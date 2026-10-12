@@ -159,9 +159,9 @@ static void modal_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
             x = xn == xl - 1 ? x : xlp;
             break;
         case MX_BOW: {                                   /* noise that leans on the body's own swing (stick-slip) */
-            int32_t sg = last > 0 ? 1 << 18 : -(1 << 18), nz = st_noise(&S->rng) << 1;
-            xlp += px_m(nz - xlp, kx, 15);
-            x = px_m(xlp + sg, amp, 15) >> 1;
+            int32_t sg = last > 0 ? 1 << 19 : -(1 << 19), nz = st_noise(&S->rng);
+            xlp += px_m(nz + sg - xlp, kx, 15);          /* (the slip and the grain through HARD's low-pass) */
+            x = px_m(xlp, amp, 15) >> 1;
             break;
         }
         default:                                         /* BLOW: breath */

@@ -65,6 +65,16 @@ jobs:
           FELUCCA_STRANGE=1 ./build.sh --release 1.5.1-strange 2>&1 | tee build-strange.log
           cp -r /tmp/mod/felucca-1.5.1-mod.fwsc /tmp/mod/release-1.5.1-mod build/
 
+      - name: Build logs to the ci-logs branch (on a failure: the logs reach a clone without the Actions UI)
+        if: failure()
+        run: |
+          mkdir -p /tmp/logs && cp build.log build-strange.log /tmp/logs/ 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan ci-logs && git rm -rfq . && git clean -fdxq
+          cp /tmp/logs/* . 2>/dev/null || echo "no log" > none.txt
+          git add -A && git commit -qm "Build logs of ${GITHUB_SHA}" && git push -f origin ci-logs
+
       - uses: actions/upload-artifact@v4
         with:
           name: felucca-module
