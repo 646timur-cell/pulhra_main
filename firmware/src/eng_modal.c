@@ -230,4 +230,6 @@ static const engine_t ENG_MODAL = {
     .knob = {P_E0, P_E2, P_E3, P_E4},
     .poly = MD_POLY,
     .mem = sizeof(md_slot_t) * MD_POLY,
+    .xyd = {{XY_E(1), XY_E(2), XY_E(6)}, {XY_E(3), XY_E(7), XY_E(4)}},   /* X: STRC BRIT HARD (the metal), Y: DAMP BEAT POS (the ring, the beating) */
+    .xya = {{40, 40, 40}, {40, 50, 30}},
 };

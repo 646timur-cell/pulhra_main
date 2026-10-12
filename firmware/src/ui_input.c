@@ -1711,8 +1711,10 @@ static void ui_input(void)
             int16_t *vp;
             const param_desc_t *d = home_param(k, &vp);
             *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
-            motion_capture(home_trk(k), (uint32_t)(vp - home_trk(k)->p), *vp);   /* (LEVELS: that track's, as MIXER) */
-            ml_knob(home_trk(k), (uint32_t)(vp - home_trk(k)->p));
+            if (!home_xy(k) && !home_mfilt(k)) {         /* (STRANGE's X / Y, master filters: not a track's) */
+                motion_capture(home_trk(k), (uint32_t)(vp - home_trk(k)->p), *vp);   /* (LEVELS: that track's, as MIXER) */
+                ml_knob(home_trk(k), (uint32_t)(vp - home_trk(k)->p));
+            }
         } else {
             edit_param(k, s);
         }

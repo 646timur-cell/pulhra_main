@@ -164,7 +164,7 @@ static int test_engines(void)
 {
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
-    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_PHYS, ENGI_GURDY};
+    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_PHYS, ENGI_GURDY, 8};
     ui_power_on();
     bad += check("20 engines; LYRA CHAOS STRING MODAL BLOW are 15..19", NENGINES == 20 && ENGINES[ENGI_LYRA] == &ENG_LYRA &&
                  ENGINES[ENGI_CHAOS] == &ENG_CHAOS && ENGINES[ENGI_STRING] == &ENG_STRING &&
@@ -174,7 +174,7 @@ static int test_engines(void)
         ok &= eng_vis(i) == want[i] && eng_ok(want[i]);
     for (i = 0; i < NENGINES; i++)
         nshown += eng_ok(i) != 0;
-    bad += check("shown: LYRA CHAOS STRING MODAL BLOW PHYS GURDY, nothing else", ok && nshown == 7u && NENG_SHOWN == 7);
+    bad += check("shown: LYRA CHAOS STRING MODAL BLOW PHYS GURDY GRAIN, nothing else", ok && nshown == 8u && NENG_SHOWN == 8);
     preset_all_pos(&total);
     ok = 1;
     for (i = 0; i < total; i++) {
@@ -336,6 +336,103 @@ static int test_lyra_tail(void)
     return bad;
 }
 
+
+/* the RMS of T1 playing note 57 (vel 110) for n blocks after 60 blocks of attack, through the whole mix */
+static double mix_rms(uint32_t eng, uint32_t pre, uint32_t n, void (*tweak)(void))
+{
+    int32_t buf[2 * CTL];
+    uint32_t k, i;
+    double sq = 0;
+    ui_power_on();
+    song.master_q12 = 4096;
+    set_engine_of(&trk[0], eng);
+    apply_preset_to(&trk[0], pre);
+    trk[0].p[P_REV] = trk[0].p[P_DLY] = trk[0].p[P_CHOR] = 0;
+    for (k = 0; k < 8u; k++)
+        mix_block(buf, CTL);
+    if (tweak)
+        tweak();
+    midi_event(0x90, 0, 57, 110);
+    for (k = 0; k < 60u + n; k++) {
+        mix_block(buf, CTL);
+        if (k >= 60u)
+            for (i = 0; i < 2u * CTL; i++)
+                sq += (double)buf[i] * buf[i];
+    }
+    return sqrt(sq / (2.0 * CTL * n));
+}
+static void tw_lpf(void) { song.g[G_MLPF] = 110; }
+static void tw_hpf(void) { song.g[G_MHPF] = 120; }
+static void tw_x(void) { midi_event(0xB0, 0, 16, 127); }
+
+static int test_xy_filter(void)
+{
+    int bad = 0, ok;
+    double r0, rl, rh, rx;
+    int16_t e2;
+    /* the XY morph: LYRA's X default routes (MOD SHRP HLFO), a slot of the matrix taking X instead */
+    ui_power_on();
+    set_engine_of(&trk[0], ENGI_LYRA);
+    apply_preset_to(&trk[0], 0);
+    trk[0].engine = trk[0].eng_req;
+    e2 = trk[0].p[P_E2];
+    midi_event(0xB0, 0, 16, 127);
+    blocks(2);
+    bad += check("CC16 on T1's channel sets T1's X; CC17 its Y", xy_val[0][0] == 127 && (midi_event(0xB0, 0, 17, 64), blocks(2),
+                 xy_val[0][1] == 64));
+    ok = mod_begin(&trk[0]) && trk[0].p[P_E2] > e2 && trk[0].p[P_E2] <= 127;
+    mod_end(&trk[0]);
+    bad += check("X at the top: LYRA's MOD up for the block (its default route), the stored value back after", ok &&
+                 trk[0].p[P_E2] == e2);
+    trk[0].p[P_M1SRC] = MS_X;
+    trk[0].p[P_M1DST] = MD_E1 + 6;                         /* X -> FDBK only */
+    trk[0].p[P_M1AMT] = 40;
+    {
+        int16_t e6 = trk[0].p[P_E6];
+        ok = mod_begin(&trk[0]) && trk[0].p[P_E2] == e2 && trk[0].p[P_E6] > e6;
+        mod_end(&trk[0]);
+    }
+    bad += check("a matrix slot taking X: its route plays, X's defaults do not (Y's still do)", ok);
+    xy_val[0][0] = xy_val[0][1] = 0;
+    trk[0].p[P_M1SRC] = trk[0].p[P_M1DST] = trk[0].p[P_M1AMT] = 0;
+    bad += check("X, Y at 0 and an empty matrix: no modulation at all", !mod_begin(&trk[0]));
+    /* HOME: KNOB 3 / 4 the selected track's X / Y; TRANSPOSE: the master HPF / LPF */
+    ui_power_on();
+    go_home();
+    song.sel = 1;
+    turn(EN_K1 + 2, 10);
+    frame();
+    turn(EN_K1 + 3, 5);
+    frame();
+    bad += check("HOME KNOB 3 / 4: T2's X and Y (the selected track)", xy_val[1][0] > 0 && xy_val[1][1] > 0 && !xy_val[0][0]);
+    frames(200);
+    press(B_HOME);
+    frame();
+    turn(EN_K1 + 2, 6);
+    frame();
+    turn(EN_K1 + 3, 6);
+    frame();
+    bad += check("TRANSPOSE KNOB 3 / 4: the master HPF and LPF", ui.home == HOME_TRANSPOSE && song.g[G_MHPF] > 0 &&
+                 song.g[G_MLPF] > 0);
+    {
+        char v[12];
+        const char *u;
+        param_format(&GP[G_MLPF], 0, v, &u);
+        ok = str_eq(v, "OFF");
+        param_format(&GP[G_MLPF], 127, v, &u);
+        bad += check("LPF: 0 OFF, up closes it (127: 30 Hz)", ok && str_eq(v, "30") && str_eq(u, "Hz"));
+    }
+    /* the filters on the mix */
+    r0 = mix_rms(ENGI_STRING, 0, 300, 0);
+    rl = mix_rms(ENGI_STRING, 0, 300, tw_lpf);
+    rh = mix_rms(ENGI_STRING, 0, 300, tw_hpf);
+    bad += check("the master LPF near the bottom and the HPF near the top take the cello down by > 12 dB",
+                 r0 > 1000 && rl < r0 / 4 && rh < r0 / 4);
+    rx = mix_rms(ENGI_LYRA, 0, 300, tw_x);
+    bad += check("LYRA with X at the top sounds otherwise than at 0", fabs(rx - mix_rms(ENGI_LYRA, 0, 300, 0)) > 1.0);
+    return bad;
+}
+
 #ifndef STRANGE_NO_MAIN
 int main(void)
 {
@@ -344,6 +441,7 @@ int main(void)
     bad += test_engines();
     bad += test_parts();
     bad += test_lyra_tail();
+    bad += test_xy_filter();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);

@@ -218,4 +218,6 @@ static const engine_t ENG_STRING = {
     .knob = {P_E1, P_E2, P_E3, P_E4},
     .poly = SR_POLY,
     .mem = sizeof(sr_slot_t) * SR_POLY,
+    .xyd = {{XY_E(2), XY_E(4), XY_E(1)}, {XY_E(7), XY_E(3), XY_E(5)}},   /* X: POS BRIT PRES (towards the bridge: glassy), Y: BMIX DAMP STIF (the body, the ring) */
+    .xya = {{-50, 40, -20}, {50, 30, 30}},
 };

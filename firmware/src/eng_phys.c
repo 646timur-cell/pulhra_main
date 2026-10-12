@@ -249,4 +249,6 @@ static const engine_t ENG_PHYS = {
     .poly = PHYS_POLY,
     .desc = phys_desc,
     .mem = sizeof(phys_slot_t) * PHYS_POLY,
+    .xyd = {{XY_E(1), XY_E(2), XY_E(6)}, {XY_E(3), XY_E(4), XY_E(7)}},   /* STRANGE XY: X STRC BRIT BOW, Y DAMP POS EXC */
+    .xya = {{40, 40, 30}, {40, 40, 30}},
 };

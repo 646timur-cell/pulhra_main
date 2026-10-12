@@ -209,4 +209,6 @@ static const engine_t ENG_BLOW = {
     .knob = {P_E1, P_E2, P_E4, P_E5},
     .poly = BW_POLY,
     .mem = sizeof(bw_slot_t) * BW_POLY,
+    .xyd = {{XY_E(1), XY_E(3), XY_E(6)}, {XY_E(4), XY_E(5), XY_E(7)}},   /* X: BRTH NOIS GROWL (blown harder), Y: TONE VIBR AIR */
+    .xya = {{40, 40, 30}, {40, 40, 40}},
 };

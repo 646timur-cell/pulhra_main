@@ -66,7 +66,11 @@ static const char *const N_IRATE[] = {"689", "919", "1.1k", "1.4k", "1.8k", "2.2
                                       "7.4k", "8.8k", "11k", "15k", "22k", "44k", 0};
 /* modulation matrix (mod.c): sources, destinations (E1..E8 = P_E0..P_E7: shown with the engine's labels).
  * Append-only (stored values keep their meaning): S&H SLEW and DEPTH (#132) came after EXPR and E8 */
-static const char *const N_MSRC[] = {"OFF", "LFO", "ENV", "VEL", "KEY", "RAND", "MODW", "AT", "EXPR", "S&H", "SLEW"};
+static const char *const N_MSRC[] = {"OFF", "LFO", "ENV", "VEL", "KEY", "RAND", "MODW", "AT", "EXPR", "S&H", "SLEW",
+#if FELUCCA_STRANGE
+                                     "X", "Y",   /* STRANGE: the XY morph (HOME KNOB 3 / 4, CC16 / 17) */
+#endif
+};
 static const char *const N_MDST[] = {"OFF", "PITCH", "CUT", "SHP", "AMP", "PAN", "DIST", "CHO", "DLY", "REV", "RATE",
                                      "VIB", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "DEPTH"};
 static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN", "PHYS",
@@ -221,8 +225,13 @@ static const param_desc_t GP[G_COUNT] = {
     /* inert: they set the GM drum part (level, reverb send), which is gone (drums are the DRUM engine
      * on any part). On no page; kept so the ids and G_COUNT, which the project format and the
      * editor protocol depend on, do not move */
+#if FELUCCA_STRANGE
+    [G_MHPF] = PD("HPF", F_HPF, 0, 127, 0),     /* STRANGE: the master filters (fx.c master_filter) */
+    [G_MLPF] = PD("LPF", F_LPF, 0, 127, 0),
+#else
     [G_DRLVL] = PD("-", F_INT, 0, 0, 0),
     [G_DRREV] = PD("-", F_INT, 0, 0, 0),
+#endif
 };
 
 static const param_desc_t *track_desc(const track_t *t, uint32_t id)
@@ -367,6 +376,14 @@ static void param_format(const param_desc_t *d, int32_t v, char *val, const char
         *unit = "Hz";
         break;
     }
+    case F_HPF:
+    case F_LPF:
+        if (v <= 0) {
+            str_cpy(val, "OFF", 6);
+            break;
+        }
+        v = d->fmt == F_LPF ? 127 - v : v;
+        /* fall through: the cutoff */
     case F_CUTOFF: {
         uint32_t h = CUTOFF_HZ[v & 127];
         if (h < 1000u) {

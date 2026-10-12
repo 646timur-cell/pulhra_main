@@ -461,4 +461,6 @@ static const engine_t ENG_GRAIN = {
     .poly = GR_POLY,
     .block = grain_block,
     .mem = sizeof(gr_part_t),
+    .xyd = {{XY_E(3), XY_E(2), XY_E(7)}, {XY_E(5), XY_E(1), XY_E(6)}},   /* STRANGE XY: X DENS SIZE TONE, Y SPRD POS RAND */
+    .xya = {{45, 35, -25}, {45, 40, 30}},
 };

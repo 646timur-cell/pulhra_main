@@ -45,7 +45,7 @@
 #define ENGI_BLOW 19u            /* STRANGE: eng_blow.c (reed, jet and lip waveguides) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (FELUCCA_STRANGE ? 7 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
+#define NENG_SHOWN (FELUCCA_STRANGE ? 8 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))
@@ -53,7 +53,8 @@
 /* ------------------------------------------------------- parameters --- */
 enum {
     F_INT, F_PCT, F_BIPCT, F_TIME, F_LFOHZ, F_CUTOFF, F_DB, F_SEMI, F_ENUM, F_BPM, F_NOTE,
-    F_ONOFF, F_OCT, F_STEPS
+    F_ONOFF, F_OCT, F_STEPS,
+    F_HPF, F_LPF                 /* STRANGE: the master filters (0: OFF; HPF v: CUTOFF_HZ[v], LPF v: CUTOFF_HZ[127 - v]) */
 };
 
 typedef struct {
@@ -116,6 +117,8 @@ enum {                          /* global parameters */
                                  * the import of an old project reads them: proj_drums_to_part) */
     G_COUNT
 };
+#define G_MHPF G_DRLVL           /* STRANGE: the inert globals of the old drum part are the master HPF and LPF (stored */
+#define G_MLPF G_DRREV           /* with the project; 0 = off, so a project of another build loads them off: fx.c) */
 
 /* stored parameters of an older layout -> today's P_* order. A store keeps np = the P_COUNT it was
  * written with; common parameters are only ever added just before P_E0, so the first np - 8 are
@@ -247,7 +250,14 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
     /* optional (STRANGE: LYRA's delay): once per block and part, after its voices, on the part's sum (out); returns 1
      * while it still sounds with no voice (a tail), so the part keeps being mixed */
     uint32_t (*post)(struct track *t, int32_t *out, uint32_t n);
+    /* STRANGE: X and Y's routes when the matrix has none for that axis (mod.c mod_begin): up to three each, a matrix
+     * destination (XY_E(k) = E k+1, XY_REV ..) and its amount (-64..63, as AMT); 0 = none */
+    uint8_t xyd[2][3];
+    int8_t xya[2][3];
 } engine_t;
+#define XY_DLY 8u                /* (mod.c MD_DLY, MD_REV, MD_E1: checked there) */
+#define XY_REV 9u
+#define XY_E(k) (12u + (k))
 
 /* ------------------------------------------------- tracks, the song --- */
 enum { ST_NOTE, ST_TIE, ST_REST };

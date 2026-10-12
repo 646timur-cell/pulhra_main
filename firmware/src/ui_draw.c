@@ -874,7 +874,9 @@ static void draw_columns(void)
             const param_desc_t *d = home_param(c, &vp);
             param_format(d, *vp, val, &unit);
             card_mot_of(vp);
-            if (ui.home == HOME_TRANSPOSE)             /* sound module: T1..T4 TRN, the semitones; 0 (none): DIM */
+            if (home_xy(c) || home_mfilt(c))            /* STRANGE: X / Y of the selected track, the master filters */
+                draw_column(c, d->label, val, unit, *vp ? VAL(c) : T_DIM, RATIO(d, *vp), ICON_MOD);
+            else if (ui.home == HOME_TRANSPOSE)             /* sound module: T1..T4 TRN, the semitones; 0 (none): DIM */
                 draw_column(c, "TRN", val, unit, *vp ? VAL(c) : T_DIM, RATIO(d, *vp), trk_icon(c, 1));
             else if (home_levels())                    /* 1.5: T1..T4 LEVEL, the track's cushion, muted: DIM */
                 draw_column(c, "LEVEL", val, unit, trk[c].p[P_MUTE] ? T_DIM : VAL(c), RATIO(d, *vp), trk_icon(c, 1));

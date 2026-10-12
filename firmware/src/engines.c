@@ -138,7 +138,7 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
 #if FELUCCA_STRANGE
 static const uint8_t ENGINE_ORDER[] = {
     ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,   /* STRANGE's own */
-    ENGI_PHYS, ENGI_GURDY,                                      /* kept: their kin */
+    ENGI_PHYS, ENGI_GURDY, 8,                                   /* kept: their kin (8 GRAIN: the user samples) */
 };
 #else
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {

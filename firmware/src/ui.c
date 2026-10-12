@@ -1567,9 +1567,30 @@ static uint32_t preset_visible(uint32_t cur, uint32_t total, uint32_t row)
 
 /* HOME: the track KNOB k edits (MENU > HOME LEVELS, 1.5: track k; else the selected one) and what: the engine's four
  * main parameters, or (LEVELS) the track's LEVEL, as the GLO layer's knobs */
-static track_t *home_trk(uint32_t k) { return home_levels() ? &trk[k & 3u] : TSEL; }
+static track_t *home_trk(uint32_t k) { return home_levels() && !(FELUCCA_STRANGE && (k & 3u) >= NLIVE) ? &trk[k & 3u] : TSEL; }
+#if FELUCCA_STRANGE
+/* STRANGE: KNOB 3 / 4 on HOME are X / Y of the selected track's XY morph (mod.c xy_val), on TRANSPOSE the master HPF /
+ * LPF (fx.c master_filter): T3 and T4, whose they were, never sound */
+static const param_desc_t XY_DESC[2] = {{"X", F_PCT, 0, 127, 0, 0, 0}, {"Y", F_PCT, 0, 127, 0, 0, 0}};
+static int home_xy(uint32_t k) { return (k & 3u) >= NLIVE && home_levels() && ui.home != HOME_TRANSPOSE; }
+static int home_mfilt(uint32_t k) { return (k & 3u) >= NLIVE && ui.home == HOME_TRANSPOSE; }
+#else
+static int home_xy(uint32_t k) { (void)k; return 0; }
+static int home_mfilt(uint32_t k) { (void)k; return 0; }
+#endif
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
+#if FELUCCA_STRANGE
+    if (home_xy(k)) {
+        *vp = &xy_val[song.sel % NTRK][(k & 3u) - NLIVE];
+        return &XY_DESC[(k & 3u) - NLIVE];
+    }
+    if (home_mfilt(k)) {
+        uint32_t g = (k & 3u) == NLIVE ? G_MHPF : G_MLPF;
+        *vp = &song.g[g];
+        return &GP[g];
+    }
+#endif
     uint32_t id = ui.home == HOME_TRANSPOSE ? (uint32_t)P_TRANS : home_levels() ? (uint32_t)P_LEVEL
                                                                 : ENGINES[TSEL->eng_req % NENGINES]->knob[k & 3u];
     *vp = &home_trk(k)->p[id];

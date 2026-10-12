@@ -227,4 +227,6 @@ static const engine_t ENG_LYRA = {
     .poly = LY_POLY,
     .keep = 0x73,                                        /* the last outputs, the drifts and their random numbers */
     .mem = sizeof(lyra_mem_t),
+    .xyd = {{XY_E(2), XY_E(1), XY_E(4)}, {XY_E(5), XY_E(6), XY_E(7)}},   /* X: MOD SHRP HLFO (the chaos of the pairs), Y: TIME FDBK DMOD (the space) */
+    .xya = {{40, 30, 30}, {30, 35, 40}},
 };

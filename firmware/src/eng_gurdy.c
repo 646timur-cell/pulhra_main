@@ -236,4 +236,6 @@ static const engine_t ENG_GURDY = {
     .knob = {P_E4, P_E3, P_E1, P_REL},
     .poly = 1,                                          /* one wheel: one melody note */
     .keep = 0xAF,                                       /* the body, the wander and the pressure carry on */
+    .xyd = {{XY_E(3), XY_E(4), 0}, {XY_E(6), XY_E(7), XY_E(2)}},   /* STRANGE XY: X WHL BUZZ, Y BODY WOBL 5TH */
+    .xya = {{40, 50, 0}, {40, 50, 30}},
 };

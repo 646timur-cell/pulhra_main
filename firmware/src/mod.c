@@ -41,11 +41,20 @@
  * presets read and write t->p from the main loop, which the ISR preempts; TIMER5 only fills the MIDI rings),
  * and the engines read t->p as before. An engine reads its parameters in note_on (events_block) unmodulated.
  * Nothing active (every slot with SRC, DST or AMT at 0): no work, and the sound is bit-identical. */
-enum { MS_OFF, MS_LFO, MS_ENV, MS_VEL, MS_KEY, MS_RAND, MS_MODW, MS_AT, MS_EXPR, MS_SH, MS_SLEW, MS_N };
+enum { MS_OFF, MS_LFO, MS_ENV, MS_VEL, MS_KEY, MS_RAND, MS_MODW, MS_AT, MS_EXPR, MS_SH, MS_SLEW,
+#if FELUCCA_STRANGE
+       MS_X, MS_Y,               /* STRANGE: the XY morph, per track, 0..1 (xy_val: HOME KNOB 3 / 4, CC16 / CC17) */
+#endif
+       MS_N };
 enum { MD_OFF, MD_PITCH, MD_CUT, MD_SHP, MD_AMP, MD_PAN, MD_DIST, MD_CHO, MD_DLY, MD_REV, MD_RATE, MD_VIB, MD_E1,
        MD_DEPTH = MD_E1 + 8, MD_N };              /* (append-only: the stored values keep their meaning) */
 _Static_assert(NELEM(N_MSRC) == MS_N && NELEM(N_MDST) == MD_N, "N_MSRC / N_MDST == MS_* / MD_*");
 _Static_assert(P_M2SRC == P_M1SRC + 3 && P_M4AMT == P_M1SRC + 11 && P_M4AMT + 1 == P_FM1_ATK, "matrix slots: 3 ids each");
+_Static_assert(XY_DLY == MD_DLY && XY_REV == MD_REV && XY_E(0) == MD_E1, "core.h XY_*: the matrix's destinations");
+/* STRANGE's XY morph: each track's X and Y (0..127), set by HOME KNOB 3 / 4 on the selected track (ui.c home_param)
+ * and CC16 / CC17 on the track's channel (mod_midi). Performance state, as the mod wheel: not stored. With no matrix
+ * slot taking an axis, the engine's own routes for it play (engine_t.xyd / xya: mod_begin) */
+static int16_t xy_val[NTRK][2];
 #define NMSLOT 4u
 #define MS_VOICE(s) ((s) >= MS_ENV && (s) <= MS_RAND)             /* a value per voice */
 #define MS_BIPOLAR(s) ((s) == MS_LFO || (s) == MS_KEY || (s) == MS_RAND || (s) >= MS_SH)
@@ -67,8 +76,8 @@ static struct {                  /* the part in mix_part (one at a time) */
     int32_t ldep;                /* DEPTH: the track LFO's gain (Q15; 32767 = none, track_render leaves it alone) */
     uint8_t vsrc[NMSLOT], vdst[NMSLOT];
     int8_t vamt[NMSLOT];
-    uint8_t kid[NMSLOT];         /* per-block: the parameter, its stored value */
-    int16_t keep[NMSLOT];
+    uint8_t kid[NMSLOT + 6u];    /* per-block: the parameter, its stored value (+ STRANGE's six XY routes) */
+    int16_t keep[NMSLOT + 6u];
 } mod;
 
 static uint32_t mod_seed = 0x2545F491u;
@@ -107,6 +116,11 @@ static int32_t mod_tsrc(const track_t *t, uint32_t s, int32_t lfo)
         return t->mw * 258;
     case MS_AT:
         return t->at * 258;
+#if FELUCCA_STRANGE
+    case MS_X:
+    case MS_Y:
+        return xy_val[(t - trk) % NTRK][s - MS_X] * 258;
+#endif
     default:
         return (127 - t->ex_off) * 258;
     }
@@ -154,13 +168,36 @@ static __attribute__((noinline)) int32_t mod_depth(const track_t *t, int32_t lfo
 static __attribute__((noinline)) int mod_begin(track_t *t)
 {
     const int16_t *p = t->p;
-    int32_t lfo, off[NMSLOT];
-    uint32_t k, j;
+    int32_t lfo, off[NMSLOT + 6u];
+    uint32_t k, j, nv = 0;
+    uint8_t vs[NMSLOT + 6u], vd[NMSLOT + 6u];
+    int8_t va[NMSLOT + 6u];
     mod.on = 0;
-    for (k = 0; k < NMSLOT; k++)
-        if (p[P_M1SRC + 3u * k] && p[P_M1DST + 3u * k] && p[P_M1AMT + 3u * k])
-            break;
-    if (k == NMSLOT)
+    for (k = 0; k < NMSLOT; k++)                        /* the active slots */
+        if (p[P_M1SRC + 3u * k] && p[P_M1DST + 3u * k] && p[P_M1AMT + 3u * k]) {
+            vs[nv] = (uint8_t)p[P_M1SRC + 3u * k];
+            vd[nv] = (uint8_t)p[P_M1DST + 3u * k];
+            va[nv++] = (int8_t)p[P_M1AMT + 3u * k];
+        }
+#if FELUCCA_STRANGE
+    {                                                   /* XY: an axis no slot takes plays the engine's routes */
+        const engine_t *e = ENGINES[t->engine];
+        uint32_t ax, r, used;
+        for (ax = 0; ax < 2u; ax++) {
+            if (!xy_val[(t - trk) % NTRK][ax])
+                continue;
+            for (used = 0, k = 0; k < nv; k++)
+                used |= vs[k] == MS_X + ax;
+            for (r = 0; r < 3u && !used; r++)
+                if (e->xyd[ax][r] && e->xya[ax][r]) {
+                    vs[nv] = (uint8_t)(MS_X + ax);
+                    vd[nv] = e->xyd[ax][r];
+                    va[nv++] = e->xya[ax][r];
+                }
+        }
+    }
+#endif
+    if (!nv)
         return 0;
     lfo = mulq15(t->lfo_val, t->lfo_fade);              /* (the LFO of the block before: track_render ticks it) */
     mod.on = 1;
@@ -171,17 +208,19 @@ static __attribute__((noinline)) int mod_begin(track_t *t)
     mod.ldep = mod_depth(t, lfo);                       /* DEPTH first: the other slots see the LFO it leaves */
     if (mod.ldep < 32767)
         lfo = mulq15(lfo, mod.ldep);
-    for (; k < NMSLOT; k++) {
-        uint32_t s = (uint32_t)p[P_M1SRC + 3u * k], d = (uint32_t)p[P_M1DST + 3u * k];
-        int32_t a = p[P_M1AMT + 3u * k], x;
-        if (!s || !d || !a || s >= MS_N || d >= MD_N || d == MD_DEPTH)
+    for (k = 0; k < nv; k++) {
+        uint32_t s = vs[k], d = vd[k];
+        int32_t a = va[k], x;
+        if (s >= MS_N || d >= MD_N || d == MD_DEPTH)
             continue;
         if (d <= MD_AMP) {                              /* per voice */
             mod.amp |= d == MD_AMP;
             if (MS_VOICE(s)) {
-                mod.vsrc[mod.nv] = (uint8_t)s;
-                mod.vdst[mod.nv] = (uint8_t)d;
-                mod.vamt[mod.nv++] = (int8_t)a;
+                if (mod.nv < NMSLOT) {
+                    mod.vsrc[mod.nv] = (uint8_t)s;
+                    mod.vdst[mod.nv] = (uint8_t)d;
+                    mod.vamt[mod.nv++] = (int8_t)a;
+                }
             } else {                                    /* (a UNI LFO, 0..1, takes AMP as ENV does) */
                 mod_voice_add(s == MS_LFO && p[P_LPOL] ? MS_ENV : s, d, mod_tsrc(t, s, lfo), a, &mod.pit, &mod.cut,
                               &mod.shp, &mod.gain);
@@ -268,6 +307,10 @@ static __attribute__((noinline)) void mod_midi(track_t *t, uint32_t st, uint32_t
             t->ex_off = (uint8_t)(127u - d2);
         else if (d1 == 121u)
             t->mw = t->at = t->ex_off = 0;
+#if FELUCCA_STRANGE
+        else if (d1 == 16u || d1 == 17u)                /* STRANGE: X, Y of the XY morph */
+            xy_val[(t - trk) % NTRK][d1 - 16u] = (int16_t)d2;
+#endif
     }
 }
 

@@ -901,6 +901,62 @@ static __attribute__((noinline)) void scope_take_mix(uint32_t n)
         scope_buf[scope_w++ & (SCOPE_N - 1u)] = (int16_t)clamp(mix_l[i] + wet[i], -32767, 32767);
 }
 
+#if FELUCCA_STRANGE
+/* STRANGE: the master HPF and LPF (G_MHPF, G_MLPF: TRANSPOSE's KNOB 3 / 4), 12 dB/oct each (Simper's SVF, Butterworth
+ * damping), on the mix after MASTER, before the speaker EQ and the limiter (master_out). 0 = off: the filter is left
+ * out (a project of another build stores 0 there). The cutoffs glide a quarter of the way each block (no zipper) */
+static struct {
+    int32_t hc, lc;                                      /* the cutoffs now (0..127 << 8) */
+    uint8_t h_on, l_on;
+    tsvf_t h, l;
+    int32_t s[8];                                        /* HP left (2), right (2), LP left, right */
+} mf;
+static __attribute__((noinline)) void mf_prep(void)
+{
+    int32_t hv = song.g[G_MHPF], lv = song.g[G_MLPF], ht = hv > 0 ? hv << 8 : 0, lt = (127 - (lv > 0 ? lv : 0)) << 8;
+    mf.hc += (ht - mf.hc) >> 2;
+    mf.lc += (lt - mf.lc) >> 2;
+    if (ht == 0 && mf.hc < 64)
+        mf.hc = 0;
+    if (lt == 127 << 8 && mf.lc > (127 << 8) - 64)
+        mf.lc = 127 << 8;
+    mf.h_on = mf.hc > 0;
+    mf.l_on = mf.lc < 127 << 8;
+    if (!mf.h_on)
+        mf.s[0] = mf.s[1] = mf.s[2] = mf.s[3] = 0;
+    if (!mf.l_on)
+        mf.s[4] = mf.s[5] = mf.s[6] = mf.s[7] = 0;
+    tsvf_coef_k(&mf.h, mf.hc, 5793);                     /* (k = sqrt 2, Q12) */
+    tsvf_coef_k(&mf.l, mf.lc, 5793);
+}
+static inline int32_t mf_hp(const tsvf_t *c, int32_t x, int32_t *ic1, int32_t *ic2)
+{
+    int32_t v3 = x - *ic2;
+    int32_t v1 = (c->a1 * *ic1 + c->a2 * v3) >> 13;
+    int32_t v2 = *ic2 + ((c->a2 * *ic1 + c->a3 * v3) >> 13);
+    *ic1 = clamp(2 * v1 - *ic1, -150000, 150000);
+    *ic2 = clamp(2 * v2 - *ic2, -150000, 150000);
+    return x - ((5793 * v1) >> 12) - v2;
+}
+static inline void master_filter(int32_t *l, int32_t *r)
+{
+    int32_t x = clamp(*l, -100000, 100000), y = clamp(*r, -100000, 100000);
+    if (mf.h_on) {
+        x = mf_hp(&mf.h, x, &mf.s[0], &mf.s[1]);
+        y = mf_hp(&mf.h, y, &mf.s[2], &mf.s[3]);
+    }
+    if (mf.l_on) {
+        x = tsvf_lp(&mf.l, x, &mf.s[4], &mf.s[5]);
+        y = tsvf_lp(&mf.l, y, &mf.s[6], &mf.s[7]);
+    }
+    *l = x;
+    *r = y;
+}
+#define MASTER_FILTER(l, r) do { if (mf.h_on | mf.l_on) master_filter(l, r); } while (0)
+#else
+#define MASTER_FILTER(l, r) do { } while (0)
+#endif
+
 /* the master with the FX layer's effects between its level and master_out (perform.c) */
 static __attribute__((noinline)) void perf_master(int32_t *out, uint32_t n)
 {
@@ -913,6 +969,7 @@ static __attribute__((noinline)) void perf_master(int32_t *out, uint32_t n)
     perf_block(mix_l, mix_r, n);
     for (i = 0; i < n; i++) {
         int32_t l = mix_l[i], r = mix_r[i];
+        MASTER_FILTER(&l, &r);
         master_out(&l, &r);
         out[2u * i] = l;
         out[2u * i + 1u] = r;
@@ -926,6 +983,9 @@ static void mix_block(int32_t *out, uint32_t n)
     int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;   /* (USB LEVEL FIXED: MASTER after) */
     for (i = 0; i < n; i++)
         send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
+#if FELUCCA_STRANGE
+    mf_prep();
+#endif
     events_block(n);
     perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
     for (i = 0; i < NLIVE; i++)                         /* (STRANGE: T1, T2 only) */
@@ -944,6 +1004,7 @@ static void mix_block(int32_t *out, uint32_t n)
     for (i = 0; i < n; i++) {
         int32_t l = (((mix_l[i] + wet[i]) >> 2) * mg) >> 10;
         int32_t r = (((mix_r[i] + wet[i]) >> 2) * mg) >> 10;
+        MASTER_FILTER(&l, &r);
         master_out(&l, &r);
         out[2u * i] = l;
         out[2u * i + 1u] = r;

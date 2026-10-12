@@ -188,4 +188,6 @@ static const engine_t ENG_CHAOS = {
     .knob = {P_E1, P_E2, P_E3, P_E4},
     .poly = 4,
     .keep = 0x33,                                        /* the system and the drift run on over a retrigger */
+    .xyd = {{XY_E(1), XY_E(5), XY_E(7)}, {XY_E(4), XY_E(3), XY_E(2)}},   /* X: CHAO DRFT NOIS (into chaos), Y: FOLD TONE WARP (the edge) */
+    .xya = {{50, 40, 25}, {55, 25, 30}},
 };

@@ -219,7 +219,11 @@ static uint32_t param_icon(const param_desc_t *d, int32_t v)
 static uint32_t mod_src_icon(int32_t s)
 {
     static const uint8_t I[MS_N] = {ICON_MOD, ICON_LFO_WAVE, ICON_ENV, ICON_ACCENT, ICON_KEYTRACK, ICON_PROB,
-                                    ICON_MOD, ICON_MIDI, ICON_LEVEL, ICON_W_SH, ICON_GLIDE};
+                                    ICON_MOD, ICON_MIDI, ICON_LEVEL, ICON_W_SH, ICON_GLIDE,
+#if FELUCCA_STRANGE
+                                    ICON_MOD, ICON_MOD,   /* X, Y */
+#endif
+    };
     return I[clamp(s, 0, MS_N - 1)];
 }
 static uint32_t mod_dst_icon(const track_t *t, int32_t d)
