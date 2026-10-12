@@ -97,6 +97,7 @@ typedef struct {
 
 /* T1 plays notes (vel 100) for hold_s, released, rendered on until the voices are free and the tail has rung out (at
  * most 12 s in all); T2 silent */
+static void (*phr_tweak)(void);                      /* (a test's change after the preset: MICRO's) */
 static phr_t phrase(uint32_t eng, uint32_t preset, const uint8_t *notes, uint32_t nn, double hold_s)
 {
     phr_t R;
@@ -112,6 +113,8 @@ static phr_t phrase(uint32_t eng, uint32_t preset, const uint8_t *notes, uint32_
     song.sel = 0;
     set_engine_of(&trk[0], eng);
     apply_preset_to(&trk[0], preset);
+    if (phr_tweak)
+        phr_tweak();
     for (k = 0; k < 8u; k++)                            /* settle the engine switch */
         mix_block(buf, CTL);
     for (k = 0; k < nn; k++)
@@ -697,6 +700,64 @@ static int test_scenes(void)
     return bad;
 }
 
+/* MICRO: a note's degree from ROOT moved by the tuning's cents (and its own), heard; values from before it load OFF */
+static int mt_ty, mt_root, mt_deg = -1, mt_ct;
+static void tw_micro(void)
+{
+    trk[0].p[P_FM4_LEVEL] = (int16_t)mt_ty;
+    trk[0].p[P_ROOT] = (int16_t)mt_root;
+    if (mt_deg >= 0)
+        trk[0].p[MDEG_P((uint32_t)mt_deg)] = (int16_t)mt_ct;
+}
+static double micro_ct(uint32_t note, int ty, int root, int deg, int ct)
+{
+    uint8_t n = (uint8_t)note;
+    double a, b;
+    phr_tweak = tw_micro;
+    mt_ty = MT_OFF, mt_root = 0, mt_deg = -1;
+    a = phrase(0, 0, &n, 1, 1.5).f0;
+    mt_ty = ty, mt_root = root, mt_deg = deg, mt_ct = ct;
+    b = phrase(0, 0, &n, 1, 1.5).f0;
+    phr_tweak = 0;
+    mt_deg = -1;
+    return a > 0 && b > 0 ? 1200 * log2(b / a) : 999;
+}
+static int test_micro(void)
+{
+    int bad = 0, ok;
+    int32_t buf[2 * CTL];
+    double e, d, m, h;
+    uint32_t i, vis = 0;
+    ui_power_on();
+    ok = trk[0].p[P_FM4_LEVEL] == MT_OFF && trk[0].p[P_FM3_DEC] == 100 && param_kept(P_LN0) && param_kept(P_FM4_LEVEL) &&
+         param_kept(P_FM4_REL) && param_kept(P_FM3_DEC);
+    trk[0].p[P_FM4_LEVEL] = 127, trk[0].p[P_LN0] = 127, trk[0].p[P_FM3_DEC] = 0;   /* a 1.5.x project's values */
+    mix_block(buf, CTL);
+    ok &= trk[0].p[P_FM4_LEVEL] == MT_OFF && trk[0].p[P_LN0] == 0 && trk[0].p[P_FM3_DEC] == 100;
+    bad += check("micro: OFF by default, the part's own (kept, scenes), a 1.5.x part's values load OFF", ok);
+    e = micro_ct(64, MT_RAST, 0, -1, 0);                 /* RAST on C: E half-flat */
+    d = micro_ct(62, MT_RAST, 0, -1, 0);                 /* .. D as it was */
+    m = micro_ct(69, MT_EQUAL, 2, 7, 30);                /* ROOT D, its 5th (A) +30 by hand */
+    h = micro_ct(66, MT_BAYAT, 4, -1, 0);                /* BAYATI on E: F# (the 2nd) half-flat */
+    {
+        char b[96];
+        snprintf(b, sizeof b, "micro: RAST E %+.1f ct, D %+.1f, EQUAL + A by hand %+.1f, BAYATI on E: F# %+.1f", e, d, m, h);
+        bad += check(b, fabs(e + 50) < 4 && fabs(d) < 3 && fabs(m - 30) < 4 && fabs(h + 50) < 4);
+    }
+    for (i = 0; i < NPAGES; i++)
+        vis += PAGES[i].graph == GR_MICRO && PAGES[i].fam == FAM_SCL && page_visible(i);
+    ok = vis == 4u && micro_cents(trk[0].p, 0) == 0;
+    trk[0].p[P_FM4_LEVEL] = MT_RAND;
+    ok &= micro_cents(trk[0].p, 0) == 0;
+    for (i = 1; i < 12u; i++)
+        ok &= abs(micro_cents(trk[0].p, i)) <= 50;
+    trk[0].p[P_FM3_DEC] = 0;
+    ok &= micro_cents(trk[0].p, 5) == 0;
+    trk[0].p[P_FM4_LEVEL] = MT_OFF, trk[0].p[P_FM3_DEC] = 100;
+    bad += check("micro: SCL shows MICRO and its 3 pages of degrees; RAND keeps ROOT, +-50; AMT 0: none", ok);
+    return bad;
+}
+
 #ifndef STRANGE_NO_MAIN
 int main(void)
 {
@@ -711,6 +772,7 @@ int main(void)
     bad += test_euclid();
     bad += test_xy_routes();
     bad += test_scenes();
+    bad += test_micro();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);

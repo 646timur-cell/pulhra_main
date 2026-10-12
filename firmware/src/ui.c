@@ -410,6 +410,8 @@ static int page_visible(uint32_t i)
         return PAGES[i].graph == GR_EUCLID;           /* (STRANGE: SEQ is EUCLID) */
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_ARP)
         return PAGES[i].graph == GR_XY || PAGES[i].graph == GR_BROWSE;   /* (STRANGE: ARP is FAV, X, Y) */
+    if (FELUCCA_STRANGE && PAGES[i].graph == GR_MICRO)
+        return 1;                                     /* (STRANGE: SCL > MICRO, the lanes and OP4 its degrees) */
     if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
                            PAGES[i].graph == GR_PATS))
         return 0;                                     /* (sound module: no sequencer, arpeggiator, song or phrases) */
@@ -1160,7 +1162,8 @@ static void pat_load_ui(track_t *t, uint32_t n)
  * insert, which chops whatever the track plays in time with its sequencer */
 static int param_kept(uint32_t i)
 {
-    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_STRANGE && i == P_FM3_ATK) ||
+    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_STRANGE && (i == P_FM3_ATK ||
+           i == P_FM3_DEC || i == P_FM3_SUS || (i >= P_FM4_ATK && i <= P_FM4_LEVEL) || (i >= P_LN0 && i <= P_LN7))) ||
            (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT;
 }
 

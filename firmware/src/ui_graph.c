@@ -561,6 +561,32 @@ static void graph_euclid(const track_t *t, uint16_t c)
 }
 #endif
 
+#if FELUCCA_STRANGE
+/* MICRO (SCL > MICRO 1..3): the tuning's name, then the 12 degrees from ROOT as bars off a centre line (+-100 cents:
+ * +-32 px), each under its note; the degrees of the page shown ACCENT. TUNE OFF: all of it dim */
+static void graph_micro(const track_t *t, uint16_t c)
+{
+    uint32_t ty = (uint32_t)clamp(t->p[P_FM4_LEVEL], 0, MT_N - 1), i, id = PAGES[ui.page].id[0];
+    uint32_t pg0 = id == P_LN0 ? 0u : id == P_LN4 ? 4u : id == P_FM4_ATK ? 8u : 99u;
+    GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "micro title centred");
+    cv_text_in(0, 4, 240, &AF_S, ty ? MT_NAME[ty] : "TURN K1 (TUNE) TO START", ty ? T_MID : T_TEXT, T_SURF);
+    cv_rect(6, 52, 228, 1, T_RULE);
+    for (i = 0; i < 12u; i++) {
+        int32_t x = 6 + 19 * (int32_t)i, mc = clamp(micro_cents(t->p, i), -110, 110), h = mc * 32 / 100;
+        uint16_t col = !ty ? T_DIM : i - pg0 < 4u ? T_ACCENT : c;
+        if (h > 0)
+            cv_rect(x + 2, 52 - h, 14, h, col);
+        else if (h < 0)
+            cv_rect(x + 2, 53, 14, -h, col);
+        else
+            cv_rect(x + 2, 51, 14, 3, col);
+        GFX_HOOK_ALIGN(x, 0, x + 18, 0, AL_H | AL_PASS, "micro note centred under its bar");
+        cv_text_in(x, 90, 18, &AF_S, N_NOTE[(uint32_t)(t->p[P_ROOT] + (int32_t)i) % 12u], i - pg0 < 4u ? T_TEXT : T_MID,
+                   T_SURF);
+    }
+}
+#endif
+
 static void graph_mod(const track_t *t, uint16_t c)
 {
     uint32_t k;
@@ -2388,6 +2414,9 @@ static void draw_graph(void)
             break;
         case GR_XY:
             graph_xy(t, c);
+            break;
+        case GR_MICRO:
+            graph_micro(t, c);
             break;
 #endif
         case GR_BROWSE:

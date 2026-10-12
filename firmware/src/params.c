@@ -76,6 +76,67 @@ static const char *const N_MDST[] = {"OFF", "PITCH", "CUT", "SHP", "AMP", "PAN",
 #if FELUCCA_STRANGE   /* EUCLID's DIV (OP3's ATK, inert here): its step RATE x 1 .. x 64, for slow sequences */
 static const char *const N_EUC_DIV[] = {"/1", "/2", "/3", "/4", "/6", "/8", "/12", "/16", "/24", "/32", "/64"};
 static const uint8_t EUC_DIV_X[] = {1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64};
+/* MICRO (SCL > MICRO): a tuning of the 12 degrees from ROOT, cents off equal temperament, the part's own (scenes keep
+ * it). TUNE (OP4's LVL) picks the table, AMT (OP3's DEC) how much of it, SEED (OP3's SUS) RAND's dice; each degree's
+ * own offset on top (MICRO 1..3: DRUM's lane levels and OP4's ATK..REL, inert in STRANGE), voice.c track_render.
+ * Append-only (stored) */
+enum { MT_OFF, MT_EQUAL, MT_JUST, MT_PYTH, MT_MEAN, MT_HARM, MT_QUART, MT_PELOG, MT_SLEND, MT_RAST, MT_BAYAT, MT_SABA,
+       MT_HIJAZ, MT_SIKAH, MT_SHUR, MT_USSAK, MT_RAND, MT_N };
+static const char *const N_MTUNE[] = {"OFF", "EQUAL", "JUST", "PYTH", "MEAN", "HARM", "QUART", "PELOG", "SLEND",
+                                      "RAST", "BAYAT", "SABA", "HIJAZ", "SIKAH", "SHUR", "USSAK", "RAND"};
+static const char *const MT_NAME[] = {"OFF", "EQUAL", "JUST 5-LIMIT", "PYTHAGOREAN", "MEANTONE 1/4", "HARMONICS 8-15",
+                                      "QUARTER TONES", "PELOG", "SLENDRO", "MAQAM RAST", "MAQAM BAYATI", "MAQAM SABA",
+                                      "MAQAM HIJAZ", "MAQAM SIKAH", "DASTGAH SHUR", "MAKAM USSAK", "RANDOM"};
+/* cents off 12-TET, degrees 1 b2 2 b3 3 4 #4 5 b6 6 b7 7 from ROOT (JUST .. USSAK; EQUAL none, RAND the dice). The
+ * maqams: their neutral (half-flat) degrees on both neighbouring keys where the scale has one between */
+static const int8_t MT_CENTS[MT_RAND - MT_JUST][12] = {
+    {0, 12, 4, 16, -14, -2, -10, 2, 14, -16, 18, -12},     /* JUST: 16/15 9/8 6/5 5/4 4/3 45/32 3/2 8/5 5/3 9/5 15/8 */
+    {0, -10, 4, -6, 8, -2, 12, 2, -8, 6, -4, 10},          /* PYTH: fifths */
+    {0, -24, -7, 10, -14, 3, -17, -3, -21, -10, 7, -17},   /* MEAN: quarter-comma, Eb .. G# */
+    {0, 5, 4, -2, -14, -29, 28, 2, 41, 6, -31, -12},       /* HARM: the harmonics 16 .. 30 / 16 (7th, 11th, 13th) */
+    {0, -50, 0, -50, 0, 0, -50, 0, -50, 0, -50, 0},        /* QUART: the black keys a quarter tone under */
+    {0, 20, 0, -30, 0, 40, 0, -30, -15, 50, 0, 0},         /* PELOG: 0 120 270 540 670 785 950 */
+    {0, 0, 40, 0, 0, -20, 0, 20, 0, 0, -40, 0},            /* SLENDRO: five near-equal steps of 240 */
+    {0, 0, 0, 0, -50, 0, 0, 0, 0, 0, 0, -50},              /* RAST: 3rd and 7th half-flat */
+    {0, 50, -50, 0, 0, 0, 0, 0, 0, 0, 0, 0},               /* BAYATI: 2nd half-flat (150) */
+    {0, 50, -50, 0, -14, 0, 0, 0, 0, 0, 0, 0},             /* SABA: 2nd half-flat, the low 4th (the Gb) */
+    {0, 14, 0, 0, -14, 0, 0, 0, 0, 0, 0, 0},               /* HIJAZ: the narrow augmented 2nd */
+    {0, 50, -50, 50, -50, 50, 0, 0, 50, -50, 50, -50},     /* SIKAH: on the half-flat 3rd: 150 350 550 700 850 1050 */
+    {0, 36, -64, 0, 0, 0, 0, 0, 0, 0, 0, 0},               /* SHUR: the koron 2nd (~135) */
+    {0, 0, -19, -6, 0, -2, 0, 2, -8, 0, -4, 0},            /* USSAK: 53 commas: 181 294 498 702 792 996 */
+};
+static const char *const N_MDEG[12] = {"1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"};
+#define MDEG_P(d) ((d) < 8u ? P_LN0 + (d) : P_FM4_ATK + (d) - 8u)   /* degree d's own offset */
+/* values from before MICRO (OP4's LVL 127, the lanes 127, AMT 0): MICRO as new, OFF. A valid TUNE is never past MT_N,
+ * so the old default marks them (voice.c track_render looks, a project, preset or scene of 1.5.x loads as it was) */
+static void micro_fix(int16_t *p)
+{
+    uint32_t d;
+    if (p[P_FM4_LEVEL] >= 0 && p[P_FM4_LEVEL] < MT_N)
+        return;
+    p[P_FM4_LEVEL] = MT_OFF;
+    p[P_FM3_DEC] = 100;
+    p[P_FM3_SUS] = 0;
+    for (d = 0; d < 12u; d++)
+        p[MDEG_P(d)] = 0;
+}
+/* degree deg's (0 = ROOT) offset in cents of a part's values p (MICRO OFF: 0) */
+static int32_t micro_cents(const int16_t *p, uint32_t deg)
+{
+    uint32_t ty = (uint32_t)clamp(p[P_FM4_LEVEL], 0, MT_N - 1);
+    int32_t base = 0;
+    if (ty == MT_OFF)
+        return 0;
+    deg %= 12u;
+    if (ty == MT_RAND && deg) {                          /* the dice: +-50, the same for a SEED (ROOT stays) */
+        uint32_t h = ((uint32_t)p[P_FM3_SUS] * 12u + deg + 1u) * 2654435761u;
+        h ^= h >> 15;
+        base = (int32_t)((h * 2246822519u) >> 25) % 101 - 50;
+    } else if (ty >= MT_JUST && ty < MT_RAND) {
+        base = MT_CENTS[ty - MT_JUST][deg];
+    }
+    return base * clamp(p[P_FM3_DEC], 0, 100) / 100 + p[MDEG_P(deg)];
+}
 #endif
 static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN", "PHYS",
                                              "DRUM", "NOISE", "FM6",
@@ -168,6 +229,11 @@ static const param_desc_t TP[P_COUNT] = {
                [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
     XYR(1), XYR(2), FMOP(3), FMOP(4),
     [P_FM3_ATK] = PE("DIV", N_EUC_DIV, 0),          /* EUCLID's divider: a step x 1 .. x 64 (seq.c EUC_DIV_X) */
+    [P_FM4_LEVEL] = PE("TUNE", N_MTUNE, 0),         /* MICRO: the tuning, how much of it, RAND's seed */
+    [P_FM3_DEC] = PD("AMT", F_PCT, 0, 100, 100),
+    [P_FM3_SUS] = PD("SEED", F_INT, 0, 99, 0),
+#define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
+    MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
 #undef XYR
 #else
     FMOP(1), FMOP(2), FMOP(3), FMOP(4),
@@ -180,6 +246,11 @@ static const param_desc_t TP[P_COUNT] = {
     LANE(0, "KICK"), LANE(1, "SNARE"), LANE(2, "CLAP"), LANE(3, "HATCL"),
     LANE(4, "HATOP"), LANE(5, "TOM"), LANE(6, "RIM"), LANE(7, "BELL"),
 #undef LANE
+#if FELUCCA_STRANGE                 /* (the lanes are MICRO's degrees 1 .. 7 here) */
+    MDEG(0u, "1"), MDEG(1u, "b2"), MDEG(2u, "2"), MDEG(3u, "b3"), MDEG(4u, "3"), MDEG(5u, "4"), MDEG(6u, "#4"),
+    MDEG(7u, "5"),
+#undef MDEG
+#endif
     [P_LSYNC] = PE("SYNC", N_LSYNC, 0),
     [P_LTRIG] = PE("TRIG", N_LTRIG, 0),
     [P_LPOL] = PE("POL", N_LPOL, 0),
@@ -475,7 +546,7 @@ enum { FAM_HOME, FAM_ENV, FAM_LFO, FAM_FX, FAM_SCL, FAM_EDIT, FAM_GLO, FAM_SAVE,
 enum { SC_TRACK, SC_GLOBAL, SC_ENGINE, SC_STEP, SC_TRK };   /* SC_TRK: the TRACKS page (ui_input.c tracks_edit) */
 enum { GR_NONE, GR_ADSR, GR_LFO, GR_STEPS, GR_ARP, GR_SCALE, GR_FX, GR_ROLL, GR_BROWSE, GR_SLOTS, GR_USER, GR_TRK,
        GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHORD, GR_SLICES, GR_EVENTS,
-       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS, GR_EUCLID, GR_XY };   /* (GR_XY: STRANGE's ARP > X, Y) */   /* (GR_EUCLID: STRANGE's EUCLID pages, the pattern) */   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
+       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS, GR_EUCLID, GR_XY, GR_MICRO };   /* (GR_XY: STRANGE's ARP > X, Y) */   /* (GR_EUCLID: STRANGE's EUCLID pages, the pattern) */   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
 
 typedef struct {
     const char *title;
@@ -500,6 +571,12 @@ static const page_t PAGES[] = {
     {"CHORUS", FAM_FX, SC_GLOBAL, GR_NONE, {G_CRATE, G_CDEPTH, 0xFF, 0xFF}},
     {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}},
     {"CHORD", FAM_SCL, SC_TRACK, GR_CHORD, {P_CHRD, P_VOIC, 0xFF, 0xFF}},   /* SCL again: the chord keys (chord.c) */
+#if FELUCCA_STRANGE   /* SCL: MICRO, the part's tuning, then its 12 degrees' own offsets */
+    {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_FM3_DEC, P_FM3_SUS, P_ROOT}},
+    {"MICRO 1", FAM_SCL, SC_TRACK, GR_MICRO, {P_LN0, P_LN1, P_LN2, P_LN3}},
+    {"MICRO 2", FAM_SCL, SC_TRACK, GR_MICRO, {P_LN4, P_LN5, P_LN6, P_LN7}},
+    {"MICRO 3", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_ATK, P_FM4_DEC, P_FM4_SUS, P_FM4_REL}},
+#endif
     {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
     {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
     {"FILTER", FAM_EDIT, SC_TRACK, GR_NONE, {P_FTYPE, P_E4, P_E5, P_E7}},   /* ANALOG only (1.5, #104): TYPE CUT RES KTR */
