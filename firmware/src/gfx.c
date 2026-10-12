@@ -109,7 +109,11 @@ static struct {
 #define T_KEY ux.key             /* a keycap's fill (its label: T_INK; unavailable: a T_DIM fill) */
 #define T_LANE ux.lane           /* the piano roll: an in-scale row (SURF -> THEME 10 %) */
 #define T_GRID ux.grid           /* the piano roll: a step line (SURF -> TEXT 6 %; beats and C rows: RAISE) */
+#if defined(FELUCCA_STRANGE) && FELUCCA_STRANGE
 #define NPALETTES UI_NPALETTES
+#else
+#define NPALETTES (UI_NPALETTES - 1u)    /* (DARK, the last, is STRANGE's: elsewhere the list is as it was) */
+#endif
 
 static inline uint16_t ux_gray(uint32_t x5) { return (uint16_t)((x5 << 11) | (x5 << 6) | x5); }
 /* a + (b - a) * pct / 100 per channel, rounded; GREY on the red channel, so it stays gray */

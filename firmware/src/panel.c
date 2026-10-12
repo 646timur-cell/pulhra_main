@@ -121,7 +121,8 @@ static void settings_init(void)
     }
     if (settings.magic != SETTINGS_MAGIC || settings.palette >= NPALETTES) {
         settings.magic = SETTINGS_MAGIC;
-        settings.palette = UI_GREY_INDEX;      /* GREY (default; named MONO before 1.0.2) */
+        settings.palette = FELUCCA_STRANGE ? UI_DARK_INDEX : UI_GREY_INDEX;   /* GREY (default; named MONO before
+                                                                                 * 1.0.2); STRANGE: DARK */
         settings.lowcut = 0;
         settings.zoom = 0;                     /* (retired: the LEDS setting, settings_persist.c) */
     }

@@ -216,6 +216,25 @@ static int test_engines(void)
         favorite_set(ENGI_BLOW, 3, 0);
         favorite_set(ENGI_LYRA, 0, 0);
     }
+    {   /* darkmachine: DARK by default, and once over earlier settings (then MENU > COLOR as saved) */
+        persist_t ps;
+        uint32_t keep = settings.palette;
+        settings.magic = 0;
+        settings_init();
+        ok = settings.palette == UI_DARK_INDEX && !strcmp(UI_PALETTES[UI_DARK_INDEX].name, "DARK");
+        settings.palette = UI_GREY_INDEX;
+        settings_export(&ps);
+        ps.favorites.factory[15][25] = 0;                    /* (settings of before) */
+        settings_import(&ps, sizeof ps);
+        ok &= settings.palette == UI_DARK_INDEX;
+        settings.palette = UI_GREY_INDEX;                    /* (MENU > COLOR GREY, saved) */
+        settings_export(&ps);
+        settings_import(&ps, sizeof ps);
+        ok &= settings.palette == UI_GREY_INDEX;
+        bad += check("DARK: the default, set once over earlier settings, then the saved COLOR", ok);
+        settings.palette = keep;
+        palette_set(keep);
+    }
     ui_power_on();
     bad += check("power on: T1 LYRA, T2 STRING", trk[0].eng_req == ENGI_LYRA && trk[1].eng_req == ENGI_STRING);
     return bad;

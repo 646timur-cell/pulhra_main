@@ -22,6 +22,7 @@ typedef struct {
     struct { uint8_t factory[16][32]; uint32_t user, filter; } favorites;
 } persist_t;
 #define PERSIST_MAGIC 0x50455234u
+#define STRANGE_DARK_SEEN 0xD4u         /* favorites.factory[15][25]: STRANGE has set DARK once */
 
 /* Normalize in place; 1 = current, 2 = migrated, 0 = invalid. */
 static int settings_import(persist_t *p, int n)
@@ -79,6 +80,12 @@ static int settings_import(persist_t *p, int n)
         favorites.factory[ENGI_SAMPLE][0] &= (uint8_t)~(1u << SMP_SET_PERC);
     }
 #endif
+#endif
+#if FELUCCA_STRANGE && defined(FELUCCA_FAVORITES)
+    if (favorites.factory[15][25] != STRANGE_DARK_SEEN) {   /* STRANGE's first start over earlier settings: DARK, once */
+        favorites.factory[15][25] = STRANGE_DARK_SEEN;      /* (then MENU > COLOR as saved; a byte no engine uses) */
+        settings.palette = UI_DARK_INDEX;
+    }
 #endif
     if (p->panel.magic == PANEL_MAGIC) panel = p->panel;
     return current ? 1 : 2;

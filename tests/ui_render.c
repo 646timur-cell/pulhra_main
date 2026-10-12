@@ -1567,7 +1567,13 @@ static void draw(int s)
     }
     if (s == S_SPLASH) {                          /* the power-on splash (main.c, before the UI): its lines, the version
                                                    * shown FELUCCA_VERSION (run_tests.sh: src/felucca.c's) */
+#if FELUCCA_STRANGE
+        static const char WANT[] = "darkmachine|STRANGE " FELUCCA_VERSION "|H\xFCgelton Instruments|with community";
+        const int32_t top = 15;                   /* (darkmachine: lower case, its ascenders 1 px over the capitals) */
+#else
         static const char WANT[] = "Felucca|" FELUCCA_VERSION "|H\xFCgelton Instruments|with community";
+        const int32_t top = 16;
+#endif
         splash_seen[0] = 0;
         in_splash = 1;
         draw_splash();
@@ -1591,7 +1597,7 @@ static void draw(int s)
                         if (x - q0 < ix) ix = x - q0;
                         if (y - q0 < iy) iy = y - q0;
                     }
-            if (bad || ix != 16 || iy != 16) {
+            if (bad || ix != 16 || iy != top) {
                 if (rep) fprintf(rep, "FIND %-26s the splash square not whole (edges %s) or its text not 16 px in (left %d, top %d)\n",
                                  cur_name, bad ? "off" : "ok", (int)ix, (int)iy);
                 nfind++;
@@ -2080,7 +2086,7 @@ int main(int argc, char **argv)
     const char *out = argc > 1 ? argv[1] : "build/ui_new";
     char path[600];
     uint32_t p, s;
-    static const char *const SHOW[] = {"GREY", "MONO", "GREEN", "PAPER", "NIGHT"};   /* (NIGHT: #50, to review) */
+    static const char *const SHOW[] = {"GREY", "MONO", "GREEN", "PAPER", "NIGHT", "DARK"};   /* (NIGHT: #50, to review; DARK: STRANGE) */
     snprintf(path, sizeof path, "%s/report.txt", out);
     rep = fopen(path, "w");
     if (!rep) { fprintf(stderr, "cannot write %s\n", path); return 1; }
