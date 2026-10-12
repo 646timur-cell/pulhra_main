@@ -474,29 +474,38 @@ static uint32_t black_key(uint32_t p) { return key_at(1, p); }
 static int test_edit_pages(void)
 {
     int bad = 0, ok;
+    int16_t e[8];
+    uint32_t k, changed = 0;
     ui_power_on();
     set_engine_of(TSEL, ENGI_LYRA);
     go_home();
     frame();
-    lay_combo(B_EDIT, white(1));                        /* G3: CHAOS */
-    key_up(white(1));
+    lay_combo(B_EDIT, 1);                                /* F#3: the 2nd engine, CHAOS */
+    key_up(1);
     frame();
     ok = TSEL->eng_req == ENGI_CHAOS && ui.layer == LAYER_EDIT;
-    key_down(white(14)); key_up(white(14)); frame();    /* F5: the 15th, LOFI */
-    ok &= TSEL->eng_req == 3u;
+    key_down(18); key_up(18); frame();                   /* B4: the 19th, DRIFT */
+    ok &= TSEL->eng_req == ENGI_DRIFT;
+    key_down(5); key_up(5); frame();                     /* A#3: the 6th, GRAIN */
+    ok &= TSEL->eng_req == 8u;
     TSEL->p[P_AHOLD] = 0;
-    key_down(black_key(10)); key_up(black_key(10)); frame();   /* F#5: LATCH */
-    ok &= TSEL->eng_req == 3u && eqa_count(TSEL) == 11u && TSEL->p[P_AHOLD] == 1;
-    key_down(black_key(10)); key_up(black_key(10)); frame();
+    key_down(20); key_up(20); frame();                   /* C#5: LATCH */
+    ok &= TSEL->p[P_AHOLD] == 1;
+    key_down(20); key_up(20); frame();
     ok &= TSEL->p[P_AHOLD] == 0;
-    key_down(black_key(0)); key_up(black_key(0)); frame();   /* F#3: RESO */
-    ok &= TSEL->eng_req == ENGI_RESO && TSEL->p[P_AHOLD] == 0;
-    key_down(black_key(3)); key_up(black_key(3)); frame();   /* C#4: DRIFT */
-    ok &= TSEL->eng_req == ENGI_DRIFT;
-    key_down(black_key(4)); key_up(black_key(4)); frame();   /* D#4: nothing */
-    ok &= TSEL->eng_req == ENGI_DRIFT;
+    sx_retrig_req = 0;
+    key_down(22); key_up(22); frame();                   /* D#5: RETRIG (done by the audio) */
+    ok &= (sx_retrig_req & 1u) != 0;
+    sx_retrig_req = 0;
+    memcpy(e, &TSEL->p[P_E0], sizeof e);
+    key_down(25); key_up(25); frame();                   /* F#5: MUTATE */
+    for (k = 0; k < 8u; k++)
+        changed += TSEL->p[P_E0 + k] != e[k];
+    ok &= changed > 0 && TSEL->eng_req == 8u;
+    key_down(19); key_up(19); frame();                   /* C5: nothing */
+    ok &= TSEL->eng_req == 8u;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT, one page: 15 engines on the white keys, RESO GLITCH JUNK DRIFT on black keys 1..4, LATCH on F#5", ok);
+    bad += check("EDIT: the 19 engines on the keys in a row, C#5 LATCH, D#5 RETRIG, F#5 MUTATE", ok);
     return bad;
 }
 
@@ -666,6 +675,21 @@ static int test_scenes(void)
     lay_combo(B_GLO, white(8)); key_up(white(8)); frame(); btn_up(B_GLO); frame();
     ok &= xy_val[1][0] == 10;
     bad += check("scenes: held 0.8 s stores over a stored one (no call back on letting go)", ok);
+    {   /* SAVE's page is the scenes too: SCENE 3, SAVE (OCT+), another engine, LOAD (OCT+) */
+        go_home(); frame();
+        press(B_SAVE);
+        ok = !ui.home && !strcmp(cur_page()->title, "SCENES");
+        ui.uslot = 2; ui.act = 4; press(B_OCTUP);
+        ok &= sc_used(2) && sc_bank.s[2].part[0].eng == trk[0].eng_req % NENGINES;
+        set_engine_of(&trk[0], ENGI_GLITCH); frame();
+        ui.act = 2; press(B_OCTUP);
+        for (k = 0; k < 40u; k++) mix_block(buf, CTL);
+        ok &= trk[0].eng_req == sc_bank.s[2].part[0].eng && trk[0].eng_req != ENGI_GLITCH;
+        ui.act = 3; press(B_OCTUP);
+        ok &= !sc_used(2);
+        go_home(); frame();
+        bad += check("scenes: SAVE > SCENES stores, calls back and erases the same scenes", ok);
+    }
     memset(&sc_bank, 0, sizeof sc_bank);
     sc_last = 0xFFu;
     trk[0].p[P_AHOLD] = 0;

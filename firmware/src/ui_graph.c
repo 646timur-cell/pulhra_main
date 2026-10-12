@@ -1473,6 +1473,22 @@ static void engine_sound_row(int32_t y)
     (void)total;
 }
 /* user preset slots around the selected one: "U07  NAME" / EMPTY */
+#if FELUCCA_STRANGE
+static void graph_user(void)                            /* the scenes: "S3  LYRA + STRG" */
+{
+    int32_t row;
+    for (row = 0; row < (int32_t)SC_SLOTS && row < 7; row++) {
+        uint32_t k = (uint32_t)clamp((int32_t)(ui.uslot % SC_SLOTS) - 3, 0, (int32_t)SC_SLOTS - 7) + (uint32_t)row;
+        char tag[4] = {'S', (char)('1' + k), 0, 0}, nm[24];
+        int used = sc_used(k);
+        if (used)
+            sc_desc(k, nm, sizeof nm);
+        else
+            str_cpy(nm, "--", sizeof nm);
+        list_row(LIST_Y(row), k == ui.uslot % SC_SLOTS, tag, T_MID, nm, used ? T_TEXT : T_DIM, 232);
+    }
+}
+#else
 static void graph_user(void)
 {
     int32_t row, first = clamp((int32_t)ui.uslot - 3, 0, UP_SLOTS - 7);
@@ -1488,6 +1504,7 @@ static void graph_user(void)
         list_row(LIST_Y(row), k == ui.uslot, tag, T_MID, nm, used ? T_TEXT : T_DIM, 232);
     }
 }
+#endif
 /* SAVE > PHRASES: the pattern list around the one picked ("03  MELODY", "U07  MY BASS") */
 static void graph_pats(void)
 {

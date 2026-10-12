@@ -61,6 +61,48 @@ static uint8_t sc_k = 0xFFu;                            /* the key a scene was p
 #else
 #define SC_SIG 0u
 #endif
+#if FELUCCA_STRANGE
+/* STRANGE's EDIT layer: the engines on every key in a row (F3 F#3 G3 .. : ENGINE_ORDER), above them on the black keys
+ * C#5 LATCH, D#5 RETRIG (the latched notes and EUCLID from the top, seq.c), F#5 MUTATE (the engine's values nudged at
+ * random, undone by OCT- / SAVE held), G5 INIT */
+#define SE_LATCH 20u                                    /* chromatic key indices (0 = F3) */
+#define SE_RETRIG 22u
+#define SE_MUTATE 25u
+#define SE_INIT 26u
+static void eqa_latch(track_t *t, uint32_t i, uint32_t down);
+static void edit_load(uint32_t e, int32_t step);
+static void se_mutate(track_t *t)
+{
+    uint32_t k;
+    load_begin(t, UNDO_SOUND);
+    for (k = 0; k < 8u; k++) {
+        const param_desc_t *d = track_desc(t, P_E0 + k);
+        int32_t r = d->max - d->min, v = t->p[P_E0 + k];
+        if (d->fmt == F_ENUM || r < 8)
+            continue;                                   /* (a model, a mode: kept) */
+        v += (int32_t)(rng() % (uint32_t)(r / 4 + 1)) - r / 8;   /* +-1/8 of its range */
+        t->p[P_E0 + k] = (int16_t)clamp(v, d->min, d->max);
+    }
+    load_end(t);
+    ui_say("MUTATED", "");
+}
+static void se_key(uint32_t k)
+{
+    if (k < NENG_SHOWN)
+        edit_load(eng_vis(k), 0);
+    else if (k == SE_LATCH)
+        eqa_latch(TSEL, 0, 1);
+    else if (k == SE_RETRIG) {
+        sx_retrig_req |= (uint8_t)(1u << (song.sel & 7u));
+        ui_say("RETRIG", "");
+    } else if (k == SE_MUTATE)
+        se_mutate(TSEL);
+    else if (k == SE_INIT && chain_busy())
+        ui_message("STOP TO EDIT");
+    else if (k == SE_INIT)
+        confirm_open(CF_INIT_SOUND, song.sel);
+}
+#endif
 enum { LK_HOLD, LK_SET };
 typedef struct {
     uint8_t btn, kind, fam;            /* the button, HOLD / SET, the family whose first page KNOB 1..4 edit */
@@ -711,6 +753,10 @@ static void layer_key(uint32_t l, uint32_t k)
 #endif
     } else if (l == LAYER_SCL) {
         TSEL->p[P_ROOT] = (int16_t)((k + 5u) % 12u);    /* the key's note name (F3 = F) */
+#if FELUCCA_STRANGE
+    } else if (l == LAYER_EDIT) {
+        se_key(k);
+#endif
     } else if (l == LAYER_EDIT && !key_black(k)) {
         if (ly_eng(p) < NENGINES)
             edit_load(ly_eng(p), 0);
@@ -910,6 +956,11 @@ static uint32_t layer_leds(uint32_t *br)
             e = (k + 5u + 12u - root) % 12u;
             on = e == 0u;
             can = (mask >> e) & 1u;
+#if FELUCCA_STRANGE
+        } else if (l == LAYER_EDIT) {                   /* the engine lit, the other engines and the actions breathe */
+            on = k < NENG_SHOWN ? eng_vis(k) == TSEL->eng_req % NENGINES : k == SE_LATCH && TSEL->p[P_AHOLD];
+            can = k < NENG_SHOWN || k == SE_LATCH || k == SE_RETRIG || k == SE_MUTATE || (k == SE_INIT && !chain_busy());
+#endif
         } else if (l == LAYER_EDIT && !b) {             /* the engine lit, the others and INIT breathe */
             on = ly_eng(p) < NENGINES && ly_eng(p) == TSEL->eng_req % NENGINES;
             can = ly_eng(p) < NENGINES ? 1u : p == LY_INIT && !chain_busy();
@@ -1138,6 +1189,28 @@ static void eqa_row(uint32_t n)
             cv_rect(x + (int32_t)w - 7 + j, 102 + j, 4 - j, 1, ink);
     }
 }
+#if FELUCCA_STRANGE
+/* the engines on the keys in a row, five a row (each its key and its name), the actions under them */
+static void layer_edit(void)
+{
+    static const char *const AN[4] = {"LATCH", "RETRIG", "MUTATE", "INIT"};
+    uint32_t i;
+    for (i = 0; i < NENG_SHOWN; i++) {
+        int32_t x = 6 + (int32_t)(i % 5u) * 46, y = 4 + (int32_t)(i / 5u) * 22, w = 43;
+        const engine_t *en = ENGINES[eng_vis(i) % NENGINES];
+        uint16_t ink, fill = lc_fill(eng_vis(i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, &ink);
+        fill = lc_box(x, y, w, 19, fill);
+        GFX_HOOK_ALIGN(x, y, x + w, y + 19, AL_HV, "edit engine cell name centred");
+        cv_text_in(x, y + CAP_IN(S, 19), w, &AF_S, eng_abbr(en->name), ink, fill);
+    }
+    for (i = 0; i < 4u; i++) {                          /* (the black keys C#5 D#5 F#5 G5: the names alone, centred) */
+        uint32_t st = i == 0u ? (TSEL->p[P_AHOLD] ? LS_SEL : LS_OFF) : i == 3u && chain_busy() ? LS_DIM : LS_OFF;
+        uint16_t ink, fill = lc_box(LC_X(i), LM_Y, LC_W, LM_H, lc_fill(st, &ink));
+        GFX_HOOK_ALIGN(LC_X(i), LM_Y, LC_X(i) + LC_W, LM_Y + LM_H, AL_HV, "edit action cell name centred");
+        cv_text_in(LC_X(i), LM_Y + CAP_IN(S, LM_H), LC_W, &AF_S, AN[i], ink, fill);
+    }
+}
+#else
 static void layer_edit(void)                            /* the engines from F3, INIT next (LY_INIT), the sound under them */
 {                                                        /* (cells show the engine's icon, not the key's note) */
     uint32_t n = NENG_SHOWN - ly_epage * LY_INIT < LY_INIT ? NENG_SHOWN - ly_epage * LY_INIT : LY_INIT;   /* (this page's) */
@@ -1160,6 +1233,7 @@ static void layer_edit(void)                            /* the engines from F3, 
     else
         engine_sound_row(104);
 }
+#endif
 
 /* SEQ TOOLS: the white keys' tools, 4 a row from F3 (the whole sequence; RANDOM COOK BEAT; the lane's), on a DRUM
  * track the lanes of black keys 1..8 under them (the selected one: the selection's fill). A melodic track: the two

@@ -722,6 +722,27 @@ static __attribute__((noinline)) void sc_latch_apply(track_t *t, uint32_t k)
     }
 }
 
+#if FELUCCA_STRANGE
+static volatile uint8_t sx_retrig_req;                  /* (ui_layer.c: EDIT's RETRIG, a part's bit) */
+static __attribute__((noinline)) void sx_retrig(track_t *t, uint32_t k)
+{
+    uint32_t j;
+    sx_retrig_req &= (uint8_t)~(1u << k);
+    if (t->p[P_AMODE]) {                                /* EUCLID / the arp: from its first step */
+        if (t->arp_note)
+            arp_off(t);
+        t->arp_pos = 0xFFFFFFF;
+        t->arp_idx = 0xFFFFFFFFu;
+        t->euc_pos = 0;
+        return;
+    }
+    for (j = 0; j < t->nheld; j++) {                    /* LATCH's notes: off and on again */
+        trk_note_off(t, t->held[j]);
+        trk_note_on(t, t->held[j], 100);
+    }
+}
+#endif
+
 static void input_on(track_t *t, uint32_t note, uint32_t vel)
 {
     last_note = (uint8_t)note;
@@ -1412,6 +1433,10 @@ static void events_block(uint32_t n)
         engine_block(t);                              /* engine switch: fade, then switch (voice.c) */
         if (FELUCCA_STRANGE && i < 2u && ((sc_latch_req >> i) & 1u) && !sc_latch_wait && t->engine == t->eng_req)
             sc_latch_apply(t, i);
+#if FELUCCA_STRANGE
+        if (i < 2u && ((sx_retrig_req >> i) & 1u))       /* EDIT's RETRIG: the held notes struck again, EUCLID from the top */
+            sx_retrig(t, i);
+#endif
         if (FELUCCA_MODULE && !FELUCCA_STRANGE)
             t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds;
                                                        * STRANGE: the arp is EUCLID's) */

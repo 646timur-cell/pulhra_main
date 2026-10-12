@@ -983,7 +983,7 @@ static void edit_param(uint32_t slot, int32_t steps)
     }
     if (pg->graph == GR_USER) {                           /* KNOB 1 the slot */
         if (slot == 0u)
-            ui.uslot = (uint8_t)clamp((int32_t)ui.uslot + steps, 0, UP_SLOTS - 1);
+            ui.uslot = (uint8_t)clamp((int32_t)ui.uslot + steps, 0, FELUCCA_STRANGE ? 7 : UP_SLOTS - 1);   /* (STRANGE: 8 scenes) */
         return;
     }
     if (pg->graph == GR_PATS) {                          /* KNOB 1 the pattern */
@@ -1054,6 +1054,18 @@ static void act_do(void)
     if (cur_page()->graph == GR_USER) {                   /* 1 LOAD, 2 ERASE, 3 SAVE (the NAME screen first) */
         if (c > 1u)
             ui.act = 0;
+#if FELUCCA_STRANGE                                       /* the scenes: at once, no name */
+        {
+            uint32_t n = ui.uslot % 8u;
+            static const char *const W[3] = {" CALLED", " ERASED", " SAVED"};
+            char b[16] = "SCENE ";
+            int rc = c == 1u ? sc_recall(n) : c == 2u ? sc_erase(n) : sc_store(n);
+            b[6] = (char)('1' + n);
+            b[7] = 0;
+            ui_say(b, rc ? (c == 3u ? " NOT SAVED" : " EMPTY") : W[(c - 1u) % 3u]);
+            return;
+        }
+#endif
         if (c == 2u && up_used(ui.uslot) && !transport_busy())
             confirm_open(CF_ERASE_USER, ui.uslot);        /* ERASE: the dialog first */
         else if (c != 3u)
@@ -1311,7 +1323,7 @@ static int page_tap(uint32_t b)
         ev_delete();
         return 1;
     }
-    if (b == B_EDIT && !ui.home && (cur_page()->graph == GR_USER || cur_page()->graph == GR_SLOTS)) {
+    if (b == B_EDIT && !ui.home && ((!FELUCCA_STRANGE && cur_page()->graph == GR_USER) || cur_page()->graph == GR_SLOTS)) {
         name_rename();                                  /* SAVE > USER / PROJECT: EDIT renames the slot */
         return 1;
     }

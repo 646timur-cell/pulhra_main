@@ -17,6 +17,14 @@ static uint32_t up_rank(uint32_t slot);
 static uint32_t up_engine(uint32_t k);
 static void up_name(uint32_t k, char *b);
 static void up_slot_label(char *b, uint32_t k);
+#if FELUCCA_STRANGE                                    /* the scenes (scene.c): SAVE's slots and GLO's G4 .. G5 */
+static int sc_used(uint32_t n);
+static int sc_recall(uint32_t n);
+static int sc_store(uint32_t n);
+static int sc_erase(uint32_t n);
+static void sc_desc(uint32_t n, char *b, uint32_t cap);
+#define SC_SLOTS 8u
+#endif
 static void up_ui(uint32_t op, uint32_t k);
 static int up_has_pat(uint32_t k);               /* user presets that hold a pattern */
 static uint32_t up_pat_count(void);
@@ -1696,6 +1704,10 @@ static int act_ready(void)
         return song.playing || chain_busy() || chain_config.count;
     if (cur_page()->graph == GR_PATS)
         return pat_last[s] != pat_pick() + 1u || steps_sig(TSEL) != pat_sig[s];
+#if FELUCCA_STRANGE
+    if (cur_page()->graph == GR_USER)
+        return c == 3u || sc_used(ui.uslot % SC_SLOTS);  /* (the scenes) */
+#endif
     if (cur_page()->graph == GR_USER)
         return c == 3u ? !song.playing : up_used(ui.uslot) && (c == 1u || !song.playing);
 #if FELUCCA_SLICE

@@ -29,6 +29,24 @@ static sc_bank_t sc_bank;
 static uint8_t sc_last = 0xFFu;                       /* the scene called back or stored last (its key lit) */
 
 static int sc_used(uint32_t n) { return n < SC_N && sc_bank.s[n].used; }
+static int sc_save_bank(void);
+/* "LYRA + STRG": the two parts' engines (SAVE > SCENES' list) */
+static void sc_desc(uint32_t n, char *b, uint32_t cap)
+{
+    const scene_t *s = &sc_bank.s[n % SC_N];
+    str_cpy(b, eng_abbr(ENGINES[s->part[0].eng % NENGINES]->name), cap);
+    str_cpy(b + str_len(b), " + ", cap - str_len(b));
+    str_cpy(b + str_len(b), eng_abbr(ENGINES[s->part[1].eng % NENGINES]->name), cap - str_len(b));
+}
+static int sc_erase(uint32_t n)
+{
+    if (!sc_used(n))
+        return 1;
+    sc_bank.s[n % SC_N].used = 0;
+    if (sc_last == n)
+        sc_last = 0xFFu;
+    return sc_save_bank();
+}
 static int sc_global_kept(uint32_t g)                 /* the globals a scene holds */
 {
     return g == G_BPM || g == G_SWING || (g >= G_DTIME && g <= G_CDEPTH) || g == G_RTYPE || g == G_MHPF || g == G_MLPF;
@@ -70,6 +88,10 @@ static int sc_store(uint32_t n)
         s->xy[k][1] = xy_val[k][1];
     }
     sc_last = (uint8_t)(n % SC_N);
+    return sc_save_bank();
+}
+static int sc_save_bank(void)                         /* 0 ok, 1 the flash failed (RAM keeps it until power-off) */
+{
     sc_bank.magic = SC_MAGIC;
     sc_bank.pcount = P_COUNT;
     sc_bank.gcount = G_COUNT;

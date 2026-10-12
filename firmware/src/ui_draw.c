@@ -1035,9 +1035,17 @@ static void draw_columns(void)
         return;
     }
     if (cur_page()->graph == GR_USER) {                  /* SLOT, then three GO buttons */
+#if FELUCCA_STRANGE                                      /* (the scenes: S1 .. S8) */
+        int used = sc_used(ui.uslot % SC_SLOTS);
+        val[0] = 'S';
+        val[1] = (char)('1' + ui.uslot % SC_SLOTS);
+        val[2] = 0;
+        draw_column(0, "SCENE", val, "", VAL(0u), (int32_t)(ui.uslot % SC_SLOTS) * 1000 / (int32_t)(SC_SLOTS - 1u), ICON_AUTO);
+#else
         int used = up_used(ui.uslot);
         up_slot_label(val, ui.uslot);
         draw_column(0, "SLOT", val, "", VAL(0u), (int32_t)ui.uslot * 1000 / (int32_t)(UP_SLOTS - 1u), ICON_AUTO);
+#endif
         draw_act_column(1, "LOAD", used ? T_THEME : T_DIM, ICON_AUTO);
         draw_act_column(2, "ERASE", used ? T_THEME : T_DIM, ICON_AUTO);
         draw_act_column(3, "SAVE", T_THEME, ICON_AUTO);
