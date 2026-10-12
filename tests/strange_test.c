@@ -439,6 +439,35 @@ static int test_xy_filter(void)
     return bad;
 }
 
+
+/* EDIT layer: the engines on the white keys from F3, OCT+ their next page */
+static int test_edit_pages(void)
+{
+    int bad = 0, ok;
+    ui_power_on();
+    set_engine_of(TSEL, ENGI_LYRA);
+    go_home();
+    frame();
+    lay_combo(B_EDIT, white(1));                        /* G3: CHAOS (page 1) */
+    key_up(white(1));
+    frame();
+    ok = TSEL->eng_req == ENGI_CHAOS && ui.layer == LAYER_EDIT && !ly_epage;
+    btn_down(B_OCTUP); frame(); btn_up(B_OCTUP); frame();
+    ok &= ly_epage == 1u;
+    key_down(white(3)); key_up(white(3)); frame();      /* page 2, B3: the 19th engine, DRUM */
+    ok &= TSEL->eng_req == ENGI_DRUM;
+    key_down(white(4)); key_up(white(4)); frame();      /* page 2, C4: no engine there */
+    ok &= TSEL->eng_req == ENGI_DRUM;
+    btn_down(B_OCTUP); frame(); btn_up(B_OCTUP); frame();
+    ok &= !ly_epage;
+    btn_up(B_EDIT); frame();
+    bad += check("EDIT: 15 engines on the keys, OCT+ the next page (the last 4), wraps; an empty key does nothing", ok);
+    btn_down(B_EDIT); frames(800);
+    bad += check("EDIT opens on the page of the track's engine (DRUM: page 2)", ui.layer == LAYER_EDIT && ly_epage == 1u);
+    btn_up(B_EDIT); frames(10);
+    return bad;
+}
+
 #ifndef STRANGE_NO_MAIN
 int main(void)
 {
@@ -448,6 +477,7 @@ int main(void)
     bad += test_parts();
     bad += test_lyra_tail();
     bad += test_xy_filter();
+    bad += test_edit_pages();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);

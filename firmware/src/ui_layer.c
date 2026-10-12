@@ -60,7 +60,11 @@ static const layer_t LAYERS[LAYER_N] = {
     {B_FX, LK_HOLD, FAM_HOME, "[FX] HOLD", {{KC_KEYS, "EFFECTS"}, {KC_K14, "MACROS"}, {0, 0}}},   /* (LET GO: the header's HOLD) */
     {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
     {B_SCL, LK_SET, FAM_SCL, "[SCL] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
+#if FELUCCA_STRANGE                                     /* (OCT+: the engines' next page) */
+    {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTUP, "PAGE"}, {KC_OCTDN, "UNDO"}}},
+#else
     {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTDN, "UNDO"}, {KC_EDIT, "DONE"}}},
+#endif
     {B_SEQ, LK_SET, FAM_SEQ, "[SEQ] TOOLS", {{KC_KEYS, "TOOLS"}, {KC_OCTDN, "UNDO"}, {KC_SEQ, "DONE"}}},
     {B_REC, LK_SET, FAM_HOME, "[REC] SET", {{KC_KEYS, "RECORDING"}, {KC_OCTDN, "UNDO"}, {KC_REC, "DONE"}}},
 };
@@ -76,6 +80,15 @@ static const page_t *ly_page(uint32_t l) { return l == LAYER_SCL ? &LY_SCL : l =
 #define LY_INIT ((uint32_t)(NENG_SHOWN < 15 ? NENG_SHOWN : 15))   /* EDIT: the white key of INIT, the one after the engines
                                                                      * (13: E5; STRANGE: the first 15 engines, G5), its cell */
 typedef char ly_init_fits[LY_INIT < 16u ? 1 : -1];   /* (a white key: F3 .. G5) */
+/* EDIT's engine pages (STRANGE: more engines than keys): LY_INIT engines a page, OCT+ the next page (wraps); the layer
+ * opens on the page of the selected track's engine. ly_eng(p): the engine on white key p of the page, NENGINES none */
+#define LY_PAGES ((NENG_SHOWN + LY_INIT - 1u) / LY_INIT)
+static uint8_t ly_epage;
+static uint32_t ly_eng(uint32_t p)
+{
+    uint32_t i = ly_epage * LY_INIT + p;
+    return p < LY_INIT && i < NENG_SHOWN ? eng_vis(i) : NENGINES;
+}
 #define layer_seen (favorites.factory[15][31])   /* bit l: layer l opened once (a byte no engine uses) */
 static const khint_t FX_LATCH_FOOT[3] = {{KC_KEYS, "ON / OFF"}, {KC_K14, "MACROS"}, {KC_OCTDN, "ALL OFF"}};
 static const khint_t FX_KEY_FOOT[3] = {{KC_PRESETS, "ASSIGN"}, {KC_EDIT, "DEFAULT"}, {KC_K14, "MACROS"}};   /* (a key held) */
@@ -234,6 +247,7 @@ static void layer_opened(uint32_t l)
     lys.trk = song.sel;
     lys.loaded = 0;
     lys.cook = 0;
+    ly_epage = (uint8_t)(eng_rank(TSEL->eng_req % NENGINES) / LY_INIT);   /* (EDIT: the engine's page) */
     if (l == LAYER_SEQ || l == LAYER_REC) {             /* the track as it is now (OCT-) */
         memcpy(tl_open.step, TSEL->step, sizeof tl_open.step);
         motion_snapshot_track(TSEL, &tl_open.mo);
@@ -631,8 +645,8 @@ static void layer_key(uint32_t l, uint32_t k)
     } else if (l == LAYER_SCL) {
         TSEL->p[P_ROOT] = (int16_t)((k + 5u) % 12u);    /* the key's note name (F3 = F) */
     } else if (l == LAYER_EDIT && !key_black(k)) {
-        if (p < NENG_SHOWN && p < LY_INIT)
-            edit_load(eng_vis(p), 0);
+        if (ly_eng(p) < NENGINES)
+            edit_load(ly_eng(p), 0);
         else if (p == LY_INIT && chain_busy())
             ui_message("STOP TO EDIT");
         else if (p == LY_INIT)
@@ -734,6 +748,10 @@ static uint32_t layer_oct(uint32_t pressed, uint32_t oct)
     if (layer_set_open())
         lys.oct |= (uint8_t)(((pressed >> dn) & 1u) | ((pressed >> up) & 1u) << 1);
     mine = oct & lys.oct;
+    if ((mine & 2u) && lys.l == LAYER_EDIT && LY_PAGES > 1u) {   /* OCT+ in EDIT: the next engine page */
+        ly_epage = (uint8_t)((ly_epage + 1u) % LY_PAGES);
+        ui.force = 1;
+    }
     if (mine & 1u) {                                    /* OCT-: back to when it opened */
         if (lys.l == LAYER_FX) {                        /* (FX LATCH) every effect and macro off */
             perf_latched = 0;
@@ -812,8 +830,8 @@ static uint32_t layer_leds(uint32_t *br)
             on = e == 0u;
             can = (mask >> e) & 1u;
         } else if (l == LAYER_EDIT && !b) {             /* the engine lit, the others and INIT breathe */
-            on = p < NENG_SHOWN && p < LY_INIT && eng_vis(p) == TSEL->eng_req % NENGINES;
-            can = p < NENG_SHOWN && p < LY_INIT ? 1u : p == LY_INIT && !chain_busy();
+            on = ly_eng(p) < NENGINES && ly_eng(p) == TSEL->eng_req % NENGINES;
+            can = ly_eng(p) < NENGINES ? 1u : p == LY_INIT && !chain_busy();
         } else if (l == LAYER_EDIT && (a = eqa_of(TSEL, p)) != 0) {   /* the quick actions: on lit (DRUM: sounding), */
             on = a->on(TSEL, a->arg) != 0u;             /* a HOLD one off breathes, none dark */
             can = a->kind == LK_HOLD;
@@ -1005,14 +1023,18 @@ static void eqa_row(uint32_t n)
 }
 static void layer_edit(void)                            /* the engines from F3, INIT next (LY_INIT), the sound under them */
 {                                                        /* (cells show the engine's icon, not the key's note) */
-    uint32_t n = NENG_SHOWN < LY_INIT ? NENG_SHOWN : LY_INIT, cells = n + 1u, i, h = cells > 12u ? 20u : 28u;   /* 4 rows of 20: 8 px clear above the sound row */
+    uint32_t n = NENG_SHOWN - ly_epage * LY_INIT < LY_INIT ? NENG_SHOWN - ly_epage * LY_INIT : LY_INIT;   /* (this page's) */
+    uint32_t cells = LY_PAGES > 1u ? LY_INIT + 1u : n + 1u, i, h = cells > 12u ? 20u : 28u;   /* 4 rows of 20: 8 px clear
+                                                                    * above the sound row (pages: INIT on its key's cell) */
     uint32_t na = eqa_count(TSEL);
     for (i = 0; i < cells; i++) {
         int32_t x = LC_X(i % 4u), y = 4 + (int32_t)(h + 4u) * (int32_t)(i / 4u);
-        const engine_t *en = ENGINES[eng_vis(i) % NENGINES];
+        const engine_t *en = ENGINES[eng_vis(ly_epage * LY_INIT + i) % NENGINES];
         if (i < n)
             lcell(x, y, (int32_t)h, 0, engine_icon(en->name), 0, h > 24u ? en->name : eng_abbr(en->name),
-                  eng_vis(i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, 0);
+                  eng_vis(ly_epage * LY_INIT + i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, 0);
+        else if (i < cells - 1u)
+            continue;                                   /* (a page's keys past its engines: nothing) */
         else
             lcell(x, y, (int32_t)h, 0, ICON_X_WARN, 0, "INIT", chain_busy() ? LS_DIM : LS_OFF, 0);
     }
