@@ -106,6 +106,7 @@ static phr_t phrase(uint32_t eng, uint32_t preset, const uint8_t *notes, uint32_
     uint32_t nl = 0;
     memset(&R, 0, sizeof R);
     ui_power_on();
+    memset(xy_val, 0, sizeof xy_val);                    /* (performance state: not reset by a power-on of the tests) */
     song.master_q12 = 4096;
     song.sel = 0;
     set_engine_of(&trk[0], eng);
@@ -344,6 +345,7 @@ static double mix_rms(uint32_t eng, uint32_t pre, uint32_t n, void (*tweak)(void
     uint32_t k, i;
     double sq = 0;
     ui_power_on();
+    memset(xy_val, 0, sizeof xy_val);
     song.master_q12 = 4096;
     set_engine_of(&trk[0], eng);
     apply_preset_to(&trk[0], pre);
