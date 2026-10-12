@@ -734,7 +734,7 @@ static void draw_foot(void)
     int32_t x;
     sound_name(t, pn);
     if (ui.home)
-        str_cpy(ti, "HOME", sizeof ti);
+        str_cpy(ti, ui.home == HOME_TRANSPOSE ? "TRANSPOSE" : "HOME", sizeof ti);
     else                                               /* page title + number in its family: "ENV DEST 2/2" */
         page_title(ti);
     str_cpy(s, ename, sizeof s);
@@ -874,7 +874,9 @@ static void draw_columns(void)
             const param_desc_t *d = home_param(c, &vp);
             param_format(d, *vp, val, &unit);
             card_mot_of(vp);
-            if (home_levels())                         /* 1.5: T1..T4 LEVEL, the track's cushion, muted: DIM */
+            if (ui.home == HOME_TRANSPOSE)             /* sound module: T1..T4 TRN, the semitones; 0 (none): DIM */
+                draw_column(c, "TRN", val, unit, *vp ? VAL(c) : T_DIM, RATIO(d, *vp), trk_icon(c, 1));
+            else if (home_levels())                    /* 1.5: T1..T4 LEVEL, the track's cushion, muted: DIM */
                 draw_column(c, "LEVEL", val, unit, trk[c].p[P_MUTE] ? T_DIM : VAL(c), RATIO(d, *vp), trk_icon(c, 1));
             else
                 draw_column(c, d->label, val, unit, VAL(c), RATIO(d, enum_rank(d, *vp)), param_icon(d, *vp));

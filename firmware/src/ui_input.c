@@ -1285,6 +1285,8 @@ static void layer_lock_input(uint32_t pressed);
 static int page_tap(uint32_t b)
 {
     uint32_t f;
+    if (FELUCCA_MODULE && (b == B_SEQ || b == B_ARP || b == B_GLO))
+        return 1;                                     /* (sound module: their pages are gone; GLO held is its layer) */
     if (b == B_EDIT && detail_on()) {                    /* DETAIL (1.5.1): the step's CHANCE RATCH NUDGE VEL back */
         if (chain_busy())
             ui_message("STOP TO EDIT");
@@ -1500,7 +1502,7 @@ static void ui_input(void)
             song.seq_mode = 0;
         }
     }
-    if (rec == BT_TAP && !ui.menu && !ui.confirm && !name_on())   /* REC pressed in another layer (REC alone: */
+    if (rec == BT_TAP && !FELUCCA_MODULE && !ui.menu && !ui.confirm && !name_on())   /* REC pressed in another layer (REC alone: */
         rec_tap();                                      /* its layer's tap); nothing in the menu, a dialog or NAME */
     if (ui.menu) {                                      /* SAVE / REC taps do nothing here (HOME: above) */
         if (ui.save_t0)

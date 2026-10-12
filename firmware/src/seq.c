@@ -61,8 +61,23 @@ static int32_t midi_base(void)
     uint32_t r = (uint32_t)song.g[G_ROUTE];
     return r == 1u ? -1 : r ? (int32_t)(r - 1u) * 4 : 0;
 }
-/* MIDI channel 0..15 of track i (keys -> MIDI out): its channel in ROUT's block (SEL, CH1-4: 1..4) */
-static uint32_t trk_midi_ch(uint32_t i) { return (midi_base() > 0 ? (uint32_t)midi_base() : 0u) + i % NTRK; }
+/* Sound-module build: ROUT 0 is TRACK CH, each track on a MIDI channel of its own (MENU > MIDI > T1 CH .. T4 CH). Kept
+ * with the settings, as nibbles in two bytes no engine uses (ui.c ui_mch: favorites.factory[15][8..9]): track i's nibble
+ * is (channel - i) mod 16, so 0 (every older setting) is channels 1..4, as CH1-4 was. A build without the UI: none */
+static uint8_t *const mch_tab;
+static uint32_t trk_ch(uint32_t i)                 /* track i's channel 0..15 */
+{
+    uint32_t off = mch_tab ? (uint32_t)(mch_tab[(i >> 1) & 1u] >> ((i & 1u) * 4u)) & 15u : 0u;
+    return (i % NTRK + off) & 15u;
+}
+static uint32_t mch_word(void) { return mch_tab ? (uint32_t)mch_tab[0] | (uint32_t)mch_tab[1] << 8 : 0u; }
+/* MIDI channel 0..15 of track i (keys -> MIDI out): its own with TRACK CH, else its channel in ROUT's block (SEL: 1..4) */
+static uint32_t trk_midi_ch(uint32_t i)
+{
+    if (FELUCCA_MODULE && !song.g[G_ROUTE])
+        return trk_ch(i);
+    return (midi_base() > 0 ? (uint32_t)midi_base() : 0u) + i % NTRK;
+}
 
 static int drum_track(const track_t *t) { return ENGINES[eng_idx(t->eng_req)] == &ENG_DRUM; }
 
@@ -1088,7 +1103,7 @@ static void seq_tick(track_t *t, uint32_t n)
         else
             t->seq_off -= n;
     }
-    if (!song.playing)
+    if (!song.playing || FELUCCA_MODULE)            /* (sound module: the transport runs for the tempo, no steps) */
         return;
     period = div_samples((uint32_t)t->p[P_SDIV]);
     len = (uint32_t)t->p[P_SLEN];
@@ -1116,12 +1131,30 @@ static void seq_tick(track_t *t, uint32_t n)
  * here: midi_event drops them), SEL (1) every channel the selected track; CH5-8 .. CH13-16 (2..4) as CH1-4 on
  * their four channels (midi_base) */
 static uint8_t midi_route;                 /* the G_ROUTE events_block last saw (a change to a block: midi_route_block) */
-static int midi_in_block(uint32_t ch)      /* ch is one of ROUT's block (not with SEL) */
+static uint16_t midi_mch;                  /* .. and TRACK CH's channels (a change: midi_route_block too) */
+static int32_t midi_ch_trk(uint32_t ch)    /* TRACK CH: the first track on channel ch, -1 none */
 {
-    int32_t b = midi_base();
+    uint32_t i;
+    for (i = 0; i < NPART; i++)
+        if (trk_ch(i) == (ch & 15u))
+            return (int32_t)i;
+    return -1;
+}
+static int midi_in_block(uint32_t ch)      /* ch is heard by a track of its own (TRACK CH, ROUT's block; not with SEL) */
+{
+    int32_t b;
+    if (FELUCCA_MODULE && !song.g[G_ROUTE])
+        return midi_ch_trk(ch) >= 0;
+    b = midi_base();
     return b >= 0 && ch - (uint32_t)b < NPART;
 }
-static track_t *midi_track(uint32_t ch) { return midi_in_block(ch) ? &trk[ch - (uint32_t)midi_base()] : TSEL; }
+static track_t *midi_track(uint32_t ch)
+{
+    int32_t i;
+    if (FELUCCA_MODULE && !song.g[G_ROUTE])
+        return (i = midi_ch_trk(ch)) >= 0 ? &trk[i] : TSEL;
+    return midi_in_block(ch) ? &trk[ch - (uint32_t)midi_base()] : TSEL;
+}
 
 #include "midi_control.c"
 #include "midi_clock.c"
@@ -1231,8 +1264,10 @@ static void events_block(uint32_t n)
         }
         transport_req = 0;
     }
-    if (midi_route != (uint8_t)song.g[G_ROUTE]) {     /* ROUT changed: a block lets go of the other channels */
+    if (midi_route != (uint8_t)song.g[G_ROUTE] ||      /* ROUT changed: a block lets go of the other channels */
+        (FELUCCA_MODULE && !song.g[G_ROUTE] && midi_mch != (uint16_t)mch_word())) {   /* (TRACK CH: a track's channel changed too) */
         midi_route = (uint8_t)song.g[G_ROUTE];
+        midi_mch = (uint16_t)mch_word();
         if (midi_route != 1u)
             midi_route_block();
     }
@@ -1263,6 +1298,8 @@ static void events_block(uint32_t n)
             arp_forget(t);
         }
         engine_block(t);                              /* engine switch: fade, then switch (voice.c) */
+        if (FELUCCA_MODULE)
+            t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds) */
         /* ARP turned off, or HOLD released with no key down: drop the latched chord */
         if ((t->armp && !t->p[P_AMODE]) || (t->aholdp && !t->p[P_AHOLD] && !t->arp_phys)) {
             t->nheld = 0;

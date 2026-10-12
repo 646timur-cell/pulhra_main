@@ -15,7 +15,11 @@
  * nothing of theirs is in the settings record (MI_PROJECT: menu_get / menu_put read and write song.g) */
 enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_SCROFF, MI_SCOPE, MI_HOME, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_SCLLED,
        MI_PREVIEW, MI_CHADD, MI_LOWCUT, MI_USB,
-       MI_CLICK, MI_CLKLVL, MI_COUNTIN, MI_TUNE, MI_MIDIIN, MI_LCLEAR, MI_SERIAL, MI_RESTORE, MI_HELP, MI_PANEL, MI_INFO,
+       MI_CLICK, MI_CLKLVL, MI_COUNTIN, MI_TUNE, MI_MIDIIN,
+#if FELUCCA_MODULE
+       MI_CH1, MI_CH2, MI_CH3, MI_CH4,                 /* (sound module: TRACK CH's channels, MIDI) */
+#endif
+       MI_LCLEAR, MI_SERIAL, MI_RESTORE, MI_HELP, MI_PANEL, MI_INFO,
        MI_ABOUT, MI_COUNT };
                                                        /* (1.1: the metronome's rows in AUDIO; 1.2: RESTORE LAST in
                                                         * SYSTEM, SCALE LEDS STEP PREVIEW CHORD ENTRY in CONTROL, SCOPE in
@@ -27,7 +31,11 @@ static int menu_valued(uint32_t row) { return row < MI_VALUES && row != MI_LCLEA
 static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM", "LEDS", "SCREEN OFF", "SCOPE", "HOME", "HOLD", "KNOB ACCEL",
                                               "FX LATCH", "BPM LOCK", "SCALE LEDS", "STEP PREVIEW", "CHORD ENTRY",
                                               "SPEAKER EQ", "USB LEVEL", "CLICK", "CLICK LEVEL", "COUNT-IN", "TUNE",
-                                              "MIDI IN", "LEARN CLEAR", "USB SERIAL", "RESTORE LAST", "HELP", "CALIBRATION", "INFO",
+                                              "MIDI IN",
+#if FELUCCA_MODULE
+                                              "T1 CH", "T2 CH", "T3 CH", "T4 CH",
+#endif
+                                              "LEARN CLEAR", "USB SERIAL", "RESTORE LAST", "HELP", "CALIBRATION", "INFO",
                                               "ABOUT"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
@@ -50,6 +58,9 @@ static const uint8_t MI_TAB[MI_COUNT] = {
                                                                              * COUNT-IN */
     MTAB_AUDIO,                                                             /* TUNE (1.2) */
     MTAB_MIDI,                                                              /* MIDI IN (1.2) */
+#if FELUCCA_MODULE
+    MTAB_MIDI, MTAB_MIDI, MTAB_MIDI, MTAB_MIDI,                             /* T1 CH .. T4 CH (sound module) */
+#endif
     MTAB_MIDI,                                                              /* LEARN CLEAR (1.5) */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* USB SERIAL, RESTORE LAST, HELP (1.5) */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* CALIBRATION, INFO (1.2), ABOUT */
@@ -113,7 +124,23 @@ static const char *const SCROFF_N[5] = {"NEVER", "5 MIN", "15 MIN", "30 MIN", "6
 static const char *const ANIM_N[3] = {"ON", "OFF", "IDLE"};
 static const uint8_t ANIM_ORD[3] = {1, 0, 2};          /* (a value's place in the menu's order, and back: its own inverse) */
 /* 1.3 (Discussions #112, #134): what HOME shows under its cards (ui.c ui_home_view): the scope, or the four tracks */
+#if FELUCCA_MODULE
+static const char *const HOME_N[2] = {"TRACKS", "SCOPE"};   /* (sound module: the knobs are always T1..T4; stored 1 SCOPE,
+                                                               * 0 and 2 TRACKS: ui.c home_tracks) */
+#define HOME_NV 2u
+#define HOME_GET() ((uint32_t)(ui_home_view == HV_TRACKS))
+#define HOME_PUT(v) ((uint8_t)((v) ? HV_TRACKS : HV_SCOPE))
+#else
 static const char *const HOME_N[HV_COUNT] = {"SCOPE", "TRACKS", "LEVELS"};   /* (1.5, #134: LEVELS) */
+#define HOME_NV HV_COUNT
+#define HOME_GET() (ui_home_view < HV_COUNT ? ui_home_view : HV_SCOPE)
+#define HOME_PUT(v) ((uint8_t)((v) < HV_COUNT ? (v) : HV_SCOPE))
+#endif
+#if FELUCCA_MODULE
+#define MI_CHROW(row) ((row) >= MI_CH1 && (row) <= MI_CH4)
+#else
+#define MI_CHROW(row) 0
+#endif
 
 /* MENU > USB SERIAL (#67). The serial console is a developer tool (README: FELUCCA_CDC). ON (the default) presents it,
  * the descriptors byte for byte as before; OFF re-enumerates as audio + MIDI only, device class 0 (the bytes of a
@@ -147,7 +174,7 @@ static uint32_t menu_n(uint32_t row)
 {
     return row == MI_COLOR ? NPALETTES : row == MI_LOWCUT || (row >= MI_CLICK && row <= MI_COUNTIN) ? 3u :
            row == MI_HOLD ? 4u : row == MI_LEDS ? LEDS_COUNT : row == MI_SCROFF ? NELEM(SCROFF_N) :
-           row == MI_TUNE ? TUNE_N : row == MI_MIDIIN ? NELEM(N_ROUTE) : row == MI_ANIM ? 3u : row == MI_HOME ? HV_COUNT : 2u;
+           row == MI_TUNE ? TUNE_N : row == MI_MIDIIN ? NELEM(N_ROUTE) : MI_CHROW(row) ? 16u : row == MI_ANIM ? 3u : row == MI_HOME ? HOME_NV : 2u;
 }
 static uint32_t menu_get(uint32_t row)
 {
@@ -162,10 +189,13 @@ static uint32_t menu_get(uint32_t row)
     case MI_HOLD: return settings_hold % 4u;
     case MI_SCROFF: return scr_get();
     case MI_ANIM: return ui_prefs & PREF_ANIM_OFF ? 1u : (ui_idle & 1u) ? 2u : 0u;
-    case MI_HOME: return ui_home_view < HV_COUNT ? ui_home_view : HV_SCOPE;
+    case MI_HOME: return HOME_GET();
     case MI_CLICK: case MI_CLKLVL: case MI_COUNTIN: return rp_get(row - MI_CLICK);
     case MI_TUNE: return (uint32_t)(clamp(song.g[G_TUNE], TUNE_MIN, TUNE_MIN + (int32_t)TUNE_N - 1) - TUNE_MIN);
     case MI_MIDIIN: return (uint32_t)clamp(song.g[G_ROUTE], 0, (int32_t)NELEM(N_ROUTE) - 1);
+#if FELUCCA_MODULE
+    case MI_CH1: case MI_CH2: case MI_CH3: case MI_CH4: return trk_ch(row - MI_CH1);
+#endif
     case MI_LEDS:
         while (i + 1u < LEDS_COUNT && LEDS_MENU[i] != settings_leds)
             i++;
@@ -188,9 +218,16 @@ static const char *menu_vname(uint32_t row, uint32_t v)
     case MI_COUNTIN: return COUNTIN_N[v % 3u];
     case MI_SCROFF: return SCROFF_N[v % NELEM(SCROFF_N)];
     case MI_ANIM: return ANIM_N[v % 3u];
-    case MI_HOME: return HOME_N[v % HV_COUNT];
+    case MI_HOME: return HOME_N[v % HOME_NV];
     case MI_LEDS: return LEDS_NAME[LEDS_MENU[v % LEDS_COUNT]];
     case MI_MIDIIN: return N_ROUTE[v % NELEM(N_ROUTE)];
+#if FELUCCA_MODULE
+    case MI_CH1: case MI_CH2: case MI_CH3: case MI_CH4: {   /* the channel 1..16 */
+        static char b[4];
+        fmt_int(b, (int32_t)(v % 16u) + 1);
+        return b;
+    }
+#endif
     case MI_TUNE: {                                    /* the cents, signed ("+12", "0", "-7"; the menu adds "ct") */
         static char b[8];
         int32_t c = (int32_t)(v % TUNE_N) + TUNE_MIN;
@@ -235,13 +272,20 @@ static void menu_put(uint32_t row, uint32_t v)
         ui_idle = (uint8_t)(v == 2u ? ui_idle | 1u : ui_idle & ~1u);
         break;                                         /* (1.5: up to 1.4.1 it fell through: ANIM set HOME too) */
     case MI_HOME:                                      /* (another look: HOME drawn anew) */
-        ui_home_view = (uint8_t)(v < HV_COUNT ? v : HV_SCOPE);
+        ui_home_view = HOME_PUT(v);                    /* (sound module: 1 SCOPE, 0 TRACKS: home_tracks) */
         ui.force = 1;
         break;
     case MI_LEDS: settings_leds = LEDS_MENU[v]; break;
     case MI_CLICK: case MI_CLKLVL: case MI_COUNTIN: rp_put(row - MI_CLICK, v); break;   /* (at once: click.c, seq.c) */
     case MI_TUNE: song.g[G_TUNE] = (int16_t)((int32_t)v + TUNE_MIN); break;
     case MI_MIDIIN: song.g[G_ROUTE] = (int16_t)v; break;
+#if FELUCCA_MODULE
+    case MI_CH1: case MI_CH2: case MI_CH3: case MI_CH4: {   /* (seq.c events_block lets go of the old channel's notes) */
+        uint32_t i = row - MI_CH1, sh = (i & 1u) * 4u, off = (v - i) & 15u;
+        mch_tab[i >> 1] = (uint8_t)((mch_tab[i >> 1] & ~(15u << sh)) | off << sh);
+        break;
+    }
+#endif
     }
 }
 /* the menu's step, any of KNOB 1..4 or OCT+ (s > 0) / OCT- (s < 0): the next / previous value, stopping at the ends;

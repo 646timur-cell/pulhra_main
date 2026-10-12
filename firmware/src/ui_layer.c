@@ -146,8 +146,8 @@ static void layer_arm(uint32_t pressed, uint32_t now)
     if (ui.ly)
         return;
     for (l = LAYER_FX; l < LAYER_N; l++)
-        if (pressed & ly_bit(l)) {
-            ui.ly = (uint8_t)l;
+        if ((pressed & ly_bit(l)) && !(FELUCCA_MODULE && (l == LAYER_SEQ || l == LAYER_REC))) {
+            ui.ly = (uint8_t)l;                         /* (sound module: no SEQ TOOLS, no REC layer) */
             ui.ly_t0 = (now & ~15u) | 1u | (layer_allowed() ? 0u : LY_DEAD);
             lys.dtap = lys.dt_l == l && fm1_ms - lys.dt_ms <= LY_DTAP_MS;   /* (#83: the second tap of a double tap?) */
             lys.dt_l = 0;

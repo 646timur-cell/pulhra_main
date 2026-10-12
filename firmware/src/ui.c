@@ -78,9 +78,19 @@ static uint32_t up_gen;                      /* bumped on every user bank change
  * engine uses, saved with the settings; 0 in older settings = SCOPE; an unknown value (a later firmware's view) reads as
  * SCOPE and is kept as saved (1.3 / 1.4 read LEVELS so) */
 #define ui_home_view (favorites.factory[15][26])
+/* Sound-module build: TRACK CH's channels (seq.c trk_ch), a nibble per track in two bytes no engine uses */
+static uint8_t *const mch_tab = &favorites.factory[15][8];
 enum { HV_SCOPE, HV_TRACKS, HV_LEVELS, HV_COUNT };
+/* Sound-module build: HOME's KNOB 1..4 are always T1..T4 (LEVEL; on TRANSPOSE, HOME tapped again, their TRN), and HOME
+ * shows the four tracks' rows unless MENU > HOME is SCOPE (the stored 1; 0, 2: TRACKS) */
+#if FELUCCA_MODULE
+static int home_tracks(void) { return ui_home_view != HV_TRACKS; }
+static int home_levels(void) { return 1; }
+#else
 static int home_tracks(void) { return ui_home_view == HV_TRACKS || ui_home_view == HV_LEVELS; }
 static int home_levels(void) { return ui_home_view == HV_LEVELS; }
+#endif
+#define HOME_TRANSPOSE 2u                      /* ui.home: 1 HOME (the levels), 2 TRANSPOSE (the tracks' TRN) */
 enum { RP_CLICK, RP_LEVEL, RP_COUNTIN };
 static uint32_t rp_get(uint32_t f)                     /* a field as the MENU steps it: 0..2 */
 {
@@ -388,6 +398,9 @@ static uint32_t layer_btn(void);
  * track's (its patch's operators, ui_fm6op.c) */
 static int page_visible(uint32_t i)
 {
+    if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
+                           PAGES[i].graph == GR_PATS))
+        return 0;                                     /* (sound module: no sequencer, arpeggiator, song or phrases) */
     if (PAGES[i].scope == SC_TRACK && PAGES[i].id[0] >= P_LN0 && PAGES[i].id[0] <= P_LN7)
         return TSEL->eng_req % NENGINES == ENGI_DRUM;
     if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): ANALOG's */
@@ -694,7 +707,11 @@ static void go_home(void)
 static void home_tap(void)
 {
     uint32_t i = ui.page + 1u;
-    if (ui.home) {
+    if (FELUCCA_MODULE && ui.home == 1u) {            /* sound module: HOME twice is TRANSPOSE (then MIXER, CLOCK) */
+        ui.home = HOME_TRANSPOSE;
+        ui.force = 1;
+        help_start();
+    } else if (ui.home) {
         ui.fam_last[FAM_TRK] = 0;                     /* (open_family: the family's first, the MIXER) */
         open_family(FAM_TRK);
     } else if (cur_page()->fam == FAM_TRK && i < NPAGES && PAGES[i].fam == FAM_TRK) {
@@ -1553,7 +1570,8 @@ static uint32_t preset_visible(uint32_t cur, uint32_t total, uint32_t row)
 static track_t *home_trk(uint32_t k) { return home_levels() ? &trk[k & 3u] : TSEL; }
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
-    uint32_t id = home_levels() ? (uint32_t)P_LEVEL : ENGINES[TSEL->eng_req % NENGINES]->knob[k & 3u];
+    uint32_t id = ui.home == HOME_TRANSPOSE ? (uint32_t)P_TRANS : home_levels() ? (uint32_t)P_LEVEL
+                                                                : ENGINES[TSEL->eng_req % NENGINES]->knob[k & 3u];
     *vp = &home_trk(k)->p[id];
     return track_desc(home_trk(k), id);
 }

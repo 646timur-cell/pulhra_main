@@ -20,6 +20,10 @@
 #define FELUCCA_FM4 0            /* the DIGITAL engine (eng_digital.c, four-operator FM): kept in the tree, not built
                                   * by default; replaced by FM6, its sounds convert (fm4_convert.c) */
 #endif
+#ifndef FELUCCA_MODULE
+#define FELUCCA_MODULE 1         /* the sound-module build: TRACK CH MIDI, HOME levels / TRANSPOSE, no groovebox pages;
+                                  * FELUCCA_MODULE=0 keeps Felucca's panel (the upstream UI tests build so) */
+#endif
 #if !FELUCCA_SLICE
 #error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
 #endif

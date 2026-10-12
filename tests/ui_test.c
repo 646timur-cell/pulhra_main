@@ -9559,6 +9559,7 @@ static int test_edit_quick_actions(void)
     return bad;
 }
 
+#ifndef UI_TEST_NO_MAIN   /* (tests/module_test.c includes this file with its own main) */
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -9655,3 +9656,4 @@ int main(void)
     return bad ? 1 : 0;
 }
 #endif
+#endif /* UI_TEST_NO_MAIN */

@@ -104,7 +104,11 @@ static void midi_release(uint32_t ch, uint32_t note)
 static void midi_play(track_t *t, uint32_t ch, uint32_t note, uint32_t vel)
 {
     uint8_t nn[CHORD_MAX];
-    uint32_t n = chord_build(t, note, nn), i, f = 0;
+    /* Sound-module build: the track's TRN (HOME's TRANSPOSE page, SCL) moves its MIDI notes as it moves the keys; a kit
+     * keeps its key map. A moved note is kept as a chord of one (mchord: its note-off ends exactly the note it started,
+     * whatever TRN is by then) */
+    uint32_t tn = !FELUCCA_MODULE || drum_track(t) ? note : (uint32_t)clamp((int32_t)note + t->p[P_TRANS], 0, 127);
+    uint32_t n = chord_build(t, tn, nn), i, f = 0;
     if (n > 1u || nn[0] != note)
         for (f = 0; f < MCHORD_N && mchord[f].id; f++)
             ;

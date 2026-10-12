@@ -56,7 +56,12 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"CLOCK", "[SELECT]TEMPO[GLO]HOLD: TAP"},
 };
 #define H_HOME "[PRESETS]SOUND[HOME]HOLD: MENU"
+#if FELUCCA_MODULE
+#define H_LEVELS "[K1-4]T1-T4 LEVEL[HOME]TRANSPOSE"
+#else
 #define H_LEVELS "[K1-4]T1-T4 LEVEL[HOME]MIXER"
+#endif
+#define H_TRANS "[K1-4]T1-T4 TRN[HOME]MIXER"
 #define H_GRID "[KEYS]STEPS[K2]LANE[SEQ]RATCH"
 /* a layer's (LAYER_*): what its footer row (LAYERS[].foot) does not say */
 static const char *const HELP_LAYER[LAYER_N] = {
@@ -70,7 +75,7 @@ static const char *help_page(void)
     uint32_t i;
     const char *t;
     if (ui.home)
-        return home_levels() ? H_LEVELS : H_HOME;
+        return ui.home == HOME_TRANSPOSE ? H_TRANS : home_levels() ? H_LEVELS : H_HOME;
     if (grid_on() && !detail_on())
         return H_GRID;
     t = cur_page()->title;
