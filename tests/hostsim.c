@@ -27,7 +27,7 @@
 #undef memset
 #undef memcpy
 #undef memcmp
-static struct { volatile uint32_t notes, buttons; } fm1_in;
+static struct { volatile uint32_t notes, buttons, frames; uint32_t enc_dfr[8]; } fm1_in;   /* (frames, enc_dfr: the GURDY crank, ui_input.c) */
 #include "../firmware/src/core.h"
 #include "../firmware/src/engines.c"
 #include "../firmware/src/params.c"

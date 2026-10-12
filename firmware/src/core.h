@@ -20,7 +20,11 @@
 #define FELUCCA_FM4 0            /* the DIGITAL engine (eng_digital.c, four-operator FM): kept in the tree, not built
                                   * by default; replaced by FM6, its sounds convert (fm4_convert.c) */
 #endif
-#define NENGINES (13 + FELUCCA_SLICE)   /* SLICE (13) comes last: the other engines keep their numbers */
+#if !FELUCCA_SLICE
+#error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
+#endif
+#define NENGINES (14 + FELUCCA_SLICE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX): the others keep their numbers */
+#define ENGI_GURDY 14u           /* GURDY: the hurdy-gurdy (eng_gurdy.c, from GHOULBOX by Jason Persinger, GPL-3.0) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */

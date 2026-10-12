@@ -7,23 +7,33 @@ typedef struct {
     uint32_t user, filter;
 } favorites_t;
 static favorites_t favorites __attribute__((section(".pool")));
+/* the byte holding factory preset `preset`'s star, 0 = none. Row 14 is MIDI LEARN's (midi_control.c ml_tab), so GURDY
+ * (engine 14, sound-module build) keeps its stars in row 15's bytes 0..7 (64 presets; no setting uses them: bytes 8, 9
+ * hold the tracks' MIDI channels, ui.c ui_mch; 10.. the others, settings_persist.c) */
+static uint8_t *fav_byte(uint32_t engine, uint32_t preset)
+{
+    if (engine == ENGI_GURDY)
+        return preset < 64u ? &favorites.factory[15][preset / 8u] : 0;
+    return engine < NENGINES && engine < 14u && preset < 256u ? &favorites.factory[engine][preset / 8u] : 0;
+}
 static int favorite_has(uint32_t engine, uint32_t preset)
 {
+    const uint8_t *b;
     if (engine == NENGINES)
         return preset < UP_SLOTS && ((favorites.user >> preset) & 1u);
-    return engine < NENGINES && engine < 16u && preset < 256u &&
-        ((favorites.factory[engine][preset / 8u] >> (preset % 8u)) & 1u);
+    b = fav_byte(engine, preset);
+    return b && ((*b >> (preset % 8u)) & 1u);
 }
 static int favorite_set(uint32_t engine, uint32_t preset, int on)
 {
-    if (engine > NENGINES || (engine == NENGINES ? preset >= UP_SLOTS : engine >= 16u || preset >= 256u))
+    if (engine > NENGINES || (engine == NENGINES ? preset >= UP_SLOTS : !fav_byte(engine, preset)))
         return 0;
     if (favorite_has(engine, preset) == !!on) return 0;
     if (engine == NENGINES) {
         if (on) favorites.user |= 1u << preset;
         else favorites.user &= ~(1u << preset);
     } else {
-        uint8_t *b = &favorites.factory[engine][preset / 8u];
+        uint8_t *b = fav_byte(engine, preset);
         if (on) *b |= (uint8_t)(1u << (preset % 8u));
         else *b &= (uint8_t)~(1u << (preset % 8u));
     }
