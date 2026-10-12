@@ -17,7 +17,11 @@ typedef struct {
     const char *name;
     uint16_t z0, nz;
 } smp_set_t;
+#if FELUCCA_STRANGE
+#include "felucca_samples_strange.h"   /* STRANGE: synthesized sources and the GLITCH kit (tools/gen_strange_samples.py) */
+#else
 #include "felucca_samples.h"
+#endif
 #if defined(SMP_PERC_SLOT) && SMP_PERC_SLOT != SMP_SET_PERC
 #error "tools/gen_samples.py PERC_SLOT != core.h SMP_SET_PERC"
 #endif

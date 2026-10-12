@@ -79,7 +79,11 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_WHEEL,                  /* 7 */
     &ENG_GRAIN,                  /* 8 */
     &ENG_PHYS,                   /* 9 (ENGI_PHYS) */
+#if FELUCCA_STRANGE
+    &ENG_FM4_GONE,               /* 10: DRUM (not in STRANGE; its code drops out unreferenced) */
+#else
     &ENG_DRUM,                   /* 10 (ENGI_DRUM) */
+#endif
     &ENG_NOISE,                  /* 11 */
     &ENG_FM6,                    /* 12 (ENGI_FM6) */
 #if FELUCCA_SLICE
