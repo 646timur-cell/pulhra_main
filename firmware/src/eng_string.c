@@ -91,7 +91,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     kb = clamp(5000 + p[P_E4] * 216 + m->cutoff, 3000, 32767);   /* BRIT: the bridge's low-pass (ENV / LFO -> FLT) */
     c = p[P_E5] * 160;                                   /* STIF: the all-pass, 0 .. 0.62 (Q15) */
     /* their delays at low frequencies: (1 - k) / k, (1 - c) / (1 + c) samples (Q16), taken off the neck line */
-    comp = (uint32_t)(((int64_t)(32768 - kb) << 16) / kb) + (uint32_t)(((int64_t)(32768 - c) << 16) / (32768 + c));
+    comp = ((uint32_t)(32768 - kb) << 16) / (uint32_t)kb + ((uint32_t)(32768 - c) << 16) / (uint32_t)(32768 + c);
     Lb = (uint32_t)(((uint64_t)L * (uint32_t)(1311 + p[P_E2] * 160)) >> 32);   /* whole samples */
     if (Lb < 2u)
         Lb = 2u;
