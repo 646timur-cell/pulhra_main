@@ -60,11 +60,7 @@ static const layer_t LAYERS[LAYER_N] = {
     {B_FX, LK_HOLD, FAM_HOME, "[FX] HOLD", {{KC_KEYS, "EFFECTS"}, {KC_K14, "MACROS"}, {0, 0}}},   /* (LET GO: the header's HOLD) */
     {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
     {B_SCL, LK_SET, FAM_SCL, "[SCL] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
-#if FELUCCA_STRANGE                                     /* (OCT+: the engines' next page) */
-    {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTUP, "PAGE"}, {KC_OCTDN, "UNDO"}}},
-#else
     {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTDN, "UNDO"}, {KC_EDIT, "DONE"}}},
-#endif
     {B_SEQ, LK_SET, FAM_SEQ, "[SEQ] TOOLS", {{KC_KEYS, "TOOLS"}, {KC_OCTDN, "UNDO"}, {KC_SEQ, "DONE"}}},
     {B_REC, LK_SET, FAM_HOME, "[REC] SET", {{KC_KEYS, "RECORDING"}, {KC_OCTDN, "UNDO"}, {KC_REC, "DONE"}}},
 };
@@ -82,7 +78,7 @@ static const page_t *ly_page(uint32_t l) { return l == LAYER_SCL ? &LY_SCL : l =
 typedef char ly_init_fits[LY_INIT < 16u ? 1 : -1];   /* (a white key: F3 .. G5) */
 /* EDIT's engine pages (STRANGE: more engines than keys): LY_INIT engines a page, OCT+ the next page (wraps); the layer
  * opens on the page of the selected track's engine. ly_eng(p): the engine on white key p of the page, NENGINES none */
-#define LY_PAGES ((NENG_SHOWN + LY_INIT - 1u) / LY_INIT)
+#define LY_PAGES 1u                    /* (one page: STRANGE's engines past the white keys are on the black ones, EQA_ENG) */
 static uint8_t ly_epage;
 static uint32_t ly_eng(uint32_t p)
 {
@@ -562,6 +558,15 @@ static const eqa_t EQA_DRUM[NLANE] = {EQA_LANE(0), EQA_LANE(1), EQA_LANE(2), EQA
 static const eqa_set_t EQA[] = {
     {ENGI_DRUM, NLANE, EQA_DRUM},
 };
+#if FELUCCA_STRANGE
+/* STRANGE: on every engine, black keys 1.. load the engines past the white keys (ENGINE_ORDER from LY_INIT on) */
+static const char *eqa_eng_name(const track_t *t, uint32_t i) { (void)t; return eng_abbr(ENGINES[eng_vis(LY_INIT + i)]->name); }
+static void eqa_eng_load(track_t *t, uint32_t i, uint32_t down) { (void)t; if (down) edit_load(eng_vis(LY_INIT + i), 0); }
+static uint32_t eqa_eng_on(const track_t *t, uint32_t i) { return t->eng_req % NENGINES == eng_vis(LY_INIT + i); }
+#define EQA_ENG(i) {LK_SET, EQ_SHOW_SEL, i, eqa_eng_name, eqa_eng_load, eqa_eng_on}
+static const eqa_t EQA_ENGINES[] = {EQA_ENG(0), EQA_ENG(1)};
+typedef char eqa_eng_fits[NELEM(EQA_ENGINES) == NENG_SHOWN - LY_INIT ? 1 : -1];   /* (every engine has a key) */
+#endif
 typedef char eqa_fits[NLANE <= 11 ? 1 : -1];       /* (11 black keys) */
 
 static uint32_t eqa_count(const track_t *t)        /* the actions of t's engine (black keys 1..n) */
@@ -570,7 +575,11 @@ static uint32_t eqa_count(const track_t *t)        /* the actions of t's engine 
     for (i = 0; i < NELEM(EQA); i++)
         if (EQA[i].eng == e)
             return EQA[i].n;
+#if FELUCCA_STRANGE
+    return NELEM(EQA_ENGINES);
+#else
     return 0;
+#endif
 }
 static const eqa_t *eqa_of(const track_t *t, uint32_t p)   /* black key p's (0 = F#3), 0 none */
 {
@@ -578,7 +587,11 @@ static const eqa_t *eqa_of(const track_t *t, uint32_t p)   /* black key p's (0 =
     for (i = 0; i < NELEM(EQA); i++)
         if (EQA[i].eng == e)
             return p < EQA[i].n ? &EQA[i].a[p] : 0;
+#if FELUCCA_STRANGE
+    return p < NELEM(EQA_ENGINES) ? &EQA_ENGINES[p] : 0;
+#else
     return 0;
+#endif
 }
 /* black key k (its place p) pressed in the EDIT layer */
 static void eqa_key(uint32_t k, uint32_t p)

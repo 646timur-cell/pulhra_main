@@ -140,7 +140,8 @@ static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: every engine
                                                          * the first 15 are the EDIT layer's keys (ui_layer.c LY_INIT) */
     ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,  /* STRANGE's own */
     8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 6, 5, 11,      /* GRAIN PHYS GURDY FM6 ANALOG WHEEL PHASE TRIO VOICE NOISE */
-    3, 4, 13,                                                   /* LOFI SAMPLE SLICE (no DRUM: a texture module) */
+    3, 4,                                                       /* LOFI SAMPLE: the EDIT layer's black keys 1, 2
+                                                                 * (no DRUM, no SLICE: a texture module) */
 };
 #else
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
