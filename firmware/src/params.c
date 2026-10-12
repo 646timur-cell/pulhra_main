@@ -107,7 +107,7 @@ static const param_desc_t TP[P_COUNT] = {
     [P_LD_FLT] = PD("FLT", F_BIPCT, -64, 63, 0),
     [P_LD_SHP] = PD("SHP", F_BIPCT, -64, 63, 0),
     [P_LD_AMP] = PD("AMP", F_PCT, 0, 127, 0),
-    [P_AMODE] = PE("MODE", N_AMODE, 0),
+    [P_AMODE] = PE(FELUCCA_STRANGE ? "NOTES" : "MODE", N_AMODE, 0),   /* (STRANGE: EUCLID's, OFF = off) */
     [P_ARATE] = PE("RATE", N_DIV, 2),
     [P_AOCT] = PD("OCT", F_INT, 1, 4, 1),
     [P_AGATE] = PD("GATE", F_PCT, 1, 127, 64),
@@ -120,9 +120,9 @@ static const param_desc_t TP[P_COUNT] = {
     [P_QUANT] = PE("QNT", N_QUANT, 0),
     [P_TRANS] = PD("TRN", F_SEMI, -24, 24, 0),
 #if FELUCCA_STRANGE                 /* (no sequencer: LEN SWG GATE are the EUCLID pattern of the arp, seq.c euc_hit) */
-    [P_SLEN] = PD("STEPS", F_INT, 1, 32, 16),
+    [P_SLEN] = PD("STEPS", F_INT, 1, 32, 8),        /* (3 of 8: x..x..x., a rhythm at once) */
     [P_SDIV] = PE("DIV", N_DIV, 2),
-    [P_SSWING] = PD("HITS", F_INT, 1, 32, 16),
+    [P_SSWING] = PD("HITS", F_INT, 1, 32, 3),
     [P_SGATE] = PD("ROT", F_INT, 0, 31, 0),
 #else
     [P_SLEN] = PD("LEN", F_STEPS, 1, NSTEP, 16),

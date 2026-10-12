@@ -541,6 +541,23 @@ static void graph_euclid(const track_t *t, uint16_t c)
         uint16_t col = i == cur ? T_ACCENT : !euc_hit(t, i) ? T_RAISE : on ? c : T_DIM;
         cv_rrect(x, y, w, 24, w > 8 ? 3 : 1, col, T_SURF);
     }
+    {                                                    /* what it needs, or what it plays */
+        char b[24];
+        const char *s = b;
+        if (!on)
+            s = "TURN K1 (NOTES) TO START";
+        else if (!t->nheld)
+            s = "HOLD OR LATCH SOME NOTES";
+        else {
+            uint32_t k = (uint32_t)clamp(t->p[P_SSWING], 1, 32);
+            fmt_int(b, (int32_t)(k < n ? k : n));
+            str_cpy(b + str_len(b), " OF ", sizeof b - str_len(b));
+            fmt_int(b + str_len(b), (int32_t)n);
+            str_cpy(b + str_len(b), " PLAYING", sizeof b - str_len(b));
+        }
+        GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "euclid status centred");
+        cv_text_in(0, 84, 240, &AF_S, s, on && t->nheld ? T_MID : T_TEXT, T_SURF);
+    }
 }
 #endif
 
