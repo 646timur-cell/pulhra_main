@@ -47,6 +47,11 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"PHRASES", "[K1]PHRASE[OCT+]LOAD[SAVE]PROJECT"},
     {"PROJECT", "[K1]SLOT[K4]SAVE[EDIT]NAME"},
     {"TOOLS", "[K1]CLEAR[K2]INIT SOUND[OCT+]DO"},
+#if FELUCCA_STRANGE
+    {"FAV", "[K1]FAVOURITE[K2]ENGINE[ARP]X"},
+    {"X", "[K1]X TO[K2]AMOUNT[ARP]Y"},
+    {"Y", "[K1]Y TO[K2]AMOUNT[ARP]FAV"},
+#endif
     {"ARP", "[K1]MODE[KEYS]CHORD[ARP]ARP 2"},
     {"ARP 2", "[K3]LATCH[K4]ORDER[ARP]ARP"},
 #if FELUCCA_STRANGE

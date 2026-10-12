@@ -1078,6 +1078,22 @@ static void draw_columns(void)
         }
         return;
     }
+#if FELUCCA_STRANGE
+    if (cur_page()->graph == GR_XY) {                    /* X / Y: DST1 AMT1 DST2 AMT2, the destinations by name */
+        const track_t *t = TSEL;
+        for (c = 0; c < 4u; c++) {
+            uint32_t id = cur_page()->id[c], d = cur_page()->id[c & ~1u], a = cur_page()->id[c | 1u];
+            int32_t v = t->p[id], on = t->p[d] && t->p[a];
+            if (!(c & 1u)) {
+                draw_column(c, TP[id].label, mod_dst_name(t, v), "", on ? VAL(c) : T_DIM, -1, mod_dst_icon(t, v));
+            } else {
+                param_format(&TP[id], v, val, &unit);
+                draw_column(c, TP[id].label, val, unit, on ? VAL(c) : T_DIM, RATIO(&TP[id], v), mod_src_icon(MS_X));
+            }
+        }
+        return;
+    }
+#endif
     if (cur_page()->graph == GR_MOD) {                   /* SLOT, then that slot's SRC DST AMT */
         const track_t *t = TSEL;
         uint32_t id = P_M1SRC + 3u * mod_ui_slot;

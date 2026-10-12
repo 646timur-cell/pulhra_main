@@ -578,6 +578,32 @@ static int test_euclid(void)
     return bad;
 }
 
+/* ARP > X / Y: the sound's own routes replace the engine's; ARP's pages FAV X Y, FAV the favourites' list */
+static void tw_x_amp(void) { trk[0].p[XY_ROUTE(0)] = 4; trk[0].p[XY_ROUTE(0) + 1u] = -64; midi_event(0xB0, 0, 16, 127); }
+static void tw_x_none(void) { trk[0].p[XY_ROUTE(0)] = 4; trk[0].p[XY_ROUTE(0) + 1u] = 0; midi_event(0xB0, 0, 16, 127); }
+static int test_xy_routes(void)
+{
+    int bad = 0, ok;
+    double dry = mix_rms(0, 0, 40, 0), amp = mix_rms(0, 0, 40, tw_x_amp), none = mix_rms(0, 0, 40, tw_x_none);
+    ok = amp < dry * 0.5 && fabs(none - mix_rms(0, 0, 40, tw_x)) < dry * 0.02;
+    bad += check("X's own route (AMP -64) turns it down; a route without an amount: the engine's play", ok);
+    ui_power_on();
+    trk[0].p[XY_ROUTE(1)] = 2; trk[0].p[XY_ROUTE(1) + 1u] = 30;
+    apply_preset_to(&trk[0], 0);
+    ok = !xy_custom(trk[0].p, 1) && !strcmp(TP[XY_ROUTE(0)].label, "DST1");
+    bad += check("a factory preset clears the own routes (the engine's play again)", ok);
+    go_home(); frame();
+    press(B_ARP);
+    ok = !strcmp(cur_page()->title, "FAV") && list_mode() == 1u;
+    press(B_ARP);
+    ok &= !strcmp(cur_page()->title, "X") && list_mode() != 1u;
+    press(B_ARP);
+    ok &= !strcmp(cur_page()->title, "Y");
+    go_home(); frame();
+    bad += check("ARP: FAV (the FAV list), X, Y", ok);
+    return bad;
+}
+
 #ifndef STRANGE_NO_MAIN
 int main(void)
 {
@@ -590,6 +616,7 @@ int main(void)
     bad += test_edit_pages();
     bad += test_latch();
     bad += test_euclid();
+    bad += test_xy_routes();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);

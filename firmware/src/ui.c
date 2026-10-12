@@ -400,6 +400,8 @@ static int page_visible(uint32_t i)
 {
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SEQ)
         return PAGES[i].graph == GR_EUCLID;           /* (STRANGE: SEQ is EUCLID) */
+    if (FELUCCA_STRANGE && PAGES[i].fam == FAM_ARP)
+        return PAGES[i].graph == GR_XY || PAGES[i].graph == GR_BROWSE;   /* (STRANGE: ARP is FAV, X, Y) */
     if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
                            PAGES[i].graph == GR_PATS))
         return 0;                                     /* (sound module: no sequencer, arpeggiator, song or phrases) */
@@ -1388,7 +1390,11 @@ static uint32_t preset_all_at(uint32_t n, uint32_t *k)
  * editor and backups); the PRESETS knob and page browse that list */
 #define ui_lcat (favorites.factory[15][11])
 #define LIST_N (1u + CAT_N)                              /* ALL FAV BASS LEAD PAD PLUCK KEYS DRUM FX OTHER */
-static uint32_t list_mode(void) { return favorites.filter ? 1u : ui_lcat && ui_lcat < CAT_N ? 1u + ui_lcat : 0u; }
+static int fav_page_on(void) { return FELUCCA_STRANGE && !ui.home && cur_page()->fam == FAM_ARP && cur_page()->graph == GR_BROWSE; }
+static uint32_t list_mode(void)                         /* (STRANGE's ARP > FAV: the FAV list, whatever LIST says) */
+{
+    return favorites.filter || fav_page_on() ? 1u : ui_lcat && ui_lcat < CAT_N ? 1u + ui_lcat : 0u;
+}
 static void list_set(uint32_t m)
 {
     favorites.filter = m == 1u;

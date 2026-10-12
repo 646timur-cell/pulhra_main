@@ -959,7 +959,7 @@ static void edit_param(uint32_t slot, int32_t steps)
             select_engine(eng_step(TSEL->eng_req, steps));
         } else if (slot == 2u) {
             preset_mark(steps > 0);
-        } else if (slot == 3u) {                          /* LIST: ALL FAV BASS .. OTHER (ui.c list_mode), no wrap */
+        } else if (slot == 3u && !fav_page_on()) {        /* LIST: ALL FAV BASS .. OTHER (ui.c list_mode), no wrap */
             uint32_t m = (uint32_t)clamp((int32_t)list_mode() + steps, 0, (int32_t)LIST_N - 1);
             if (m != list_mode()) {
                 list_set(m);
@@ -1285,7 +1285,7 @@ static void layer_lock_input(uint32_t pressed);
 static int page_tap(uint32_t b)
 {
     uint32_t f;
-    if (FELUCCA_MODULE && ((b == B_SEQ && !FELUCCA_STRANGE) || b == B_ARP || b == B_GLO))
+    if (FELUCCA_MODULE && (((b == B_SEQ || b == B_ARP) && !FELUCCA_STRANGE) || b == B_GLO))
         return 1;                                     /* (sound module: their pages are gone; GLO held is its layer) */
     if (b == B_EDIT && detail_on()) {                    /* DETAIL (1.5.1): the step's CHANCE RATCH NUDGE VEL back */
         if (chain_busy())

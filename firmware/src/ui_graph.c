@@ -497,6 +497,38 @@ static void graph_slicer(const track_t *t, uint16_t c)
  * destination of up to 5 characters 106..160, the amount from 172), the one KNOB 2..4 edit selected, slots that do
  * nothing (SRC, DST or AMT at 0) dim */
 #if FELUCCA_STRANGE
+/* ARP > X / Y: the axis' value (HOME KNOB 3 / 4, CC16 / CC17) as a bar, then the routes it plays: the sound's own
+ * (OWN) or, with none set, the engine's (ENGINE, dim); a matrix slot taking the axis overrides both (MOD) */
+static void graph_xy(const track_t *t, uint16_t c)
+{
+    uint32_t ax = cur_page()->title[0] == 'Y', r, n = 0, k, mod = 0;
+    const int16_t *q = &t->p[XY_ROUTE(ax)];
+    const engine_t *e = ENGINES[t->eng_req % NENGINES];
+    int32_t v = xy_val[trk_index(t)][ax];
+    char b[24];
+    const char *unit;
+    for (k = 0; k < NMSLOT; k++)
+        mod |= t->p[P_M1SRC + 3u * k] == (int16_t)(MS_X + ax) && t->p[P_M1DST + 3u * k] && t->p[P_M1AMT + 3u * k];
+    cv_rrect(12, 6, 216, 10, 3, T_RAISE, T_SURF);
+    if (v)
+        cv_rrect(12, 6, 10 + 206 * v / 127, 10, 3, c, T_RAISE);
+    cv_text(12, 24, &AF_S, mod ? "MOD (A MATRIX SLOT)" : xy_custom(t->p, ax) ? "OWN" : "ENGINE", T_MID);
+    for (r = 0; r < 3u && !mod; r++) {
+        int32_t d = xy_custom(t->p, ax) ? (r < 2u ? q[2u * r] : 0) : e->xyd[ax][r];
+        int32_t a = xy_custom(t->p, ax) ? (r < 2u ? q[2u * r + 1u] : 0) : e->xya[ax][r];
+        int32_t x;
+        if (!d || !a)
+            continue;
+        param_format(&TP[P_FM1_DEC], a, b, &unit);
+        x = cv_text(12, 42 + 20 * (int32_t)n, &AF_M, mod_dst_name(t, d), xy_custom(t->p, ax) ? c : T_MID);
+        x = cv_text(x + 8, 42 + 20 * (int32_t)n, &AF_M, b, xy_custom(t->p, ax) ? T_TEXT : T_DIM);
+        cv_text(x + 2, 42 + 20 * (int32_t)n + AF_M.asc - AF_S.asc, &AF_S, unit, T_DIM);
+        n++;
+    }
+    if (!n && !mod)
+        cv_text(12, 42, &AF_M, "NOTHING", T_DIM);
+}
+
 /* EUCLID (STRANGE's SEQ): the pattern, a row of STEPS cells (two rows past 16): a hit THEME, a rest RAISE, the step
  * the arp is on (a note held or LATCHed, MODE on) ACCENT; MODE OFF: all of it dim */
 static void graph_euclid(const track_t *t, uint16_t c)
@@ -1225,6 +1257,10 @@ static uint32_t graph_signature(void)
             h ^= (ui_prefs & PREF_LARGE) ? 0x2545F491u : 0u;
         }
     }
+#if FELUCCA_STRANGE
+    if (pg->graph == GR_XY)                          /* (the axis' value) */
+        h ^= (uint32_t)xy_val[song.sel % NTRK][pg->title[0] == 'Y'] * 40503u;
+#endif
     if (pg->graph == GR_EUCLID)                      /* (the step the arp is on) */
         h ^= (uint32_t)t->euc_pos * 2654435761u + t->nheld;
     if (pg->graph == GR_MOD)
@@ -2314,6 +2350,9 @@ static void draw_graph(void)
 #if FELUCCA_STRANGE
         case GR_EUCLID:
             graph_euclid(t, c);
+            break;
+        case GR_XY:
+            graph_xy(t, c);
             break;
 #endif
         case GR_BROWSE:

@@ -165,6 +165,16 @@ static __attribute__((noinline)) int32_t mod_depth(const track_t *t, int32_t lfo
 
 /* before a part's block (fx.c mix_part): the per-track offsets, the per-block destinations into t->p.
  * 0 = no slot active (then nothing changed) */
+#if FELUCCA_STRANGE
+/* ARP > X, Y: the sound's own routes of an axis, DST AMT twice at OP1 (X) / OP2 (Y)'s ATK DEC SUS REL; one route
+ * set (a destination and an amount): those, not the engine's (engine_t.xyd / xya) */
+#define XY_ROUTE(ax) (P_FM1_ATK + 5u * (ax))
+static int xy_custom(const int16_t *p, uint32_t ax)
+{
+    const int16_t *q = &p[XY_ROUTE(ax)];
+    return (q[0] && q[1]) || (q[2] && q[3]);
+}
+#endif
 static __attribute__((noinline)) int mod_begin(track_t *t)
 {
     const int16_t *p = t->p;
@@ -180,15 +190,27 @@ static __attribute__((noinline)) int mod_begin(track_t *t)
             va[nv++] = (int8_t)p[P_M1AMT + 3u * k];
         }
 #if FELUCCA_STRANGE
-    {                                                   /* XY: an axis no slot takes plays the engine's routes */
+    {   /* XY: an axis no slot takes plays the sound's own routes (ARP > X, Y: xy_route), else the engine's */
         const engine_t *e = ENGINES[t->engine];
         uint32_t ax, r, used;
         for (ax = 0; ax < 2u; ax++) {
+            const int16_t *q = &p[XY_ROUTE(ax)];
             if (!xy_val[(t - trk) % NTRK][ax])
                 continue;
             for (used = 0, k = 0; k < nv; k++)
                 used |= vs[k] == MS_X + ax;
-            for (r = 0; r < 3u && !used; r++)
+            if (used)
+                continue;
+            if (xy_custom(p, ax)) {
+                for (r = 0; r < 2u; r++)
+                    if (q[2u * r] && q[2u * r + 1u]) {
+                        vs[nv] = (uint8_t)(MS_X + ax);
+                        vd[nv] = (uint8_t)q[2u * r];
+                        va[nv++] = (int8_t)q[2u * r + 1u];
+                    }
+                continue;
+            }
+            for (r = 0; r < 3u; r++)
                 if (e->xyd[ax][r] && e->xya[ax][r]) {
                     vs[nv] = (uint8_t)(MS_X + ax);
                     vd[nv] = e->xyd[ax][r];
