@@ -1135,7 +1135,7 @@ static uint16_t midi_mch;                  /* .. and TRACK CH's channels (a chan
 static int32_t midi_ch_trk(uint32_t ch)    /* TRACK CH: the first track on channel ch, -1 none */
 {
     uint32_t i;
-    for (i = 0; i < NPART; i++)
+    for (i = 0; i < NLIVE; i++)                 /* (STRANGE: T3, T4 hear nothing) */
         if (trk_ch(i) == (ch & 15u))
             return (int32_t)i;
     return -1;
@@ -1146,7 +1146,7 @@ static int midi_in_block(uint32_t ch)      /* ch is heard by a track of its own 
     if (FELUCCA_MODULE && !song.g[G_ROUTE])
         return midi_ch_trk(ch) >= 0;
     b = midi_base();
-    return b >= 0 && ch - (uint32_t)b < NPART;
+    return b >= 0 && ch - (uint32_t)b < NLIVE;
 }
 static track_t *midi_track(uint32_t ch)
 {

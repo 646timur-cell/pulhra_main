@@ -16,6 +16,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from make_site import product_of, strip_module  # noqa: E402
 
+STRANGE_TITLE = "FM-1 STRANGE"
+STRANGE_CREDIT = ('<p class="small">STRANGE build: two MIDI parts, the engines LYRA (organismic pairs, hyper-LFO, delay), '
+                  'CHAOS (unstable oscillators), STRING, MODAL and BLOW (waveguides and resonators), with PHYS and GURDY. '
+                  'A sound-module build of Felucca, below.</p>\n')
 TITLE = "FM-1 Sound Module"
 CREDIT = ('<p class="small">Sound-module build: TRACK CH MIDI, per-track transpose, HOME levels / TRANSPOSE, no '
           'sequencer; the GURDY engine from <a href="https://github.com/jasonpersinger/ghoulbox-fm1-dungeon-synth" '
@@ -24,6 +28,9 @@ CREDIT = ('<p class="small">Sound-module build: TRACK CH MIDI, per-track transpo
 
 
 def main(pkg, version, out):
+    global TITLE, CREDIT
+    if "strange" in version:                            # the STRANGE build (STRANGE.md): its own title and line
+        TITLE, CREDIT = STRANGE_TITLE, STRANGE_CREDIT
     raw = Path(pkg).read_bytes()
     product = product_of(raw)
     if not re.fullmatch(r"FM-1_9\d\d", product):

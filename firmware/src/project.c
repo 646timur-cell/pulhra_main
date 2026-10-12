@@ -1009,7 +1009,7 @@ static int project_restore_runtime(const project_t *input)
             fm6_adopt(k);
         }
     }
-    song.sel = (uint8_t)(p->sel < NTRK ? p->sel : 0u);
+    song.sel = (uint8_t)(p->sel < NLIVE ? p->sel : 0u);
     fm1_irq_on();
     proj_name_get(proj_name, (const uint8_t *)p->name);
     proj_cur = PROJ_NO_SLOT;                            /* (project_load: its slot) */

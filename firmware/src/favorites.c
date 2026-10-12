@@ -14,6 +14,11 @@ static uint8_t *fav_byte(uint32_t engine, uint32_t preset)
 {
     if (engine == ENGI_GURDY)
         return preset < 64u ? &favorites.factory[15][preset / 8u] : 0;
+#if FELUCCA_STRANGE
+    /* STRANGE's engines 15..19: row 1 (DIGITAL's, retired: never shown, never starred), 6 bytes (48 presets) each */
+    if (engine >= ENGI_LYRA && engine < NENGINES)
+        return preset < 48u ? &favorites.factory[1][(engine - ENGI_LYRA) * 6u + preset / 8u] : 0;
+#endif
     return engine < NENGINES && engine < 14u && preset < 256u ? &favorites.factory[engine][preset / 8u] : 0;
 }
 static int favorite_has(uint32_t engine, uint32_t preset)

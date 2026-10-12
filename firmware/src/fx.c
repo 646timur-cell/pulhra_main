@@ -928,7 +928,7 @@ static void mix_block(int32_t *out, uint32_t n)
         send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
     events_block(n);
     perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
-    for (i = 0; i < NPART; i++)
+    for (i = 0; i < NLIVE; i++)                         /* (STRANGE: T1, T2 only) */
         mix_part(&trk[i], n);
     if (perf)
         perf_pre(mix_l, mix_r, send_d, send_r, n);

@@ -1,6 +1,7 @@
-# Sound-module build: host tests, then the firmware package (.fwsc) with JieLi's toolchain and the AC79 SDK.
-# The package is uploaded as the run's artifact "felucca-module"; install it with the web installer's "install a
-# file" option (or tools/fm1_install.py). A tag v* also attaches it to a GitHub release.
+# Sound-module build and the STRANGE build (STRANGE.md): host tests, then both firmware packages (.fwsc) with JieLi's
+# toolchain and the AC79 SDK. The packages are uploaded as the run's artifacts "felucca-module" and "felucca-strange";
+# install one with the web installer's "install a file" option (or tools/fm1_install.py). A tag v* also attaches both
+# to a GitHub release.
 name: firmware
 
 on:
@@ -39,6 +40,11 @@ jobs:
             build/host/$t | tail -n 1
           done
 
+      - name: Host tests (STRANGE)
+        run: |
+          cc -O2 -w -DFELUCCA_STRANGE=1 -Ibuild/gen -Ifirmware/src -o build/host/strange_test tests/strange_test.c -lm
+          build/host/strange_test | tail -n 60
+
       - name: JieLi toolchain
         run: tools/get_toolchain.sh
 
@@ -51,6 +57,13 @@ jobs:
         run: |
           set -o pipefail
           ./build.sh --release 1.5.1-mod 2>&1 | tee build.log
+          mkdir -p /tmp/mod && cp -r build/felucca-1.5.1-mod.fwsc build/release-1.5.1-mod /tmp/mod/
+
+      - name: Build (STRANGE)
+        run: |
+          set -o pipefail
+          FELUCCA_STRANGE=1 ./build.sh --release 1.5.1-strange 2>&1 | tee build-strange.log
+          cp -r /tmp/mod/felucca-1.5.1-mod.fwsc /tmp/mod/release-1.5.1-mod build/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -59,13 +72,22 @@ jobs:
             build/felucca-1.5.1-mod.fwsc
             build/release-1.5.1-mod/
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: felucca-strange
+          path: |
+            build/felucca-1.5.1-strange.fwsc
+            build/release-1.5.1-strange/
+            build-strange.log
+
       - name: Publish to the firmware-builds branch (the package, its checksum and the build log)
         if: github.ref == 'refs/heads/main'
         run: |
           sha=$(git rev-parse --short HEAD)
-          mkdir -p /tmp/out && cp build/felucca-1.5.1-mod.fwsc build.log /tmp/out/
+          mkdir -p /tmp/out && cp build/felucca-1.5.1-mod.fwsc build/felucca-1.5.1-strange.fwsc build.log build-strange.log /tmp/out/
           python3 web/make_module_installer.py build/felucca-1.5.1-mod.fwsc 1.5.1-mod /tmp/out/fm1-sound-module-installer.html
-          (cd /tmp/out && sha256sum felucca-1.5.1-mod.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
+          python3 web/make_module_installer.py build/felucca-1.5.1-strange.fwsc 1.5.1-strange /tmp/out/fm1-strange-installer.html
+          (cd /tmp/out && sha256sum felucca-1.5.1-mod.fwsc felucca-1.5.1-strange.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan firmware-builds
@@ -78,4 +100,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/felucca-1.5.1-mod.fwsc --title "$GITHUB_REF_NAME" --notes "Sound-module build of Felucca 1.5.1 with GURDY."
+        run: gh release create "$GITHUB_REF_NAME" build/felucca-1.5.1-mod.fwsc build/felucca-1.5.1-strange.fwsc --title "$GITHUB_REF_NAME" --notes "Sound-module build of Felucca 1.5.1 with GURDY, and the STRANGE build (STRANGE.md)."

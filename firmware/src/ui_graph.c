@@ -1261,7 +1261,9 @@ static const char *eng_abbr(const char *name)
                                        {"PHASE", "PHAS"}, {"LOFI", "LOFI"},
                                        {"SAMPLE", "SMPL"}, {"VOICE", "VOCL"}, {"TRIO", "TRIO"}, {"WHEEL", "WHEL"},
                                        {"GRAIN", "GRAN"}, {"PHYS", "PHYS"}, {"DRUM", "DRUM"},
-                                       {"NOISE", "NOIS"}, {"FM6", "FM6"}, {"SLICE", "SLCE"}, {"GURDY", "GRDY"}};
+                                       {"NOISE", "NOIS"}, {"FM6", "FM6"}, {"SLICE", "SLCE"}, {"GURDY", "GRDY"},
+                                       {"LYRA", "LYRA"}, {"CHAOS", "CHAO"}, {"STRING", "STRG"}, {"MODAL", "MODL"},
+                                       {"BLOW", "BLOW"}};
     uint32_t i;
     for (i = 0; i < sizeof A / sizeof A[0]; i++)
         if (str_eq(name, A[i][0]))
@@ -1897,8 +1899,10 @@ static void draw_home_tracks(void)
             lcd_fill(3, ux.style ? y + 1u : y, TR_W, ux.style ? 1u : 2u, T_BG);
         }
     }
-    for (c = 0; c < NTRK; c++)
+    for (c = 0; c < NLIVE; c++)
         home_track_row(c);
+    if (FELUCCA_STRANGE && ui.force)                 /* STRANGE: no T3, T4 (they never sound): their rows blank */
+        lcd_fill(3, (uint32_t)(Y_GRAPH + NLIVE * TR_PITCH), TR_W, (uint32_t)((NTRK - NLIVE) * TR_PITCH - 2), T_BG);
 }
 /* oscilloscope of the output, triggered on a rising zero crossing: a RAISE centre line, the trace 2 px (in silence
  * a flat line on it; MENU > SCREEN OFF keeps it from staying on the panel for hours) */

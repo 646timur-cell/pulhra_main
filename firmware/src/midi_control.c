@@ -229,6 +229,13 @@ static const uint8_t MIDI_CC_ENG[NENGINES] = {
     0x80,                                             /* SLICE TONE */
 #endif
     0x04,                                             /* GURDY: CC71 WHL (the bow's pressure) */
+#if FELUCCA_STRANGE
+    0x23,                                             /* LYRA: CC74 SHRP, CC71 MOD */
+    0x32,                                             /* CHAOS: CC74 TONE, CC71 CHAO */
+    0x82,                                             /* STRING: CC74 BRIT, CC71 PRES */
+    0x34,                                             /* MODAL: CC74 BRIT, CC71 DAMP */
+    0x52,                                             /* BLOW: CC74 TONE, CC71 BRTH */
+#endif
 };
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */
 static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)

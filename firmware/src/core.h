@@ -24,13 +24,28 @@
 #define FELUCCA_MODULE 1         /* the sound-module build: TRACK CH MIDI, HOME levels / TRANSPOSE, no groovebox pages;
                                   * FELUCCA_MODULE=0 keeps Felucca's panel (the upstream UI tests build so) */
 #endif
+#ifndef FELUCCA_STRANGE
+#define FELUCCA_STRANGE 0        /* the STRANGE build (STRANGE.md): two parts only (T1, T2: the other two never render
+                                  * nor hear MIDI), their CPU and memory spent on five engines of its own (LYRA, CHAOS,
+                                  * STRING, MODAL, BLOW: engines 15..19) shown with PHYS and GURDY; the rest hidden */
+#endif
+#if FELUCCA_STRANGE && !FELUCCA_MODULE
+#error "the STRANGE build is a sound-module build (FELUCCA_MODULE=1)"
+#endif
 #if !FELUCCA_SLICE
 #error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
 #endif
-#define NENGINES (14 + FELUCCA_SLICE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX): the others keep their numbers */
+#define NENGINES (14 + FELUCCA_SLICE + 5 * FELUCCA_STRANGE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
+                                                            * STRANGE's 15..19: the others keep their numbers */
 #define ENGI_GURDY 14u           /* GURDY: the hurdy-gurdy (eng_gurdy.c, from GHOULBOX by Jason Persinger, GPL-3.0) */
+#define ENGI_LYRA 15u            /* STRANGE: eng_lyra.c (Lyra-8-like organismic pairs, hyper-LFO, delay) */
+#define ENGI_CHAOS 16u           /* STRANGE: eng_chaos.c (Enner / Terra-like unstable oscillators) */
+#define ENGI_STRING 17u          /* STRANGE: eng_string.c (waveguide string: pluck, strike, friction bow) */
+#define ENGI_MODAL 18u           /* STRANGE: eng_modal.c (24-mode resonator, materials, exciters) */
+#define ENGI_BLOW 19u            /* STRANGE: eng_blow.c (reed, jet and lip waveguides) */
+#define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
+#define NENG_SHOWN (FELUCCA_STRANGE ? 7 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))
@@ -229,6 +244,9 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
      * in, 0 = none: a part plays one engine at a time, so they share one region; on a switch to the engine
      * (after the old one's fade) the region is zeroed when another engine had it (eng_mem_claim) */
     uint16_t mem;
+    /* optional (STRANGE: LYRA's delay): once per block and part, after its voices, on the part's sum (out); returns 1
+     * while it still sounds with no voice (a tail), so the part keeps being mixed */
+    uint32_t (*post)(struct track *t, int32_t *out, uint32_t n);
 } engine_t;
 
 /* ------------------------------------------------- tracks, the song --- */
