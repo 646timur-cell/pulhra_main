@@ -75,7 +75,8 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     uint32_t i, w, mode = (uint32_t)clamp(p[P_E0], 0, SR_NMODE - 1), body = (uint32_t)clamp(p[P_E6], 0, SB_N - 1);
     uint32_t L, Lb, Ln, comp;
     int32_t pres = p[P_E1], kb, g, c, slope, bmix = p[P_E7] * 258, t60, jaw = body == SB_SITAR ? SQ_ONE / 48 : 0;
-    int32_t lp, apx, apy, xn, xl, xlp, kx, gb[3];
+    int32_t lp, apx, apy, xn, xl, xlp, kx, gb[3], xf;
+    uint32_t xd;
     tsvf_t bf[3];
     if (!S)
         return;
@@ -99,7 +100,8 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         Ln = 2u << 16;
     /* DAMP: the time the string rings, 0.08 .. ~20 s; per round trip the loss of 6.9 (60 dB in nepers) x L / T60 */
     t60 = (int32_t)sx_expmap(p[P_E3], 3528u, 8);   /* in samples (3528 = 80 ms) */
-    g = 32767 - (int32_t)(((int64_t)226357 * (L >> 8)) / ((int64_t)t60 << 8));
+    g = 32767 - (int32_t)((((uint64_t)226357 * (L >> 8)) / (uint32_t)t60) >> 8);   /* (a 64 / 32 divide: the target has
+                                                                                 * no 64 / 64 one) */
     g = clamp(g, 20000, 32760);
     if (mode == SR_BOW && !v->gate)                      /* (a bow lifted: the string is free, as damped as it is) */
         g = g > 32000 ? g - 300 : g;
@@ -113,6 +115,8 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         S->xn = mode == SR_BOW ? 0 : S->xl;
     }
     kx = 1500 + pres * 240;                              /* PLUCK: the pick's low-pass */
+    xd = S->xl > 0 ? 0xFFFFFFFFu / (uint32_t)S->xl : 0;  /* the exciter's steps: a turn (STRIKE), 1.0 (PLUCK's fade) */
+    xf = S->xl > 0 ? 32767 / S->xl : 0;
     w = S->w;
     lp = S->lp;
     apx = S->apx;
@@ -139,11 +143,11 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         } else if (xn > 0) {
             int32_t e;
             if (mode == SR_PLUCK) {                      /* noise, fading over the burst */
-                e = px_m(sx_noise(&S->rng), (xn << 15) / xl, 15);
+                e = px_m(sx_noise(&S->rng), xn * xf, 15);
                 xlp += px_m(e - xlp, kx, 15);
                 e = xlp * 3;
             } else {                                     /* a raised cosine: 1 - cos over the hammer's contact */
-                e = (SQ_ONE >> 1) - (px_sin((uint32_t)(((uint64_t)(uint32_t)xn << 32) / (uint32_t)xl) + 0x40000000u) >> 11);
+                e = (SQ_ONE >> 1) - (px_sin((uint32_t)xn * xd + 0x40000000u) >> 11);
             }
             nv = e >> 1;
             xn--;

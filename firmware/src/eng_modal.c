@@ -109,7 +109,8 @@ static void modal_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     const int16_t *p = t->p;
     md_slot_t *S = md_slot(t, v);
     uint32_t exct = (uint32_t)clamp(p[P_E5], 0, MX_N - 1), i, k, nm;
-    int32_t hard = p[P_E6], kx, xn, xl, xlp, last, x, s;
+    int32_t hard = p[P_E6], kx, xn, xl, xlp, last, x, s, xg;
+    uint32_t xd;
     if (!S)
         return;
     if (n > CTL)
@@ -135,6 +136,8 @@ static void modal_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         S->xn = S->xl;
     }
     kx = 800 + hard * 250;                               /* the noise's low-pass (STICK, BOW, BLOW) */
+    xd = S->xl > 0 ? 0x80000000u / (uint32_t)S->xl : 0;  /* a hit's half sine: its step (a turn / 2, Q32) */
+    xg = S->xl > 0 ? (6 << 15) / S->xl : 0;              /* .. and its height: the same momentum over any contact */
     xn = S->xn;
     xl = S->xl;
     xlp = S->xlp;
@@ -145,14 +148,13 @@ static void modal_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         switch (exct) {
         case MX_MALLET:                                  /* a half sine over the contact */
             if (xn > 0) {
-                x = (px_sin((uint32_t)(((uint64_t)(uint32_t)xn << 31) / (uint32_t)xl)) >> 6) * 6 / xl;   /* (a mallet's
-                                                                                 * momentum: the same over any contact) */
+                x = px_m(px_sin((uint32_t)xn * xd) >> 6, xg, 15);
                 xn--;
             }
             break;
         case MX_STICK:                                   /* a click, then 2 ms of noise falling away */
             if (xn > 0) {
-                x = xn == xl ? 1 << 24 : px_m(sx_noise(&S->rng) << 3, (xn << 15) / xl, 15);
+                x = xn == xl ? 1 << 24 : px_m(sx_noise(&S->rng) << 3, xn * 364, 15);   /* (90 samples: 32768 / 90) */
                 xn--;
             }
             xlp += px_m(x - xlp, kx, 15);
