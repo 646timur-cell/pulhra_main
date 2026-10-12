@@ -100,8 +100,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         Ln = 2u << 16;
     /* DAMP: the time the string rings, 0.08 .. ~20 s; per round trip the loss of 6.9 (60 dB in nepers) x L / T60 */
     t60 = (int32_t)sx_expmap(p[P_E3], 3528u, 8);   /* in samples (3528 = 80 ms) */
-    g = 32767 - (int32_t)((((uint64_t)226357 * (L >> 8)) / (uint32_t)t60) >> 8);   /* (a 64 / 32 divide: the target has
-                                                                                 * no 64 / 64 one) */
+    g = 32767 - (int32_t)(28295u * (L >> 13) / (uint32_t)t60);   /* 226357 / 8 x L (Q3): 32 bits, a 32-bit divide */
     g = clamp(g, 20000, 32760);
     if (mode == SR_BOW && !v->gate)                      /* (a bow lifted: the string is free, as damped as it is) */
         g = g > 32000 ? g - 300 : g;
