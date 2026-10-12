@@ -910,7 +910,7 @@ static struct {
     uint8_t h_on, l_on;
     tsvf_t h, l;
     int32_t s[8];                                        /* HP left (2), right (2), LP left, right */
-} mf;
+} mf = {.lc = 127 << 8};                                 /* (open at power-on: no glide up from the bottom) */
 static __attribute__((noinline)) void mf_prep(void)
 {
     int32_t hv = song.g[G_MHPF], lv = song.g[G_MLPF], ht = hv > 0 ? hv << 8 : 0, lt = (127 - (lv > 0 ? lv : 0)) << 8;
