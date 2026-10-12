@@ -119,7 +119,7 @@ static const icon_map_t ICON_MAP[] = {
     {"FADE", ICON_FADE}, {"AMP", ICON_LEVEL},
     /* arp, scale, pattern */
     {"MODE", ICON_ARP}, {"OCT", ICON_OCTAVE}, {"GATE", ICON_GATE}, {"SWG", ICON_SWING},
-    {"PROB", ICON_PROB}, {"HOLD", ICON_HOLD}, {"ORD", ICON_ORDER}, {"ROOT", ICON_PITCH},
+    {"PROB", ICON_PROB}, {"HOLD", ICON_HOLD}, {"LATCH", ICON_HOLD}, {"ORD", ICON_ORDER}, {"ROOT", ICON_PITCH},
     {"SCL", ICON_SCALE}, {"QNT", ICON_QUANTIZE}, {"TRN", ICON_TRANSPOSE}, {"LEN", ICON_LENGTH},
     {"DIV", ICON_DIVISION}, {"VOIC", ICON_OCTAVE},   /* (CHRD: below, PHYS's) */
     /* fx sends, voice */

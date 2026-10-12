@@ -623,6 +623,45 @@ static __attribute__((noinline)) void cin_keep(track_t *t, uint32_t note, uint32
     cin_up[i] &= (uint8_t)~(1u << k);
 }
 
+/* LATCH (sound module: P_AHOLD, the arp's HOLD, with no arp): notes keep sounding after their keys are let go. The
+ * first key of a new gesture (no key down) lets the latched notes go and starts a new set; the same single note
+ * again stops it (a drone on, a drone off); LATCH OFF lets them all go (seq_block). held / nheld / arp_phys are the
+ * arp's, free in a module */
+static int latch_on(const track_t *t) { return FELUCCA_MODULE && t->p[P_AHOLD] && !t->p[P_AMODE]; }
+static __attribute__((noinline)) void latch_release(track_t *t)
+{
+    uint32_t i;
+    for (i = 0; i < t->nheld; i++)
+        trk_note_off(t, t->held[i]);
+    t->nheld = 0;
+}
+static int latch_has(const track_t *t, uint32_t note)   /* (a key down before LATCH ON is let go as usual) */
+{
+    uint32_t i;
+    for (i = 0; i < t->nheld; i++)
+        if (t->held[i] == note)
+            return 1;
+    return 0;
+}
+static __attribute__((noinline)) void latch_add(track_t *t, uint32_t note, uint32_t vel)
+{
+    uint32_t i;
+    if (t->arp_phys++ == 0u) {
+        int same = t->nheld == 1u && t->held[0] == note;
+        latch_release(t);
+        if (same) {
+            t->arp_phys = 0;                        /* tapped again: off (its key-up a plain one) */
+            return;
+        }
+    }
+    for (i = 0; i < t->nheld; i++)
+        if (t->held[i] == note)
+            return;
+    if (t->nheld < 16u)
+        t->held[t->nheld++] = (uint8_t)note;
+    trk_note_on(t, note, vel);
+}
+
 static void input_on(track_t *t, uint32_t note, uint32_t vel)
 {
     last_note = (uint8_t)note;
@@ -632,6 +671,8 @@ static void input_on(track_t *t, uint32_t note, uint32_t vel)
         rec_note(t, note, vel);
     if (t->p[P_AMODE])
         arp_add(t, note);
+    else if (latch_on(t))
+        latch_add(t, note, vel);
     else
         trk_note_on(t, note, vel);
 }
@@ -649,6 +690,15 @@ static void input_off(track_t *t, uint32_t note)
                 cin_up[i] |= (uint8_t)(1u << k);
     }
     rec_release(t, note);
+    if (latch_on(t)) {                              /* (LATCH: a latched note is kept, only the key count goes */
+        if (!latch_has(t, note)) {                  /* down; one down from before LATCH ON or tapped off goes) */
+            trk_note_off(t, note);
+            return;
+        }
+        if (t->arp_phys)
+            t->arp_phys--;
+        return;
+    }
     arp_remove(t, note);                            /* both: the note may have started in the */
     trk_note_off(t, note);                          /* other mode (ARP switched while held) */
 }
@@ -1301,6 +1351,10 @@ static void events_block(uint32_t n)
         if (FELUCCA_MODULE)
             t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds) */
         /* ARP turned off, or HOLD released with no key down: drop the latched chord */
+        if (FELUCCA_MODULE && t->aholdp && !t->p[P_AHOLD]) {
+            latch_release(t);                         /* LATCH OFF: the latched notes go (keys down sound on) */
+            t->arp_phys = 0;
+        }
         if ((t->armp && !t->p[P_AMODE]) || (t->aholdp && !t->p[P_AHOLD] && !t->arp_phys)) {
             t->nheld = 0;
             if (!t->p[P_AMODE])

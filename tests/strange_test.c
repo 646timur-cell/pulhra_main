@@ -107,6 +107,7 @@ static phr_t phrase(uint32_t eng, uint32_t preset, const uint8_t *notes, uint32_
     memset(&R, 0, sizeof R);
     ui_power_on();
     memset(xy_val, 0, sizeof xy_val);                    /* (performance state: not reset by a power-on of the tests) */
+    rng_state = 0x1234567u;                              /* (the noise seeds: the same whatever ran before) */
     song.master_q12 = 4096;
     song.sel = 0;
     set_engine_of(&trk[0], eng);
@@ -466,6 +467,47 @@ static int test_edit_pages(void)
     return bad;
 }
 
+/* LATCH (P_AHOLD in a module, VOICE 3): notes stay after their keys; a new gesture replaces them, the same single note
+ * again stops it, LATCH OFF lets go */
+static void run(uint32_t n)
+{
+    int32_t buf[2 * CTL];
+    while (n--)
+        mix_block(buf, CTL);
+}
+static int test_latch(void)
+{
+    int bad = 0;
+    track_t *t = &trk[0];
+    int16_t keep = t->p[P_VOICE];
+    ui_power_on();
+    set_engine_of(t, 0);
+    apply_preset_to(t, 0);
+    t->engine = t->eng_req;
+    t->p[P_VOICE] = V_POLY;
+    t->p[P_AHOLD] = 1;
+    run(4);
+    midi_event(0x90, 0, 60, 100); midi_event(0x90, 0, 64, 100); run(4);
+    midi_event(0x80, 0, 60, 0); midi_event(0x80, 0, 64, 0); run(20);
+    bad += check("LATCH: a chord sounds on after its keys", gated(t, 60) && gated(t, 64));
+    midi_event(0x90, 0, 67, 100); run(4); midi_event(0x80, 0, 67, 0); run(20);
+    bad += check("LATCH: a new gesture replaces it", gated(t, 67) && !gated(t, 60) && !gated(t, 64));
+    midi_event(0x90, 0, 67, 100); run(4);
+    bad += check("LATCH: the same note again stops it", !gated(t, 67));
+    midi_event(0x80, 0, 67, 0); run(4);
+    midi_event(0x90, 0, 62, 100); run(4); midi_event(0x80, 0, 62, 0); run(4);
+    bad += check("LATCH: and the next one latches again", gated(t, 62));
+    t->p[P_AHOLD] = 0; run(4);
+    bad += check("LATCH OFF lets go", !gated(t, 62));
+    midi_event(0x90, 0, 60, 100); run(4); t->p[P_AHOLD] = 1; run(2); midi_event(0x80, 0, 60, 0); run(4);
+    bad += check("a key down before LATCH ON is let go as usual", !gated(t, 60));
+    midi_event(0x90, 0, 65, 100); run(4); midi_event(0x80, 0, 65, 0); run(4);
+    bad += check("(then a new one latches)", gated(t, 65));
+    t->p[P_AHOLD] = 0; run(4);
+    t->p[P_VOICE] = keep;                                 /* (a track's own: no power-on of the tests resets it) */
+    return bad;
+}
+
 #ifndef STRANGE_NO_MAIN
 int main(void)
 {
@@ -476,6 +518,7 @@ int main(void)
     bad += test_lyra_tail();
     bad += test_xy_filter();
     bad += test_edit_pages();
+    bad += test_latch();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);
