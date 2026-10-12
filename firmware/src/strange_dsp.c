@@ -32,7 +32,7 @@ static const int32_t MODAL_LOG2[MD_NMAT][MD_NMODE] = {
      242512, 249519, 256042, 262144, 267876, 273280, 278392, 283242, 287855, 292253, 296456, 300480},
 };
 /* the bow's friction: min(1, (|x| + 0.75)^-4) at |x| = 4 i / 256, Q15 (STK's BowTable, slope applied before) */
-static const int16_t ST_BOW_TAB[257] = {
+static const int16_t SX_BOW_TAB[257] = {
     32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767,
     32767, 30797, 28972, 27281, 25711, 24253, 22896, 21633, 20456, 19358, 18333, 17374, 16478, 15638, 14852, 14114,
     13421, 12771, 12159, 11584, 11042, 10531, 10050, 9596, 9167, 8762, 8379, 8017, 7674, 7349, 7041, 6749,
@@ -53,14 +53,14 @@ static const int16_t ST_BOW_TAB[257] = {
 };
 
 /* a delay of one period of inc (cycles Q32 per sample), in samples Q16: 2^48 / inc (a divide: once a block) */
-static inline uint32_t st_period(uint32_t inc)
+static inline uint32_t sx_period(uint32_t inc)
 {
     return inc > 0x8000u ? (uint32_t)(((uint64_t)1 << 48) / inc) : 0xFFFFFFFFu;
 }
 
 /* a read d samples (Q16, >= 1) behind the write index w of a circular line (mask + 1 a power of two), linearly
  * interpolated */
-static inline int32_t st_read(const int32_t *b, uint32_t mask, uint32_t w, uint32_t d16)
+static inline int32_t sx_read(const int32_t *b, uint32_t mask, uint32_t w, uint32_t d16)
 {
     uint32_t di = d16 >> 16, f = (d16 >> 1) & 0x7FFFu;
     int32_t a = b[(w - di) & mask], c = b[(w - di - 1u) & mask];
@@ -68,38 +68,38 @@ static inline int32_t st_read(const int32_t *b, uint32_t mask, uint32_t w, uint3
 }
 
 /* the bow's friction for x (velocity difference x slope, Q20): Q15, 1.0 sticking .. ~0 slipping */
-static inline int32_t st_bow(int32_t x)
+static inline int32_t sx_bow(int32_t x)
 {
     uint32_t a = (uint32_t)(x < 0 ? -x : x), i = a >> 14;
     int32_t y0, y1;
     if (i >= 256u)
-        return ST_BOW_TAB[256];
-    y0 = ST_BOW_TAB[i];
-    y1 = ST_BOW_TAB[i + 1u];
+        return SX_BOW_TAB[256];
+    y0 = SX_BOW_TAB[i];
+    y1 = SX_BOW_TAB[i + 1u];
     return y0 + (((y1 - y0) * (int32_t)(a & 0x3FFFu)) >> 14);
 }
 
 /* tanh for Q20 signals (softclip's table: Q20 1.0 -> tanh(1)), the result Q20 */
-static inline int32_t st_sat(int32_t x)
+static inline int32_t sx_sat(int32_t x)
 {
     return softclip(clamp(x >> 5, -(1 << 24), 1 << 24)) << 5;
 }
 
 /* white noise, Q20 (-1 .. 1) */
-static inline int32_t st_noise(uint32_t *s)
+static inline int32_t sx_noise(uint32_t *s)
 {
     return (int32_t)px_rand(s) >> 11;
 }
 
 /* a one-pole low-pass of k (Q15: 32767 = through) */
-static inline int32_t st_lp(int32_t *y, int32_t x, int32_t k)
+static inline int32_t sx_lp(int32_t *y, int32_t x, int32_t k)
 {
     *y += px_m(x - *y, k, 15);
     return *y;
 }
 
 /* a slow random walk (+-limit), once a block: leaky, so it wanders and comes back */
-static inline int32_t st_walk(int32_t w, uint32_t *s, int32_t step, int32_t limit)
+static inline int32_t sx_walk(int32_t w, uint32_t *s, int32_t step, int32_t limit)
 {
     w += px_m((int32_t)px_rand(s), step, 31);
     w -= w >> 7;
@@ -107,13 +107,13 @@ static inline int32_t st_walk(int32_t w, uint32_t *s, int32_t step, int32_t limi
 }
 
 /* 2^(v / 127 * oct) x lo, for a knob v 0..127 spread exponentially over oct octaves from lo (both Q16): Q16 */
-static uint32_t st_expmap(int32_t v, uint32_t lo, int32_t oct)
+static uint32_t sx_expmap(int32_t v, uint32_t lo, int32_t oct)
 {
     return (uint32_t)(((uint64_t)px_exp2(clamp(v, 0, 127) * oct * 65536 / 127) * lo) >> 16);
 }
 
 /* Hz (Q16) -> phase increment (cycles Q32 per sample) */
-static inline uint32_t st_hz_inc(uint32_t hz16)
+static inline uint32_t sx_hz_inc(uint32_t hz16)
 {
     return (uint32_t)(((uint64_t)hz16 * 97392u) >> 16);  /* 2^32 / 44100 */
 }

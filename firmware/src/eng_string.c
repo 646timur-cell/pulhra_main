@@ -82,7 +82,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     if (n > CTL)
         n = CTL;
     /* the loop: its period (Q16), split at POS (0.02 .. 0.33 of it from the bridge) */
-    L = st_period(m->inc);
+    L = sx_period(m->inc);
     if (L > (2000u << 16))
         L = 2000u << 16;
     if (L < (8u << 16))
@@ -98,7 +98,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     if ((int32_t)Ln < (2 << 16))
         Ln = 2u << 16;
     /* DAMP: the time the string rings, 0.08 .. ~20 s; per round trip the loss of 6.9 (60 dB in nepers) x L / T60 */
-    t60 = (int32_t)st_expmap(p[P_E3], 3528u, 8);   /* in samples (3528 = 80 ms) */
+    t60 = (int32_t)sx_expmap(p[P_E3], 3528u, 8);   /* in samples (3528 = 80 ms) */
     g = 32767 - (int32_t)(((int64_t)226357 * (L >> 8)) / ((int64_t)t60 << 8));
     g = clamp(g, 20000, 32760);
     if (mode == SR_BOW && !v->gate)                      /* (a bow lifted: the string is free, as damped as it is) */
@@ -121,7 +121,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     xl = S->xl;
     xlp = S->xlp;
     for (i = 0; i < n; i++) {
-        int32_t bo = S->bridge[(w - Lb) & (SR_BLEN - 1u)], no = st_read(S->neck, SR_NLEN - 1u, w, Ln);
+        int32_t bo = S->bridge[(w - Lb) & (SR_BLEN - 1u)], no = sx_read(S->neck, SR_NLEN - 1u, w, Ln);
         int32_t br, nr, sv, nv = 0, o, s, amp = amp_at(m, i);
         lp += px_m(bo - lp, kb, 15);                     /* the bridge: low-pass, loss, all-pass, then inverted */
         br = px_m(lp, g, 15);
@@ -135,11 +135,11 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         sv = br + nr;                                    /* the string's velocity where it is played */
         if (mode == SR_BOW) {
             int32_t bv = amp << 3, dv = bv - sv, contact = clamp(amp << 4, 0, 32767);   /* bow: 0 .. 0.25 */
-            nv = px_m(px_m(dv, st_bow(px_m(dv, slope, 12)), 15), contact, 15);
+            nv = px_m(px_m(dv, sx_bow(px_m(dv, slope, 12)), 15), contact, 15);
         } else if (xn > 0) {
             int32_t e;
             if (mode == SR_PLUCK) {                      /* noise, fading over the burst */
-                e = px_m(st_noise(&S->rng), (xn << 15) / xl, 15);
+                e = px_m(sx_noise(&S->rng), (xn << 15) / xl, 15);
                 xlp += px_m(e - xlp, kx, 15);
                 e = xlp * 3;
             } else {                                     /* a raised cosine: 1 - cos over the hammer's contact */

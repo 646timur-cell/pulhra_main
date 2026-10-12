@@ -65,7 +65,7 @@ static __attribute__((noinline)) void modal_coef(md_slot_t *S, const track_t *t,
     int32_t strc = (p[P_E1] - 64) * 400;                 /* the exponent's change: -0.39 .. +0.39 (Q16) */
     int32_t brit = clamp(p[P_E2] * 4 + (m->cutoff >> 6), 0, 600);   /* 0 .. ~1.17 (Q9): the high modes' decay */
     uint32_t pos = (uint32_t)p[P_E4] * 8454660u;         /* pos / 2: 0 .. 1/4 of a turn (Q32) */
-    int32_t t60 = (int32_t)st_expmap(p[P_E3], 882u, 10);   /* 20 ms .. 20 s, samples */
+    int32_t t60 = (int32_t)sx_expmap(p[P_E3], 882u, 10);   /* 20 ms .. 20 s, samples */
     /* a0: the fundamental's decay per sample, 6.9078 / T60 (Q32) */
     uint32_t a0 = (uint32_t)(29668581814ull / (uint32_t)t60);
     for (k = 0; k < MD_NMODE; k++) {
@@ -152,20 +152,20 @@ static void modal_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
             break;
         case MX_STICK:                                   /* a click, then 2 ms of noise falling away */
             if (xn > 0) {
-                x = xn == xl ? 1 << 24 : px_m(st_noise(&S->rng) << 3, (xn << 15) / xl, 15);
+                x = xn == xl ? 1 << 24 : px_m(sx_noise(&S->rng) << 3, (xn << 15) / xl, 15);
                 xn--;
             }
             xlp += px_m(x - xlp, kx, 15);
             x = xn == xl - 1 ? x : xlp;
             break;
         case MX_BOW: {                                   /* noise that leans on the body's own swing (stick-slip) */
-            int32_t sg = last > 0 ? 1 << 19 : -(1 << 19), nz = st_noise(&S->rng);
+            int32_t sg = last > 0 ? 1 << 19 : -(1 << 19), nz = sx_noise(&S->rng);
             xlp += px_m(nz + sg - xlp, kx, 15);          /* (the slip and the grain through HARD's low-pass) */
             x = px_m(xlp, amp, 15) >> 1;
             break;
         }
         default:                                         /* BLOW: breath */
-            xlp += px_m((st_noise(&S->rng) << 2) - xlp, kx, 15);
+            xlp += px_m((sx_noise(&S->rng) << 2) - xlp, kx, 15);
             x = px_m(xlp, amp, 15) >> 2;
             break;
         }

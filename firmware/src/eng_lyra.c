@@ -50,7 +50,7 @@ static lyra_mem_t *lyra_mem(const track_t *t) { return (lyra_mem_t *)ENG_MEM(t -
 /* the hyper-LFO's two increments: HLFO 0..127 -> 0.05 Hz .. ~410 Hz (13 octaves), the second x sqrt 2 */
 static void lyra_lfo_inc(const track_t *t, uint32_t *ia, uint32_t *ib)
 {
-    *ia = st_hz_inc(st_expmap(t->p[P_E4], 3277u, 13));
+    *ia = sx_hz_inc(sx_expmap(t->p[P_E4], 3277u, 13));
     *ib = *ia + (uint32_t)(((uint64_t)*ia * 27146u) >> 16);   /* x 1.414 */
 }
 
@@ -94,8 +94,8 @@ static void lyra_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     if (n > CTL)
         n = CTL;
     /* the drift: a slow random walk per oscillator, +-7 cents (in TUNE's 1/4096 steps: 2.367 a cent) */
-    da = v->s[4] = st_walk(v->s[4], &seed, 3, 16);
-    db = v->s[5] = st_walk(v->s[5], &seed, 3, 16);
+    da = v->s[4] = sx_walk(v->s[4], &seed, 3, 16);
+    db = v->s[5] = sx_walk(v->s[5], &seed, 3, 16);
     ia = m->inc + (uint32_t)((int32_t)(m->inc >> 12) * da);
     ib = cents_inc(m->pitch16, LY_TUNE_CT[tune], m->fine + db);
     g = 4096 + sh * sh * 3;                              /* SHRP: x1 .. x12 into the tanh (Q12) */
@@ -146,7 +146,7 @@ static uint32_t lyra_post(track_t *t, int32_t *out, uint32_t n)
         return 0;
     }
     /* 10 ms .. 740 ms (6.2 octaves) in half-rate samples (22.05 a ms), Q16; DMOD: up to +-45 % by the hyper-LFO */
-    tgt = (int32_t)(((uint64_t)st_expmap(time, 10u << 16, 6) * 22050u / 1000u));
+    tgt = (int32_t)(((uint64_t)sx_expmap(time, 10u << 16, 6) * 22050u / 1000u));
     tgt += (int32_t)(((int64_t)tgt * hl >> 15) * dmod / 282);
     tgt = clamp(tgt, 4 << 16, (int32_t)(LY_DLEN - 4u) << 16);
     if (!L->dtime)

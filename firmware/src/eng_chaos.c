@@ -51,7 +51,7 @@ static void chaos_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     tsvf_t f;
     if (n > CTL)
         n = CTL;
-    dr = v->s[4] = st_walk(v->s[4], &seed, p[P_E5] * 3, p[P_E5] * 24);   /* DRFT: CHAO wanders by up to ~24 */
+    dr = v->s[4] = sx_walk(v->s[4], &seed, p[P_E5] * 3, p[P_E5] * 24);   /* DRFT: CHAO wanders by up to ~24 */
     chao = clamp(p[P_E1] * 32 + dr, 0, 127 * 32);       /* 0 .. 4064 (CHAO x 32) */
     tsvf_coef(&f, clamp((p[P_E3] << 8) + m->cutoff * 2, 0, 127 << 8), 30);
     /* w = 2 pi f / FS (Q24) of the note, for the integrators; at most ~0.9 (stable: the step stays short of a cycle) */
@@ -59,10 +59,10 @@ static void chaos_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     w = w > 15099494 ? 15099494 : w;
     switch (algo) {
     case CH_FBFM:
-        ib = (uint32_t)(((uint64_t)inc * st_expmap(warp, 16384u, 4)) >> 16);   /* B at 1/4 .. 4 x the note */
+        ib = (uint32_t)(((uint64_t)inc * sx_expmap(warp, 16384u, 4)) >> 16);   /* B at 1/4 .. 4 x the note */
         k1 = (chao * chao) >> 10;                        /* depth: 0 .. 16128 (<< 3: ~1 cycle, 6 radians, at full scale) */
         for (i = 0; i < n; i++) {
-            int32_t a, b, nz = nois ? px_m(st_noise(&seed), nois * 64, 20) : 0, s;
+            int32_t a, b, nz = nois ? px_m(sx_noise(&seed), nois * 64, 20) : 0, s;
             a = sine_i(ph + ((uint32_t)((y + nz) * k1) << 3));
             b = sine_i(pb + ((uint32_t)((x + nz) * k1) << 3));
             x = a;                                       /* (s[0] A's output, s[1] B's: Q15 here) */
@@ -92,7 +92,7 @@ static void chaos_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         for (i = 0; i < n; i++) {
             int32_t fx = px_m(sine_i(ph + 0x40000000u), k2, 15), x2 = px_m(x, x, CH_Q), acc, s;
             if (nois)
-                fx += px_m(st_noise(&seed), nois * 1024, 20);
+                fx += px_m(sx_noise(&seed), nois * 1024, 20);
             if (algo == CH_DUFF)
                 acc = -(y >> 3) - x - px_m(px_m(x2, x, CH_Q), k1, CH_Q) + fx;   /* d = 1/8 */
             else
@@ -119,7 +119,7 @@ static void chaos_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
             uint32_t prev = ph;
             ph += inc << 1;
             if (ph < prev) {                             /* the clock: one step of the map */
-                int32_t r = k1 + (nois ? px_m(st_noise(&seed), nois * 2048, 20) : 0);
+                int32_t r = k1 + (nois ? px_m(sx_noise(&seed), nois * 2048, 20) : 0);
                 x = px_m(px_m(clamp(r, 0, 4 * CH_ONE), x, CH_Q), CH_ONE - x, CH_Q);
                 if (x <= 0 || x >= CH_ONE)               /* (left the interval: back in, somewhere) */
                     x = (int32_t)(px_rand(&seed) >> 8) | 1;

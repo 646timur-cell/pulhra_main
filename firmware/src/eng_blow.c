@@ -72,7 +72,7 @@ static void blow_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         return;
     if (n > CTL)
         n = CTL;
-    P = st_period(m->inc);
+    P = sx_period(m->inc);
     if (P > (1300u << 16))                               /* (the lowest notes: an octave up rather than out of line) */
         P >>= 1;
     /* the bores (Q16), as STK's, less the loop's own delays (measured: tests/strange_test.c tunes them) */
@@ -110,8 +110,8 @@ static void blow_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     dcx = S->dcx;
     dcy = S->dcy;
     for (i = 0; i < n; i++) {
-        int32_t amp = amp_at(m, i), bp, b = st_read(S->bore, BW_LEN - 1u, w, D - D2 * (type == BW_SAX)), o, f;
-        int32_t nz = st_noise(&S->rng);
+        int32_t amp = amp_at(m, i), bp, b = sx_read(S->bore, BW_LEN - 1u, w, D - D2 * (type == BW_SAX)), o, f;
+        int32_t nz = sx_noise(&S->rng);
         bp = px_m(amp << 5, brth, 15);                   /* the breath (Q20) */
         if (growl) {                                     /* the throat: shaken an octave down, and roughened */
             bp += px_m(bp, px_m(gph < 0x80000000u ? 16384 : -16384, growl, 15) + px_m(nz >> 5, growl, 15), 15);
@@ -136,14 +136,14 @@ static void blow_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             dcy = tp;
             pd = bp - (tp >> 1);
             S->jet[w & (BW_JLEN - 1u)] = clamp(pd, -4 * SQ_ONE, 4 * SQ_ONE);
-            j = st_read(S->jet, BW_JLEN - 1u, w + 1u, D2);
+            j = sx_read(S->jet, BW_JLEN - 1u, w + 1u, D2);
             j = clamp(px_m(j, px_m(j, j, 20) - SQ_ONE, 20), -SQ_ONE, SQ_ONE);   /* the jet: x (x^2 - 1) */
             S->bore[w & (BW_LEN - 1u)] = j + (tp >> 1);
             o = (b * 5) >> 3;                            /* (STK's 0.3, and some gain back) */
             break;
         }
         default: {                                       /* SAX */
-            int32_t l1 = st_read(S->jet, BW_JLEN - 1u, w, D2), tp = -px_m(lp, 31130, 15), pd;
+            int32_t l1 = sx_read(S->jet, BW_JLEN - 1u, w, D2), tp = -px_m(lp, 31130, 15), pd;
             o = tp - l1;
             pd = bp - o;
             S->jet[w & (BW_JLEN - 1u)] = tp;
