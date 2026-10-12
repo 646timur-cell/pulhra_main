@@ -48,7 +48,9 @@ jobs:
               https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
 
       - name: Build
-        run: ./build.sh --release 1.5.1-mod
+        run: |
+          set -o pipefail
+          ./build.sh --release 1.5.1-mod 2>&1 | tee build.log
 
       - uses: actions/upload-artifact@v4
         with:
@@ -56,6 +58,20 @@ jobs:
           path: |
             build/felucca-1.5.1-mod.fwsc
             build/release-1.5.1-mod/
+
+      - name: Publish to the firmware-builds branch (the package, its checksum and the build log)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          sha=$(git rev-parse --short HEAD)
+          mkdir -p /tmp/out && cp build/felucca-1.5.1-mod.fwsc build.log /tmp/out/
+          (cd /tmp/out && sha256sum felucca-1.5.1-mod.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan firmware-builds
+          git rm -rfq . && git clean -fdxq
+          cp /tmp/out/* .
+          git add -A && git commit -qm "Firmware build of $sha"
+          git push -f origin firmware-builds
 
       - name: Release (tags v*)
         if: startsWith(github.ref, 'refs/tags/v')
