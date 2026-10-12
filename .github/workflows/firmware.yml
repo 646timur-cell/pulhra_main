@@ -110,4 +110,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/felucca-1.5.1-mod.fwsc build/felucca-1.5.1-strange.fwsc --title "$GITHUB_REF_NAME" --notes "Sound-module build of Felucca 1.5.1 with GURDY, and the STRANGE build: darkmachine, a texture module (STRANGE.md). Install a .fwsc with the web installer's install-a-file option, or the matching installer page from the firmware-builds branch."
+        run: gh release create "$GITHUB_REF_NAME" build/felucca-1.5.1-mod.fwsc build/felucca-1.5.1-strange.fwsc --title "$GITHUB_REF_NAME" --notes "Sound-module build of Felucca 1.5.1 with GURDY, and the STRANGE build (darkmachine, a texture module; STRANGE.md). Install a .fwsc with the web installer's install-a-file option, or the matching installer page from the firmware-builds branch."
