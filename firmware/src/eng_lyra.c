@@ -146,8 +146,8 @@ static uint32_t lyra_post(track_t *t, int32_t *out, uint32_t n)
         return 0;
     }
     /* 10 ms .. 740 ms (6.2 octaves) in half-rate samples (22.05 a ms), Q16; DMOD: up to +-45 % by the hyper-LFO */
-    tgt = (int32_t)(((uint64_t)sx_expmap(time, 10u << 16, 6) * 22050u / 1000u));
-    tgt += (int32_t)(((int64_t)tgt * hl >> 15) * dmod / 282);
+    tgt = (int32_t)(((uint64_t)sx_expmap(time, 10u << 16, 6) * 1445069u) >> 16);   /* x 22.05 (Q16) */
+    tgt += (int32_t)((((int64_t)tgt * hl >> 15) * dmod * 232) >> 16);              /* x DMOD / 282 */
     tgt = clamp(tgt, 4 << 16, (int32_t)(LY_DLEN - 4u) << 16);
     if (!L->dtime)
         L->dtime = tgt;

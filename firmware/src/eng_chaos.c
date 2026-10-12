@@ -83,10 +83,10 @@ static void chaos_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         if (algo == CH_DUFF) {
             k1 = warp * 132104;                          /* b: 0 .. 1 */
         } else {                                         /* mu: 0 .. 4, mu w at most 1.5 (stiff: unstable above) */
-            int64_t lim = ((int64_t)CH_ONE * CH_ONE * 3 / 2) / (w | 1);
+            uint32_t r = 0xFFFFFFFFu / (uint32_t)(w | 1);  /* 2^32 / w: 256 x (1 / w) */
             k1 = warp * 528416;
-            if (k1 > lim)
-                k1 = (int32_t)lim;
+            if (r < 683u && k1 > (int32_t)(98304u * r))   /* 1.5 x 2^24 x (1 / w) (Q24) */
+                k1 = (int32_t)(98304u * r);
         }
         k2 = chao * 4128;                                /* g: 0 .. ~1 (Q24) */
         for (i = 0; i < n; i++) {

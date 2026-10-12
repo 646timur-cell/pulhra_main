@@ -67,7 +67,9 @@ static __attribute__((noinline)) void modal_coef(md_slot_t *S, const track_t *t,
     uint32_t pos = (uint32_t)p[P_E4] * 8454660u;         /* pos / 2: 0 .. 1/4 of a turn (Q32) */
     int32_t t60 = (int32_t)sx_expmap(p[P_E3], 882u, 10);   /* 20 ms .. 20 s, samples */
     /* a0: the fundamental's decay per sample, 6.9078 / T60 (Q32) */
-    uint32_t a0 = (uint32_t)(29668581814ull / (uint32_t)t60);
+    uint32_t a0 = (uint32_t)(((uint64_t)(uint32_t)(((uint64_t)1 << 40) / (uint32_t)t60) * 452704u) >> 24);   /* (2^40 / T60
+                                                                                 * x 6.9078 (Q16): no 64-bit divide but
+                                                                                 * the 2^n / x the target has) */
     for (k = 0; k < MD_NMODE; k++) {
         uint32_t src = beat && k >= 12u ? k - 12u : k, f, a, cs, sn;
         int32_t lg = MODAL_LOG2[mat][src], r, lv;
