@@ -67,6 +67,7 @@ const splash = colours(a.screen());
 }
 a.render(800);
 check("  over by 1 s (~0.70 s)", a.ex.web_anim_levels() === 0);
+for (let t = 1000; t < 3000 && !(a.ex.web_lit_buttons() >> B.HOME & 1); t += 100) a.render(100);   /* (STRANGE: a 1.6 s splash) */
 const home = a.screen();
 check(`boots: the splash, then HOME (${colours(home)} colours), the HOME LED lit`,
       splash > 1 && colours(home) > 4 && (a.ex.web_lit_buttons() >> B.HOME & 1) === 1);
