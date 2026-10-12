@@ -38,7 +38,12 @@ cc -O1 -w -Ibuild/gen -Ifirmware/src -o build/host/module_test tests/module_test
 
 ## Установка
 
+Проще всего: открыть `fm1-sound-module-installer.html` (ветка `firmware-builds`, или `python3 web/make_module_installer.py build/felucca-1.5.1-mod.fwsc 1.5.1-mod out.html`) в Chrome или Edge, подключить FM-1 по USB и нажать Install. Прошивка уже внутри страницы, сервер не нужен.
+
+Или из терминала:
+
 ```
+pip3 install mido python-rtmidi
 python3 tools/fm1_install.py felucca-1.5.1-mod.fwsc
 ```
 

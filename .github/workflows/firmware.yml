@@ -64,6 +64,7 @@ jobs:
         run: |
           sha=$(git rev-parse --short HEAD)
           mkdir -p /tmp/out && cp build/felucca-1.5.1-mod.fwsc build.log /tmp/out/
+          python3 web/make_module_installer.py build/felucca-1.5.1-mod.fwsc 1.5.1-mod /tmp/out/fm1-sound-module-installer.html
           (cd /tmp/out && sha256sum felucca-1.5.1-mod.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
