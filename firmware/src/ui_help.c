@@ -56,7 +56,7 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"ARP 2", "[K3]LATCH[K4]ORDER[ARP]ARP"},
 #if FELUCCA_STRANGE
     {"EUCLID", "[K1]NOTES[K3]HITS[SEQ]RATE"},
-    {"EUCLID 2", "[K1]RATE[K4]LATCH[SEQ]MORE"},
+    {"EUCLID 2", "[K1]RATE[K2]SLOWER[SEQ]MORE"},
     {"EUCLID 3", "[K1]CHANCE[K2]SWING[SEQ]EUCLID"},
 #endif
     {"STEP", "[KEYS]WRITE[K1]STEP[SEQ]RATCH"},   /* (1.5.1: SEQ to DETAIL) */

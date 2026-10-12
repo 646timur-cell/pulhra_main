@@ -378,6 +378,7 @@ static double mix_rms(uint32_t eng, uint32_t pre, uint32_t n, void (*tweak)(void
     double sq = 0;
     ui_power_on();
     memset(xy_val, 0, sizeof xy_val);
+    rng_state = 0x1234567u;                              /* (the noise seeds: the same whatever ran before) */
     song.master_q12 = 4096;
     set_engine_of(&trk[0], eng);
     apply_preset_to(&trk[0], pre);
@@ -550,6 +551,7 @@ static int test_euclid(void)
     set_engine_of(t, 0);
     apply_preset_to(t, 0);
     t->engine = t->eng_req;
+    t->p[P_REV] = t->p[P_DLY] = t->p[P_CHOR] = 0;          /* (no tails into the tests after) */
     t->p[P_AMODE] = 1;                                    /* UP */
     t->p[P_SLEN] = 8; t->p[P_SSWING] = 3; t->p[P_SGATE] = 0;
     run(4);
@@ -574,6 +576,19 @@ static int test_euclid(void)
     midi_event(0x80, 0, 60, 0); midi_event(0x80, 0, 64, 0); run(8);
     ok &= !t->arp_note;
     bad += check("EUCLID: 3 of 8 (x..x..x.), ROT turns it, HITS = STEPS plays every step, let go: silent", ok);
+    {   /* DIV /4: a step four times as long */
+        uint32_t steps1 = 0, steps4 = 0, last;
+        t->p[P_SSWING] = 8; t->p[P_FM3_ATK] = 0;
+        midi_event(0x90, 0, 60, 100); run(1);
+        last = t->euc_pos;
+        for (k = 0; k < 2000u; k++) { run(1); if (t->euc_pos != last) { steps1++; last = t->euc_pos; } }
+        t->p[P_FM3_ATK] = 3;                              /* /4 */
+        for (k = 0; k < 2000u; k++) { run(1); if (t->euc_pos != last) { steps4++; last = t->euc_pos; } }
+        midi_event(0x80, 0, 60, 0); run(8);
+        t->p[P_FM3_ATK] = 0;
+        bad += check("EUCLID DIV /4: a quarter of the steps in the same time", steps1 >= 8u && steps4 * 4u >= steps1 - 2u &&
+                     steps4 * 4u <= steps1 + 4u);
+    }
     t->p[P_AMODE] = 0; t->p[P_SLEN] = 16; t->p[P_SSWING] = 16; t->p[P_SGATE] = 0;
     go_home(); frame();
     press(B_SEQ);

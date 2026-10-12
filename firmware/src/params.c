@@ -73,6 +73,10 @@ static const char *const N_MSRC[] = {"OFF", "LFO", "ENV", "VEL", "KEY", "RAND", 
 };
 static const char *const N_MDST[] = {"OFF", "PITCH", "CUT", "SHP", "AMP", "PAN", "DIST", "CHO", "DLY", "REV", "RATE",
                                      "VIB", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "DEPTH"};
+#if FELUCCA_STRANGE   /* EUCLID's DIV (OP3's ATK, inert here): its step RATE x 1 .. x 64, for slow sequences */
+static const char *const N_EUC_DIV[] = {"/1", "/2", "/3", "/4", "/6", "/8", "/12", "/16", "/24", "/32", "/64"};
+static const uint8_t EUC_DIV_X[] = {1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64};
+#endif
 static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN", "PHYS",
                                              "DRUM", "NOISE", "FM6",
 #if FELUCCA_SLICE
@@ -163,6 +167,7 @@ static const param_desc_t TP[P_COUNT] = {
                [P_FM##k##_SUS] = PE("DST2", N_MDST, 0), [P_FM##k##_REL] = PD("AMT2", F_BIPCT, -64, 63, 0), \
                [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
     XYR(1), XYR(2), FMOP(3), FMOP(4),
+    [P_FM3_ATK] = PE("DIV", N_EUC_DIV, 0),          /* EUCLID's divider: a step x 1 .. x 64 (seq.c EUC_DIV_X) */
 #undef XYR
 #else
     FMOP(1), FMOP(2), FMOP(3), FMOP(4),
@@ -531,8 +536,8 @@ static const page_t PAGES[] = {
     {"ARP 2", FAM_ARP, SC_TRACK, GR_NONE, {P_ASWING, P_APROB, P_AHOLD, P_AORDER}},
 #if FELUCCA_STRANGE   /* SEQ: EUCLID, the arp (MODE OFF: off) stepping through a euclidean pattern, the held / LATCHed notes */
     {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_AMODE, P_SLEN, P_SSWING, P_SGATE}},
-    {"EUCLID 2", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_ARATE, P_AGATE, P_AOCT, P_AHOLD}},
-    {"EUCLID 3", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_APROB, P_ASWING, P_AORDER, 0xFF}},
+    {"EUCLID 2", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_ARATE, P_FM3_ATK, P_AGATE, P_AHOLD}},
+    {"EUCLID 3", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_APROB, P_ASWING, P_AORDER, P_AOCT}},
 #endif
     {"STEP", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},
     {"DETAIL", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},   /* 1.5.1 (#199): the cursor step's CHANCE RATCH NUDGE VEL

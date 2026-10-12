@@ -1152,7 +1152,7 @@ static void pat_load_ui(track_t *t, uint32_t n)
  * insert, which chops whatever the track plays in time with its sequencer */
 static int param_kept(uint32_t i)
 {
-    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) ||
+    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_STRANGE && i == P_FM3_ATK) ||
            (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT;
 }
 

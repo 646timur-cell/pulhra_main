@@ -441,7 +441,7 @@ static __attribute__((noinline)) void arp_fire(track_t *t, uint32_t period)
     if (t->arp_note)
         arp_off(t);
     if ((uint32_t)(rng() & 127u) <= (uint32_t)t->p[P_APROB]) {
-        t->arp_off = period * (uint32_t)t->p[P_AGATE] / 128u;
+        t->arp_off = (uint32_t)(((uint64_t)period * (uint32_t)t->p[P_AGATE]) >> 7);   /* (a long step: no overflow) */
         if (t->p[P_AMODE] == AM_CHORD) {            /* CHORD: the first 4 notes, an octave up each step */
             arp_chord(t, list, cnt);
             return;
@@ -469,7 +469,10 @@ static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
         return;
     }
     period = div_samples((uint32_t)t->p[P_ARATE]);
-    sw = t->p[P_ASWING] * (int32_t)period / 250;
+#if FELUCCA_STRANGE
+    period *= EUC_DIV_X[clamp(t->p[P_FM3_ATK], 0, (int32_t)NELEM(EUC_DIV_X) - 1)];   /* (EUCLID's DIV) */
+#endif
+    sw = (int32_t)(period / 250u) * t->p[P_ASWING];
     t->arp_pos += n;
     if (t->arp_pos < period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw) && t->arp_pos != 0xFFFFFFF + n)
         return;
