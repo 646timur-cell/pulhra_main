@@ -51,7 +51,7 @@ static uint32_t pow2_q16(int32_t d16)
 #define SMP_USER_SIZE 0x14000u
 #define SMP_USER_DATA 512u
 #if FELUCCA_STRANGE
-#define SMP_SLOT_SIZE(k) ((k) == 2u ? 0x12000u : SMP_USER_SIZE)   /* (STRANGE: USR3's last two sectors hold the scenes,
+#define SMP_SLOT_SIZE(k) ((k) == 2u ? 72u * 1024u : SMP_USER_SIZE)   /* (STRANGE: USR3's last two sectors hold the scenes,
                                                                     * scene.c: its sample at most 73,216 bytes) */
 #else
 #define SMP_SLOT_SIZE(k) SMP_USER_SIZE

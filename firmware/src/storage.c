@@ -75,7 +75,7 @@ static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy 
         return 0xE5000u + copy * ST_SECTOR;
 #if FELUCCA_STRANGE
     if (obj == OBJ_SCENES)
-        return 0xA0000u + 2u * 0x14000u + 0x12000u + copy * ST_SECTOR;   /* (eng_sample.c SMP_SLOT_SIZE(2)) */
+        return 0xDA000u + copy * ST_SECTOR;       /* (USR3 0xC8000 + 72 KiB: eng_sample.c SMP_SLOT_SIZE(2)) */
 #endif
     if (obj >= OBJ_UPRESET0)
         return 0xDC000u + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;
