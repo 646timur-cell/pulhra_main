@@ -165,7 +165,7 @@ static int test_engines(void)
 {
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
-    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 6, 5, 11, 3, 4, 13, ENGI_DRUM};
+    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 6, 5, 11, 3, 4, 13};
     ui_power_on();
     bad += check("20 engines; LYRA CHAOS STRING MODAL BLOW are 15..19", NENGINES == 20 && ENGINES[ENGI_LYRA] == &ENG_LYRA &&
                  ENGINES[ENGI_CHAOS] == &ENG_CHAOS && ENGINES[ENGI_STRING] == &ENG_STRING &&
@@ -175,7 +175,7 @@ static int test_engines(void)
         ok &= eng_vis(i) == want[i] && eng_ok(want[i]);
     for (i = 0; i < NENGINES; i++)
         nshown += eng_ok(i) != 0;
-    bad += check("shown: every engine but the retired DIGITAL, STRANGE's five first", ok && nshown == 19u && NENG_SHOWN == 19 && !eng_ok(1));
+    bad += check("shown: every engine but DIGITAL (retired) and DRUM, STRANGE's five first", ok && nshown == 18u && NENG_SHOWN == 18 && !eng_ok(1) && !eng_ok(ENGI_DRUM));
     preset_all_pos(&total);
     ok = 1;
     for (i = 0; i < total; i++) {
@@ -454,16 +454,16 @@ static int test_edit_pages(void)
     ok = TSEL->eng_req == ENGI_CHAOS && ui.layer == LAYER_EDIT && !ly_epage;
     btn_down(B_OCTUP); frame(); btn_up(B_OCTUP); frame();
     ok &= ly_epage == 1u;
-    key_down(white(3)); key_up(white(3)); frame();      /* page 2, B3: the 19th engine, DRUM */
-    ok &= TSEL->eng_req == ENGI_DRUM;
-    key_down(white(4)); key_up(white(4)); frame();      /* page 2, C4: no engine there */
-    ok &= TSEL->eng_req == ENGI_DRUM;
+    key_down(white(2)); key_up(white(2)); frame();      /* page 2, A3: the 18th engine, SLICE */
+    ok &= TSEL->eng_req == 13u;
+    key_down(white(3)); key_up(white(3)); frame();      /* page 2, B3: no engine there */
+    ok &= TSEL->eng_req == 13u;
     btn_down(B_OCTUP); frame(); btn_up(B_OCTUP); frame();
     ok &= !ly_epage;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT: 15 engines on the keys, OCT+ the next page (the last 4), wraps; an empty key does nothing", ok);
+    bad += check("EDIT: 15 engines on the keys, OCT+ the next page (the last 3), wraps; an empty key does nothing", ok);
     btn_down(B_EDIT); frames(800);
-    bad += check("EDIT opens on the page of the track's engine (DRUM: page 2)", ui.layer == LAYER_EDIT && ly_epage == 1u);
+    bad += check("EDIT opens on the page of the track's engine (SLICE: page 2)", ui.layer == LAYER_EDIT && ly_epage == 1u);
     btn_up(B_EDIT); frames(10);
     return bad;
 }
