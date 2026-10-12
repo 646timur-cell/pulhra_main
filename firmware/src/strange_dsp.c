@@ -58,6 +58,13 @@ static inline uint32_t sx_period(uint32_t inc)
     return inc > 0x8000u ? (uint32_t)(((uint64_t)1 << 48) / inc) : 0xFFFFFFFFu;
 }
 
+/* 2^40 / x (x > 256): out of line, so the 32-bit quotient is what the divide gives (the target has a 64 / 32 divide
+ * to 32 bits, no 64 / 64 one: inlined, the compiler may widen it into a library call that is not there) */
+static __attribute__((noinline)) uint32_t sx_inv40(uint32_t x)
+{
+    return (uint32_t)(((uint64_t)1 << 40) / x);
+}
+
 /* a read d samples (Q16, >= 1) behind the write index w of a circular line (mask + 1 a power of two), linearly
  * interpolated */
 static inline int32_t sx_read(const int32_t *b, uint32_t mask, uint32_t w, uint32_t d16)
