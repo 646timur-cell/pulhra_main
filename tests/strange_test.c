@@ -166,9 +166,11 @@ static int test_engines(void)
 {
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
-    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3};
+    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3,
+                                       ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT};
     ui_power_on();
-    bad += check("20 engines; LYRA CHAOS STRING MODAL BLOW are 15..19", NENGINES == 20 && ENGINES[ENGI_LYRA] == &ENG_LYRA &&
+    bad += check("24 engines; LYRA CHAOS STRING MODAL BLOW RESO GLITCH JUNK DRIFT are 15..23", NENGINES == 24 &&
+                 ENGINES[ENGI_LYRA] == &ENG_LYRA && ENGINES[ENGI_DRIFT] == &ENG_DRIFT && str_eq(N_ENGNAME[ENGI_DRIFT], "DRIFT") &&
                  ENGINES[ENGI_CHAOS] == &ENG_CHAOS && ENGINES[ENGI_STRING] == &ENG_STRING &&
                  ENGINES[ENGI_MODAL] == &ENG_MODAL && ENGINES[ENGI_BLOW] == &ENG_BLOW &&
                  str_eq(N_ENGNAME[ENGI_BLOW], "BLOW") && str_eq(N_ENGNAME[ENGI_LYRA], "LYRA"));
@@ -301,13 +303,16 @@ static int test_sound(const char *wavs)
             int mono = en->presets[k].mono || en->poly < 2u;
             int pitched = e == ENGI_STRING || e == ENGI_BLOW || (e == ENGI_MODAL && en->presets[k].e[0] == 7);
             int hit = (e == ENGI_STRING && en->presets[k].e[0] != SR_BOW) ||
-                      (e == ENGI_MODAL && en->presets[k].e[5] <= MX_STICK);   /* (struck: it decays while held) */
+                      (e == ENGI_MODAL && en->presets[k].e[5] <= MX_STICK) ||   /* (struck: it decays while held) */
+                      (e == ENGI_RESO && en->presets[k].e[0] == RX_BALL) || (e == ENGI_GLITCH && !en->presets[k].e[2]) ||
+                      (e == ENGI_JUNK && en->presets[k].e[0] != JT_RATTLE) || (e == ENGI_DRIFT && en->presets[k].e[0] == DS_PLUCK);
+            int forever = e == ENGI_DRIFT && en->presets[k].e[4] >= 118;   /* (a memory that keeps: no tail's end) */
             R = phrase(e, k, mono || pitched ? A3 : CH, mono || pitched ? 1u : 2u, en->presets[k].env[0] >= 80 ? 5.0 : 2.0);
             if (wavs)
                 wav_write(wavs, en->name, en->presets[k].name, R.frames);
             snprintf(what, sizeof what, "%s %-12s peak %5.0f rms %5.0f dc %4.0f clip %u free %.2fs f0 %.1f", en->name,
                      en->presets[k].name, R.peak, R.rms_hold, R.dc, R.clip, R.free_at / (double)SR, R.f0);
-            ok = R.peak > 1500 && R.clip == 0 && fabs(R.dc) < 200 && R.free_at && !R.tail_rms &&
+            ok = R.peak > 1500 && R.clip == 0 && fabs(R.dc) < 200 && (forever || (R.free_at && !R.tail_rms)) &&
                  (hit ? R.rms_early > 600 : R.rms_hold > 600);
             if (hit)
                 R.f0 = f0_of(SR / 20u, (uint32_t)(SR * 0.2));
@@ -483,10 +488,14 @@ static int test_edit_pages(void)
     ok &= TSEL->eng_req == 3u && eqa_count(TSEL) == 11u && TSEL->p[P_AHOLD] == 1;
     key_down(black_key(10)); key_up(black_key(10)); frame();
     ok &= TSEL->p[P_AHOLD] == 0;
-    key_down(black_key(0)); key_up(black_key(0)); frame();   /* F#3: nothing (no engines past the white keys) */
-    ok &= TSEL->eng_req == 3u && TSEL->p[P_AHOLD] == 0;
+    key_down(black_key(0)); key_up(black_key(0)); frame();   /* F#3: RESO */
+    ok &= TSEL->eng_req == ENGI_RESO && TSEL->p[P_AHOLD] == 0;
+    key_down(black_key(3)); key_up(black_key(3)); frame();   /* C#4: DRIFT */
+    ok &= TSEL->eng_req == ENGI_DRIFT;
+    key_down(black_key(4)); key_up(black_key(4)); frame();   /* D#4: nothing */
+    ok &= TSEL->eng_req == ENGI_DRIFT;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT, one page: 15 engines on the white keys, LATCH on the last black key, F#5 (on, off)", ok);
+    bad += check("EDIT, one page: 15 engines on the white keys, RESO GLITCH JUNK DRIFT on black keys 1..4, LATCH on F#5", ok);
     return bad;
 }
 

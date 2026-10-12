@@ -36,7 +36,7 @@
 #if !FELUCCA_SLICE && FELUCCA_MODULE && !FELUCCA_STRANGE
 #error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
 #endif
-#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_STRANGE) + 5 * FELUCCA_STRANGE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
+#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_STRANGE) + 9 * FELUCCA_STRANGE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
                                                             * STRANGE's 15..19: the others keep their numbers */
 #define ENGI_GURDY 14u           /* GURDY: the hurdy-gurdy (eng_gurdy.c, from GHOULBOX by Jason Persinger, GPL-3.0) */
 #define ENGI_LYRA 15u            /* STRANGE: eng_lyra.c (Lyra-8-like organismic pairs, hyper-LFO, delay) */
@@ -44,9 +44,13 @@
 #define ENGI_STRING 17u          /* STRANGE: eng_string.c (waveguide string: pluck, strike, friction bow) */
 #define ENGI_MODAL 18u           /* STRANGE: eng_modal.c (24-mode resonator, materials, exciters) */
 #define ENGI_BLOW 19u            /* STRANGE: eng_blow.c (reed, jet and lip waveguides) */
+#define ENGI_RESO 20u            /* STRANGE: eng_reso.c (strange exciters into strange resonators) */
+#define ENGI_GLITCH 21u          /* STRANGE: eng_glitch.c (a slice machine on a synthesized glitch kit) */
+#define ENGI_JUNK 22u            /* STRANGE: eng_junk.c (springs and a box of junk) */
+#define ENGI_DRIFT 23u           /* STRANGE: eng_drift.c (a drifting memory, after SOMA's COSMOS) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (FELUCCA_STRANGE ? 15 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
+#define NENG_SHOWN (FELUCCA_STRANGE ? 19 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))

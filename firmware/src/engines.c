@@ -57,6 +57,10 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
 #include "eng_string.c"
 #include "eng_modal.c"
 #include "eng_blow.c"
+#include "eng_reso.c"
+#include "eng_glitch.c"
+#include "eng_junk.c"
+#include "eng_drift.c"
 #endif
 
 /* the editor protocol, user presets and projects store these indices: append, never reorder */
@@ -98,6 +102,10 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_STRING,                 /* 17 (ENGI_STRING) */
     &ENG_MODAL,                  /* 18 (ENGI_MODAL) */
     &ENG_BLOW,                   /* 19 (ENGI_BLOW) */
+    &ENG_RESO,                   /* 20 (ENGI_RESO) */
+    &ENG_GLITCH,                 /* 21 (ENGI_GLITCH) */
+    &ENG_JUNK,                   /* 22 (ENGI_JUNK) */
+    &ENG_DRIFT,                  /* 23 (ENGI_DRIFT) */
 #endif
 };
 
@@ -153,6 +161,7 @@ static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: every engine
     ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,  /* STRANGE's own */
     8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3,      /* GRAIN PHYS GURDY FM6 ANALOG WHEEL PHASE VOICE NOISE LOFI
                                                                  * (no SAMPLE, TRIO, DRUM, SLICE: a texture module) */
+    ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT,              /* the EDIT layer's black keys 1..4 (F#3 G#3 A#3 C#4) */
 };
 #else
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {

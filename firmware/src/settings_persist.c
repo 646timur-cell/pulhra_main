@@ -74,7 +74,7 @@ static int settings_import(persist_t *p, int n)
         memset(favorites.factory[ENGI_DIGITAL], 0, sizeof favorites.factory[ENGI_DIGITAL]);
     }
 #endif
-#ifdef SMP_SET_PERC
+#if defined(SMP_SET_PERC) && !FELUCCA_STRANGE   /* (STRANGE: rows 4 and 10 are DRIFT's and GLITCH's stars) */
     if ((favorites.factory[ENGI_SAMPLE][0] >> SMP_SET_PERC) & 1u) {   /* SAMPLE's PERC (preset 4, retired): DRUM's */
         favorites.factory[ENGI_DRUM][0] |= 1u;                         /* kit (core.h drum_from_perc) */
         favorites.factory[ENGI_SAMPLE][0] &= (uint8_t)~(1u << SMP_SET_PERC);

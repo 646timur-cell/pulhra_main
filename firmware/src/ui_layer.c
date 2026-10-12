@@ -589,7 +589,17 @@ static const eqa_set_t EQA[] = {
 };
 #if FELUCCA_STRANGE
 /* STRANGE: on every engine, black keys 1.. load the engines past the white keys (ENGINE_ORDER from LY_INIT on) */
-static const char *eqa_eng_name(const track_t *t, uint32_t i) { (void)t; return eng_abbr(ENGINES[eng_vis(LY_INIT + i)]->name); }
+static const char *eqa_eng_name(const track_t *t, uint32_t i)   /* (an 11th of the row: two letters) */
+{
+    static const char *const A[][2] = {{"RESO", "RS"}, {"GLITCH", "GL"}, {"JUNK", "JK"}, {"DRIFT", "DR"}};
+    const char *n = ENGINES[eng_vis(LY_INIT + i)]->name;
+    uint32_t k;
+    (void)t;
+    for (k = 0; k < NELEM(A); k++)
+        if (str_eq(n, A[k][0]))
+            return A[k][1];
+    return eng_abbr(n);
+}
 static void eqa_eng_load(track_t *t, uint32_t i, uint32_t down) { (void)t; if (down) edit_load(eng_vis(LY_INIT + i), 0); }
 static uint32_t eqa_eng_on(const track_t *t, uint32_t i) { return t->eng_req % NENGINES == eng_vis(LY_INIT + i); }
 #define EQA_ENG(i) {LK_SET, EQ_SHOW_SEL, i, eqa_eng_name, eqa_eng_load, eqa_eng_on}

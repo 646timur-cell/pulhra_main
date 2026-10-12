@@ -16,8 +16,13 @@ static uint8_t *fav_byte(uint32_t engine, uint32_t preset)
         return preset < 64u ? &favorites.factory[15][preset / 8u] : 0;
 #if FELUCCA_STRANGE
     /* STRANGE's engines 15..19: row 1 (DIGITAL's, retired: never shown, never starred), 6 bytes (48 presets) each */
-    if (engine >= ENGI_LYRA && engine < NENGINES)
+    if (engine >= ENGI_LYRA && engine <= ENGI_BLOW)
         return preset < 48u ? &favorites.factory[1][(engine - ENGI_LYRA) * 6u + preset / 8u] : 0;
+    /* 20..23 (RESO GLITCH JUNK DRIFT): the rows of the engines STRANGE dropped, TRIO DRUM SLICE SAMPLE (never shown) */
+    if (engine >= ENGI_RESO && engine < NENGINES) {
+        static const uint8_t ROW[4] = {6, 10, 13, 4};
+        return preset < 256u ? &favorites.factory[ROW[engine - ENGI_RESO]][preset / 8u] : 0;
+    }
 #endif
     return engine < NENGINES && engine < 14u && preset < 256u ? &favorites.factory[engine][preset / 8u] : 0;
 }

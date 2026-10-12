@@ -50,8 +50,9 @@ static const char *const PRESET_CAT[NENGINES > 16 ? NENGINES : 16] = {
     "DD",                        /* 13 SLICE: CHOP, STUTTER */
     "LPLLLL" XCAT_GURDY,                    /* 14 GURDY: HURDY GURDY, DRONE WHEEL, DANCE GURDY, TROMPETTE, VIELLE, BAGPIPE */
 #if FELUCCA_STRANGE
-    STRANGE_CAT_LYRA, STRANGE_CAT_CHAOS, STRANGE_CAT_STRING, STRANGE_CAT_MODAL, STRANGE_CAT_BLOW,   /* 15..19 (the engine
+    STRANGE_CAT_LYRA, STRANGE_CAT_CHAOS, STRANGE_CAT_STRING, STRANGE_CAT_MODAL, STRANGE_CAT_BLOW,   /* 15..23 (the engine
                                                                                                 * files: next to their presets) */
+    STRANGE_CAT_RESO, STRANGE_CAT_GLITCH, STRANGE_CAT_JUNK, STRANGE_CAT_DRIFT,
 #endif
 };
 static uint32_t preset_cat(uint32_t e, uint32_t k)    /* factory preset k of engine e */
