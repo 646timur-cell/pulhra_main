@@ -553,10 +553,27 @@ static void eqa_drum_mute(track_t *t, uint32_t l, uint32_t down)
 }
 static uint32_t eqa_drum_on(const track_t *t, uint32_t l) { return !((drum_mute[trk_index(t) % NPART] >> l) & 1u); }
 #define EQA_LANE(l) {LK_SET, EQ_SHOW_MUTE, l, drum_lane_abbr, eqa_drum_mute, eqa_drum_on}
-static const eqa_t EQA_DRUM[NLANE] = {EQA_LANE(0), EQA_LANE(1), EQA_LANE(2), EQA_LANE(3), EQA_LANE(4), EQA_LANE(5),
-    EQA_LANE(6), EQA_LANE(7)};
+/* sound module: LATCH (P_AHOLD, seq.c latch_on) of the selected track on the black key after the engine's actions
+ * (STRANGE: A#3, after LOFI SAMPLE; else F#3, DRUM's after its lanes) */
+static const char *eqa_latch_name(const track_t *t, uint32_t i) { (void)t; (void)i; return "LAT"; }
+static void eqa_latch(track_t *t, uint32_t i, uint32_t down)
+{
+    (void)i;
+    if (!down)
+        return;
+    t->p[P_AHOLD] = (int16_t)!t->p[P_AHOLD];
+    ui_say("LATCH", t->p[P_AHOLD] ? " ON" : " OFF");
+}
+static uint32_t eqa_latch_on(const track_t *t, uint32_t i) { (void)i; return t->p[P_AHOLD] != 0; }
+#define EQA_LATCH {LK_SET, EQ_SHOW_SEL, 0, eqa_latch_name, eqa_latch, eqa_latch_on}
+static const eqa_t EQA_DRUM[] = {EQA_LANE(0), EQA_LANE(1), EQA_LANE(2), EQA_LANE(3), EQA_LANE(4), EQA_LANE(5),
+    EQA_LANE(6), EQA_LANE(7),
+#if FELUCCA_MODULE
+    EQA_LATCH,
+#endif
+};
 static const eqa_set_t EQA[] = {
-    {ENGI_DRUM, NLANE, EQA_DRUM},
+    {ENGI_DRUM, NELEM(EQA_DRUM), EQA_DRUM},
 };
 #if FELUCCA_STRANGE
 /* STRANGE: on every engine, black keys 1.. load the engines past the white keys (ENGINE_ORDER from LY_INIT on) */
@@ -564,10 +581,12 @@ static const char *eqa_eng_name(const track_t *t, uint32_t i) { (void)t; return 
 static void eqa_eng_load(track_t *t, uint32_t i, uint32_t down) { (void)t; if (down) edit_load(eng_vis(LY_INIT + i), 0); }
 static uint32_t eqa_eng_on(const track_t *t, uint32_t i) { return t->eng_req % NENGINES == eng_vis(LY_INIT + i); }
 #define EQA_ENG(i) {LK_SET, EQ_SHOW_SEL, i, eqa_eng_name, eqa_eng_load, eqa_eng_on}
-static const eqa_t EQA_ENGINES[] = {EQA_ENG(0), EQA_ENG(1)};
-typedef char eqa_eng_fits[NELEM(EQA_ENGINES) == NENG_SHOWN - LY_INIT ? 1 : -1];   /* (every engine has a key) */
+static const eqa_t EQA_ENGINES[] = {EQA_ENG(0), EQA_ENG(1), EQA_LATCH};
+typedef char eqa_eng_fits[NELEM(EQA_ENGINES) - 1u == NENG_SHOWN - LY_INIT ? 1 : -1];   /* (every engine has a key) */
+#elif FELUCCA_MODULE
+static const eqa_t EQA_ENGINES[] = {EQA_LATCH};
 #endif
-typedef char eqa_fits[NLANE <= 11 ? 1 : -1];       /* (11 black keys) */
+typedef char eqa_fits[NELEM(EQA_DRUM) <= 11 ? 1 : -1];   /* (11 black keys) */
 
 static uint32_t eqa_count(const track_t *t)        /* the actions of t's engine (black keys 1..n) */
 {
@@ -575,7 +594,7 @@ static uint32_t eqa_count(const track_t *t)        /* the actions of t's engine 
     for (i = 0; i < NELEM(EQA); i++)
         if (EQA[i].eng == e)
             return EQA[i].n;
-#if FELUCCA_STRANGE
+#if FELUCCA_MODULE
     return NELEM(EQA_ENGINES);
 #else
     return 0;
@@ -587,7 +606,7 @@ static const eqa_t *eqa_of(const track_t *t, uint32_t p)   /* black key p's (0 =
     for (i = 0; i < NELEM(EQA); i++)
         if (EQA[i].eng == e)
             return p < EQA[i].n ? &EQA[i].a[p] : 0;
-#if FELUCCA_STRANGE
+#if FELUCCA_MODULE
     return p < NELEM(EQA_ENGINES) ? &EQA_ENGINES[p] : 0;
 #else
     return 0;

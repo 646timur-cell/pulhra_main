@@ -460,10 +460,15 @@ static int test_edit_pages(void)
     ok &= TSEL->eng_req == 3u;
     key_down(black_key(1)); key_up(black_key(1)); frame();   /* G#3: SAMPLE */
     ok &= TSEL->eng_req == ENGI_SAMPLE;
-    key_down(black_key(2)); key_up(black_key(2)); frame();   /* A#3: nothing */
-    ok &= TSEL->eng_req == ENGI_SAMPLE && eqa_count(TSEL) == 2u;
+    TSEL->p[P_AHOLD] = 0;
+    key_down(black_key(2)); key_up(black_key(2)); frame();   /* A#3: LATCH */
+    ok &= TSEL->eng_req == ENGI_SAMPLE && eqa_count(TSEL) == 3u && TSEL->p[P_AHOLD] == 1;
+    key_down(black_key(2)); key_up(black_key(2)); frame();
+    ok &= TSEL->p[P_AHOLD] == 0;
+    key_down(black_key(3)); key_up(black_key(3)); frame();   /* C#4: nothing */
+    ok &= TSEL->eng_req == ENGI_SAMPLE && TSEL->p[P_AHOLD] == 0;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT, one page: 15 engines on the white keys, LOFI SAMPLE on black keys 1 2, the next black key nothing", ok);
+    bad += check("EDIT, one page: 15 engines on the white keys, LOFI SAMPLE on black keys 1 2, LATCH on 3 (on, off)", ok);
     return bad;
 }
 
