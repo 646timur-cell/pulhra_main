@@ -13,9 +13,6 @@
 #define NTRK NPART               /* tracks (the formats and the protocol count these): every track is a part */
 #define NSTEP 64
 #define HALF_FRAMES 128          /* I2S half buffer: 2.9 ms at 44.1 kHz (a key waits 0..1 half, then plays 1 half later) */
-#ifndef FELUCCA_SLICE
-#define FELUCCA_SLICE 1          /* the SLICE engine (eng_slice.c), engine 13; FELUCCA_SLICE=0 builds without it */
-#endif
 #ifndef FELUCCA_FM4
 #define FELUCCA_FM4 0            /* the DIGITAL engine (eng_digital.c, four-operator FM): kept in the tree, not built
                                   * by default; replaced by FM6, its sounds convert (fm4_convert.c) */
@@ -29,13 +26,17 @@
                                   * nor hear MIDI), their CPU and memory spent on five engines of its own (LYRA, CHAOS,
                                   * STRING, MODAL, BLOW: engines 15..19) shown with PHYS and GURDY; the rest hidden */
 #endif
+#ifndef FELUCCA_SLICE
+#define FELUCCA_SLICE !FELUCCA_STRANGE   /* the SLICE engine (eng_slice.c), engine 13; FELUCCA_SLICE=0 builds without it
+                                          * (STRANGE: without; its number 13 stays, played by none) */
+#endif
 #if FELUCCA_STRANGE && !FELUCCA_MODULE
 #error "the STRANGE build is a sound-module build (FELUCCA_MODULE=1)"
 #endif
-#if !FELUCCA_SLICE
+#if !FELUCCA_SLICE && FELUCCA_MODULE && !FELUCCA_STRANGE
 #error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
 #endif
-#define NENGINES (14 + FELUCCA_SLICE + 5 * FELUCCA_STRANGE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
+#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_STRANGE) + 5 * FELUCCA_STRANGE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
                                                             * STRANGE's 15..19: the others keep their numbers */
 #define ENGI_GURDY 14u           /* GURDY: the hurdy-gurdy (eng_gurdy.c, from GHOULBOX by Jason Persinger, GPL-3.0) */
 #define ENGI_LYRA 15u            /* STRANGE: eng_lyra.c (Lyra-8-like organismic pairs, hyper-LFO, delay) */
@@ -45,7 +46,7 @@
 #define ENGI_BLOW 19u            /* STRANGE: eng_blow.c (reed, jet and lip waveguides) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (FELUCCA_STRANGE ? 17 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
+#define NENG_SHOWN (FELUCCA_STRANGE ? 15 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))

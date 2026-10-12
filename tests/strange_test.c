@@ -166,7 +166,7 @@ static int test_engines(void)
 {
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
-    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 6, 5, 11, 3, 4};
+    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3};
     ui_power_on();
     bad += check("20 engines; LYRA CHAOS STRING MODAL BLOW are 15..19", NENGINES == 20 && ENGINES[ENGI_LYRA] == &ENG_LYRA &&
                  ENGINES[ENGI_CHAOS] == &ENG_CHAOS && ENGINES[ENGI_STRING] == &ENG_STRING &&
@@ -176,7 +176,10 @@ static int test_engines(void)
         ok &= eng_vis(i) == want[i] && eng_ok(want[i]);
     for (i = 0; i < NENGINES; i++)
         nshown += eng_ok(i) != 0;
-    bad += check("shown: every engine but DIGITAL (retired), DRUM and SLICE, STRANGE's five first", ok && nshown == 17u && NENG_SHOWN == 17 && !eng_ok(1) && !eng_ok(ENGI_DRUM) && !eng_ok(13));
+    bad += check("shown: every engine but DIGITAL (retired), SAMPLE, TRIO, DRUM and SLICE, STRANGE's five first",
+                 ok && nshown == NELEM(want) && NENG_SHOWN == NELEM(want) && !eng_ok(1) && !eng_ok(ENGI_DRUM) && !eng_ok(13) &&
+                 !eng_ok(ENGI_SAMPLE) && !eng_ok(6) && ENGINES[6] == &ENG_FM4_GONE && ENGINES[13] == &ENG_FM4_GONE &&
+                 ENGINES[ENGI_GURDY] == &ENG_GURDY);
     preset_all_pos(&total);
     ok = 1;
     for (i = 0; i < total; i++) {
@@ -473,21 +476,17 @@ static int test_edit_pages(void)
     key_up(white(1));
     frame();
     ok = TSEL->eng_req == ENGI_CHAOS && ui.layer == LAYER_EDIT;
-    key_down(white(14)); key_up(white(14)); frame();    /* F5: the 15th, NOISE */
-    ok &= TSEL->eng_req == 11u;
-    key_down(black_key(0)); key_up(black_key(0)); frame();   /* F#3: LOFI */
+    key_down(white(14)); key_up(white(14)); frame();    /* F5: the 15th, LOFI */
     ok &= TSEL->eng_req == 3u;
-    key_down(black_key(1)); key_up(black_key(1)); frame();   /* G#3: SAMPLE */
-    ok &= TSEL->eng_req == ENGI_SAMPLE;
     TSEL->p[P_AHOLD] = 0;
-    key_down(black_key(2)); key_up(black_key(2)); frame();   /* A#3: LATCH */
-    ok &= TSEL->eng_req == ENGI_SAMPLE && eqa_count(TSEL) == 3u && TSEL->p[P_AHOLD] == 1;
-    key_down(black_key(2)); key_up(black_key(2)); frame();
+    key_down(black_key(10)); key_up(black_key(10)); frame();   /* F#5: LATCH */
+    ok &= TSEL->eng_req == 3u && eqa_count(TSEL) == 11u && TSEL->p[P_AHOLD] == 1;
+    key_down(black_key(10)); key_up(black_key(10)); frame();
     ok &= TSEL->p[P_AHOLD] == 0;
-    key_down(black_key(3)); key_up(black_key(3)); frame();   /* C#4: nothing */
-    ok &= TSEL->eng_req == ENGI_SAMPLE && TSEL->p[P_AHOLD] == 0;
+    key_down(black_key(0)); key_up(black_key(0)); frame();   /* F#3: nothing (no engines past the white keys) */
+    ok &= TSEL->eng_req == 3u && TSEL->p[P_AHOLD] == 0;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT, one page: 15 engines on the white keys, LOFI SAMPLE on black keys 1 2, LATCH on 3 (on, off)", ok);
+    bad += check("EDIT, one page: 15 engines on the white keys, LATCH on the last black key, F#5 (on, off)", ok);
     return bad;
 }
 

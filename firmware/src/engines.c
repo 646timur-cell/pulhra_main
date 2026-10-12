@@ -33,7 +33,9 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
 #include "eng_lofi.c"
 #include "eng_sample.c"
 #include "eng_formant.c"
+#if !FELUCCA_STRANGE                     /* (STRANGE: TRIO, DRUM, SLICE dropped; their numbers stay, played by none) */
 #include "eng_trio.c"
+#endif
 #include "eng_wheel.c"
 #include "eng_grain.c"
 #include "eng_phys.c"           /* PHYS: DaisySP physical models (phys_dsp.c, MIT) */
@@ -69,7 +71,11 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_LOFI,                   /* 3 */
     &ENG_SAMPLE,                 /* 4 */
     &ENG_FORMANT,                /* 5 VOICE (eng_formant.c: "voice" is a sounding note in voice.c) */
+#if FELUCCA_STRANGE
+    &ENG_FM4_GONE,               /* 6: TRIO (not in STRANGE) */
+#else
     &ENG_TRIO,                   /* 6 */
+#endif
     &ENG_WHEEL,                  /* 7 */
     &ENG_GRAIN,                  /* 8 */
     &ENG_PHYS,                   /* 9 (ENGI_PHYS) */
@@ -78,6 +84,8 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_FM6,                    /* 12 (ENGI_FM6) */
 #if FELUCCA_SLICE
     &ENG_SLICE,                  /* 13 (FELUCCA_SLICE=0 builds without it) */
+#elif FELUCCA_STRANGE
+    &ENG_FM4_GONE,               /* 13: SLICE (not in STRANGE; GURDY's 14 and STRANGE's 15..19 stay) */
 #endif
     &ENG_GURDY,                  /* 14 (ENGI_GURDY) */
 #if FELUCCA_STRANGE
@@ -139,9 +147,8 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
 static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: every engine, its own first, then the textures' kin;
                                                          * the first 15 are the EDIT layer's keys (ui_layer.c LY_INIT) */
     ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,  /* STRANGE's own */
-    8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 6, 5, 11,      /* GRAIN PHYS GURDY FM6 ANALOG WHEEL PHASE TRIO VOICE NOISE */
-    3, 4,                                                       /* LOFI SAMPLE: the EDIT layer's black keys 1, 2
-                                                                 * (no DRUM, no SLICE: a texture module) */
+    8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3,      /* GRAIN PHYS GURDY FM6 ANALOG WHEEL PHASE VOICE NOISE LOFI
+                                                                 * (no SAMPLE, TRIO, DRUM, SLICE: a texture module) */
 };
 #else
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {

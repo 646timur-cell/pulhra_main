@@ -984,7 +984,8 @@ function buildSlot(name, zonesIn) {
   let len = 0;
   for (const z of zonesIn) {
     const e = imaEncode(z.s, 0);
-    zones.push({ off: len, n: z.s.length, ls: 0, le: z.s.length - 1, root: z.root, lo: z.lo ?? null, hi: z.hi ?? null, pred: e.pred, idx: e.idx });
+    zones.push({ off: len, n: z.s.length, ls: 0, le: z.s.length - 1, root: z.root, lo: z.lo ?? null, hi: z.hi ?? null, pred: e.pred, idx: e.idx,
+                 rate: z.rate || SMP.RATE });
     parts.push(e.data);
     len += e.data.length;
   }
@@ -1008,15 +1009,36 @@ function buildSlot(name, zonesIn) {
   for (let i = 0; i < nm.length; i++) hdr[8 + i] = nm.charCodeAt(i);
   v.setUint32(16, len, true);
   v.setUint32(20, crc32(data), true);
-  const rate = pyRound(SMP.RATE / 44100 * 65536);
   zones.forEach((z, j) => {
-    const b = 32 + j * 28;
+    const b = 32 + j * 28, rate = pyRound(z.rate / 44100 * 65536);   /* (each zone its own rate: the downsampler) */
     [z.off, z.n, z.ls, z.le, rate].forEach((x, k) => v.setUint32(b + k * 4, x >>> 0, true));
     v.setInt16(b + 20, z.root * 16, true);
     v.setInt16(b + 22, z.pred, true);
     hdr[b + 24] = z.idx; hdr[b + 25] = z.lo; hdr[b + 26] = z.hi; hdr[b + 27] = 0;
   });
   return { hdr, data, zones };
+}
+
+/* the downsampler: a slot's files as uploaded, at its RATE (22050 .. 4000 Hz: the player takes each zone's rate,
+ * so a lower one holds longer in the slot and sounds grittier), ALIAS (no smoothing before the decimation: the
+ * folded highs left in) and BITS (16 .. 3: the samples quantised before the ADPCM) */
+const SMP_RATES = [22050, 16000, 11025, 8000, 5512, 4000];
+const SMP_BITS = [16, 12, 8, 6, 4, 3];
+function crushed(d, f) {
+  if (d.rate === SMP.RATE && d.bits >= 16) return f.s;
+  if (f._ck === `${d.rate}/${d.alias}/${d.bits}/${f.a}/${f.b}/${f.s.length}`) return f._cs;
+  let x;
+  if (d.rate === SMP.RATE) x = Array.from(f.s);
+  else if (d.alias) {                                /* sample and hold: every step-th sample, nothing smoothed */
+    const step = SMP.RATE / d.rate;
+    x = [];
+    for (let p = 0; p < f.s.length; p += step) x.push(f.s[Math.floor(p)]);
+  } else x = resample(Array.from(f.s), SMP.RATE, d.rate);
+  const q = d.bits >= 16 ? 1 : 1 << (16 - d.bits);
+  const out = Int16Array.from(x, (v) => Math.max(-32768, Math.min(32767, q > 1 ? Math.round(v / q) * q : Math.round(v))));
+  f._ck = `${d.rate}/${d.alias}/${d.bits}/${f.a}/${f.b}/${f.s.length}`;
+  f._cs = out;
+  return out;
 }
 
 /* -------------------------------------------------------------- librarian --- */
@@ -2561,6 +2583,7 @@ const TEXT = {
     confirmSave: "スロット {n} に上書き保存しますか？", confirmLoad: "スロット {n} を読み込みますか？ 4 トラックすべての音色とシーケンスが置き換わります（元に戻せません）。",
     confirmClear: "シーケンスを全部消しますか？", confirmInit: "音色を初期化しますか？ シーケンスはそのままです（本体の SAVE 長押しで元に戻せます）。",
     samples: "サンプル", smpHelp: "ファイルを選択、または入力から録音。波形の両端でトリム、ホイールで拡大。1枠に16音、合計約7秒。",
+    smpRate: "レート", smpAlias: "エイリアス", smpBits: "ビット", smpHolds: "スロット最大",
     zones: "ゾーン", smpName: "名前", chooseFiles: "ファイルを選ぶ", upload: "書き込む", erase: "消去", clearList: "リストを消す",
     file: "ファイル", root: "ルート", keys: "鍵盤", length: "長さ", remove: "外す",
     record: "録音", stopRec: "停止", recInput: "入力", recDenied: "録音できません", recFull: "スロットがいっぱいです", recSilent: "無音でした。入力を確かめてください",
@@ -2664,6 +2687,7 @@ const TEXT = {
     confirmSave: "Overwrite slot {n}?", confirmLoad: "Load slot {n}? The sounds and sequences of all four tracks are replaced (no undo).",
     confirmClear: "Clear the whole sequence?", confirmInit: "Reset the sound to the engine defaults? The sequence stays (hold SAVE on the device to undo).",
     samples: "Samples", smpHelp: "Choose files or record an input. Drag waveform ends to trim; wheel to zoom. Up to 16 sounds and about 7 s per slot.",
+    smpRate: "Rate", smpAlias: "Alias (no smoothing)", smpBits: "Bits", smpHolds: "slot holds",
     zones: "zones", smpName: "Name", chooseFiles: "Choose files", upload: "Upload", erase: "Erase", clearList: "Clear list",
     file: "File", root: "Root", keys: "Keys", length: "Length", remove: "Remove",
     record: "Record", stopRec: "Stop", recInput: "Input", recDenied: "Cannot record", recFull: "The slot is full", recSilent: "Silence: check the input",
@@ -3579,7 +3603,7 @@ $("clearseq").addEventListener("click", async () => {
 });
 
 /* ---------------------------------------------------------- samples --- */
-const smpDraft = [0, 1, 2].map(() => ({ name: "", files: [] }));
+const smpDraft = [0, 1, 2].map(() => ({ name: "", files: [], rate: SMP.RATE, alias: false, bits: 16 }));
 let smpBusy = false;
 const SMP_RC = { 1: "size", 2: "header", 3: "data CRC", 4: "flash", 5: "zones" };
 const kib = (n) => (n / 1024).toFixed(1);
@@ -3593,7 +3617,7 @@ function splitKeys(files) {
   });
   return out;
 }
-const draftBytes = (d) => d.files.reduce((a, f) => a + ((f.s.length + 1) >> 1), 0);
+const draftBytes = (d) => d.files.reduce((a, f) => a + ((crushed(d, f).length + 1) >> 1), 0);
 
 async function decodeFile(f) {
   const buf = await f.arrayBuffer();
@@ -3857,8 +3881,10 @@ function preview(f) {
     if (previewSrc) previewSrc.stop();
     previewCtx = previewCtx || new AudioContext();
     previewCtx.resume().catch(() => {});
-    const buf = previewCtx.createBuffer(1, f.s.length, SMP.RATE), ch = buf.getChannelData(0);
-    for (let i = 0; i < f.s.length; i++) ch[i] = f.s[i] / 32768;
+    const r = f.rate || SMP.RATE, up = SMP.RATE / r, n = Math.floor(f.s.length * up);   /* (a lower rate held, as the
+                                                                                          * player steps it: no smoothing) */
+    const buf = previewCtx.createBuffer(1, Math.max(1, n), SMP.RATE), ch = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) ch[i] = f.s[Math.min(f.s.length - 1, Math.floor(i / up))] / 32768;
     previewSrc = previewCtx.createBufferSource();
     previewSrc.buffer = buf;
     previewSrc.connect(previewCtx.destination);
@@ -3923,6 +3949,15 @@ function renderSamples() {
         el("button", { ic: "symbol_upload", disabled: smpBusy || recActive() || !d.files.length || tooBig || !d.name, onclick: () => smpUpload(k, prog) }, t("upload")),
         d.files.length ? el("button", { text: t("clearList"), disabled: smpBusy || recActive(), onclick: () => { d.files = []; renderSamples(); } }) : "",
         size, prog),
+      el("div", { class: "head" }, el("span", { text: t("smpRate") }),
+        (() => { const s = el("select", { disabled: smpBusy }, ...SMP_RATES.map((r) => el("option", { value: r, text: `${(r / 1000).toFixed(r % 1000 ? 1 : 0)} kHz` })));
+          s.value = d.rate; s.addEventListener("change", () => { d.rate = +s.value; renderSamples(); }); return s; })(),
+        el("label", {}, (() => { const c = el("input", { type: "checkbox", disabled: smpBusy || d.rate === SMP.RATE });
+          c.checked = d.alias; c.addEventListener("change", () => { d.alias = c.checked; renderSamples(); }); return c; })(), " " + t("smpAlias")),
+        el("span", { text: t("smpBits") }),
+        (() => { const s = el("select", { disabled: smpBusy }, ...SMP_BITS.map((b) => el("option", { value: b, text: `${b}` })));
+          s.value = d.bits; s.addEventListener("change", () => { d.bits = +s.value; renderSamples(); }); return s; })(),
+        el("span", { class: "dim", text: `${t("smpHolds")} ${(SMP.MAX_DATA * 2 / d.rate).toFixed(1)} s` })),
       recRow(k));
     if (d.files.length) {
       const keys = splitKeys(d.files);
@@ -3938,12 +3973,12 @@ function renderSamples() {
         });
         tb.append(el("tr", {}, el("td", { text: f.fname }), el("td", {}, root),
           el("td", { text: `${noteName(keys[i][0])}–${noteName(keys[i][1])}` }),
-          el("td", { text: `${(f.s.length / SMP.RATE).toFixed(2)} s` }),
+          el("td", { text: `${(f.s.length / SMP.RATE).toFixed(2)} s` + (d.rate !== SMP.RATE || d.bits < 16 ? ` → ${(crushed(d, f).length / 1024).toFixed(0)}k` : "") }),
           el("td", {}, el("button", { text: t("remove"), disabled: smpBusy || recActive(), onclick: () => { d.files.splice(i, 1); renderSamples(); } }))));
         if (f.raw)                                  /* the waveform: drag its ends to trim */
           tb.append(el("tr", { class: "trimrow" }, el("td", { colspan: 4 }, trimCanvas(f)),
             el("td", {},
-              el("button", { text: t("preview"), onclick: () => preview(f) }),
+              el("button", { text: t("preview"), onclick: () => preview({ s: crushed(d, f), rate: d.rate }) }),
               el("button", { text: t("autoTrim"), disabled: smpBusy || recActive(), onclick: () => {
                 [f.a, f.b] = autoTrim(f.raw);
                 f.s = takeSample(f.raw, f.a, f.b);
@@ -3968,7 +4003,7 @@ async function smpInfo(d = dev) { d.smp = parse[CMD.SMP_INFO](await sessionReque
 async function smpUpload(k, prog) {
   const d = smpDraft[k];
   let built;
-  try { built = buildSlot(d.name, d.files.map((f) => ({ s: f.s, root: f.root }))); }
+  try { built = buildSlot(d.name, d.files.map((f) => ({ s: crushed(d, f), root: f.root, rate: d.rate }))); }
   catch (e) { sayK("smpFail", e.message); return; }
   if (!confirm(t("confirmUpload").replace("{n}", k + 1))) return;
   const { hdr, data } = built;

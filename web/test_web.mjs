@@ -35,7 +35,7 @@ const FW_ROOT = process.env.FELUCCA_ROOT || join(HERE, "..");
 const html = readFileSync(join(HERE, "editor.html"), "utf8");
 const proto = html.slice(html.indexOf("/*PROTO-BEGIN*/"), html.indexOf("/*PROTO-END*/"));
 const E = vm.runInNewContext(proto + `
-;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, takeSample, autoTrim, zoomView, rootFromName, buildSlot, makeMockDevice, CMD, SMP,
+;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, takeSample, autoTrim, zoomView, rootFromName, buildSlot, crushed, makeMockDevice, CMD, SMP,
    UP, bank, capturePatch, auditionPatch, startWatch, libraryFile, readLibraryFile, paramKeys, patternFromSteps, stepsFromPattern, upName,
    mixer, parseNotes, parseHits, hitsText, gridFromSteps, LANE_NOTE, LANE_OF, readDevicePreferences, devicePresetRows, engineOrder, ENGINE_ORDER, aliasOf, fmtValue, FM6, enumShown, F,
    FM4, fromDigital, fromPerc, DRUM_KIT_E,
@@ -1569,6 +1569,17 @@ function samplesMatch() {
     const pyHdr = readFileSync(join(dir, "slot.hdr")), pyData = readFileSync(join(dir, "slot.bin"));
     ok(eq(js.hdr, pyHdr) && eq(js.data, pyData), `samples: editor == sampleio.py (${files.length} WAV formats, ${js.data.length} B)`);
   } else console.log("samples: editor == sampleio.py (no FELUCCA_TOOLS)                skip");
+  {   /* the downsampler: RATE (each zone its own, in the header), ALIAS (held, unsmoothed), BITS */
+    const s = Int16Array.from({ length: 2205 }, (_, i) => Math.round(Math.sin(i * 0.3) * 20000) | 1);
+    const d = { rate: 11025, alias: true, bits: 16 }, f = { s, a: 0, b: s.length };
+    const c = E.crushed(d, f), d8 = E.crushed({ rate: 22050, alias: false, bits: 8 }, { s, a: 0, b: 1 });
+    const sm = E.crushed({ rate: 11025, alias: false, bits: 16 }, { s, a: 0, b: 2 });
+    const sl = E.buildSlot("crush", [{ s: c, root: 60, rate: 11025 }]), hv = new DataView(sl.hdr.buffer);
+    ok(c.length === 1103 && c[1] === s[2] && c[7] === s[14] && sm.length > 1000 && sm[1] !== s[2] &&
+       d8.every((v) => v % 256 === 0) && E.crushed({ rate: 22050, alias: false, bits: 16 }, f) === s &&
+       hv.getUint32(32 + 16, true) === 16384 && hv.getUint32(32 + 4, true) === 1103,
+       "samples: the downsampler (11.025 kHz held = every 2nd sample, smoothed otherwise, 8 bits, the zone's rate 0x4000)");
+  }
   /* recording / trimming: takeSample (a cut of the raw input, faded at the cuts, normalised), autoTrim */
   const R = E.SMP.RATE, raw = new Float64Array(R);       /* 1 s: silence, a tone from 0.25 to 0.6 s, silence */
   for (let i = Math.round(R * 0.25); i < Math.round(R * 0.6); i++) raw[i] = Math.sin(i * 0.2) * 0.3;

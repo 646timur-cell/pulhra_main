@@ -486,8 +486,8 @@ static int32_t glyph_at(const aafont_t *f, uint32_t ch)
 static uint32_t glyph(const aafont_t *f, uint32_t ch)
 {
     int32_t k;
-    if (ch >= 'a' && ch <= 'z' && f->last < 'a')
-        ch -= 32u;                                   /* L has capitals only */
+    if (ch >= 'a' && ch <= 'z' && f->last < 'a' && glyph_at(f, ch) < 0)
+        ch -= 32u;                                   /* L: capitals (and STRANGE's splash's few lower case) */
     if ((k = glyph_at(f, ch)) < 0 && (ch != (uint8_t)ELLIPSIS || (k = glyph_at(f, '.')) < 0) &&
         (k = glyph_at(f, '?')) < 0)
         k = 0;
@@ -509,7 +509,8 @@ static int32_t kern(const aafont_t *f, uint32_t a, uint32_t b)       /* 1/16 px 
     return 0;
 }
 
-static uint32_t fold(const aafont_t *f, uint32_t c) { return c >= 'a' && c <= 'z' && f->last < 'a' ? c - 32u : c; }
+/* a sparse face (L) without the lower case: its capital; the few lower-case letters it has (STRANGE's splash) as they are */
+static uint32_t fold(const aafont_t *f, uint32_t c) { return c >= 'a' && c <= 'z' && f->last < 'a' && glyph_at(f, c) < 0 ? c - 32u : c; }
 
 static int32_t text_w(const aafont_t *f, const char *s)
 {

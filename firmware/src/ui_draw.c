@@ -1236,7 +1236,9 @@ static void draw_columns(void)
 #define SPL_PITCH 20                                /* line to line */
 #if FELUCCA_STRANGE                                 /* (STRANGE: darkmachine, so a glance tells the builds apart) */
 static const char *const SPLASH_LINES[] = {"darkmachine", "STRANGE " FELUCCA_VERSION, "H\xFCgelton Instruments", "with community"};
+#define SPLASH_MS 1600u                             /* (main.c: STRANGE's splash stays longer) */
 #else
+#define SPLASH_MS 400u
 static const char *const SPLASH_LINES[] = {"Felucca", FELUCCA_VERSION, "H\xFCgelton Instruments", "with community"};
 #endif
 /* a band of two lines, h tall, at y on the screen: the first line's top at ly; the two lines' capitals declared
@@ -1250,6 +1252,26 @@ static void splash_band(uint32_t y, uint32_t h, int32_t ly, const char *const *l
     cv_text_on(SPL_PAD, ly + SPL_PITCH, &AF_M, l[1], T_TEXT, T_RAISE);
     cv_blit(SPL_X0, y);
 }
+#if FELUCCA_STRANGE
+/* STRANGE: no square; on the background, "darkmachine" in L centred a little over the middle, under it STRANGE and
+ * the version in THEME, at the bottom the maker and "with community" in S, dim */
+static void splash_line(int32_t y, const aafont_t *f, const char *s, uint16_t c)
+{
+    cv_begin(240, (uint32_t)f->h, T_BG);
+    GFX_HOOK_ALIGN(0, 0, 240, f->h, AL_H, "strange splash line centred");
+    cv_text_in(0, 0, 240, f, s, c, T_BG);
+    cv_blit(0, (uint32_t)y);
+}
+static void draw_splash(void)
+{
+    lcd_fill(0, 0, 240, 240, T_BG);
+    splash_line(84, &AF_L, SPLASH_LINES[0], T_TEXT);
+    splash_line(126, &AF_M, SPLASH_LINES[1], T_THEME);
+    splash_line(196, &AF_S, SPLASH_LINES[2], T_DIM);
+    splash_line(212, &AF_S, SPLASH_LINES[3], T_DIM);
+    lcd_sync();
+}
+#else
 static void draw_splash(void)
 {
     int32_t h = SPL_PAD - AF_M_CAP_Y + SPL_PITCH + AF_M.h;     /* a band: its two lines, the descenders in */
@@ -1262,6 +1284,7 @@ static void draw_splash(void)
                 "splash maker's baseline SPL_PAD from the bottom");
     lcd_sync();
 }
+#endif
 
 /* UPDATE MODE countdown (main.c: OCT- + OCT+ held): over everything, the menu and the dialogs too */
 static void draw_uboot(void)

@@ -1569,7 +1569,7 @@ static void draw(int s)
                                                    * shown FELUCCA_VERSION (run_tests.sh: src/felucca.c's) */
 #if FELUCCA_STRANGE
         static const char WANT[] = "darkmachine|STRANGE " FELUCCA_VERSION "|H\xFCgelton Instruments|with community";
-        const int32_t top = 15;                   /* (darkmachine: lower case, its ascenders 1 px over the capitals) */
+        const int32_t top = 16;                   /* (STRANGE: no square, the lines centred: not checked) */
 #else
         static const char WANT[] = "Felucca|" FELUCCA_VERSION "|H\xFCgelton Instruments|with community";
         const int32_t top = 16;
@@ -1578,7 +1578,7 @@ static void draw(int s)
         in_splash = 1;
         draw_splash();
         in_splash = 0;
-        {   /* the square whole on the screen (176 x 176 at 32,32, more than the canvas): its edges and square corners
+        if (!FELUCCA_STRANGE) {   /* the square whole on the screen (176 x 176 at 32,32, more than the canvas): its edges and square corners
              * RAISE, BG just outside; its text's ink 16 px in from the left and the top (the bottom: AL_B, the hook) */
             const int32_t q0 = 32, q1 = 32 + 176 - 1;
             uint16_t bg = host_screen[0], ra = host_screen[(uint32_t)(q0 + 1) * 240u + (uint32_t)q0 + 1];
