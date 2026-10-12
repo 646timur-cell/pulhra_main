@@ -135,7 +135,7 @@ static void blow_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             dcx = -lp;
             dcy = tp;
             pd = bp - (tp >> 1);
-            S->jet[w & (BW_JLEN - 1u)] = clamp(pd, -4 * SQ_ONE, 4 * SQ_ONE);
+            S->jet[w & (BW_JLEN - 1u)] = clamp(pd, -5 * SQ_ONE, 5 * SQ_ONE)   /* (not +-4: -4.0 is a ROM address to build.py) */;
             j = sx_read(S->jet, BW_JLEN - 1u, w + 1u, D2);
             j = clamp(px_m(j, px_m(j, j, 20) - SQ_ONE, 20), -SQ_ONE, SQ_ONE);   /* the jet: x (x^2 - 1) */
             S->bore[w & (BW_LEN - 1u)] = j + (tp >> 1);
