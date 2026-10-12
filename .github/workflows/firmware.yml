@@ -1,0 +1,64 @@
+# Sound-module build: host tests, then the firmware package (.fwsc) with JieLi's toolchain and the AC79 SDK.
+# The package is uploaded as the run's artifact "felucca-module"; install it with the web installer's "install a
+# file" option (or tools/fm1_install.py). A tag v* also attaches it to a GitHub release.
+name: firmware
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python packages
+        run: python3 -m pip install pillow fonttools
+
+      - name: Generated headers
+        run: python3 -c "import sys; sys.path.insert(0, 'tools'); import build; build.generate()"
+
+      - name: Host tests (sound module, and Felucca's UI with FELUCCA_MODULE=0)
+        run: |
+          mkdir -p build/host
+          cc -O1 -w -Ibuild/gen -Ifirmware/src -o build/host/module_test tests/module_test.c -lm
+          build/host/module_test | tail -n 60
+          cc -O1 -w -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/ui_test tests/ui_test.c -lm
+          build/host/ui_test | tail -n 3
+          for t in midi_control_test chord_test project_test; do
+            cc -O1 -w -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/$t tests/$t.c -lm
+            build/host/$t | tail -n 1
+          done
+
+      - name: JieLi toolchain
+        run: tools/get_toolchain.sh
+
+      - name: JieLi AC79 SDK
+        run: |
+          git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
+              https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
+
+      - name: Build
+        run: ./build.sh --release 1.5.1-mod
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: felucca-module
+          path: |
+            build/felucca-1.5.1-mod.fwsc
+            build/release-1.5.1-mod/
+
+      - name: Release (tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/felucca-1.5.1-mod.fwsc --title "$GITHUB_REF_NAME" --notes "Sound-module build of Felucca 1.5.1 with GURDY."
