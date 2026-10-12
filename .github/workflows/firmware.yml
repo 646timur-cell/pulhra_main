@@ -106,8 +106,16 @@ jobs:
           git add -A && git commit -qm "Firmware build of $sha"
           git push -f origin firmware-builds
 
-      - name: Release (tags v*)
+      - name: Release (tags v*; the packages and both installer pages, added to a release made on GitHub first)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/felucca-1.5.1-mod.fwsc build/felucca-1.5.1-strange.fwsc --title "$GITHUB_REF_NAME" --notes "Sound-module build of Felucca 1.5.1 with GURDY, and the STRANGE build (darkmachine, a texture module; STRANGE.md). Install a .fwsc with the web installer's install-a-file option, or the matching installer page from the firmware-builds branch."
+        run: |
+          python3 web/make_module_installer.py build/felucca-1.5.1-mod.fwsc 1.5.1-mod build/fm1-sound-module-installer.html
+          python3 web/make_module_installer.py build/felucca-1.5.1-strange.fwsc 1.5.1-strange build/fm1-strange-installer.html
+          set -- build/felucca-1.5.1-strange.fwsc build/fm1-strange-installer.html build/felucca-1.5.1-mod.fwsc build/fm1-sound-module-installer.html
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$@" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$@" --title "$GITHUB_REF_NAME" --notes "STRANGE (darkmachine, a texture module on Felucca 1.5.1; STRANGE.md) and the sound-module build. Install by opening fm1-strange-installer.html in Chrome with the FM-1 on USB."
+          fi
