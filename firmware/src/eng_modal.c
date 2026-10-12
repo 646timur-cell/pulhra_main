@@ -197,7 +197,7 @@ static void modal_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     S->last = last;
 }
 
-#define STRANGE_CAT_MODAL "UUPPFUPK"
+#define STRANGE_CAT_MODAL "UUPPFUPKPFPF"
 static const preset_t MODAL_PRESETS[] = {
     /* name, {MATR, STRC, BRIT, DAMP, POS, EXCT, HARD, BEAT}, {A D S R}, fenv, mono */
     {"MARIMBA", {1, 64, 30, 46, 20, MX_MALLET, 50, 0}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 0, 30)},
@@ -208,6 +208,11 @@ static const preset_t MODAL_PRESETS[] = {
     {"TABLA", {5, 50, 40, 50, 50, MX_MALLET, 70, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
     {"BLOWN GLASS", {3, 64, 80, 104, 34, MX_BLOW, 60, 10}, {70, 64, 127, 90}, 0, 0, FX(0, 0, 0, 70)},
     {"STEEL TONGUE", {7, 72, 60, 90, 24, MX_STICK, 80, 6}, {0, 64, 127, 80}, 0, 0, FX(0, 0, 10, 50)},
+    /* textures */
+    {"BOWL FIELD", {6, 64, 80, 124, 30, MX_BOW, 30, 60}, {110, 64, 127, 127}, 0, 0, FX(0, 0, 20, 110)},
+    {"WIND CHIMES", {0, 70, 110, 110, 18, MX_STICK, 120, 30}, {0, 64, 127, 120}, 0, 0, FX(0, 0, 30, 100)},
+    {"GLASS BREATH", {3, 64, 90, 116, 40, MX_BLOW, 30, 40}, {120, 64, 127, 124}, 0, 0, FX(0, 30, 0, 110)},
+    {"IRON RAIN", {4, 100, 120, 90, 50, MX_STICK, 90, 80}, {0, 64, 127, 110}, 0, 0, FX(0, 0, 40, 90)},
 };
 
 static const engine_t ENG_MODAL = {

@@ -20,7 +20,7 @@
 #include <math.h>
 
 #define SR 44100u
-static int32_t wav_l[SR * 12], wav_r[SR * 12];
+static int32_t wav_l[SR * 30], wav_r[SR * 30];
 
 static void wav_write(const char *dir, const char *eng, const char *name, uint32_t frames)
 {
@@ -101,7 +101,7 @@ static phr_t phrase(uint32_t eng, uint32_t preset, const uint8_t *notes, uint32_
 {
     phr_t R;
     int32_t buf[2 * CTL];
-    uint32_t i, k, f = 0, hold = (uint32_t)(hold_s * SR), end = SR * 12u, quiet = 0;
+    uint32_t i, k, f = 0, hold = (uint32_t)(hold_s * SR), end = SR * 30u, quiet = 0;
     double sum = 0, sq = 0, sl = 0, se = 0;
     uint32_t nl = 0;
     memset(&R, 0, sizeof R);
@@ -156,8 +156,8 @@ static phr_t phrase(uint32_t eng, uint32_t preset, const uint8_t *notes, uint32_
     R.rms_late = sqrt(sl / (SR / 4u));
     R.rms_early = sqrt(se / (SR * 3u / 10u - SR / 50u));
     R.tail_rms = quiet > SR / 2u ? 0 : 1;
-    if (hold > SR)                                       /* the held note's pitch: 0.3 s from 0.5 s in */
-        R.f0 = f0_of(SR / 2u, (uint32_t)(SR * 0.3));
+    if (hold > SR)                                       /* the held note's pitch: 0.3 s from 0.5 s in (a long hold: */
+        R.f0 = f0_of(hold > 3u * SR ? hold - SR / 2u : SR / 2u, (uint32_t)(SR * 0.3));   /* its end, past the attack) */
     return R;
 }
 
@@ -165,7 +165,7 @@ static int test_engines(void)
 {
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
-    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_PHYS, ENGI_GURDY, 8};
+    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 6, 5, 11, 3, 4, 13, ENGI_DRUM};
     ui_power_on();
     bad += check("20 engines; LYRA CHAOS STRING MODAL BLOW are 15..19", NENGINES == 20 && ENGINES[ENGI_LYRA] == &ENG_LYRA &&
                  ENGINES[ENGI_CHAOS] == &ENG_CHAOS && ENGINES[ENGI_STRING] == &ENG_STRING &&
@@ -175,14 +175,14 @@ static int test_engines(void)
         ok &= eng_vis(i) == want[i] && eng_ok(want[i]);
     for (i = 0; i < NENGINES; i++)
         nshown += eng_ok(i) != 0;
-    bad += check("shown: LYRA CHAOS STRING MODAL BLOW PHYS GURDY GRAIN, nothing else", ok && nshown == 8u && NENG_SHOWN == 8);
+    bad += check("shown: every engine but the retired DIGITAL, STRANGE's five first", ok && nshown == 19u && NENG_SHOWN == 19 && !eng_ok(1));
     preset_all_pos(&total);
     ok = 1;
     for (i = 0; i < total; i++) {
         uint32_t e = preset_all_at(i, &k);
         ok &= e == NENGINES || eng_ok(e);
     }
-    bad += check("the PRESETS list holds only those", ok && total > 40u);
+    bad += check("the PRESETS list holds every shown engine's sounds", ok && total > 100u);
     ok = 1;
     for (i = ENGI_LYRA; i < NENGINES; i++) {
         const char *s = PRESET_CAT[i];
@@ -265,9 +265,13 @@ static int test_sound(const char *wavs)
     int bad = 0;
     uint32_t e, k;
     static const uint8_t A3[] = {57}, CH[] = {57, 64};
-    for (e = ENGI_LYRA; e < NENGINES; e++) {
+    /* the stock engines' own sounds: tests/regress.c's; here their STRANGE textures, after them */
+    static const uint8_t STOCK_N[ENGI_LYRA] = {[0] = 12, [8] = 4, [9] = 9, [11] = 4, [14] = 6};
+    for (e = 0; e < NENGINES; e++) {
         const engine_t *en = ENGINES[e];
-        for (k = 0; k < en->npresets; k++) {
+        if (e < ENGI_LYRA && (!STOCK_N[e] || !eng_ok(e)))
+            continue;
+        for (k = e < ENGI_LYRA ? STOCK_N[e] : 0u; k < en->npresets; k++) {
             char what[96];
             int ok;
             phr_t R;
@@ -275,7 +279,7 @@ static int test_sound(const char *wavs)
             int pitched = e == ENGI_STRING || e == ENGI_BLOW || (e == ENGI_MODAL && en->presets[k].e[0] == 7);
             int hit = (e == ENGI_STRING && en->presets[k].e[0] != SR_BOW) ||
                       (e == ENGI_MODAL && en->presets[k].e[5] <= MX_STICK);   /* (struck: it decays while held) */
-            R = phrase(e, k, mono || pitched ? A3 : CH, mono || pitched ? 1u : 2u, 2.0);
+            R = phrase(e, k, mono || pitched ? A3 : CH, mono || pitched ? 1u : 2u, en->presets[k].env[0] >= 80 ? 5.0 : 2.0);
             if (wavs)
                 wav_write(wavs, en->name, en->presets[k].name, R.frames);
             snprintf(what, sizeof what, "%s %-12s peak %5.0f rms %5.0f dc %4.0f clip %u free %.2fs f0 %.1f", en->name,

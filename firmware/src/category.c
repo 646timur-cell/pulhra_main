@@ -18,8 +18,21 @@ static uint32_t cat_of_engine(uint32_t e) { return e == 10u || e == 13u ? CAT_DR
  * L LEAD, P PAD, U PLUCK, K KEYS, D DRUM, F FX, O OTHER); a preset past its string (DIGITAL's, FELUCCA_FM4 builds
  * only; SAMPLE's retired PERC, past SMP_NPRESETS): its engine's (cat_of_engine). tests/ui_test.c checks every string
  * against its engine's preset count. A preset's category is a hint for browsing: nothing else reads it */
+#if FELUCCA_STRANGE                                      /* STRANGE's texture sounds after the stock ones */
+#define XCAT_ANALOG "PP"
+#define XCAT_GRAIN "PPFP"
+#define XCAT_PHYS "PPF"
+#define XCAT_NOISE "FF"
+#define XCAT_GURDY "PP"
+#else
+#define XCAT_ANALOG ""
+#define XCAT_GRAIN ""
+#define XCAT_PHYS ""
+#define XCAT_NOISE ""
+#define XCAT_GURDY ""
+#endif
 static const char *const PRESET_CAT[NENGINES > 16 ? NENGINES : 16] = {
-    "LPBPBKLBULLP",              /* 0 ANALOG: SAW LEAD, SOFT PAD, SQR BASS, PWM STR, ACID, SINE KEY, RAVE, SUB BASS,
+    "LPBPBKLBULLP" XCAT_ANALOG,              /* 0 ANALOG: SAW LEAD, SOFT PAD, SQR BASS, PWM STR, ACID, SINE KEY, RAVE, SUB BASS,
                                   * PLUCK, BRASS, WIND, STRINGS */
     "",                          /* 1 DIGITAL (retired) */
     "LKPLUU",                    /* 2 PHASE: BRASS, ORGAN, STRING, RESO, BELL, WIRE */
@@ -28,14 +41,14 @@ static const char *const PRESET_CAT[NENGINES > 16 ? NENGINES : 16] = {
     "PLBF",                      /* 5 VOICE: CHOIR AAH, VOX LEAD, WOW BASS, WHISPER */
     "BLLUP",                     /* 6 TRIO: FAT BASS, ARP LEAD, SYNC LEAD, RING BELL, CHIP CHOIR */
     "KKKKK",                     /* 7 WHEEL: the organs */
-    "PFPP",                      /* 8 GRAIN: CLOUD PAD, GLITCH, FROZEN, SHIMMER */
-    "UUUPUDDPU",                 /* 9 PHYS: BELL TREE, MARIMBA, PLUCK, BOWED METAL, KALIMBA, HAND DRUM, TOMS, DRONE
+    "PFPP" XCAT_GRAIN,                      /* 8 GRAIN: CLOUD PAD, GLITCH, FROZEN, SHIMMER */
+    "UUUPUDDPU" XCAT_PHYS,                 /* 9 PHYS: BELL TREE, MARIMBA, PLUCK, BOWED METAL, KALIMBA, HAND DRUM, TOMS, DRONE
                                   * STRING, HARP */
     "D",                         /* 10 DRUM: DRUM KIT */
-    "FFFF",                      /* 11 NOISE: WIND, RAIN, ARCADE, METAL */
+    "FFFF" XCAT_NOISE,                      /* 11 NOISE: WIND, RAIN, ARCADE, METAL */
     "KUBLPUKU",                  /* 12 FM6: TINE EP, BELL, FM BASS, BRASS, PAD, MARIMBA, ORGAN, PLUCK */
     "DD",                        /* 13 SLICE: CHOP, STUTTER */
-    "LPLLLL",                    /* 14 GURDY: HURDY GURDY, DRONE WHEEL, DANCE GURDY, TROMPETTE, VIELLE, BAGPIPE */
+    "LPLLLL" XCAT_GURDY,                    /* 14 GURDY: HURDY GURDY, DRONE WHEEL, DANCE GURDY, TROMPETTE, VIELLE, BAGPIPE */
 #if FELUCCA_STRANGE
     STRANGE_CAT_LYRA, STRANGE_CAT_CHAOS, STRANGE_CAT_STRING, STRANGE_CAT_MODAL, STRANGE_CAT_BLOW,   /* 15..19 (the engine
                                                                                                 * files: next to their presets) */

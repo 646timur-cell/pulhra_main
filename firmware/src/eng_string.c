@@ -184,7 +184,7 @@ static const param_desc_t *string_desc(const track_t *t, uint32_t k)
     return k == 1u && t->p[P_E0] != SR_BOW ? &SR_D_HARD : 0;   /* PRES: the pick's / hammer's hardness */
 }
 
-#define STRANGE_CAT_STRING "LPLUUKPU"
+#define STRANGE_CAT_STRING "LPLUUKPUPPUU"
 static const preset_t STRING_PRESETS[] = {
     /* name, {MODE, PRES, POS, DAMP, BRIT, STIF, BODY, BMIX}, {A D S R}, fenv, mono */
     {"CELLO BOW", {SR_BOW, 60, 30, 80, 70, 4, SB_CELLO, 70}, {40, 64, 127, 60}, 0, 1, FX(0, 0, 0, 50)},
@@ -195,6 +195,11 @@ static const preset_t STRING_PRESETS[] = {
     {"DULCIMER", {SR_STRIKE, 90, 30, 92, 100, 30, SB_GUITAR, 40}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 10, 40)},
     {"DRONE BOW", {SR_BOW, 80, 40, 110, 80, 20, SB_CELLO, 90}, {90, 64, 127, 100}, 0, 0, FX(0, 20, 0, 80)},
     {"PIANO WIRE", {SR_STRIKE, 110, 16, 100, 116, 90, SB_OFF, 0}, {0, 64, 127, 70}, 0, 0, FX(0, 0, 0, 40)},
+    /* textures */
+    {"BOWED HAZE", {SR_BOW, 30, 6, 110, 110, 20, SB_VIOLIN, 40}, {110, 64, 127, 120}, 0, 0, FX(0, 30, 0, 110)},
+    {"DRONE CELLOS", {SR_BOW, 70, 36, 120, 70, 8, SB_CELLO, 90}, {120, 64, 127, 127}, 0, 0, FX(0, 40, 0, 100)},
+    {"GHOST HARP", {SR_PLUCK, 30, 60, 120, 50, 10, SB_GUITAR, 60}, {0, 64, 127, 127}, 0, 0, FX(0, 30, 40, 110)},
+    {"SITAR MIST", {SR_PLUCK, 100, 30, 120, 120, 0, SB_SITAR, 70}, {0, 64, 127, 127}, 0, 0, FX(0, 20, 40, 110)},
 };
 
 static const engine_t ENG_STRING = {

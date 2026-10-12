@@ -155,7 +155,7 @@ static const param_desc_t *chaos_desc(const track_t *t, uint32_t k)
     return k == 2u ? W[(uint32_t)clamp(t->p[P_E0], 0, CH_N - 1)] : 0;
 }
 
-#define STRANGE_CAT_CHAOS "LBFPLFB"
+#define STRANGE_CAT_CHAOS "LBFPLFBFPPF"
 static const preset_t CHAOS_PRESETS[] = {
     /* name, {ALGO, CHAO, WARP, TONE, FOLD, DRFT, SUB, NOIS}, {A D S R}, fenv, mono */
     {"ENNER LEAD", {CH_FBFM, 40, 64, 100, 20, 30, 0, 0}, {2, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
@@ -165,6 +165,11 @@ static const preset_t CHAOS_PRESETS[] = {
     {"VALVE LEAD", {CH_VDP, 70, 110, 88, 40, 20, 20, 0}, {4, 64, 127, 40}, 0, 1, FX(10, 0, 0, 30)},
     {"ROAR", {CH_DUFF, 127, 127, 110, 60, 90, 0, 30}, {10, 64, 127, 60}, 0, 0, FX(20, 0, 0, 40)},
     {"LOGIC BASS", {CH_LOGI, 20, 90, 60, 0, 10, 80, 0}, {0, 64, 127, 20}, 0, 1, FX(0, 0, 0, 10)},
+    /* textures */
+    {"STATIC FIELD", {CH_LOGI, 110, 100, 60, 10, 90, 0, 40}, {100, 64, 127, 120}, 0, 0, FX(0, 30, 20, 100)},
+    {"LUNG", {CH_VDP, 30, 40, 50, 0, 100, 0, 70}, {110, 64, 127, 120}, 0, 0, FX(0, 20, 0, 110)},
+    {"TERRA DRONE", {CH_DUFF, 30, 50, 70, 20, 110, 40, 10}, {120, 64, 127, 127}, 0, 0, FX(0, 30, 0, 100)},
+    {"FERAL SWARM", {CH_FBFM, 70, 37, 80, 30, 120, 0, 20}, {90, 64, 127, 110}, 0, 0, FX(10, 40, 30, 90)},
 };
 
 static const engine_t ENG_CHAOS = {

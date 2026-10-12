@@ -192,7 +192,7 @@ static uint32_t lyra_post(track_t *t, int32_t *out, uint32_t n)
     return L->live > 0;
 }
 
-#define STRANGE_CAT_LYRA "PPPLFPF"
+#define STRANGE_CAT_LYRA "PPPLFPFPPFPP"
 static const preset_t LYRA_PRESETS[] = {
     /* name, {TUNE, SHRP, MOD, ROUT, HLFO, TIME, FDBK, DMOD}, {A D S R}, fenv, mono */
     {"ORGANISM", {0, 30, 40, LR_SELF, 30, 78, 70, 24}, {70, 64, 127, 90}, 0, 0, FX(0, 10, 0, 50)},
@@ -202,6 +202,12 @@ static const preset_t LYRA_PRESETS[] = {
     {"HYPER FM", {6, 64, 90, LR_LFO, 100, 70, 74, 60}, {40, 64, 127, 70}, 0, 0, FX(0, 0, 0, 40)},
     {"DRONE OCT", {8, 40, 46, LR_ALL, 12, 104, 92, 34}, {100, 64, 127, 110}, 0, 0, FX(0, 0, 0, 70)},
     {"FEEDBACK", {9, 80, 70, LR_ALL, 60, 84, 118, 70}, {50, 64, 127, 90}, 0, 0, FX(8, 0, 0, 40)},
+    /* textures */
+    {"DUST VEIL", {0, 20, 30, LR_LFO, 8, 110, 96, 60}, {110, 64, 127, 120}, 0, 0, FX(0, 30, 0, 100)},
+    {"GLASS CHOIR", {1, 8, 18, LR_SELF, 14, 100, 88, 30}, {100, 64, 127, 115}, 0, 0, FX(0, 40, 0, 110)},
+    {"SWARM CLOUD", {9, 60, 70, LR_CROSS, 40, 120, 104, 90}, {90, 64, 127, 120}, 0, 0, FX(0, 0, 0, 90)},
+    {"SLOW TIDE", {2, 30, 24, LR_ALL, 4, 124, 108, 100}, {120, 64, 127, 127}, 0, 0, FX(0, 20, 0, 100)},
+    {"RUST ORGAN", {8, 90, 50, LR_SELF, 20, 70, 100, 40}, {80, 64, 127, 110}, 0, 0, FX(20, 0, 0, 80)},
 };
 
 static const engine_t ENG_LYRA = {

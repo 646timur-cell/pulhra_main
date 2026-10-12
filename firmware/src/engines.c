@@ -136,9 +136,11 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
  * engine indices, never DIGITAL's reserved 1 (with FELUCCA_FM4 it follows FM6). The indices stay as they are (the
  * stores and the protocol hold them); only this table orders them */
 #if FELUCCA_STRANGE
-static const uint8_t ENGINE_ORDER[] = {
-    ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,   /* STRANGE's own */
-    ENGI_PHYS, ENGI_GURDY, 8,                                   /* kept: their kin (8 GRAIN: the user samples) */
+static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: every engine, its own first, then the textures' kin;
+                                                         * the first 15 are the EDIT layer's keys (ui_layer.c LY_INIT) */
+    ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,  /* STRANGE's own */
+    8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 6, 5, 11,      /* GRAIN PHYS GURDY FM6 ANALOG WHEEL PHASE TRIO VOICE NOISE */
+    3, 4, 13, ENGI_DRUM,                                        /* LOFI SAMPLE SLICE DRUM */
 };
 #else
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {

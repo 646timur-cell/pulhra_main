@@ -176,7 +176,7 @@ static const param_desc_t *blow_desc(const track_t *t, uint32_t k)
     return k != 2u ? 0 : t->p[P_E0] == BW_FLUTE ? &BW_D_JET : t->p[P_E0] == BW_SAX ? &BW_D_POS : 0;
 }
 
-#define STRANGE_CAT_BLOW "LLLBLPF"
+#define STRANGE_CAT_BLOW "LLLBLPFFPP"
 static const preset_t BLOW_PRESETS[] = {
     /* name, {TYPE, BRTH, REED, NOIS, TONE, VIBR, GROWL, AIR}, {A D S R}, fenv, mono */
     {"CLARINET", {BW_CLAR, 60, 64, 10, 70, 20, 0, 6}, {20, 64, 127, 30}, 0, 1, FX(0, 0, 0, 40)},
@@ -186,6 +186,10 @@ static const preset_t BLOW_PRESETS[] = {
     {"SHAKUHACHI", {BW_FLUTE, 80, 40, 30, 80, 50, 0, 80}, {40, 64, 127, 50}, 0, 1, FX(0, 0, 10, 70)},
     {"REED DRONE", {BW_CLAR, 64, 64, 16, 56, 0, 30, 10}, {60, 64, 127, 70}, 0, 0, FX(0, 20, 0, 60)},
     {"OVERBLOWN", {BW_SAX, 127, 40, 30, 110, 30, 30, 20}, {10, 64, 127, 40}, 0, 1, FX(10, 0, 20, 50)},
+    /* textures */
+    {"AIR COLUMN", {BW_CLAR, 70, 100, 40, 60, 20, 0, 110}, {100, 64, 127, 120}, 0, 0, FX(0, 30, 20, 110)},
+    {"THROAT DRONE", {BW_CLAR, 80, 64, 30, 40, 0, 50, 30}, {100, 64, 127, 120}, 0, 0, FX(0, 20, 0, 100)},
+    {"FOG HORN", {BW_SAX, 54, 90, 20, 20, 0, 40, 40}, {110, 64, 127, 124}, 0, 0, FX(0, 0, 20, 110)},
 };
 
 static const engine_t ENG_BLOW = {
