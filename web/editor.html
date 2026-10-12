@@ -525,6 +525,7 @@ const parse = {
     const r = new Reader(a);
     const o = { nslots: r.b(), slotKiB: r.b(), slots: [] };
     for (let i = 0; i < o.nslots; i++) o.slots.push({ zones: r.b(), name: r.s(), kib: r.b() });
+    for (let i = 0; i < o.nslots; i++) o.slots[i].maxKiB = r.i < r.a.length ? r.b() : o.slotKiB;   /* (STRANGE: USR3 72) */
     return o;
   },
   [CMD.UP_LIST](a) {
@@ -3924,8 +3925,8 @@ function recRow(k) {
 function renderSamples() {
   const box = $("smpslots");                        /* the tab says when there are no slots (renderPanels) */
   if (!dev || !dev.smp) { box.replaceChildren(); return; }
-  const max = SMP.MAX_DATA;
   box.replaceChildren(...dev.smp.slots.map((u, k) => {
+    const max = (u.maxKiB || dev.smp.slotKiB) * 1024 - SMP.DATA_OFF;   /* (the slot's own size: STRANGE's USR3 is smaller) */
     const d = smpDraft[k];
     const status = u.zones ? `${u.name || "—"}, ${u.zones} ${t("zones")}, ${u.kib} KiB` : t("empty");
     const bar = el("progress", { max: dev.smp.slotKiB, value: u.kib, title: `${u.kib} / ${dev.smp.slotKiB} KiB` });
@@ -3957,7 +3958,7 @@ function renderSamples() {
         el("span", { text: t("smpBits") }),
         (() => { const s = el("select", { disabled: smpBusy }, ...SMP_BITS.map((b) => el("option", { value: b, text: `${b}` })));
           s.value = d.bits; s.addEventListener("change", () => { d.bits = +s.value; renderSamples(); }); return s; })(),
-        el("span", { class: "dim", text: `${t("smpHolds")} ${(SMP.MAX_DATA * 2 / d.rate).toFixed(1)} s` })),
+        el("span", { class: "dim", text: `${t("smpHolds")} ${(max * 2 / d.rate).toFixed(1)} s` })),
       recRow(k));
     if (d.files.length) {
       const keys = splitKeys(d.files);

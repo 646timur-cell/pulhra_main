@@ -598,3 +598,7 @@ static void up_ui_named(uint32_t op, uint32_t k, const char *name, uint32_t cat)
 }
 static void up_ui(uint32_t op, uint32_t k) { up_ui_named(op, k, 0, 0); }
 #endif
+
+#if FELUCCA_STRANGE
+#include "scene.c"               /* STRANGE: the scenes (GLO held, G4 .. G5): after the user presets it loads */
+#endif

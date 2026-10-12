@@ -53,7 +53,7 @@ static const uint8_t *ed_bk_object(uint32_t id, uint32_t *len)
     if (id >= 32u && id < 32u + SMP_USER_SLOTS) {
         uint32_t k = id - 32u;
         const smp_user_hdr_t *h = (const smp_user_hdr_t *)smp_user_xip(k);
-        if (usr_nz[k] && h->magic == SMP_USER_MAGIC && h->data_len <= SMP_USER_SIZE - SMP_USER_DATA)
+        if (usr_nz[k] && h->magic == SMP_USER_MAGIC && h->data_len <= SMP_SLOT_SIZE(k) - SMP_USER_DATA)
             *len = SMP_USER_DATA + h->data_len;
         return smp_user_xip(k);
     }

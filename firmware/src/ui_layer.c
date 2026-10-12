@@ -49,6 +49,18 @@
  * a double tap leaves the page as it was. A first tap that acted instead of opening a page (EDIT on STEP: clear the
  * step; on USER / PROJECT: rename) arms no double tap: two quick taps there still act twice. */
 #include "ui_tools.c"                                   /* SEQ TOOLS' actions */
+#if FELUCCA_STRANGE                                     /* the scenes (scene.c): GLO's white keys G4 .. G5 */
+#define SC_SIG ((uint32_t)sc_last * 7919u + (uint32_t)sc_used(0) + sc_used(1) * 2u + sc_used(2) * 4u + sc_used(3) * 8u + \
+                sc_used(4) * 16u + sc_used(5) * 32u + sc_used(6) * 64u + sc_used(7) * 128u)
+#define SC_KEY0 8u                                      /* (the white key place of scene 1: G4) */
+static void sc_press(uint32_t n);
+static void sc_poll(int held);
+static int sc_used(uint32_t n);
+static uint8_t sc_last;
+static uint8_t sc_k = 0xFFu;                            /* the key a scene was pressed on */
+#else
+#define SC_SIG 0u
+#endif
 enum { LK_HOLD, LK_SET };
 typedef struct {
     uint8_t btn, kind, fam;            /* the button, HOLD / SET, the family whose first page KNOB 1..4 edit */
@@ -681,6 +693,12 @@ static void layer_key(uint32_t l, uint32_t k)
         } else if (p == 5u) {
             ml_toggle();                                /* D4: MIDI LEARN on / off (midi_learn.c) */
         }
+#if FELUCCA_STRANGE
+        else if (p >= SC_KEY0 && p < SC_KEY0 + 8u) {
+            sc_k = (uint8_t)k;
+            sc_press(p - SC_KEY0);                      /* a tap calls it back, held stores (scene.c) */
+        }
+#endif
     } else if (l == LAYER_SCL) {
         TSEL->p[P_ROOT] = (int16_t)((k + 5u) % 12u);    /* the key's note name (F3 = F) */
     } else if (l == LAYER_EDIT && !key_black(k)) {
@@ -711,6 +729,14 @@ static void layer_keys(uint32_t keys)
             layer_key(l, k);
     if (lys.eqh)
         eqa_release();
+#if FELUCCA_STRANGE
+    if (sc_k != 0xFFu) {                                /* the scene key: still held (to store), let go (to call) */
+        int held = (kb_layer >> sc_k) & 1u;
+        sc_poll(held);
+        if (!held)
+            sc_k = 0xFFu;
+    }
+#endif
     lys.solo &= kb_layer;
     for (k = 0; k < 27u; k++)
         if ((lys.solo >> k) & 1u)
@@ -864,6 +890,12 @@ static uint32_t layer_leds(uint32_t *br)
         } else if (l == LAYER_GLO) {                    /* sounding lit; SOLO held lit, the others, C4, F4 breathe */
             on = b ? p < NTRK && glo_sounding(p) : (p < NTRK && ((lys.solo >> k) & 1u)) || (p == 5u && ui.ml.on);
             can = !b && (p < NTRK || p == 4u || p == 5u || (p == 7u && !song.g[G_CLOCK]));
+#if FELUCCA_STRANGE
+            if (!b && p >= SC_KEY0 && p < SC_KEY0 + 8u) {   /* scenes: the last one lit, the stored ones breathe */
+                on = p - SC_KEY0 == sc_last;
+                can = sc_used(p - SC_KEY0);
+            }
+#endif
         } else if (l == LAYER_SCL) {                    /* the root lit, the scale's notes breathe */
             e = (k + 5u + 12u - root) % 12u;
             on = e == 0u;
@@ -1012,6 +1044,39 @@ static void layer_fx(void)
         lcell(LC_X(e), LM_Y, LM_H, n, ICON_MUTE, trk_icon(e, 0), 0, (held >> (PF_M1 + e)) & 1u ? LS_MUTE : LS_OFF, 0);
     }
 }
+#if FELUCCA_STRANGE
+/* STRANGE's GLO: F3 G3 SOLO T1 T2, C4 ALL, D4 LEARN, F4 TAP over the scenes G4 .. G5 (eight cells, the last one called
+ * selected, a stored one in the theme, an empty one dim), the black keys 1 2 MUTE T1 T2 */
+static void layer_glo(void)
+{
+    uint32_t e;
+    char n[3] = {0, 0, 0};
+    static const char *const SCN[8] = {"1", "2", "3", "4", "5", "6", "7", "8"};
+    for (e = 0; e < 2u; e++) {
+        n[0] = W_NOTE[e];
+        lcell(LC_X(e), 4, LC_H, n, trk_icon(e, 0), 0, "SOLO", (perf_solo >> e) & 1u ? LS_HELD : LS_OFF, 1);
+    }
+    n[0] = 'C';
+    lcell(LC_X(2), 4, LC_H, n, ICON_MUTE, 0, "ALL", LS_OFF, 0);
+    n[0] = 'D';
+    lcell(LC_X(3), 4, LC_H, n, ICON_MIDI, 0, "LEARN", ui.ml.on ? LS_SEL : LS_OFF, 0);
+    n[0] = 'F';
+    lcell(LC_X(0), 50, LC_H, n, ICON_TEMPO, 0, "TAP", song.g[G_CLOCK] ? LS_DIM : LS_OFF, 0);
+    for (e = 0; e < 8u; e++) {                          /* G4 .. G5: the scenes, two rows of four */
+        int32_t x = LC_X(1) + (int32_t)(e % 4u) * 43, y = 50 + (int32_t)(e / 4u) * 22, w = 40;
+        uint16_t ink, fill = lc_fill(e == sc_last ? LS_SEL : sc_used(e) ? LS_OFF : LS_DIM, &ink);
+        fill = lc_box(x, y, w, 20, fill);
+        GFX_HOOK_ALIGN(x, y, x + w, y + 20, AL_HV, "scene cell name centred");
+        cv_text_in(x, y + CAP_IN(S, 20), w, &AF_S, SCN[e], ink, fill);
+    }
+    for (e = 0; e < 2u; e++) {                          /* the black keys 1, 2: MUTE, latched */
+        bnote(n, e);
+        lcell(LC_X(e), LM_Y, LM_H, n, ICON_MUTE, trk_icon(e, 0), 0, trk[e].p[P_MUTE] ? LS_MUTE : LS_OFF, 0);
+    }
+    GFX_HOOK_ALIGN(LC_X(2), LM_Y, 234, LM_Y + LM_H, AL_HV, "scene hint centred");
+    cv_text_in(LC_X(2), LM_Y + CAP_IN(S, LM_H), 234 - LC_X(2), &AF_S, "HOLD KEY: SAVE", T_MID, T_SURF);
+}
+#else
 static void layer_glo(void)
 {
     uint32_t e;
@@ -1031,6 +1096,7 @@ static void layer_glo(void)
         lcell(LC_X(e), LM_Y, LM_H, n, ICON_MUTE, trk_icon(e, 0), 0, trk[e].p[P_MUTE] ? LS_MUTE : LS_OFF, 0);
     }
 }
+#endif
 static void layer_scl(void)                             /* KNOB 2's scales, 4 x 4, the one now selected */
 {
     uint32_t i, sc = (uint32_t)TSEL->p[P_SCALE];
@@ -1223,7 +1289,7 @@ static void draw_layer(void)
             sig = sig * 33u + perf_map[p];
     }
     else if (l == LAYER_GLO)
-        sig += perf_solo * 31u + (uint32_t)song.g[G_CLOCK] * 5u + ui.ml.on * 7u +
+        sig += perf_solo * 31u + (uint32_t)song.g[G_CLOCK] * 5u + ui.ml.on * 7u + SC_SIG +
                (uint32_t)(trk[0].p[P_MUTE] | trk[1].p[P_MUTE] << 1 | trk[2].p[P_MUTE] << 2 | trk[3].p[P_MUTE] << 3) * 131u;
     else if (l == LAYER_SCL)
         sig += (uint32_t)TSEL->p[P_SCALE] * 31u;

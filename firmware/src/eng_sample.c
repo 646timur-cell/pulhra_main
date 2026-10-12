@@ -46,6 +46,12 @@ static uint32_t pow2_q16(int32_t d16)
 #define SMP_USER_BASE 0xA0000u
 #define SMP_USER_SIZE 0x14000u
 #define SMP_USER_DATA 512u
+#if FELUCCA_STRANGE
+#define SMP_SLOT_SIZE(k) ((k) == 2u ? 0x12000u : SMP_USER_SIZE)   /* (STRANGE: USR3's last two sectors hold the scenes,
+                                                                    * scene.c: its sample at most 73,216 bytes) */
+#else
+#define SMP_SLOT_SIZE(k) SMP_USER_SIZE
+#endif
 #define SMP_USER_MAGIC 0x504D5346u                  /* "FSMP" */
 #define SMP_NALL (SMP_NSETS + SMP_USER_SLOTS)
 typedef struct {
@@ -83,7 +89,7 @@ static void smp_user_scan(uint32_t k)
     usr_nz[k] = 0;
     slc_user_scan(k, 0);
     if (h->magic == SMP_USER_MAGIC && h->version == 1 && h->nz && h->nz <= 16u &&
-        h->data_len <= SMP_USER_SIZE - SMP_USER_DATA) {
+        h->data_len <= SMP_SLOT_SIZE(k) - SMP_USER_DATA) {
         base = (uint32_t)(uintptr_t)(smp_user_xip(k) + SMP_USER_DATA) - (uint32_t)(uintptr_t)SMP_DATA;
         for (nz = h->nz, i = 0; i < nz; i++) {
             smp_zone_t *z = &zt[i];

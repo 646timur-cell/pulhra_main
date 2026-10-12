@@ -604,6 +604,51 @@ static int test_xy_routes(void)
     return bad;
 }
 
+/* SCENES: GLO held, G4 .. G5: a tap stores into an empty one, calls a stored one back; held 0.8 s stores over it */
+static int test_scenes(void)
+{
+    int bad = 0, ok;
+    int32_t buf[2 * CTL];
+    uint32_t k;
+    ui_power_on();
+    memset(&sc_bank, 0, sizeof sc_bank);
+    sc_last = 0xFFu;
+    set_engine_of(&trk[0], ENGI_LYRA); apply_preset_to(&trk[0], 2); trk[0].engine = trk[0].eng_req;
+    set_engine_of(&trk[1], ENGI_MODAL); apply_preset_to(&trk[1], 1); trk[1].engine = trk[1].eng_req;
+    trk[0].p[P_E0 + 2] = 33; trk[0].p[P_AHOLD] = 1;
+    song.g[G_MLPF] = 40; xy_val[1][0] = 90;
+    for (k = 0; k < 4u; k++) mix_block(buf, CTL);
+    midi_event(0x90, 0, 50, 100); midi_event(0x90, 0, 57, 100);
+    for (k = 0; k < 4u; k++) mix_block(buf, CTL);
+    midi_event(0x80, 0, 50, 0); midi_event(0x80, 0, 57, 0);
+    for (k = 0; k < 4u; k++) mix_block(buf, CTL);
+    go_home(); frame();
+    lay_combo(B_GLO, white(8)); key_up(white(8)); frame(); btn_up(B_GLO); frame();   /* G4: empty, a tap stores */
+    ok = sc_used(0) && sc_last == 0 && sc_bank.s[0].part[0].nlatch == 2u && sc_bank.s[0].part[0].eng == ENGI_LYRA;
+    /* change everything */
+    set_engine_of(&trk[0], ENGI_FM6); apply_preset_to(&trk[0], 0);
+    set_engine_of(&trk[1], 0); apply_preset_to(&trk[1], 0);
+    song.g[G_MLPF] = 0; xy_val[1][0] = 0; trk[0].p[P_AHOLD] = 0;
+    for (k = 0; k < 40u; k++) mix_block(buf, CTL);
+    lay_combo(B_GLO, white(8)); key_up(white(8)); frame(); btn_up(B_GLO); frame();   /* a tap: called back */
+    for (k = 0; k < 60u; k++) mix_block(buf, CTL);
+    ok &= trk[0].eng_req == ENGI_LYRA && trk[0].p[P_E0 + 2] == 33 && trk[0].p[P_AHOLD] == 1 && trk[1].eng_req == ENGI_MODAL &&
+          song.g[G_MLPF] == 40 && xy_val[1][0] == 90 && gated(&trk[0], 50) && gated(&trk[0], 57);
+    bad += check("scenes: a tap on an empty key stores, a tap calls back both parts, globals, XY and LATCH's notes", ok);
+    xy_val[1][0] = 10;
+    lay_combo(B_GLO, white(8)); frames(900); key_up(white(8)); frame(); btn_up(B_GLO); frame();   /* held: stores over */
+    ok = sc_bank.s[0].xy[1][0] == 10 && !sc_used(1);
+    xy_val[1][0] = 77;
+    lay_combo(B_GLO, white(8)); key_up(white(8)); frame(); btn_up(B_GLO); frame();
+    ok &= xy_val[1][0] == 10;
+    bad += check("scenes: held 0.8 s stores over a stored one (no call back on letting go)", ok);
+    memset(&sc_bank, 0, sizeof sc_bank);
+    sc_last = 0xFFu;
+    trk[0].p[P_AHOLD] = 0;
+    go_home(); frame();
+    return bad;
+}
+
 #ifndef STRANGE_NO_MAIN
 int main(void)
 {
@@ -617,6 +662,7 @@ int main(void)
     bad += test_latch();
     bad += test_euclid();
     bad += test_xy_routes();
+    bad += test_scenes();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);

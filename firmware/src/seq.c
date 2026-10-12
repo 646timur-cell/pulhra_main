@@ -648,6 +648,10 @@ static __attribute__((noinline)) void cin_keep(track_t *t, uint32_t note, uint32
  * first key of a new gesture (no key down) lets the latched notes go and starts a new set; the same single note
  * again stops it (a drone on, a drone off); LATCH OFF lets them all go (seq_block). held / nheld / arp_phys are the
  * arp's, free in a module */
+/* STRANGE's scenes (scene.c sc_recall): the notes a part's LATCH (or EUCLID) held, sounding again: set here, in the
+ * ISR, sc_latch_wait blocks after the call (the engines switched by then), one bit a part in sc_latch_req */
+static volatile uint8_t sc_latch_req, sc_latch_wait;
+static uint8_t sc_latch_note[2][16], sc_latch_n[2];
 static int latch_on(const track_t *t) { return FELUCCA_MODULE && t->p[P_AHOLD] && !t->p[P_AMODE]; }
 static __attribute__((noinline)) void latch_release(track_t *t)
 {
@@ -681,6 +685,34 @@ static __attribute__((noinline)) void latch_add(track_t *t, uint32_t note, uint3
     if (t->nheld < 16u)
         t->held[t->nheld++] = (uint8_t)note;
     trk_note_on(t, note, vel);
+}
+
+/* a scene's held notes (sc_latch_*) into part k: the arp's list (EUCLID on), else LATCH's notes, sounding */
+static __attribute__((noinline)) void sc_latch_apply(track_t *t, uint32_t k)
+{
+    uint32_t j, n = sc_latch_n[k];
+    sc_latch_req &= (uint8_t)~(1u << k);
+    if (t->p[P_AMODE]) {
+        if (t->arp_note)
+            arp_off(t);
+        t->nheld = 0;
+        t->arp_phys = 0;
+        for (j = 0; j < n; j++) {
+            held_key[k][t->nheld] = 0;
+            held_dt[k][t->nheld] = 0;
+            t->held[t->nheld++] = sc_latch_note[k][j];
+        }
+        t->arp_pos = 0xFFFFFFF;                     /* fire on this block */
+        t->arp_idx = 0xFFFFFFFFu;
+        t->euc_pos = 0;
+    } else if (latch_on(t)) {
+        latch_release(t);
+        t->arp_phys = 0;
+        for (j = 0; j < n; j++) {
+            t->held[t->nheld++] = sc_latch_note[k][j];
+            trk_note_on(t, sc_latch_note[k][j], 100);
+        }
+    }
 }
 
 static void input_on(track_t *t, uint32_t note, uint32_t vel)
@@ -1359,6 +1391,8 @@ static void events_block(uint32_t n)
         RING_PUBLISH();
         midi_in_overflow = 0;
     }
+    if (FELUCCA_STRANGE && sc_latch_wait)
+        sc_latch_wait--;                              /* (a scene's notes: once the engines switched) */
     for (i = 0; i < NTRK; i++) {
         track_t *t = &trk[i];
         if ((pr >> i) & 1u) {
@@ -1369,6 +1403,8 @@ static void events_block(uint32_t n)
             arp_forget(t);
         }
         engine_block(t);                              /* engine switch: fade, then switch (voice.c) */
+        if (FELUCCA_STRANGE && i < 2u && ((sc_latch_req >> i) & 1u) && !sc_latch_wait && t->engine == t->eng_req)
+            sc_latch_apply(t, i);
         if (FELUCCA_MODULE && !FELUCCA_STRANGE)
             t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds;
                                                        * STRANGE: the arp is EUCLID's) */

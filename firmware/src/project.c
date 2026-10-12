@@ -1096,6 +1096,9 @@ static void persist_boot(void)                    /* before settings_init / pane
                 proj_fetch(i);
     }
     up_boot();                                     /* user presets */
+#if FELUCCA_STRANGE
+    sc_boot();                                     /* the scenes (scene.c) */
+#endif
 #endif
 }
 
