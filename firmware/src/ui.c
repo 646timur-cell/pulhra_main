@@ -398,6 +398,8 @@ static uint32_t layer_btn(void);
  * track's (its patch's operators, ui_fm6op.c) */
 static int page_visible(uint32_t i)
 {
+    if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SEQ)
+        return PAGES[i].graph == GR_EUCLID;           /* (STRANGE: SEQ is EUCLID) */
     if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
                            PAGES[i].graph == GR_PATS))
         return 0;                                     /* (sound module: no sequencer, arpeggiator, song or phrases) */
@@ -503,7 +505,7 @@ static void page_entered(void)
         ev_enter();
     if (!ui.home && lock_page_ok(ui.page))
         ui.plk_src = (uint8_t)(ui.page + 1u);
-    song.seq_mode = !ui.home && pg->fam == FAM_SEQ;
+    song.seq_mode = !ui.home && pg->fam == FAM_SEQ && pg->graph != GR_EUCLID;   /* (EUCLID: the keys play) */
     ui.entry_open = 0;
     ui.hot_t = 0;                                /* clear the previous page's emphasis */
     ui.act = pg->graph == GR_USER ? 4u : 0u;     /* the save screen is ready for OCT+ */

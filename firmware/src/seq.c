@@ -197,6 +197,7 @@ static void arp_add(track_t *t, uint32_t note)
     if (t->nheld == 1u) {
         t->arp_pos = 0xFFFFFFF;                     /* fire on this block */
         t->arp_idx = 0xFFFFFFFFu;
+        t->euc_pos = 0;                             /* (EUCLID: from its first step) */
     }
 }
 
@@ -403,6 +404,17 @@ static uint32_t arp_list(const track_t *t, uint32_t *list, uint32_t *cnt)
 
 /* an arp step starts (period: its length): the next note of the list. Not inlined: once a step, kept out of the audio
  * ISR's loop over the tracks (tests/target_budget.py) */
+/* STRANGE's EUCLID (SEQ): the arp's steps go through a pattern of STEPS (P_SLEN) with HITS (P_SSWING) spread as
+ * evenly as they go (Bjorklund's, as (i * HITS) mod STEPS < HITS), turned by ROT (P_SGATE); a step off the pattern
+ * rests (the note before ends, the note list does not move on). HITS >= STEPS: every step, the plain arp */
+static uint32_t euc_hit(const track_t *t, uint32_t i)
+{
+    uint32_t n = (uint32_t)clamp(t->p[P_SLEN], 1, 32), k = (uint32_t)clamp(t->p[P_SSWING], 1, 32);
+    if (k >= n)
+        return 1;
+    i = (i + n - (uint32_t)t->p[P_SGATE] % n) % n;
+    return i * k % n < k;
+}
 static __attribute__((noinline)) void arp_fire(track_t *t, uint32_t period)
 {
     uint32_t cnt, list[64], len, j;
@@ -410,6 +422,15 @@ static __attribute__((noinline)) void arp_fire(track_t *t, uint32_t period)
         if (t->arp_note)
             arp_off(t);
         return;
+    }
+    if (FELUCCA_STRANGE) {
+        uint32_t i = t->euc_pos;
+        t->euc_pos = (uint8_t)((i + 1u) % (uint32_t)clamp(t->p[P_SLEN], 1, 32));
+        if (!euc_hit(t, i)) {
+            if (t->arp_note)
+                arp_off(t);
+            return;
+        }
     }
     t->arp_idx++;
     j = t->p[P_AMODE] == AM_CHORD ? 0u : arp_pick(t, list, len);
@@ -1348,8 +1369,9 @@ static void events_block(uint32_t n)
             arp_forget(t);
         }
         engine_block(t);                              /* engine switch: fade, then switch (voice.c) */
-        if (FELUCCA_MODULE)
-            t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds) */
+        if (FELUCCA_MODULE && !FELUCCA_STRANGE)
+            t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds;
+                                                       * STRANGE: the arp is EUCLID's) */
         /* ARP turned off, or HOLD released with no key down: drop the latched chord */
         if (FELUCCA_MODULE && t->aholdp && !t->p[P_AHOLD]) {
             latch_release(t);                         /* LATCH OFF: the latched notes go (keys down sound on) */

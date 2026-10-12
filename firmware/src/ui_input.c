@@ -1285,7 +1285,7 @@ static void layer_lock_input(uint32_t pressed);
 static int page_tap(uint32_t b)
 {
     uint32_t f;
-    if (FELUCCA_MODULE && (b == B_SEQ || b == B_ARP || b == B_GLO))
+    if (FELUCCA_MODULE && ((b == B_SEQ && !FELUCCA_STRANGE) || b == B_ARP || b == B_GLO))
         return 1;                                     /* (sound module: their pages are gone; GLO held is its layer) */
     if (b == B_EDIT && detail_on()) {                    /* DETAIL (1.5.1): the step's CHANCE RATCH NUDGE VEL back */
         if (chain_busy())
@@ -1600,7 +1600,9 @@ static void ui_input(void)
             else
                 transport_req = 1;
             break;
+#if !FELUCCA_STRANGE                                    /* (STRANGE: SEQ a page button, EUCLID; no layer) */
         case B_SEQ:
+#endif
         case B_REC:                                     /* tap: above; held, its layer (ui_layer.c) */
         case B_SAVE:
         case B_FX:                                      /* the layers' buttons: ui_layer.c */

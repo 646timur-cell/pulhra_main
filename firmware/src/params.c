@@ -117,10 +117,17 @@ static const param_desc_t TP[P_COUNT] = {
     [P_SCALE] = PE("SCL", N_SCALE, 0),
     [P_QUANT] = PE("QNT", N_QUANT, 0),
     [P_TRANS] = PD("TRN", F_SEMI, -24, 24, 0),
+#if FELUCCA_STRANGE                 /* (no sequencer: LEN SWG GATE are the EUCLID pattern of the arp, seq.c euc_hit) */
+    [P_SLEN] = PD("STEPS", F_INT, 1, 32, 16),
+    [P_SDIV] = PE("DIV", N_DIV, 2),
+    [P_SSWING] = PD("HITS", F_INT, 1, 32, 16),
+    [P_SGATE] = PD("ROT", F_INT, 0, 31, 0),
+#else
     [P_SLEN] = PD("LEN", F_STEPS, 1, NSTEP, 16),
     [P_SDIV] = PE("DIV", N_DIV, 2),
     [P_SSWING] = PD("SWG", F_PCT, 0, 100, 0),
     [P_SGATE] = PD("GATE", F_PCT, 1, 127, 64),
+#endif
     [P_DIST] = PD("DST", F_PCT, 0, 127, 0),
     [P_CHOR] = PD("CHO", F_PCT, 0, 127, 0),
     [P_DLY] = PD("DLY", F_PCT, 0, 127, 0),
@@ -453,7 +460,7 @@ enum { FAM_HOME, FAM_ENV, FAM_LFO, FAM_FX, FAM_SCL, FAM_EDIT, FAM_GLO, FAM_SAVE,
 enum { SC_TRACK, SC_GLOBAL, SC_ENGINE, SC_STEP, SC_TRK };   /* SC_TRK: the TRACKS page (ui_input.c tracks_edit) */
 enum { GR_NONE, GR_ADSR, GR_LFO, GR_STEPS, GR_ARP, GR_SCALE, GR_FX, GR_ROLL, GR_BROWSE, GR_SLOTS, GR_USER, GR_TRK,
        GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHORD, GR_SLICES, GR_EVENTS,
-       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS };   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
+       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS, GR_EUCLID };   /* (GR_EUCLID: STRANGE's EUCLID pages, the pattern) */   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
 
 typedef struct {
     const char *title;
@@ -507,6 +514,11 @@ static const page_t PAGES[] = {
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_TOOLS, {G_CLRSEQ, G_INITSND, 0xFF, 0xFF}},
     {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}},
     {"ARP 2", FAM_ARP, SC_TRACK, GR_NONE, {P_ASWING, P_APROB, P_AHOLD, P_AORDER}},
+#if FELUCCA_STRANGE   /* SEQ: EUCLID, the arp (MODE OFF: off) stepping through a euclidean pattern, the held / LATCHed notes */
+    {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_AMODE, P_SLEN, P_SSWING, P_SGATE}},
+    {"EUCLID 2", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_ARATE, P_AGATE, P_AOCT, P_AHOLD}},
+    {"EUCLID 3", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_APROB, P_ASWING, P_AORDER, 0xFF}},
+#endif
     {"STEP", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},
     {"DETAIL", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},   /* 1.5.1 (#199): the cursor step's CHANCE RATCH NUDGE VEL
                                                              * (ui.c detail_on, ui_input.c sd_turn) */

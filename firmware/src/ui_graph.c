@@ -496,6 +496,22 @@ static void graph_slicer(const track_t *t, uint16_t c)
 /* MOD page: the four slots as rows "1 LFO > CUT +50%" (M, a list's rows: the source to x 78, the arrow 84..98, the
  * destination of up to 5 characters 106..160, the amount from 172), the one KNOB 2..4 edit selected, slots that do
  * nothing (SRC, DST or AMT at 0) dim */
+#if FELUCCA_STRANGE
+/* EUCLID (STRANGE's SEQ): the pattern, a row of STEPS cells (two rows past 16): a hit THEME, a rest RAISE, the step
+ * the arp is on (a note held or LATCHed, MODE on) ACCENT; MODE OFF: all of it dim */
+static void graph_euclid(const track_t *t, uint16_t c)
+{
+    uint32_t n = (uint32_t)clamp(t->p[P_SLEN], 1, 32), i, rows = n > 16u ? 2u : 1u, m = (n + rows - 1u) / rows;
+    int32_t w = (216 - 3 * ((int32_t)m - 1)) / (int32_t)m, x0 = 120 - ((int32_t)m * (w + 3) - 3) / 2;
+    uint32_t on = t->p[P_AMODE] != 0, cur = on && t->nheld ? (t->euc_pos + n - 1u) % n : 0xFFu;
+    for (i = 0; i < n; i++) {
+        int32_t x = x0 + (int32_t)(i % m) * (w + 3), y = (rows == 2u ? 22 : 34) + (int32_t)(i / m) * 30;
+        uint16_t col = i == cur ? T_ACCENT : !euc_hit(t, i) ? T_RAISE : on ? c : T_DIM;
+        cv_rrect(x, y, w, 24, w > 8 ? 3 : 1, col, T_SURF);
+    }
+}
+#endif
+
 static void graph_mod(const track_t *t, uint16_t c)
 {
     uint32_t k;
@@ -1209,6 +1225,8 @@ static uint32_t graph_signature(void)
             h ^= (ui_prefs & PREF_LARGE) ? 0x2545F491u : 0u;
         }
     }
+    if (pg->graph == GR_EUCLID)                      /* (the step the arp is on) */
+        h ^= (uint32_t)t->euc_pos * 2654435761u + t->nheld;
     if (pg->graph == GR_MOD)
         h ^= (mod_ui_slot + 1u) * 40503u;
     if (pg->graph == GR_SLCR && t->p[P_SLCR])        /* the SLICER's step playing */
@@ -2293,6 +2311,11 @@ static void draw_graph(void)
             cv_oy = 0;
             graph_mod(t, c);
             break;
+#if FELUCCA_STRANGE
+        case GR_EUCLID:
+            graph_euclid(t, c);
+            break;
+#endif
         case GR_BROWSE:
             cv_oy = 0;
             graph_browse();

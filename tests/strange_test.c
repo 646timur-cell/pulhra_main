@@ -532,6 +532,53 @@ static int test_latch(void)
     return bad;
 }
 
+/* EUCLID (SEQ): the arp through STEPS / HITS / ROT over the held notes */
+static int test_euclid(void)
+{
+    int bad = 0, ok = 1;
+    track_t *t = &trk[0];
+    uint32_t k, last_pos, last_idx, hits = 0, pat = 0, guard = 0;
+    ui_power_on();
+    set_engine_of(t, 0);
+    apply_preset_to(t, 0);
+    t->engine = t->eng_req;
+    t->p[P_AMODE] = 1;                                    /* UP */
+    t->p[P_SLEN] = 8; t->p[P_SSWING] = 3; t->p[P_SGATE] = 0;
+    run(4);
+    midi_event(0x90, 0, 60, 100); midi_event(0x90, 0, 64, 100);
+    run(1);
+    last_pos = t->euc_pos; last_idx = t->arp_idx;
+    pat = t->arp_idx != 0xFFFFFFFFu ? 1u : 0u;            /* (step 0 fired on the first block) */
+    hits = pat;
+    for (k = 1; k < 8u && guard < 200000u; guard++) {
+        run(1);
+        if (t->euc_pos != last_pos) {
+            if (t->arp_idx != last_idx) { pat |= 1u << k; hits++; }
+            last_pos = t->euc_pos; last_idx = t->arp_idx;
+            k++;
+        }
+    }
+    ok = pat == 0x49u && hits == 3u;                      /* x..x..x. */
+    t->p[P_SGATE] = 1;                                    /* ROT 1: .x..x..x */
+    ok &= euc_hit(t, 1) && euc_hit(t, 4) && euc_hit(t, 7) && !euc_hit(t, 0);
+    t->p[P_SSWING] = 8;
+    ok &= euc_hit(t, 0) && euc_hit(t, 5);                 /* HITS = STEPS: every step */
+    midi_event(0x80, 0, 60, 0); midi_event(0x80, 0, 64, 0); run(8);
+    ok &= !t->arp_note;
+    bad += check("EUCLID: 3 of 8 (x..x..x.), ROT turns it, HITS = STEPS plays every step, let go: silent", ok);
+    t->p[P_AMODE] = 0; t->p[P_SLEN] = 16; t->p[P_SSWING] = 16; t->p[P_SGATE] = 0;
+    go_home(); frame();
+    press(B_SEQ);
+    ok = !ui.home && !strcmp(cur_page()->title, "EUCLID") && !song.seq_mode;
+    press(B_SEQ);
+    ok &= !strcmp(cur_page()->title, "EUCLID 2");
+    press(B_SEQ); press(B_SEQ);
+    ok &= !strcmp(cur_page()->title, "EUCLID");
+    go_home(); frame();
+    bad += check("SEQ: EUCLID, EUCLID 2, EUCLID 3 round (the keys still play)", ok);
+    return bad;
+}
+
 #ifndef STRANGE_NO_MAIN
 int main(void)
 {
@@ -543,6 +590,7 @@ int main(void)
     bad += test_xy_filter();
     bad += test_edit_pages();
     bad += test_latch();
+    bad += test_euclid();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);
