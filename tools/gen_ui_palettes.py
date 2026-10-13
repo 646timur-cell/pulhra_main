@@ -49,8 +49,9 @@ PALETTES = [
     ("NIGHT",  (0, 0, 0),       (0, 24, 10),     (150, 230, 170), (56, 220, 100),  (255, 255, 255)),
     # 1.0.2: black and white (the derived tokens are set, not blended: bw()); the old MONO is GREY (id 0)
     ("MONO",   (0, 0, 0),       (0, 0, 0),       (255, 255, 255), (255, 255, 255), (255, 255, 255)),
-    # STRANGE (darkmachine, the build's default): near black, ash text, ember values, bone for the hot thing
-    ("DARK",   (8, 7, 8),       (24, 20, 22),    (210, 202, 196), (244, 114, 66),  (244, 236, 224)),
+    # STRANGE (darkmachine, the build's default): a crypt by candlelight: black stone, parchment text, blood-red values,
+    # torch gold for the hot thing
+    ("DARK",   (4, 3, 3),       (20, 16, 13),    (216, 202, 170), (214, 160, 76),  (226, 58, 46)),
 ]
 BW = "MONO"
 BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE

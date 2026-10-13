@@ -1286,9 +1286,22 @@ static void splash_line(int32_t y, const aafont_t *f, const char *s, uint16_t c)
     cv_text_in(0, 0, 240, f, s, c, T_BG);
     cv_blit(0, (uint32_t)y);
 }
+/* a rule across, faded at its ends (LINE, then DIM), a small diamond in ACCENT at its middle: the crypt's frieze */
+static void splash_rule(int32_t y)
+{
+    int32_t k;
+    lcd_fill(56, (uint32_t)y, 128, 1, T_LINE);
+    lcd_fill(84, (uint32_t)y, 72, 1, T_DIM);
+    for (k = 0; k < 4; k++)                              /* the diamond: rows 1, 3, 5, 7 px wide, then back */
+        lcd_fill((uint32_t)(120 - k), (uint32_t)(y - 3 + k), (uint32_t)(2 * k + 1), 1, T_ACCENT);
+    for (k = 0; k < 3; k++)
+        lcd_fill((uint32_t)(118 + k), (uint32_t)(y + 1 + k), (uint32_t)(5 - 2 * k), 1, T_ACCENT);
+}
 static void draw_splash(void)
 {
     lcd_fill(0, 0, 240, 240, T_BG);
+    splash_rule(70);
+    splash_rule(160);
     splash_line(84, &AF_L, SPLASH_LINES[0], T_TEXT);
     splash_line(126, &AF_M, SPLASH_LINES[1], T_THEME);
     splash_line(196, &AF_S, SPLASH_LINES[2], T_DIM);

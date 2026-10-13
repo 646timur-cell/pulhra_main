@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Tim (646timur-cell), on Felucca by Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* GLITCH (STRANGE): a slice machine on its own kit of broken digital sound (tools/gen_strange_samples.py: 16 slices,
- * 11,025 Hz: crushed noise, click trains, FM chirps, stutters, dropouts, zaps, a rate sweep, crackle, a modem, a thump,
- * a CD skip, LFSR data, a faulty beep, a tick, a reversed swell, a grain smear).
- * Each key plays a slice: (note + SLCE) mod 16, the next 16 keys the same slices an octave up. The slice is decoded
- * into the voice's buffer as it starts, so it can be read anywhere, either way:
+/* GLITCH (STRANGE): a slice machine on its own kit (tools/gen_strange_samples.py: 16 slices, 22,050 Hz, 0.3 .. 0.6 s:
+ * glass (a tap, a crack, a rubbed rim, shards), short-wave air (a heterodyne tuning through zero beat, modulated data
+ * clicks, static, a duck voice, morse, RTTY) and current (a neon lamp speeding up on its choke, choke hum, an arc, a
+ * relay, a valve warming, a degauss).
+ * Each key plays a slice: (note + SLCE) mod 16, the next 16 keys the same slices an octave up. Every slice is read
+ * from flash through a seek index, so it can be read anywhere, either way:
  *   SLCE   which slice the lowest key plays
  *   PTCH   the slices' pitch, semitones
  *   STUT   a stutter: a window of the slice (170 ms .. 5 ms) played again and again (0: off, the slice once)
@@ -15,14 +16,14 @@
  *   JUMP   the chance a window jumps somewhere else in the slice
  * KIT (EDIT > KIT, OP3's REL): BUILT (the kit above) or a user slot USR1..3, the web uploader's: a slot of several
  * zones (files, or one loop cut at its transients by the uploader) plays a zone a key; a slot of one zone is cut
- * into CUTS (OP1's LVL, 2..16) equal slices. A user slice is read from flash through a seek index (as GRAIN's: the
+ * into CUTS (OP1's LVL, 2..16) equal slices. Every slice, the kit's and a slot's, is read through a seek index (as GRAIN's: the
  * ADPCM state every 256 samples of every zone, built two entries a block in the block hook, the zones of the
  * sounding voices first) into a 257-sample window of the voice: any length the slot holds, any direction, any jump.
  * The windows (STUT) are in time, whatever the slot's rate.
  * Poly 3, its buffers and the index in the part's engine region (gl_part_t). */
 
 #define GL_POLY 3
-#define GL_LEN 2048u
+#define GL_LEN 257u                                      /* a window: 256 samples and the next one */
 
 typedef struct {
     int16_t buf[GL_LEN];
@@ -42,7 +43,7 @@ typedef struct {
     gl_slot_t v[GL_POLY];
     int16_t ipred[GL_NIDX];                              /* the seek index: the state before sample k * 256 of a zone */
     uint8_t iidx[GL_NIDX];
-    uint16_t zbase[16], zcnt[16], zdone[16];             /* a zone's entries: first, all, built */
+    uint16_t zbase[16], zcnt[16], zdone[16];             /* a zone's entries: first, all, built (<= 16 zones a kit) */
     uint32_t stamp;                                      /* the slot it was built for (smp_user_gen) */
     uint8_t kit, nz;                                     /* KIT + 1 the index holds (0: none); zones */
 } gl_part_t;
@@ -57,6 +58,12 @@ static gl_slot_t *gl_slot(track_t *t, voice_t *v)
     return &gl_part(t)->v[i];
 }
 static uint32_t gl_kit(const int16_t *p) { return (uint32_t)clamp(p[P_FM3_REL], 0, SMP_USER_SLOTS); }
+/* kit k's zones (0: the built-in kit, flash; 1..3: a user slot) */
+static uint32_t gl_nz(uint32_t kit) { return kit ? usr_nz[(kit - 1u) % SMP_USER_SLOTS] : GLT_NZ; }
+static const smp_zone_t *gl_zone(uint32_t kit, uint32_t z)
+{
+    return kit ? &usr_zone[(kit - 1u) % SMP_USER_SLOTS][z & 15u] : &GLT_ZONES[z % GLT_NZ];
+}
 
 /* one ADPCM sample of zone z at pos */
 static inline int32_t gl_dec(const smp_zone_t *z, uint32_t pos, int32_t *pred, int32_t *idx)
@@ -77,12 +84,12 @@ static inline int32_t gl_dec(const smp_zone_t *z, uint32_t pos, int32_t *pred, i
 /* the index for slot k (kit k + 1): every zone from the state (0, 0), its entries to build */
 static void gl_reset(gl_part_t *P, uint32_t kit, uint32_t stamp)
 {
-    uint32_t i, tot = 0, nz = kit ? usr_nz[kit - 1u] : 0u, had = P->kit;
+    uint32_t i, tot = 0, nz = gl_nz(kit), had = P->kit;
     P->kit = (uint8_t)(kit + 1u);
     P->stamp = stamp;
     P->nz = (uint8_t)nz;
     for (i = 0; i < nz; i++) {
-        uint32_t c = (usr_zone[kit - 1u][i].n + GL_SEG - 1u) / GL_SEG;
+        uint32_t c = (gl_zone(kit, i)->n + GL_SEG - 1u) / GL_SEG;
         if (tot + c > GL_NIDX)
             c = 0;                                       /* past the capacity: silent */
         P->zbase[i] = (uint16_t)tot;
@@ -115,7 +122,7 @@ static void gl_build(gl_part_t *P, const track_t *t)
             zl = i;
     if (zl == 16u)
         return;
-    z = &usr_zone[P->kit - 2u][zl];
+    z = gl_zone(P->kit - 1u, zl);
     k = P->zdone[zl];
     e = P->zbase[zl] + k - 1u;
     pred = P->ipred[e];
@@ -133,10 +140,10 @@ static void glitch_block(track_t *t)
 {
     gl_part_t *P;
     uint32_t kit = gl_kit(t->p), st;
-    if (t < &trk[0] || t >= &trk[NLIVE] || !kit)
+    if (t < &trk[0] || t >= &trk[NLIVE])
         return;
     P = gl_part(t);
-    st = usr_nz[kit - 1u] ? smp_user_gen : 0xFFFFFFFFu;
+    st = !kit ? 0u : usr_nz[kit - 1u] ? smp_user_gen : 0xFFFFFFFFu;
     if (P->kit != kit + 1u || P->stamp != st)
         gl_reset(P, kit, st);
     gl_build(P, t);
@@ -146,7 +153,7 @@ static void glitch_block(track_t *t)
 /* a user slice's window: chunk c of its zone (257 samples, the next chunk's first too), 0 = its entry not built yet */
 static __attribute__((noinline)) int gl_chunk(gl_part_t *P, gl_slot_t *S, uint32_t c)
 {
-    const smp_zone_t *z = &usr_zone[(P->kit - 2u) % SMP_USER_SLOTS][S->zone & 15u];
+    const smp_zone_t *z = gl_zone(P->kit - 1u, S->zone);
     uint32_t i, n0 = c * GL_SEG, n, e;
     int32_t pred, idx;
     if (S->zone >= P->nz || c >= P->zdone[S->zone] || n0 >= z->n)
@@ -161,27 +168,6 @@ static __attribute__((noinline)) int gl_chunk(gl_part_t *P, gl_slot_t *S, uint32
         S->buf[i] = 0;
     S->cc = (int32_t)c;
     return 1;
-}
-
-/* the zone's IMA ADPCM into the buffer (as eng_sample.c sample_next decodes it) */
-static __attribute__((noinline)) uint32_t gl_decode(const smp_zone_t *z, int16_t *b)
-{
-    uint32_t n = z->n < GL_LEN ? z->n : GL_LEN, i;
-    int32_t pred = 0, idx = 0;
-    for (i = 0; i < n; i++) {
-        uint32_t c = SMP_DATA[z->off + (i >> 1)], code = (i & 1u) ? c >> 4 : c & 15u;
-        int32_t step = IMA_STEP[idx], vd = step >> 3;
-        if (code & 4u)
-            vd += step;
-        if (code & 2u)
-            vd += step >> 1;
-        if (code & 1u)
-            vd += step >> 2;
-        pred = clamp(pred + ((code & 8u) ? -vd : vd), -32768, 32767);
-        idx = clamp(idx + IMA_IDX[code & 7u], 0, 88);
-        b[i] = (int16_t)pred;
-    }
-    return n;
 }
 
 static int gl_roll(gl_slot_t *S, int32_t p) { return (int32_t)(px_rand(&S->rng) >> 25) < p; }   /* p / 128 */
@@ -213,10 +199,9 @@ static void glitch_note_on(track_t *t, voice_t *v)
 {
     const int16_t *p = t->p;
     gl_slot_t *S = gl_slot(t, v);
-    uint32_t kit = gl_kit(p), nz = kit ? usr_nz[kit - 1u] : 0u, ns = kit ? (nz > 1u ? nz : (uint32_t)clamp(p[P_FM1_LEVEL], 2, 16))
-                                                                       : GLT_NZ;
-    uint32_t sl = ((uint32_t)v->note + (uint32_t)p[P_E0]) % ns;
-    int32_t dn = (int32_t)v->note - 48, oct = dn >= 0 ? dn / (int32_t)ns : -((-dn + (int32_t)ns - 1) / (int32_t)ns);
+    uint32_t kit = gl_kit(p), nz = gl_nz(kit), ns = kit && nz == 1u ? (uint32_t)clamp(p[P_FM1_LEVEL], 2, 16) : nz;
+    uint32_t sl = ns ? ((uint32_t)v->note + (uint32_t)p[P_E0]) % ns : 0u;
+    int32_t dn = (int32_t)v->note - 48, oct = ns ? (dn >= 0 ? dn / (int32_t)ns : -((-dn + (int32_t)ns - 1) / (int32_t)ns)) : 0;
     int32_t d16 = (p[P_E1] + 12 * oct) * 16;
     const smp_zone_t *z;
     if (!S)
@@ -224,22 +209,16 @@ static void glitch_note_on(track_t *t, voice_t *v)
     if (!S->rng)
         S->rng = (uint32_t)rng() | 1u;
     S->cc = -1;
-    if (kit) {                                           /* a user slot: a zone a key, or one zone cut in CUTS */
-        S->user = 1;
+    S->user = 1;                                         /* (every kit through the index: the built-in one too) */
+    S->len = 0;
+    if (!nz)
+        return;                                          /* (an empty slot: silent, the UI says NO SAMPLE) */
+    S->zone = (uint8_t)(nz > 1u ? sl : 0u);              /* a zone a key, or one zone cut in CUTS */
+    z = gl_zone(kit, S->zone);
+    S->len = nz > 1u ? z->n : z->n / ns;
+    S->base = nz > 1u ? 0 : (int32_t)(sl * S->len);
+    if (S->len < 16u)
         S->len = 0;
-        if (!nz)
-            return;                                      /* (empty: silent, the UI says NO SAMPLE) */
-        S->zone = (uint8_t)(nz > 1u ? sl : 0u);
-        z = &usr_zone[kit - 1u][S->zone];
-        S->len = nz > 1u ? z->n : z->n / ns;
-        S->base = nz > 1u ? 0 : (int32_t)(sl * S->len);
-        if (S->len < 16u)
-            S->len = 0;
-    } else {
-        S->user = 0;
-        z = &GLT_ZONES[sl];
-        S->len = gl_decode(z, S->buf);
-    }
     S->step = (int32_t)(((uint64_t)z->rate * pow2_q16(clamp(d16, -1536, 576))) >> 16);   /* Q16 samples a sample */
     S->wn = p[P_E2] ? (int32_t)(sx_expmap(127 - p[P_E2], 55u << 16, 5) >> 16) : (int32_t)S->len;   /* 5 .. 170 ms (at
                                                                                               * 11,025 Hz: 55 .. 1760) */
@@ -278,15 +257,12 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         }
         if (ip >= 0 && ip + 1 < (int32_t)S->len && S->step) {
             int32_t a, b, f = (S->pos >> 1) & 0x7FFF;
-            if (S->user) {                               /* the window over the flash: its chunk, the next sample in it */
+            {                                            /* the window over the flash: its chunk, the next sample in it */
                 uint32_t ab = (uint32_t)(S->base + ip), c = ab / GL_SEG;
                 if ((int32_t)c != S->cc && !gl_chunk(gl_part(t), S, c))
                     S->cc = -1;
                 a = S->cc >= 0 ? S->buf[ab % GL_SEG] : 0;
                 b = S->cc >= 0 ? S->buf[ab % GL_SEG + 1u] : 0;
-            } else {
-                a = S->buf[ip];
-                b = S->buf[ip + 1];
             }
             s = a + (((b - a) * f) >> 15);
             S->pos += S->step;
@@ -307,16 +283,16 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
 #define STRANGE_CAT_GLITCH "FFFFFFFFFF"
 static const preset_t GLITCH_PRESETS[] = {
     /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
-    {"BROKEN KIT", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
+    {"GLASS & AIR", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
     {"STUTTER", {0, 0, 70, 3, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 10, 20)},
-    {"BUZZ LOOP", {3, 0, 110, 16, 0, 20, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
+    {"CHOKE BUZZ", {11, 0, 110, 16, 0, 20, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
     {"BACKWARDS", {0, -5, 40, 2, 100, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 20, 40)},
-    {"UNDERRUN", {4, 0, 90, 2, 20, 30, 50, 30}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 30)},
-    {"DATA RAIN", {11, 7, 60, 4, 60, 60, 30, 90}, {40, 64, 127, 90}, 0, 0, FX(0, 0, 40, 90)},
-    {"CRUSH BOX", {0, -12, 30, 2, 30, 110, 10, 20}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
-    {"MODEM CHOIR", {8, -12, 100, 16, 40, 20, 0, 50}, {90, 64, 127, 110}, 0, 0, FX(0, 30, 30, 110)},
-    {"SKIPPING CD", {10, 0, 80, 6, 0, 10, 20, 60}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 30, 60)},
-    {"GHOST GLITCH", {14, -24, 50, 3, 80, 40, 30, 70}, {40, 64, 127, 120}, 0, 0, FX(0, 40, 40, 120)},
+    {"DEAD AIR", {4, 0, 90, 2, 20, 30, 50, 30}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 30)},
+    {"SW DATA", {5, 7, 60, 4, 60, 60, 30, 90}, {40, 64, 127, 90}, 0, 0, FX(0, 0, 40, 90)},
+    {"CRUSH ARC", {12, -12, 30, 2, 30, 110, 10, 20}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
+    {"RTTY CHOIR", {9, -12, 100, 16, 40, 20, 0, 50}, {90, 64, 127, 110}, 0, 0, FX(0, 30, 30, 110)},
+    {"NEON STRIKE", {10, 0, 80, 6, 0, 10, 20, 60}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 30, 60)},
+    {"GHOST VALVE", {14, -24, 50, 3, 80, 40, 30, 70}, {40, 64, 127, 120}, 0, 0, FX(0, 40, 40, 120)},
 };
 
 static const engine_t ENG_GLITCH = {
