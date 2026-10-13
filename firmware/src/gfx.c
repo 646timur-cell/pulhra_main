@@ -169,7 +169,7 @@ static void palette_set(uint32_t i)
         ux.dim = ux.line = ux.raise = ux.lane = UI_BW_GREY;   /* the one grey: inactive, tracks, wells */
         ux.tint = ux.grid = p->bg;
     }
-    ux.grime = FELUCCA_STRANGE && i == UI_DARK_INDEX;
+    ux.grime = NPALETTES == UI_NPALETTES && i == UI_DARK_INDEX;   /* (DARK only in STRANGE) */
     {                                            /* the wear's colours: per flat colour a dust (lighter) and a stain */
         const uint16_t f[3] = {ux.bg, ux.surf, ux.raise};
         uint32_t k;
