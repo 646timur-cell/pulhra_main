@@ -1605,6 +1605,20 @@ static void ui_input(void)
         case B_PLAY:
             if (layer_play())                           /* (GLO held: RESTART) */
                 break;
+#if FELUCCA_STRANGE
+            {                                           /* PLAY twice within 0.4 s: every sound off (seq.c kill_req) */
+                static uint32_t play_ms;
+                uint32_t dt = fm1_ms - play_ms;
+                play_ms = fm1_ms;
+                if (dt < 400u) {
+                    kill_req = 1;
+                    transport_req = 2;
+                    play_ms -= 1000u;                   /* (a third tap starts afresh) */
+                    ui_say("ALL SOUND OFF", "");
+                    break;
+                }
+            }
+#endif
             if (song.playing || chain_busy() || seq_counting())   /* (a count-in: PLAY stops it) */
                 transport_req = 2;
             else if (!ui.home && cur_page()->graph == GR_SONG)

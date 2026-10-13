@@ -170,9 +170,11 @@ static int test_engines(void)
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
     static const uint8_t want[] = {ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO, ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT,
-                                   ENGI_GLITCH, ENGI_RITUAL, ENGI_MECH, ENGI_BIO, ENGI_PHYS, ENGI_GURDY, 8, 11, 0, 2, ENGI_FM6, 7, 5, 3};
+                                   ENGI_GLITCH, ENGI_ERROR, ENGI_RITUAL, ENGI_MECH, ENGI_BIO, ENGI_PLANT,
+                                   ENGI_PHYS, ENGI_GURDY, 8, 11, 0, 2, ENGI_FM6, 7, 5, 3};
     ui_power_on();
-    bad += check("27 engines; LYRA .. DRIFT are 15..23, RITUAL MECH BIO 24..26", NENGINES == 27 &&
+    bad += check("29 engines; LYRA .. DRIFT are 15..23, RITUAL MECH BIO ERROR PLANT 24..28", NENGINES == 29 &&
+                 ENGINES[ENGI_ERROR] == &ENG_ERROR && ENGINES[ENGI_PLANT] == &ENG_PLANT && str_eq(N_ENGNAME[ENGI_PLANT], "PLANT") &&
                  ENGINES[ENGI_RITUAL] == &ENG_RITUAL && ENGINES[ENGI_MECH] == &ENG_MECH && ENGINES[ENGI_BIO] == &ENG_BIO &&
                  str_eq(N_ENGNAME[ENGI_BIO], "BIO") &&
                  ENGINES[ENGI_LYRA] == &ENG_LYRA && ENGINES[ENGI_DRIFT] == &ENG_DRIFT && str_eq(N_ENGNAME[ENGI_DRIFT], "DRIFT") &&
@@ -309,7 +311,7 @@ static int test_sound(const char *wavs)
             int pitched = e == ENGI_STRING || e == ENGI_BLOW || (e == ENGI_MODAL && en->presets[k].e[0] == 7);
             int hit = (e == ENGI_STRING && en->presets[k].e[0] != SR_BOW) ||
                       (e == ENGI_MODAL && en->presets[k].e[5] <= MX_STICK) ||   /* (struck: it decays while held) */
-                      (e == ENGI_RESO && en->presets[k].e[0] == RX_BALL) || ((e == ENGI_GLITCH || e == ENGI_RITUAL || e == ENGI_MECH || e == ENGI_BIO) && !en->presets[k].e[2]) ||
+                      (e == ENGI_RESO && en->presets[k].e[0] == RX_BALL) || ((e == ENGI_GLITCH || e == ENGI_RITUAL || e == ENGI_MECH || e == ENGI_BIO || e == ENGI_ERROR) && !en->presets[k].e[2]) ||
                       (e == ENGI_JUNK && en->presets[k].e[0] != JT_RATTLE) || (e == ENGI_DRIFT && en->presets[k].e[0] == DS_PLUCK);
             int forever = e == ENGI_DRIFT && en->presets[k].e[4] >= 118;   /* (a memory that keeps: no tail's end) */
             R = phrase(e, k, mono || pitched ? A3 : CH, mono || pitched ? 1u : 2u, en->presets[k].env[0] >= 80 ? 5.0 : 2.0);
@@ -489,8 +491,8 @@ static int test_edit_pages(void)
     key_up(1);
     frame();
     ok = TSEL->eng_req == ENGI_MODAL && ui.layer == LAYER_EDIT;
-    key_down(11); key_up(11); frame();                   /* E4: the 12th, BIO */
-    ok &= TSEL->eng_req == ENGI_BIO;
+    key_down(13); key_up(13); frame();                   /* F#4: the 14th, PLANT */
+    ok &= TSEL->eng_req == ENGI_PLANT;
     press(B_OCTUP); frame();                             /* OCT+: page 2, Felucca's */
     key_down(0); key_up(0); frame();                     /* F3: PHYS */
     ok &= TSEL->eng_req == ENGI_PHYS;
@@ -524,7 +526,7 @@ static int test_edit_pages(void)
     key_down(21); key_up(21); frame();                   /* D5: nothing */
     ok &= TSEL->eng_req == 8u;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT: two pages (darkmachine's 12, OCT+ Felucca's 10) from F3, D#5 LATCH, E5 MUTATE, F#5 RETRIG", ok);
+    bad += check("EDIT: two pages (darkmachine's 14, OCT+ Felucca's 10) from F3, D#5 LATCH, E5 MUTATE, F#5 RETRIG", ok);
     return bad;
 }
 
@@ -925,6 +927,34 @@ static int test_glitch_kit(void)
     return bad;
 }
 
+/* PLAY twice: every sound off at once (LATCH's notes, LYRA's delay, the reverb's tail); once: as before */
+static int test_play_kill(void)
+{
+    int bad = 0, ok;
+    int32_t buf[2 * CTL];
+    uint32_t k, i;
+    int32_t pk = 0;
+    ui_power_on();
+    set_engine_of(&trk[0], 0); apply_preset_to(&trk[0], 0); trk[0].engine = trk[0].eng_req;
+    trk[0].p[P_VOICE] = V_POLY; trk[0].p[P_AHOLD] = 1; trk[0].p[P_REV] = 100;
+    run(4);
+    midi_event(0x90, 0, 57, 100); midi_event(0x90, 0, 64, 100); run(4);
+    midi_event(0x80, 0, 57, 0); midi_event(0x80, 0, 64, 0); run(100);
+    ok = voices_on(&trk[0]) > 0u;                        /* (latched: still sounding) */
+    press(B_PLAY); frames(100); press(B_PLAY); frame();
+    for (k = 0; k < 8u; k++) mix_block(buf, CTL);
+    for (k = 0; k < 40u; k++) {
+        mix_block(buf, CTL);
+        for (i = 0; i < 2u * CTL; i++)
+            pk = abs(buf[i]) > pk ? abs(buf[i]) : pk;
+    }
+    ok &= trk[0].nheld == 0u && voices_on(&trk[0]) == 0u && pk < 64 && !song.playing;
+    bad += check("PLAY twice: LATCH's notes and the reverb's tail silent within a few blocks", ok);
+    trk[0].p[P_AHOLD] = 0; trk[0].p[P_REV] = 0;
+    go_home(); frame();
+    return bad;
+}
+
 /* MICRO: a note's degree from ROOT moved by the tuning's cents (and its own), heard; values from before it load OFF */
 static int mt_ty, mt_root, mt_deg = -1, mt_ct;
 static void tw_micro(void)
@@ -999,6 +1029,7 @@ int main(void)
     bad += test_scenes();
     bad += test_micro();
     bad += test_mutate();
+    bad += test_play_kill();
     bad += test_euclid_clock();
     bad += test_glitch_kit();
     bad += test_sound(wavs && *wavs ? wavs : 0);

@@ -261,7 +261,7 @@ static uint32_t engine_icon(const char *name)
         {"LYRA", ICON_WAVE}, {"CHAOS", ICON_NOISE},   /* STRANGE */
         {"STRING", ICON_PHYS}, {"MODAL", ICON_PHYS}, {"BLOW", ICON_PHYS},
         {"RESO", ICON_PHYS}, {"GLITCH", ICON_SLICE}, {"JUNK", ICON_NOISE}, {"DRIFT", ICON_LOOP},
-        {"RITUAL", ICON_SLICE}, {"MECH", ICON_SLICE}, {"BIO", ICON_SLICE},
+        {"RITUAL", ICON_SLICE}, {"MECH", ICON_SLICE}, {"BIO", ICON_SLICE}, {"ERROR", ICON_SLICE}, {"PLANT", ICON_WAVE},
     };
     uint32_t i;
     for (i = 0; i < sizeof M / sizeof M[0]; i++)

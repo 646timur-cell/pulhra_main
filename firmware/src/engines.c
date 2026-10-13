@@ -61,6 +61,7 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
 #include "eng_glitch.c"
 #include "eng_junk.c"
 #include "eng_drift.c"
+#include "eng_plant.c"
 #endif
 
 /* the editor protocol, user presets and projects store these indices: append, never reorder */
@@ -109,6 +110,8 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_RITUAL,                 /* 24 (ENGI_RITUAL) */
     &ENG_MECH,                   /* 25 (ENGI_MECH) */
     &ENG_BIO,                    /* 26 (ENGI_BIO) */
+    &ENG_ERROR,                  /* 27 (ENGI_ERROR) */
+    &ENG_PLANT,                  /* 28 (ENGI_PLANT) */
 #endif
 };
 
@@ -150,7 +153,7 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
     }
 #endif
 #if FELUCCA_STRANGE
-    if (e == &ENG_GLITCH || e == &ENG_RITUAL || e == &ENG_MECH || e == &ENG_BIO) {   /* KIT: a user slot */
+    if (e == &ENG_GLITCH || e == &ENG_RITUAL || e == &ENG_MECH || e == &ENG_BIO || e == &ENG_ERROR) {   /* KIT: a user slot */
         uint32_t k = (uint32_t)clamp(t->p[P_FM3_REL], 0, SMP_USER_SLOTS);
         *code = 96u + k;
         return k && !usr_nz[k - 1u] ? SMP_ALL_NAMES[SMP_NSETS + k - 1u] : 0;
@@ -170,7 +173,8 @@ static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: the EDIT lay
                                                          * machines on the keys from F3, four a row */
     ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO,             /* page 1, darkmachine's own: physical models, */
     ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT,              /* springs and drones, */
-    ENGI_GLITCH, ENGI_RITUAL, ENGI_MECH, ENGI_BIO,             /* the slice machines */
+    ENGI_GLITCH, ENGI_ERROR, ENGI_RITUAL, ENGI_MECH,           /* the slice machines, */
+    ENGI_BIO, ENGI_PLANT,                                      /* the organic */
     ENGI_PHYS, ENGI_GURDY, 8, 11,                              /* page 2, Felucca's: PHYS GURDY GRAIN NOISE, */
     0, 2, ENGI_FM6, 7,                                         /* ANALOG PHASE FM6 WHEEL, */
     5, 3,                                                      /* VOICE LOFI (no SAMPLE, TRIO, DRUM, SLICE) */

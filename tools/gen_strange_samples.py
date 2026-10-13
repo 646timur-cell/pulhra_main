@@ -5,9 +5,9 @@ gen_samples.py's (SMP_DATA, SMP_ZONES, SMP_SETS, ...): eng_sample.c includes it 
 
   sets (GRAIN's SRC; SAMPLE's SET, hidden in STRANGE), 22,050 Hz; the indices as in Felucca (1 and 4 aliases of 0),
   so USR1..3 stay SRC 5..7:
-    0 GLASS   bowed glass: five inharmonic partials, each a slowly beating pair, a breath of bow noise (0.5 s, A3)
-    2 THROAT  a throat drone: a buzzing source through three formants gliding from "a" to "o" (0.5 s, A2)
-    3 METAL   a struck plate: eight inharmonic modes, each its own decay (0.5 s, D4)
+    0 GLASS   bowed glass: five inharmonic partials, each a slowly beating pair, a breath of bow noise (0.4 s, A3)
+    2 THROAT  a throat drone: a buzzing source through three formants gliding from "a" to "o" (0.4 s, A2)
+    3 METAL   a struck plate: eight inharmonic modes, each its own decay (0.4 s, D4)
   the GLITCH kit (eng_glitch.c), 16,000 Hz: 16 slices, C3 .. D#4: glass, short-wave air, neon and current (GLT_ZONES)
 
   gen_strange_samples.py OUT.h
@@ -52,7 +52,7 @@ SR = 22050
 
 def glass():
     rnd = random.Random(11)
-    n, f0 = int(SR * 0.5), 220.0
+    n, f0 = int(SR * 0.4), 220.0
     parts = [(1.0, 1.0), (2.756, 0.5), (5.404, 0.33), (8.933, 0.2), (13.34, 0.11)]
     noise = onepole([rnd.uniform(-1, 1) for _ in range(n)], 0.08)
     x = []
@@ -71,7 +71,7 @@ def glass():
 
 def throat():
     rnd = random.Random(23)
-    n, f0 = int(SR * 0.5), 110.0
+    n, f0 = int(SR * 0.4), 110.0
     src, ph = [], 0.0
     for i in range(n):
         f = f0 * (1 + 0.004 * math.sin(TAU * 5.1 * i / SR))
@@ -95,7 +95,7 @@ def throat():
 
 def metal():
     rnd = random.Random(37)
-    n, f0 = int(SR * 0.5), 293.66
+    n, f0 = int(SR * 0.4), 293.66
     modes = [(1.0, 1.0, 1.2), (1.594, 0.8, 0.9), (2.136, 0.6, 0.8), (2.653, 0.55, 0.6), (3.156, 0.4, 0.5),
              (3.652, 0.32, 0.4), (4.06, 0.25, 0.35), (4.602, 0.2, 0.3)]
     ph = [rnd.random() * TAU for _ in modes]
@@ -282,7 +282,7 @@ def glitch_kit():
 
 
 # ------------------------------------------- RITUAL and MECH kits (11,025 Hz): the two machines on GLITCH's engine ---
-RG = 11025
+RG = 9000                                               # (9 kHz: their sounds stay under 4.5 kHz)
 
 
 def _n(sec):
@@ -529,7 +529,7 @@ def bio_kit():
     k.append(_hits(n, [(rnd.randrange(n), rnd.uniform(0.1, 1)) for _ in range(60)],
                    lambda a: [a * math.sin(TAU * f * j / RG) * math.exp(-j / 30) for f in [rnd.uniform(1500, 4000)] for j in range(150)]))
     n = _n(0.5)                                                   # a cicada: a pulsed buzz
-    k.append([math.sin(TAU * 4100 * i / RG) * (0.5 + 0.5 * math.sin(TAU * 230 * i / RG)) * (1 if (i // 160) % 3 else 0.5)
+    k.append([math.sin(TAU * 3300 * i / RG) * (0.5 + 0.5 * math.sin(TAU * 230 * i / RG)) * (1 if (i // 160) % 3 else 0.5)
               * math.sin(math.pi * i / n) for i in range(n)])
     n = _n(0.45)                                                  # a frog: two croaks
     def croak(a):
@@ -562,6 +562,117 @@ def bio_kit():
     return [fade(list(s), 8, 200) for s in k]
 
 
+# ------------------------------------------ ERROR's kit (11,025 Hz): the classic broken digital (the first GLITCH kit) ---
+ER = 11025
+EL = 1875                                               # 0.17 s a slice
+
+
+def crush(x, bits, hold):
+    q = 2 ** (bits - 1)
+    out, v = [], 0.0
+    for i, s in enumerate(x):
+        if i % hold == 0:
+            v = round(s * q) / q
+        out.append(v)
+    return out
+
+
+def error_kit():
+    rnd = random.Random(101)
+    t = [i / ER for i in range(EL)]
+    env = lambda d: [math.exp(-i / (ER * d)) for i in range(EL)]   # noqa: E731
+    sl = []
+    # 1 crushed noise burst
+    sl.append([v * e for v, e in zip(crush([rnd.uniform(-1, 1) for _ in range(EL)], 3, 9), env(0.05))])
+    # 2 an accelerating click train
+    x, p, gap = [0.0] * EL, 0, 300
+    while p < EL:
+        for k in range(6):
+            if p + k < EL:
+                x[p + k] = (1, -0.6, 0.4, -0.2, 0.1, -0.05)[k]
+        p += max(18, int(gap))
+        gap *= 0.8
+    sl.append(x)
+    # 3 a falling FM chirp
+    x, ph, mp = [], 0.0, 0.0
+    for i in range(EL):
+        f = 2400 * math.exp(-i / 500)
+        mp += 3.1 * f / ER
+        ph += f * (1 + 2.5 * math.sin(TAU * mp)) / ER
+        x.append(math.sin(TAU * ph) * math.exp(-i / 1200))
+    sl.append(x)
+    # 4 stutter: a tone chopped, its pitch jumping
+    x = []
+    for i in range(EL):
+        seg = i // 220
+        f = (440, 660, 330, 880, 495, 220, 990, 587, 370)[seg % 9]
+        x.append(math.sin(TAU * f * t[i]) * (1 if (i % 220) < 150 else 0))
+    sl.append(x)
+    # 5 dropouts: a chord with holes (an underrun)
+    holes = set()
+    for _ in range(9):
+        a = rnd.randrange(EL)
+        holes.update(range(a, a + rnd.randrange(30, 140)))
+    sl.append([0 if i in holes else (math.sin(TAU * 220 * t[i]) + math.sin(TAU * 277 * t[i]) + math.sin(TAU * 330 * t[i])) / 3
+               for i in range(EL)])
+    # 6 a ring-modulated zap
+    sl.append([math.sin(TAU * (90 + 4000 * t[i]) * t[i]) * math.sin(TAU * 1730 * t[i]) * math.exp(-i / 900) for i in range(EL)])
+    # 7 a tone decimated ever more (a sample-rate sweep)
+    x, v = [], 0.0
+    for i in range(EL):
+        h = 1 + i // 90
+        if i % h == 0:
+            v = math.sin(TAU * 523 * t[i]) + 0.5 * math.sin(TAU * 1046 * t[i])
+        x.append(v * 0.7)
+    sl.append(x)
+    # 8 crackle: sparse impulses of random sign
+    x = [0.0] * EL
+    for _ in range(40):
+        p = rnd.randrange(EL - 4)
+        a = rnd.uniform(0.3, 1) * rnd.choice((-1, 1))
+        x[p], x[p + 1], x[p + 2] = a, -0.5 * a, 0.2 * a
+    sl.append(x)
+    # 9 modem: FSK tones flipping
+    x, ph = [], 0.0
+    for i in range(EL):
+        f = 1200 if (i // 37) % 3 else 2200
+        ph += f / ER
+        x.append(1.0 if (ph % 1) < 0.5 else -1.0)
+    sl.append([v * 0.5 for v in onepole(x, 0.5)])
+    # 10 a clipped thump
+    x, ph = [], 0.0
+    for i in range(EL):
+        f = 40 + 120 * math.exp(-i / 180)
+        ph += f / ER
+        x.append(max(-0.6, min(0.6, 1.6 * math.sin(TAU * ph) * math.exp(-i / 1400))))
+    sl.append(x)
+    # 11 a CD skip: one fragment again and again
+    frag = [math.sin(TAU * 311 * i / ER) * 0.6 + rnd.uniform(-0.3, 0.3) for i in range(150)]
+    sl.append([frag[i % 150] * (1 if (i // 150) % 4 != 3 else 0.3) for i in range(EL)])
+    # 12 data: an LFSR's bytes as sound, its taps changing
+    x, s = [], 0xACE1
+    for i in range(EL):
+        b = ((s >> 0) ^ (s >> 2) ^ (s >> 3) ^ (s >> (5 if i < EL // 2 else 7))) & 1
+        s = (s >> 1) | (b << 15)
+        x.append(((s & 0xFF) - 128) / 128)
+    sl.append([v * e for v, e in zip(x, env(0.12))])
+    # 13 a beep, square, with a fault in the middle
+    sl.append([(0.5 if (int(1000 * t[i] * 2) % 2) else -0.5) * (0 if 800 < i < 1000 else 1) * (i < 1500) for i in range(EL)])
+    # 14 a metallic tick
+    sl.append([sum(math.sin(TAU * f * t[i]) for f in (3170, 4390, 5830, 7210)) * math.exp(-i / 160) for i in range(EL)])
+    # 15 a reversed swell, cut
+    n = onepole([rnd.uniform(-1, 1) for _ in range(EL)], 0.3)
+    sl.append([n[i] * math.exp((i - EL) / 400) * (i < EL - 60) for i in range(EL)])
+    # 16 a smear of tiny grains, random pitches
+    x = [0.0] * EL
+    for _ in range(28):
+        p, f, L = rnd.randrange(EL - 200), rnd.uniform(300, 2500), rnd.randrange(60, 200)
+        for k in range(L):
+            x[p + k] += math.sin(TAU * f * k / ER) * math.sin(math.pi * k / L) * 0.5
+    sl.append(x)
+    return [fade(list(s), 8, 40) for s in sl]
+
+
 # --------------------------------------------------------------------------------------- header ---
 def main(out):
     data, zones = bytearray(), []
@@ -587,6 +698,9 @@ def main(out):
     z_bio = len(zones)
     for k, x in enumerate(bio_kit()):
         add(x, RG, 48 + k, 48 + k, 48 + k)
+    z_err = len(zones)
+    for k, x in enumerate(error_kit()):
+        add(x, ER, 48 + k, 48 + k, 48 + k)
     L = ["/* generated by tools/gen_strange_samples.py: STRANGE's built-in samples (synthesized) */", "#pragma once",
          f"static const uint8_t SMP_DATA[{len(data)}] = {{"]
     for i in range(0, len(data), 24):
@@ -612,19 +726,23 @@ def main(out):
           f'#define GLT_NZ {z_rit - z_glitch}', 'static const smp_zone_t GLT_ZONES[] = {']
     for z in zones[z_glitch:z_rit]:
         L.append("    {" + ", ".join(str(v) for v in z) + "},")
-    L += ["};", "/* RITUAL's and MECH's kits (eng_glitch.c, the same engine), 11,025 Hz */",
+    L += ["};", "/* RITUAL's, MECH's and BIO's kits (eng_glitch.c, the same engine), 9,000 Hz */",
           f"#define RIT_NZ {z_mec - z_rit}", "static const smp_zone_t RIT_ZONES[] = {"]
     for z in zones[z_rit:z_mec]:
         L.append("    {" + ", ".join(str(v) for v in z) + "},")
     L += ["};", f"#define MEC_NZ {z_bio - z_mec}", "static const smp_zone_t MEC_ZONES[] = {"]
     for z in zones[z_mec:z_bio]:
         L.append("    {" + ", ".join(str(v) for v in z) + "},")
-    L += ["};", f"#define BIO_NZ {len(zones) - z_bio}", "static const smp_zone_t BIO_ZONES[] = {"]
-    for z in zones[z_bio:]:
+    L += ["};", f"#define BIO_NZ {z_err - z_bio}", "static const smp_zone_t BIO_ZONES[] = {"]
+    for z in zones[z_bio:z_err]:
+        L.append("    {" + ", ".join(str(v) for v in z) + "},")
+    L += ["};", "/* ERROR's kit: the classic broken digital, 11,025 Hz */", f"#define ERR_NZ {len(zones) - z_err}",
+          "static const smp_zone_t ERR_ZONES[] = {"]
+    for z in zones[z_err:]:
         L.append("    {" + ", ".join(str(v) for v in z) + "},")
     L += ["};", ""]
     Path(out).write_text("\n".join(L))
-    print(f"strange samples: {len(data)} B ({len(zones)} zones: 3 sources, 16 x 4 kit slices)")
+    print(f"strange samples: {len(data)} B ({len(zones)} zones: 3 sources, 16 x 5 kit slices)")
 
 
 if __name__ == "__main__":

@@ -63,20 +63,22 @@ static uint32_t gl_kit(const int16_t *p) { return (uint32_t)clamp(p[P_FM3_REL], 
 #define GL_RIT 4u
 #define GL_MEC 5u
 #define GL_BIO 6u
+#define GL_ERR 7u
 static uint32_t gl_src(const track_t *t)
 {
     uint32_t kit = gl_kit(t->p);
-    return kit ? kit : t->engine == ENGI_RITUAL ? GL_RIT : t->engine == ENGI_MECH ? GL_MEC : t->engine == ENGI_BIO ? GL_BIO : 0u;
+    return kit ? kit : t->engine == ENGI_RITUAL ? GL_RIT : t->engine == ENGI_MECH ? GL_MEC : t->engine == ENGI_BIO ? GL_BIO : t->engine == ENGI_ERROR ? GL_ERR : 0u;
 }
 static uint32_t gl_nz(uint32_t sc)
 {
-    return sc - 1u < SMP_USER_SLOTS ? usr_nz[sc - 1u] : sc == GL_RIT ? RIT_NZ : sc == GL_MEC ? MEC_NZ : sc == GL_BIO ? BIO_NZ : GLT_NZ;
+    return sc - 1u < SMP_USER_SLOTS ? usr_nz[sc - 1u] : sc == GL_RIT ? RIT_NZ : sc == GL_MEC ? MEC_NZ : sc == GL_BIO ? BIO_NZ : sc == GL_ERR ? ERR_NZ : GLT_NZ;
 }
 static const smp_zone_t *gl_zone(uint32_t sc, uint32_t z)
 {
     return sc - 1u < SMP_USER_SLOTS ? &usr_zone[sc - 1u][z & 15u] : sc == GL_RIT ? &RIT_ZONES[z % RIT_NZ]
                                                                  : sc == GL_MEC ? &MEC_ZONES[z % MEC_NZ]
-                                                                 : sc == GL_BIO ? &BIO_ZONES[z % BIO_NZ] : &GLT_ZONES[z % GLT_NZ];
+                                                                 : sc == GL_BIO ? &BIO_ZONES[z % BIO_NZ]
+                                                                 : sc == GL_ERR ? &ERR_ZONES[z % ERR_NZ] : &GLT_ZONES[z % GLT_NZ];
 }
 
 /* one ADPCM sample of zone z at pos */
@@ -360,7 +362,7 @@ static const preset_t RITUAL_PRESETS[] = {
 #define STRANGE_CAT_MECH "FFFFFFFFFF"
 static const preset_t MECH_PRESETS[] = {
     {"WORKSHOP", {4, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
-    {"CLOCKWORK", {0, 0, 80, 4, 0, 0, 10, 20}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 40)},
+    {"CLOCKWORK", {2, 0, 80, 4, 0, 0, 10, 20}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 40)},
     {"TYPE POOL", {3, 0, 30, 2, 10, 10, 20, 70}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 40)},
     {"REEL TO REEL", {5, 0, 100, 16, 0, 0, 0, 0}, {20, 64, 127, 80}, 0, 0, FX(0, 20, 20, 60)},
     {"TAPE DEATH", {6, -5, 60, 2, 60, 30, 20, 30}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 20, 70)},
@@ -377,7 +379,7 @@ static const preset_t BIO_PRESETS[] = {
     {"HEART LOOP", {0, -5, 90, 16, 0, 0, 0, 0}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 10, 60)},
     {"BREATHING", {1, 0, 60, 3, 50, 0, 0, 30}, {40, 64, 127, 110}, 0, 0, FX(0, 20, 20, 100)},
     {"SWAMP NIGHT", {11, 0, 50, 4, 20, 0, 20, 60}, {30, 64, 127, 110}, 0, 0, FX(0, 20, 30, 110)},
-    {"CICADA HEAT", {10, 0, 100, 16, 0, 20, 10, 20}, {60, 64, 127, 110}, 0, 0, FX(0, 0, 20, 90)},
+    {"CICADA HEAT", {10, 0, 90, 3, 0, 20, 10, 20}, {60, 64, 127, 110}, 0, 0, FX(0, 0, 20, 90)},
     {"FOREST RAIN", {9, 0, 70, 6, 30, 0, 10, 80}, {50, 64, 127, 110}, 0, 0, FX(0, 0, 30, 110)},
     {"CRUNCH", {4, -7, 30, 2, 20, 60, 20, 40}, {0, 64, 127, 50}, 0, 0, FX(20, 0, 0, 40)},
     {"WET LAB", {5, -5, 50, 3, 40, 20, 10, 50}, {0, 64, 127, 80}, 0, 0, FX(0, 20, 20, 70)},
@@ -425,6 +427,38 @@ static const engine_t ENG_BIO = {
     .edit = GL_EDIT,
     .presets = BIO_PRESETS,
     .npresets = NELEM(BIO_PRESETS),
+    .note_on = glitch_note_on,
+    .render = glitch_render,
+    .block = glitch_block,
+    .knob = {P_E2, P_E3, P_E5, P_E7},
+    .poly = GL_POLY,
+    .sampled = 1,
+    .mem = sizeof(gl_part_t),
+    .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
+    .xya = {{40, 40, 30}, {50, 40, 20}},
+};
+/* ERROR: the classic broken digital (the first GLITCH kit, 11,025 Hz): crushed noise, click trains, an FM chirp, a
+ * stutter, dropouts, a zap, a rate sweep, crackle, a modem, a thump, a CD skip, LFSR data, a faulty beep, a tick, a
+ * reversed swell, a grain smear */
+#define STRANGE_CAT_ERROR "FFFFFFFFFF"
+static const preset_t ERROR_PRESETS[] = {
+    {"BROKEN KIT", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
+    {"STUTTER", {0, 0, 70, 3, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 10, 20)},
+    {"BUZZ LOOP", {3, 0, 110, 16, 0, 20, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
+    {"BACKWARDS", {0, -5, 40, 2, 100, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 20, 40)},
+    {"UNDERRUN", {4, 0, 90, 2, 20, 30, 50, 30}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 30)},
+    {"DATA RAIN", {11, 7, 60, 4, 60, 60, 30, 90}, {40, 64, 127, 90}, 0, 0, FX(0, 0, 40, 90)},
+    {"CRUSH BOX", {0, -12, 30, 2, 30, 110, 10, 20}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
+    {"MODEM CHOIR", {8, -12, 100, 16, 40, 20, 0, 50}, {90, 64, 127, 110}, 0, 0, FX(0, 30, 30, 110)},
+    {"SKIPPING CD", {10, 0, 80, 6, 0, 10, 20, 60}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 30, 60)},
+    {"GHOST GLITCH", {14, -24, 50, 3, 80, 40, 30, 70}, {40, 64, 127, 120}, 0, 0, FX(0, 40, 40, 120)},
+};
+static const engine_t ENG_ERROR = {
+    .name = "ERROR",
+    .page_title = {"SLICE", "BREAK"},
+    .edit = GL_EDIT,
+    .presets = ERROR_PRESETS,
+    .npresets = NELEM(ERROR_PRESETS),
     .note_on = glitch_note_on,
     .render = glitch_render,
     .block = glitch_block,

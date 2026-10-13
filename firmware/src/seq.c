@@ -49,6 +49,9 @@ static volatile uint8_t kb_asleep;       /* MENU > SCREEN OFF (ui.c): the screen
 static uint8_t last_note = 60;
 static volatile uint8_t transport_req;   /* 1 start, 2 stop, 3 restart (from the UI) */
 static volatile uint8_t panic_req;       /* bit per track: release every sounding note (preset / engine change) */
+#if FELUCCA_STRANGE
+static volatile uint8_t kill_req;        /* PLAY twice (ui_input.c): every sound off at once, its tails too */
+#endif
 static volatile uint8_t midi_hint;       /* MIDI IN played track n - 1, which is not the selected one (the UI says so) */
 
 static uint32_t trk_index(const track_t *t) { return (uint32_t)(t - trk); }
@@ -1430,6 +1433,18 @@ static void events_block(uint32_t n)
         if (midi_route != 1u)
             midi_route_block();
     }
+#if FELUCCA_STRANGE
+    if (kill_req) {                                   /* PLAY twice: the notes, LATCH's and EUCLID's, cut in a block; */
+        kill_req = 0;                                 /* the engines' own tails (LYRA's delay, DRIFT's memory, the */
+        for (i = 0; i < NTRK; i++)                    /* springs) and the delay, chorus and reverb emptied */
+            midi_silence_track(i);
+        for (i = 0; i < NLIVE; i++)
+            eng_mem_owner[i] = 0;                     /* (zeroed at the next claim, voice.c engine_block) */
+        memset(dly_buf, 0, sizeof dly_buf);
+        memset(cho_buf, 0, sizeof cho_buf);
+        rev_clear();
+    }
+#endif
     pr = panic_req;
     panic_req = 0;
     if (midi_in_overflow) {                            /* a lost note-off must never leave a held note */

@@ -6,7 +6,7 @@
 
 **Две дорожки.** Звучат и принимают MIDI только T1 и T2. T3/T4 не рендерятся, их каналы никто не слушает, выбрать их нельзя. На HOME их строки пустые. MIDI — как в модуле: TRACK CH, T1 CH / T2 CH в MENU > MIDI.
 
-**Движки (машины).** 22 штуки. Убраны DRUM, SLICE, TRIO (из кода) и SAMPLE (из списка): это модуль текстур. Свои: LYRA, CHAOS, STRING, MODAL, BLOW (15–19), RESO, GLITCH, JUNK, DRIFT (20–23), RITUAL, MECH, BIO (24–26 — тот же движок, что GLITCH, со своими китами); из Felucca: GRAIN, PHYS, GURDY, FM6, ANALOG, WHEEL, PHASE, VOICE, NOISE, LOFI. Слой EDIT (зажать EDIT): две страницы машин с F3, OCT+ листает. Страница 1, фирменные (по ряду на семейство): STRING MODAL BLOW RESO · JUNK LYRA CHAOS DRIFT · GLITCH RITUAL MECH BIO. Страница 2, Felucca: PHYS GURDY GRAIN NOISE · ANALOG PHASE FM6 WHEEL · VOICE LOFI. На обеих: D#5 LATCH, E5 MUTATE, F#5 RETRIG (арп/евклид с первого шага, иначе защёлкнутые ноты заново), G5 INIT. MUTATE (вариация звука: непрерывные ручки движка в пределах ±20 % от исходного звука, каждое нажатие — новая вариация того же звука, без дрейфа; модель, алгоритм, слот, ноты не трогает). Номера убранных движков сохранены (их играет пустая заглушка), чтобы номера остальных не съехали. У GRAIN, PHYS, GURDY, NOISE, ANALOG добавлены текстурные пресеты.
+**Движки (машины).** 24 штуки. Убраны DRUM, SLICE, TRIO (из кода) и SAMPLE (из списка): это модуль текстур. Свои: LYRA, CHAOS, STRING, MODAL, BLOW (15–19), RESO, GLITCH, JUNK, DRIFT (20–23), RITUAL, MECH, BIO, ERROR (24–27 — тот же движок, что GLITCH, со своими китами), PLANT (28); из Felucca: GRAIN, PHYS, GURDY, FM6, ANALOG, WHEEL, PHASE, VOICE, NOISE, LOFI. Слой EDIT (зажать EDIT): две страницы машин с F3, OCT+ листает. Страница 1, фирменные (по ряду на семейство): STRING MODAL BLOW RESO · JUNK LYRA CHAOS DRIFT · GLITCH ERROR RITUAL MECH · BIO PLANT. Страница 2, Felucca: PHYS GURDY GRAIN NOISE · ANALOG PHASE FM6 WHEEL · VOICE LOFI. На обеих: D#5 LATCH, E5 MUTATE, F#5 RETRIG (арп/евклид с первого шага, иначе защёлкнутые ноты заново), G5 INIT. MUTATE (вариация звука: непрерывные ручки движка в пределах ±20 % от исходного звука, каждое нажатие — новая вариация того же звука, без дрейфа; модель, алгоритм, слот, ноты не трогает). Номера убранных движков сохранены (их играет пустая заглушка), чтобы номера остальных не съехали. У GRAIN, PHYS, GURDY, NOISE, ANALOG добавлены текстурные пресеты.
 
 **Встроенные сэмплы** синтезируются при сборке (`tools/gen_strange_samples.py`, ничего чужого): для GRAIN — GLASS (стекло под смычком), THROAT (горловой дрон), METAL (удар по листу), для GLITCH — кит из 16 слайсов на 16 кГц по 0,3–0,6 с: стекло (удар, треск, палец по краю, осколки), КВ-эфир (настройка через нулевые биения, щелчки данных, помехи, «утиный» SSB, морзянка, RTTY) и ток (неон разгоняется на дросселе, гул дросселя, дуга, реле, прогрев лампы, размагничивание). 126 КБ, как пианино/флейта/сакс стока.
 
@@ -15,6 +15,8 @@
 **ARP → FAV / X / Y.** Кнопка ARP листает: FAV — браузер пресетов на списке избранного (крутишь — грузится), X, Y.
 
 **SEQ → EUCLID.** Евклидов секвенсор на арпеджиаторе: играет зажатые или защёлкнутые LATCH ноты. EUCLID: NOTES (OFF / UP / DN / … как MODE арпа), STEPS 1–32, HITS, ROT; EUCLID 2: RATE, DIV (замедлитель: шаг ×1…×64, для медленных секвенций), GATE, LATCH; EUCLID 3: шанс, свинг, порядок, OCT. Паттерн нарисован клетками, текущий шаг подсвечен.
+
+**PLAY дважды** (в пределах 0,4 с) — ALL SOUND OFF: глушит все ноты, защёлкнутые LATCH, евклид, хвосты движков (дилей LYRA, память DRIFT, пружины) и общие дилей, хорус, ревер; транспорт останавливается.
 
 **Синхронизация.** CLOCK > CLK: INT / USB / TRS. С внешним клоком темп и DIV — от мастера, евклид стартует по Start (до Start молчит, по Stop останавливается), его шаги стоят на сетке от Start: нота, нажатая посреди такта, входит на ближайшем шаге той же сетки, партии в фазе между собой и с мастером, без дрейфа.
 
@@ -127,15 +129,22 @@ ATK/REL дорожки — это FAST/SLOW Лиры, INSERT или DIST — д�
 
 В загрузчике (вкладка сэмплов) для одного файла есть **Slice**: Off / At transients (по атакам, чувствительность низкая / средняя / высокая, до 16 кусков) / 8 equal / 16 equal. Резы видны на волне, куски ложатся на клавиши с C3 по одному. SLCE, PTCH (полутоны), STUT (окно-заикание 170…5 мс, 0 — слайс целиком), REP (повторов окна, 16 — бесконечно), REV (шанс задом наперёд), CRSH (биты и частота), CHOP (шанс выпадения окна), JUMP (шанс прыжка в другое место слайса).
 
-## RITUAL, MECH и BIO — ещё три слайс-машины
+## PLANT — растущий звук (по идее Synplant)
 
-Тот же движок и те же ручки, что у GLITCH (SLCE PTCH STUT REP / REV CRSH CHOP JUMP, страница KIT со слотами USR), свои киты на 11 кГц по 0,25–0,55 с, C3…D#4:
+Семя (GENE) — патч маленького синта: синус-несущая, синус-модулятор (RATIO, INDEX, своя обратная связь), фолдер, шум, резонансный ФНЧ, «ветер» (покачивание высоты). Каждая клавиша — ветка из семени: двенадцать нот октавы — двенадцать направлений мутации (у каждой октавы ещё свой, меньший корень). Пока нота держится, ветка растёт (GROW — как далеко её кончик от семени, RATE — как быстро, 0 — сразу): на ней прорастают модуляторы — глубже FM, входят фолд и ветер, фильтр открывается или закрывается, как у этой ветки. Отпустил и сыграл снова — ветка снова из семени. Другой GENE — другое растение.
+Ручки: GENE GROW RATE RATIO / INDEX BLOOM NOISE WIND. Пресеты: SEEDLING, FERN PAD, MOSS, THORN LEAD, ROOT BASS, BLOSSOM BELL, VINE, SPORE CLOUD, NIGHT GARDEN, OVERGROWN.
+
+## RITUAL, MECH, BIO и ERROR — ещё четыре слайс-машины
+
+Тот же движок и те же ручки, что у GLITCH (SLCE PTCH STUT REP / REV CRSH CHOP JUMP, страница KIT со слотами USR), свои киты по 0,25–0,55 с (RITUAL, MECH, BIO на 9 кГц, ERROR на 11 кГц), C3…D#4:
 - **RITUAL**: BELL, GONG, CHAINS, STONE GRIND, STONE KNOCK, CANDLE, CHOIR BREATH, CAVE DRIP, COFFIN, BONES, FRAME DRUM, BOWL, THROAT, CRYPT WIND, DOOR CREAK, TOLLING. Пресеты: CRYPT KIT, LOW TOLL, CHAIN DRAG, BONE RAIN, STONE ALTAR, CANDLE VIGIL, BREATH CHOIR, DRIP CAVE, BURIAL, THROAT RITE.
 - **MECH**: CLOCK TICK, TOCK, RATCHET, TYPEWRITER, CARRIAGE, REEL UP, TAPE STOP, PROJECTOR, PISTON, WIND-UP, SHUTTER, SERVO, HAMMER, CHAIN DRIVE, STEAM, MUSIC BOX. Пресеты: WORKSHOP, CLOCKWORK, TYPE POOL, REEL TO REEL, TAPE DEATH, PROJECTOR, STEAM WORKS, FORGE, SERVO SWARM, BROKEN BOX.
 
 - **BIO**: HEARTBEAT, BREATH IN, BREATH OUT, TONGUE CLICK, KNUCKLES, SQUELCH, TWIG SNAP, LEAVES, BUBBLES, RAIN ON LEAVES, CICADA, FROG, BIRD, WOOD CREAK, PURR, GULP. Пресеты: BODY KIT, HEART LOOP, BREATHING, SWAMP NIGHT, CICADA HEAT, FOREST RAIN, CRUNCH, WET LAB, DAWN BIRDS, PURR DRONE.
 
-Чтобы киты поместились: кит GLITCH на 16 кГц, встроенные источники GRAIN (GLASS, THROAT, METAL) по 0,5 с.
+- **ERROR** — классический глитч, первый кит GLITCH: пережатый шум, щелчки, FM-чирп, заикание, выпадения, «зап», свип частоты, треск, модем, удар, скачок CD, LFSR, сбойный бип, тик, реверс, гранулы. Пресеты: BROKEN KIT, STUTTER, BUZZ LOOP, BACKWARDS, UNDERRUN, DATA RAIN, CRUSH BOX, MODEM CHOIR, SKIPPING CD, GHOST GLITCH.
+
+Чтобы всё поместилось: кит GLITCH на 16 кГц, RITUAL/MECH/BIO на 9 кГц, встроенные источники GRAIN (GLASS, THROAT, METAL) по 0,4 с.
 
 ## JUNK — пружины и ящик хлама
 

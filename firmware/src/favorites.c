@@ -24,10 +24,12 @@ static uint8_t *fav_byte(uint32_t engine, uint32_t preset)
         static const uint8_t ROW[4] = {6, 10, 13, 4};
         return preset < 128u ? &favorites.factory[ROW[engine - ENGI_RESO]][preset / 8u] : 0;
     }
-    if (engine >= ENGI_RITUAL && engine <= ENGI_BIO) {
-        static const uint8_t ROW2[3] = {6, 10, 13};
+    if (engine >= ENGI_RITUAL && engine <= ENGI_ERROR) {   /* (27 ERROR: SAMPLE's row's second half) */
+        static const uint8_t ROW2[4] = {6, 10, 13, 4};
         return preset < 128u ? &favorites.factory[ROW2[engine - ENGI_RITUAL]][16u + preset / 8u] : 0;
     }
+    if (engine == ENGI_PLANT)                            /* (28 PLANT: row 1's last two bytes, past LYRA .. BLOW's) */
+        return preset < 16u ? &favorites.factory[1][30u + preset / 8u] : 0;
 #endif
     return engine < NENGINES && engine < 14u && preset < 256u ? &favorites.factory[engine][preset / 8u] : 0;
 }

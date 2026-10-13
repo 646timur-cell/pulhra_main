@@ -70,7 +70,7 @@ static uint8_t sc_k = 0xFFu;                            /* the key a scene was p
 #define SE_RETRIG 25u
 #define SE_INIT 26u
 /* the machines on two pages (OCT+ turns): darkmachine's own (ENGINE_ORDER's first SE_P1), then Felucca's */
-#define SE_P1 12u
+#define SE_P1 14u
 static uint8_t se_page;
 static uint32_t se_eng(uint32_t k)                      /* key k's machine on this page, NENGINES = none */
 {
@@ -661,7 +661,7 @@ static const eqa_set_t EQA[] = {
 /* STRANGE: on every engine, black keys 1.. load the engines past the white keys (ENGINE_ORDER from LY_INIT on) */
 static const char *eqa_eng_name(const track_t *t, uint32_t i)   /* (an 11th of the row: two letters) */
 {
-    static const char *const A[][2] = {{"RESO", "RS"}, {"GLITCH", "GL"}, {"JUNK", "JK"}, {"DRIFT", "DR"}, {"RITUAL", "RT"}, {"MECH", "MC"}, {"BIO", "BI"}};
+    static const char *const A[][2] = {{"RESO", "RS"}, {"GLITCH", "GL"}, {"JUNK", "JK"}, {"DRIFT", "DR"}, {"RITUAL", "RT"}, {"MECH", "MC"}, {"BIO", "BI"}, {"ERROR", "ER"}, {"PLANT", "PL"}};
     const char *n = ENGINES[eng_vis(LY_INIT + i)]->name;
     uint32_t k;
     (void)t;
@@ -1231,15 +1231,15 @@ static void layer_edit(void)
     static const char *const AN[4] = {"LATCH", "MUTATE", "RETRIG", "INIT"};
     uint32_t i;
     for (i = 0; se_eng(i) < NENGINES; i++) {
-        int32_t y = 4 + (int32_t)(i / 4u) * 23;
+        int32_t y = 4 + (int32_t)(i / 4u) * 18;
         uint32_t e = se_eng(i);
         uint16_t ink, fill = lc_fill(e == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, &ink);
-        fill = lc_box(LC_X(i % 4u), y, LC_W, 20, fill);
-        GFX_HOOK_ALIGN(LC_X(i % 4u), y, LC_X(i % 4u) + LC_W, y + 20, AL_HV, "edit machine cell name centred");
-        cv_text_in(LC_X(i % 4u), y + CAP_IN(S, 20), LC_W, &AF_S, ENGINES[e]->name, ink, fill);
+        fill = lc_box(LC_X(i % 4u), y, LC_W, 16, fill);
+        GFX_HOOK_ALIGN(LC_X(i % 4u), y, LC_X(i % 4u) + LC_W, y + 16, AL_HV, "edit machine cell name centred");
+        cv_text_in(LC_X(i % 4u), y + CAP_IN(S, 16), LC_W, &AF_S, ENGINES[e]->name, ink, fill);
     }
     GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "edit page centred");
-    cv_text_in(0, 76, 240, &AF_S, se_page ? "2/2 FELUCCA     OCT+: DARKMACHINE" : "1/2 DARKMACHINE     OCT+: FELUCCA", T_DIM, T_SURF);
+    cv_text_in(0, 77, 240, &AF_S, se_page ? "2/2 FELUCCA     OCT+: DARKMACHINE" : "1/2 DARKMACHINE     OCT+: FELUCCA", T_DIM, T_SURF);
     for (i = 0; i < 4u; i++) {                          /* (D#5 E5 F#5 G5: the names alone, centred) */
         uint32_t st = i == 0u ? (TSEL->p[P_AHOLD] ? LS_SEL : LS_OFF) : i == 3u && chain_busy() ? LS_DIM : LS_OFF;
         uint16_t ink, fill = lc_box(LC_X(i), LM_Y, LC_W, LM_H, lc_fill(st, &ink));
