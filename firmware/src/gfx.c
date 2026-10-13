@@ -85,6 +85,8 @@ static struct {
     uint16_t mid, dim, line, sel, tint, ink, rec, raise, key, lane, grid;
     uint8_t light, mono;
     uint8_t style;               /* MENU > STYLE (ui.c style_apply): ST_FLAT, ST_LINE */
+    uint8_t grime;               /* STRANGE's DARK: the crypt's wear (cv_grime, cv_rrect's torn edges) */
+    uint16_t gk[3], gd[3][2];    /* grime: the flat colours it wears (swapped: BG SURF RAISE), each one's dust and stain */
     uint32_t gen;                /* bumped by palette_set (the text ramps follow) */
 } ux;
 /* STYLE: FLAT, the filled SURF cards and panels; LINE, no SURF (it is BG) and 1 px T_RULE dividers between the
@@ -136,6 +138,14 @@ static uint32_t ux_luma(uint16_t c)        /* 0..255 */
     return ((c >> 11) * 255u / 31u * 54u + ((c >> 5) & 63u) * 255u / 63u * 183u + (c & 31u) * 255u / 31u * 19u) >> 8;
 }
 
+static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu) | ((c & 0xFFu) << 8)); }
+static inline uint32_t gm_hash(uint32_t x, uint32_t y)   /* a fixed noise of the screen's pixels */
+{
+    uint32_t h = x * 73856093u ^ y * 19349663u;
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    return h ^ (h >> 15);
+}
 static void palette_set(uint32_t i)
 {
     const ui_pal_t *p = &UI_PALETTES[i % NPALETTES];
@@ -159,6 +169,16 @@ static void palette_set(uint32_t i)
         ux.dim = ux.line = ux.raise = ux.lane = UI_BW_GREY;   /* the one grey: inactive, tracks, wells */
         ux.tint = ux.grid = p->bg;
     }
+    ux.grime = FELUCCA_STRANGE && i == UI_DARK_INDEX;
+    {                                            /* the wear's colours: per flat colour a dust (lighter) and a stain */
+        const uint16_t f[3] = {ux.bg, ux.surf, ux.raise};
+        uint32_t k;
+        for (k = 0; k < 3u; k++) {
+            ux.gk[k] = swap16(f[k]);
+            ux.gd[k][0] = swap16(ux_mix(f[k], p->text, k ? 9 : 6));
+            ux.gd[k][1] = swap16(k ? ux_mix(f[k], p->bg, 45) : ux_mix(f[k], p->accent, 7));
+        }
+    }
     ux.gen++;                                    /* the text ramps change with the coverage curve */
 }
 
@@ -170,8 +190,6 @@ static uint32_t palette_from_stored(uint32_t v)
 }
 static uint32_t palette_to_stored(uint32_t i) { return UI_PAL_TAG + i % NPALETTES; }
 static int palette_stored_ok(uint32_t v) { return v < 20u || (v >= UI_PAL_TAG && v - UI_PAL_TAG < NPALETTES); }
-
-static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu) | ((c & 0xFFu) << 8)); }
 
 /* ------------------------------------------------------------ canvas --- */
 static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
@@ -192,9 +210,74 @@ static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
         cv_px[i] = s;
 }
 
+/* STRANGE's DARK: the canvas worn before it goes to the screen, by the screen's own pixel noise (the same pixels every
+ * frame: no shimmer): on the flat colours only (BG, SURF, RAISE; text, its edges, values and lines untouched) a
+ * coarse mottle of 5 x 5 blotches, fine dust and rarer stains, so no surface is clean */
+/* the worn colour of screen pixel x, y whose flat colour is the k-th (0 BG, 1 SURF, 2 RAISE), c (swapped) as it is */
+static uint16_t gm_px(uint32_t x, uint32_t y, uint32_t k, uint16_t c)
+{
+    uint32_t h = gm_hash(x, y);
+    if (k) {                                     /* a slab (SURF, RAISE): hairline cracks, a cell of 24 in ~1 of 3 */
+        uint32_t cx = x / 24u, cy = y / 24u, ch = gm_hash(cx + 501u, cy + 77u);
+        if (ch % 3u == 0u) {
+            int32_t bx = (int32_t)(cx * 24u + (ch >> 4) % 10u), L = 8 + (int32_t)((ch >> 9) % 16u);
+            int32_t sl = (int32_t)((ch >> 14) % 41u) - 20, dx = (int32_t)x - bx;
+            int32_t cyp = (int32_t)(cy * 24u + 4u + (ch >> 20) % 16u) + sl * dx / 16 + (int32_t)((gm_hash(x, cy) >> 3) & 1u);
+            if (dx >= 0 && dx < L && (int32_t)y == cyp)
+                return ux.gk[0];                 /* the crack: down to the stone */
+            if (dx >= 0 && dx < L && (int32_t)y == cyp + 1)
+                return ux.gd[k][0];              /* its lit lip */
+        }
+        if ((h & 15u) == 1u)                     /* slabs wear more */
+            return (h >> 4) & 1u ? ux.gd[k][0] : ux.gd[k][1];
+    }
+    if ((h & 31u) == 0u || ((gm_hash(x / 5u, y / 5u + 977u) & 7u) == 0u && (h & 3u) == 0u))
+        return ux.gd[k][0];                      /* dust, thicker in a blotch */
+    if ((h >> 8 & 127u) == 0u || ((gm_hash(x / 3u + 31u, y / 7u) & 63u) == 0u && (h >> 5 & 1u)))
+        return ux.gd[k][1];                      /* a stain, a streak run down */
+    return c;
+}
+/* STRANGE's DARK: the canvas worn before it goes to the screen, by the screen's own pixel noise (the same pixels every
+ * frame: no shimmer): on the flat colours only (BG, SURF, RAISE; text, its edges, values and lines untouched) dust,
+ * blotches, stains and on the slabs hairline cracks, so no surface is clean */
+static __attribute__((noinline)) void cv_grime(uint32_t x0, uint32_t y0, uint32_t r0)
+{
+    uint32_t i, j, k;
+    for (j = r0; j < cv_h; j++) {
+        uint16_t *row = cv_px + j * cv_w;
+        for (i = 0; i < cv_w; i++) {
+            uint16_t c = row[i];
+            for (k = 0; k < 3u && c != ux.gk[k]; k++)
+                ;
+            if (k < 3u)
+                row[i] = gm_px(x0 + i, y0 + j, k, c);
+        }
+    }
+}
+/* lcd.c lcd_fill: a flat colour's fill worn the same way (row by row); 0 = not worn, lcd_fill fills it */
+static int gm_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+{
+    static uint16_t row[240];
+    uint32_t i, j, k, sc = swap16(c);
+    if (!ux.grime)
+        return 0;
+    for (k = 0; k < 3u && sc != ux.gk[k]; k++)
+        ;
+    if (k == 3u)
+        return 0;
+    for (j = 0; j < h; j++) {
+        lcd_sync();                              /* (the last row may still be going out) */
+        for (i = 0; i < w; i++)
+            row[i] = gm_px(x + i, y + j, k, (uint16_t)sc);
+        lcd_blit(x, y + j, w, 1u, row);
+    }
+    return 1;
+}
 static void cv_blit(uint32_t x, uint32_t y)
 {
     GFX_HOOK_BLIT(x, y, 0u);
+    if (ux.grime)
+        cv_grime(x, y, 0u);
     lcd_blit(x, y, cv_w, cv_h, cv_px);
 }
 
@@ -202,6 +285,8 @@ static void cv_blit(uint32_t x, uint32_t y)
 static void cv_blit_from(uint32_t x, uint32_t y, uint32_t r0)
 {
     GFX_HOOK_BLIT(x, y, r0);
+    if (ux.grime)
+        cv_grime(x, y, r0);
     if (r0 < cv_h)
         lcd_blit(x, y + r0, cv_w, cv_h - r0, cv_px + r0 * cv_w);
 }
@@ -297,6 +382,32 @@ static void cv_rrect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint
     else if (ux.style == ST_LINE) r = 0;         /* LINE: square cursors, selections and fills (FLAT: rounded) */
     if (r > w / 2) r = w / 2;
     if (r > h / 2) r = h / 2;
+    if (ux.grime && w > 6 && h > 6) {            /* STRANGE's DARK: a slab with its edges chipped, its corners bitten */
+        uint32_t s0 = (uint32_t)(x * 7 + y * 131 + w * 3 + h);
+        cv_rect(x, y, w, h, c);
+        for (i = 0; i < w; i++) {                /* the top and bottom edges: a chip in ~1 of 7, a notch in ~1 of 31 */
+            uint32_t a = gm_hash(s0 + (uint32_t)i, 11u), b = gm_hash(s0 + (uint32_t)i, 23u);
+            if (a % 7u == 0u) cv_pset(x + i, y, under);
+            if (a % 31u == 1u) cv_pset(x + i, y + 1, under), cv_pset(x + i, y, under);
+            if (b % 7u == 0u) cv_pset(x + i, y + h - 1, under);
+            if (b % 31u == 1u) cv_pset(x + i, y + h - 2, under), cv_pset(x + i, y + h - 1, under);
+        }
+        for (j = 0; j < h; j++) {
+            uint32_t a = gm_hash(s0 + (uint32_t)j, 37u), b = gm_hash(s0 + (uint32_t)j, 41u);
+            if (a % 7u == 0u) cv_pset(x, y + j, under);
+            if (b % 7u == 0u) cv_pset(x + w - 1, y + j, under);
+        }
+        for (j = 0; j < 4; j++) {                /* the corners: 2 .. 4 px bitten off */
+            uint32_t a = 2u + gm_hash(s0, 53u + (uint32_t)j) % 3u, d;
+            int32_t cx = j & 1 ? x + w - 1 : x, cy = j & 2 ? y + h - 1 : y, sx = j & 1 ? -1 : 1, sy = j & 2 ? -1 : 1;
+            for (d = 0; d < a; d++) {
+                int32_t e;
+                for (e = 0; e + (int32_t)d < (int32_t)a; e++)
+                    cv_pset(cx + sx * (int32_t)d, cy + sy * e, under);
+            }
+        }
+        return;
+    }
     if (r < 1) {
         cv_rect(x, y, w, h, c);
         return;

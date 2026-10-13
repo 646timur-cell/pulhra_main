@@ -105,11 +105,18 @@ static uint32_t host_fl_end(uint32_t y0, uint32_t y1)   /* the rows y0..y1-1: pi
         n += host_fl_n[k] == 2u && host_fl_mid[k] != host_screen[k];
     return n;
 }
+#if FELUCCA_STRANGE
+static int gm_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c);   /* gfx.c: DARK's worn fills (as lcd.c) */
+#endif
 static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 {
     uint32_t i, j;
 #ifdef UI_FILL_HOOK
     UI_FILL_HOOK(x, y, w, h);                     /* (tests/ui_render.c: what a fill covers is gone) */
+#endif
+#if FELUCCA_STRANGE
+    if (x < 240u && y < 240u && gm_fill(x, y, x + w > 240u ? 240u - x : w, y + h > 240u ? 240u - y : h, c))
+        return;
 #endif
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++)

@@ -66,6 +66,9 @@ static void lcd_window(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1)
 
 static uint16_t lcd_fillbuf[240];
 
+#if FELUCCA_STRANGE
+static int gm_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c);   /* gfx.c: DARK's worn fills */
+#endif
 static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 {
     uint32_t i, n, k, sw = (uint16_t)((c >> 8) | (c << 8));
@@ -75,6 +78,10 @@ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
         w = 240u - x;
     if (y + h > 240u)
         h = 240u - y;
+#if FELUCCA_STRANGE
+    if (gm_fill(x, y, w, h, c))
+        return;
+#endif
     lcd_sync();
     k = 240u / w * w;                       /* whole rows per transfer (narrow fills: one DMA) */
     for (i = 0; i < k; i++)

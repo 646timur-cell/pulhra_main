@@ -1297,12 +1297,39 @@ static void splash_rule(int32_t y)
     for (k = 0; k < 3; k++)
         lcd_fill((uint32_t)(118 + k), (uint32_t)(y + 1 + k), (uint32_t)(5 - 2 * k), 1, T_ACCENT);
 }
+/* a skull, 7 x 7, in MID at x, y: the frieze's ends */
+static void splash_skull(int32_t x, int32_t y)
+{
+    static const uint8_t SK[7] = {0x1C, 0x3E, 0x6B, 0x7F, 0x36, 0x1C, 0x14};   /* (bit 6: the left column) */
+    int32_t r, c;
+    for (r = 0; r < 7; r++)
+        for (c = 0; c < 7; c++)
+            if ((SK[r] >> (6 - c)) & 1u)
+                lcd_fill((uint32_t)(x + c), (uint32_t)(y + r), 1, 1, T_MID);
+}
+/* blood run down from the name: drips in ACCENT, 2 px wide (1 px at the top), a 3 px drop at their ends (fixed: the
+ * same every start); the version's band, drawn after, cuts the longest ones */
+static void splash_drips(int32_t y)
+{
+    static const uint8_t DX[11] = {80, 88, 97, 104, 116, 121, 131, 140, 149, 157, 165};
+    static const uint8_t DL[11] = {6, 17, 4, 12, 20, 8, 14, 5, 18, 9, 13};
+    uint32_t i;
+    for (i = 0; i < 11u; i++) {
+        lcd_fill(DX[i], (uint32_t)y, 1, 3, T_ACCENT);
+        lcd_fill(DX[i], (uint32_t)(y + 3), 2, DL[i], T_ACCENT);
+        lcd_fill(DX[i] - 1u, (uint32_t)(y + 3 + DL[i]), 4, 2, T_ACCENT);
+        lcd_fill(DX[i], (uint32_t)(y + 5 + DL[i]), 2, 1, T_ACCENT);
+    }
+}
 static void draw_splash(void)
 {
     lcd_fill(0, 0, 240, 240, T_BG);
     splash_rule(70);
     splash_rule(160);
+    splash_skull(44, 157);
+    splash_skull(189, 157);
     splash_line(84, &AF_L, SPLASH_LINES[0], T_TEXT);
+    splash_drips(84 + AF_L_CAP_Y + AF_L_CAP_H + 1);
     splash_line(126, &AF_M, SPLASH_LINES[1], T_THEME);
     splash_line(196, &AF_S, SPLASH_LINES[2], T_DIM);
     splash_line(212, &AF_S, SPLASH_LINES[3], T_DIM);

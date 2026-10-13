@@ -129,10 +129,17 @@ static void fm1_irq_on(void) {}
 /* ----------------------------------------------------------- the screen --- */
 static uint16_t web_fb[240 * 240];       /* RGB565 as the panel gets it (high byte first) */
 static uint32_t web_draws;
+#if FELUCCA_STRANGE
+static int gm_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c);   /* gfx.c: DARK's worn fills */
+#endif
 static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 {
     uint32_t i, j;
     uint16_t sw = (uint16_t)((c >> 8) | (c << 8));
+#if FELUCCA_STRANGE
+    if (x < 240u && y < 240u && gm_fill(x, y, x + w > 240u ? 240u - x : w, y + h > 240u ? 240u - y : h, c))
+        return;
+#endif
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++)
             web_fb[(y + j) * 240u + x + i] = sw;
