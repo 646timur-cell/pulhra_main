@@ -6,9 +6,9 @@
 
 **Две дорожки.** Звучат и принимают MIDI только T1 и T2. T3/T4 не рендерятся, их каналы никто не слушает, выбрать их нельзя. На HOME их строки пустые. MIDI — как в модуле: TRACK CH, T1 CH / T2 CH в MENU > MIDI.
 
-**Движки (машины).** 21 штука. Убраны DRUM, SLICE, TRIO (из кода) и SAMPLE (из списка): это модуль текстур. Свои: LYRA, CHAOS, STRING, MODAL, BLOW (15–19), RESO, GLITCH, JUNK, DRIFT (20–23), RITUAL, MECH (24, 25 — тот же движок, что GLITCH, со своими китами); из Felucca: GRAIN, PHYS, GURDY, FM6, ANALOG, WHEEL, PHASE, VOICE, NOISE, LOFI. Слой EDIT (зажать EDIT): 21 машина подряд по клавишам F3…C#5, сверху D#5 LATCH, E5 MUTATE, F#5 RETRIG (арп/евклид с первого шага, иначе защёлкнутые ноты заново), G5 INIT. MUTATE (вариация звука: непрерывные ручки движка в пределах ±20 % от исходного звука, каждое нажатие — новая вариация того же звука, без дрейфа; модель, алгоритм, слот, ноты не трогает). Номера убранных движков сохранены (их играет пустая заглушка), чтобы номера остальных не съехали. У GRAIN, PHYS, GURDY, NOISE, ANALOG добавлены текстурные пресеты.
+**Движки (машины).** 22 штуки. Убраны DRUM, SLICE, TRIO (из кода) и SAMPLE (из списка): это модуль текстур. Свои: LYRA, CHAOS, STRING, MODAL, BLOW (15–19), RESO, GLITCH, JUNK, DRIFT (20–23), RITUAL, MECH, BIO (24–26 — тот же движок, что GLITCH, со своими китами); из Felucca: GRAIN, PHYS, GURDY, FM6, ANALOG, WHEEL, PHASE, VOICE, NOISE, LOFI. Слой EDIT (зажать EDIT): две страницы машин с F3, OCT+ листает. Страница 1, фирменные (по ряду на семейство): STRING MODAL BLOW RESO · JUNK LYRA CHAOS DRIFT · GLITCH RITUAL MECH BIO. Страница 2, Felucca: PHYS GURDY GRAIN NOISE · ANALOG PHASE FM6 WHEEL · VOICE LOFI. На обеих: D#5 LATCH, E5 MUTATE, F#5 RETRIG (арп/евклид с первого шага, иначе защёлкнутые ноты заново), G5 INIT. MUTATE (вариация звука: непрерывные ручки движка в пределах ±20 % от исходного звука, каждое нажатие — новая вариация того же звука, без дрейфа; модель, алгоритм, слот, ноты не трогает). Номера убранных движков сохранены (их играет пустая заглушка), чтобы номера остальных не съехали. У GRAIN, PHYS, GURDY, NOISE, ANALOG добавлены текстурные пресеты.
 
-**Встроенные сэмплы** синтезируются при сборке (`tools/gen_strange_samples.py`, ничего чужого): для GRAIN — GLASS (стекло под смычком), THROAT (горловой дрон), METAL (удар по листу), для GLITCH — кит из 16 слайсов на 22 кГц по 0,3–0,6 с: стекло (удар, треск, палец по краю, осколки), КВ-эфир (настройка через нулевые биения, щелчки данных, помехи, «утиный» SSB, морзянка, RTTY) и ток (неон разгоняется на дросселе, гул дросселя, дуга, реле, прогрев лампы, размагничивание). 126 КБ, как пианино/флейта/сакс стока.
+**Встроенные сэмплы** синтезируются при сборке (`tools/gen_strange_samples.py`, ничего чужого): для GRAIN — GLASS (стекло под смычком), THROAT (горловой дрон), METAL (удар по листу), для GLITCH — кит из 16 слайсов на 16 кГц по 0,3–0,6 с: стекло (удар, треск, палец по краю, осколки), КВ-эфир (настройка через нулевые биения, щелчки данных, помехи, «утиный» SSB, морзянка, RTTY) и ток (неон разгоняется на дросселе, гул дросселя, дуга, реле, прогрев лампы, размагничивание). 126 КБ, как пианино/флейта/сакс стока.
 
 **XY.** HOME, кнобы 3 и 4 — X и Y (CC16 / CC17 на канале дорожки). Куда они ведут — кнопка **ARP**, страницы X и Y: по два «куда + сколько» на ось (хранятся в звуке; заводской пресет их очищает). Пока они пусты — у каждого движка свои маршруты по умолчанию. Слот матрицы MOD с источником X или Y главнее обоих.
 
@@ -127,13 +127,15 @@ ATK/REL дорожки — это FAST/SLOW Лиры, INSERT или DIST — д�
 
 В загрузчике (вкладка сэмплов) для одного файла есть **Slice**: Off / At transients (по атакам, чувствительность низкая / средняя / высокая, до 16 кусков) / 8 equal / 16 equal. Резы видны на волне, куски ложатся на клавиши с C3 по одному. SLCE, PTCH (полутоны), STUT (окно-заикание 170…5 мс, 0 — слайс целиком), REP (повторов окна, 16 — бесконечно), REV (шанс задом наперёд), CRSH (биты и частота), CHOP (шанс выпадения окна), JUMP (шанс прыжка в другое место слайса).
 
-## RITUAL и MECH — ещё две слайс-машины
+## RITUAL, MECH и BIO — ещё три слайс-машины
 
 Тот же движок и те же ручки, что у GLITCH (SLCE PTCH STUT REP / REV CRSH CHOP JUMP, страница KIT со слотами USR), свои киты на 11 кГц по 0,25–0,55 с, C3…D#4:
 - **RITUAL**: BELL, GONG, CHAINS, STONE GRIND, STONE KNOCK, CANDLE, CHOIR BREATH, CAVE DRIP, COFFIN, BONES, FRAME DRUM, BOWL, THROAT, CRYPT WIND, DOOR CREAK, TOLLING. Пресеты: CRYPT KIT, LOW TOLL, CHAIN DRAG, BONE RAIN, STONE ALTAR, CANDLE VIGIL, BREATH CHOIR, DRIP CAVE, BURIAL, THROAT RITE.
 - **MECH**: CLOCK TICK, TOCK, RATCHET, TYPEWRITER, CARRIAGE, REEL UP, TAPE STOP, PROJECTOR, PISTON, WIND-UP, SHUTTER, SERVO, HAMMER, CHAIN DRIVE, STEAM, MUSIC BOX. Пресеты: WORKSHOP, CLOCKWORK, TYPE POOL, REEL TO REEL, TAPE DEATH, PROJECTOR, STEAM WORKS, FORGE, SERVO SWARM, BROKEN BOX.
 
-Встроенные источники GRAIN (GLASS, THROAT, METAL) укорочены до 0,8 с, чтобы киты поместились.
+- **BIO**: HEARTBEAT, BREATH IN, BREATH OUT, TONGUE CLICK, KNUCKLES, SQUELCH, TWIG SNAP, LEAVES, BUBBLES, RAIN ON LEAVES, CICADA, FROG, BIRD, WOOD CREAK, PURR, GULP. Пресеты: BODY KIT, HEART LOOP, BREATHING, SWAMP NIGHT, CICADA HEAT, FOREST RAIN, CRUNCH, WET LAB, DAWN BIRDS, PURR DRONE.
+
+Чтобы киты поместились: кит GLITCH на 16 кГц, встроенные источники GRAIN (GLASS, THROAT, METAL) по 0,5 с.
 
 ## JUNK — пружины и ящик хлама
 

@@ -59,22 +59,24 @@ static gl_slot_t *gl_slot(track_t *t, voice_t *v)
 }
 static uint32_t gl_kit(const int16_t *p) { return (uint32_t)clamp(p[P_FM3_REL], 0, SMP_USER_SLOTS); }
 /* the source a part plays (sc): 1..3 a user slot (KIT), else the machine's own built-in kit: 0 GLITCH's, 4 RITUAL's,
- * 5 MECH's (the three machines are this one engine) */
+ * 5 MECH's, 6 BIO's (the four machines are this one engine) */
 #define GL_RIT 4u
 #define GL_MEC 5u
+#define GL_BIO 6u
 static uint32_t gl_src(const track_t *t)
 {
     uint32_t kit = gl_kit(t->p);
-    return kit ? kit : t->engine == ENGI_RITUAL ? GL_RIT : t->engine == ENGI_MECH ? GL_MEC : 0u;
+    return kit ? kit : t->engine == ENGI_RITUAL ? GL_RIT : t->engine == ENGI_MECH ? GL_MEC : t->engine == ENGI_BIO ? GL_BIO : 0u;
 }
 static uint32_t gl_nz(uint32_t sc)
 {
-    return sc - 1u < SMP_USER_SLOTS ? usr_nz[sc - 1u] : sc == GL_RIT ? RIT_NZ : sc == GL_MEC ? MEC_NZ : GLT_NZ;
+    return sc - 1u < SMP_USER_SLOTS ? usr_nz[sc - 1u] : sc == GL_RIT ? RIT_NZ : sc == GL_MEC ? MEC_NZ : sc == GL_BIO ? BIO_NZ : GLT_NZ;
 }
 static const smp_zone_t *gl_zone(uint32_t sc, uint32_t z)
 {
     return sc - 1u < SMP_USER_SLOTS ? &usr_zone[sc - 1u][z & 15u] : sc == GL_RIT ? &RIT_ZONES[z % RIT_NZ]
-                                                                 : sc == GL_MEC ? &MEC_ZONES[z % MEC_NZ] : &GLT_ZONES[z % GLT_NZ];
+                                                                 : sc == GL_MEC ? &MEC_ZONES[z % MEC_NZ]
+                                                                 : sc == GL_BIO ? &BIO_ZONES[z % BIO_NZ] : &GLT_ZONES[z % GLT_NZ];
 }
 
 /* one ADPCM sample of zone z at pos */
@@ -333,9 +335,11 @@ static const engine_t ENG_GLITCH = {
     .xya = {{40, 40, 30}, {50, 40, 20}},
 };
 
-/* RITUAL and MECH (STRANGE): GLITCH with kits of their own (tools/gen_strange_samples.py, 11,025 Hz, C3 .. D#4):
+/* RITUAL, MECH and BIO (STRANGE): GLITCH with kits of their own (tools/gen_strange_samples.py, 11,025 Hz, C3 .. D#4):
  *   RITUAL  BELL, GONG, CHAINS, STONE GRIND, STONE KNOCK, CANDLE, CHOIR BREATH, CAVE DRIP, COFFIN, BONES, FRAME DRUM,
  *           BOWL, THROAT, CRYPT WIND, DOOR CREAK, TOLLING
+ *   BIO     HEARTBEAT, BREATH IN, BREATH OUT, TONGUE CLICK, KNUCKLES, SQUELCH, TWIG SNAP, LEAVES, BUBBLES, RAIN ON
+ *           LEAVES, CICADA, FROG, BIRD, WOOD CREAK, PURR, GULP
  *   MECH    CLOCK TICK, TOCK, RATCHET, TYPEWRITER, CARRIAGE, REEL UP, TAPE STOP, PROJECTOR, PISTON, WIND-UP, SHUTTER,
  *           SERVO, HAMMER, CHAIN DRIVE, STEAM, MUSIC BOX
  * the same knobs, KIT too (a user slot instead of the kit) */
@@ -366,6 +370,20 @@ static const preset_t MECH_PRESETS[] = {
     {"SERVO SWARM", {11, 7, 70, 4, 30, 10, 20, 60}, {30, 64, 127, 90}, 0, 0, FX(0, 20, 20, 80)},
     {"BROKEN BOX", {15, 0, 40, 3, 40, 20, 30, 50}, {0, 64, 127, 90}, 0, 0, FX(0, 20, 30, 90)},
 };
+#define STRANGE_CAT_BIO "FFFFFFFFFF"
+static const preset_t BIO_PRESETS[] = {
+    /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
+    {"BODY KIT", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 40)},
+    {"HEART LOOP", {0, -5, 90, 16, 0, 0, 0, 0}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 10, 60)},
+    {"BREATHING", {1, 0, 60, 3, 50, 0, 0, 30}, {40, 64, 127, 110}, 0, 0, FX(0, 20, 20, 100)},
+    {"SWAMP NIGHT", {11, 0, 50, 4, 20, 0, 20, 60}, {30, 64, 127, 110}, 0, 0, FX(0, 20, 30, 110)},
+    {"CICADA HEAT", {10, 0, 100, 16, 0, 20, 10, 20}, {60, 64, 127, 110}, 0, 0, FX(0, 0, 20, 90)},
+    {"FOREST RAIN", {9, 0, 70, 6, 30, 0, 10, 80}, {50, 64, 127, 110}, 0, 0, FX(0, 0, 30, 110)},
+    {"CRUNCH", {4, -7, 30, 2, 20, 60, 20, 40}, {0, 64, 127, 50}, 0, 0, FX(20, 0, 0, 40)},
+    {"WET LAB", {5, -5, 50, 3, 40, 20, 10, 50}, {0, 64, 127, 80}, 0, 0, FX(0, 20, 20, 70)},
+    {"DAWN BIRDS", {12, 0, 40, 2, 20, 0, 20, 70}, {30, 64, 127, 100}, 0, 0, FX(0, 20, 30, 110)},
+    {"PURR DRONE", {14, -12, 80, 16, 10, 10, 0, 10}, {60, 64, 127, 120}, 0, 0, FX(10, 20, 20, 110)},
+};
 #define GL_EDIT {{"SLCE", F_INT, 0, 15, 0, 0, 0}, {"PTCH", F_SEMI, -24, 24, 0, 0, 0}, {"STUT", F_PCT, 0, 127, 0, 0, 0}, \
                  {"REP", F_INT, 1, 16, 1, 0, 0}, {"REV", F_PCT, 0, 127, 0, 0, 0}, {"CRSH", F_PCT, 0, 127, 0, 0, 0}, \
                  {"CHOP", F_PCT, 0, 127, 0, 0, 0}, {"JUMP", F_PCT, 0, 127, 0, 0, 0}}
@@ -391,6 +409,22 @@ static const engine_t ENG_MECH = {
     .edit = GL_EDIT,
     .presets = MECH_PRESETS,
     .npresets = NELEM(MECH_PRESETS),
+    .note_on = glitch_note_on,
+    .render = glitch_render,
+    .block = glitch_block,
+    .knob = {P_E2, P_E3, P_E5, P_E7},
+    .poly = GL_POLY,
+    .sampled = 1,
+    .mem = sizeof(gl_part_t),
+    .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
+    .xya = {{40, 40, 30}, {50, 40, 20}},
+};
+static const engine_t ENG_BIO = {
+    .name = "BIO",
+    .page_title = {"SLICE", "BREAK"},
+    .edit = GL_EDIT,
+    .presets = BIO_PRESETS,
+    .npresets = NELEM(BIO_PRESETS),
     .note_on = glitch_note_on,
     .render = glitch_render,
     .block = glitch_block,

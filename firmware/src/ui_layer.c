@@ -65,10 +65,18 @@ static uint8_t sc_k = 0xFFu;                            /* the key a scene was p
 /* STRANGE's EDIT layer: the engines on every key in a row (F3 F#3 G3 .. : ENGINE_ORDER), above them on the black keys
  * C#5 LATCH, D#5 RETRIG (the latched notes and EUCLID from the top, seq.c), F#5 MUTATE (the engine's values nudged at
  * random, undone by OCT- / SAVE held), G5 INIT */
-#define SE_LATCH 22u                                    /* chromatic key indices (0 = F3): the 21 machines F3 .. C#5, */
-#define SE_MUTATE 23u                                   /* then D#5 LATCH, E5 MUTATE, F#5 RETRIG, G5 INIT */
+#define SE_LATCH 22u                                    /* chromatic key indices (0 = F3): a page's machines from F3, */
+#define SE_MUTATE 23u                                   /* D#5 LATCH, E5 MUTATE, F#5 RETRIG, G5 INIT */
 #define SE_RETRIG 25u
 #define SE_INIT 26u
+/* the machines on two pages (OCT+ turns): darkmachine's own (ENGINE_ORDER's first SE_P1), then Felucca's */
+#define SE_P1 12u
+static uint8_t se_page;
+static uint32_t se_eng(uint32_t k)                      /* key k's machine on this page, NENGINES = none */
+{
+    uint32_t b = se_page ? SE_P1 : 0u, n = se_page ? NENG_SHOWN - SE_P1 : SE_P1;
+    return k < n ? eng_vis(b + k) : NENGINES;
+}
 static void eqa_latch(track_t *t, uint32_t i, uint32_t down);
 static void edit_load(uint32_t e, int32_t step);
 /* MUTATE: a variation of the sound, not a walk away from it: each press scatters the engine's continuous knobs (a share,
@@ -105,8 +113,8 @@ static void se_mutate(track_t *t)
 }
 static void se_key(uint32_t k)
 {
-    if (k < NENG_SHOWN)
-        edit_load(eng_vis(k), 0);
+    if (se_eng(k) < NENGINES)
+        edit_load(se_eng(k), 0);
     else if (k == SE_LATCH)
         eqa_latch(TSEL, 0, 1);
     else if (k == SE_RETRIG) {
@@ -315,6 +323,9 @@ static void layer_opened(uint32_t l)
     lys.loaded = 0;
     lys.cook = 0;
     ly_epage = (uint8_t)(eng_rank(TSEL->eng_req % NENGINES) / LY_INIT);   /* (EDIT: the engine's page) */
+#if FELUCCA_STRANGE
+    se_page = eng_rank(TSEL->eng_req % NENGINES) >= SE_P1;   /* (EDIT: the machine's page) */
+#endif
     if (l == LAYER_SEQ || l == LAYER_REC) {             /* the track as it is now (OCT-) */
         memcpy(tl_open.step, TSEL->step, sizeof tl_open.step);
         motion_snapshot_track(TSEL, &tl_open.mo);
@@ -650,7 +661,7 @@ static const eqa_set_t EQA[] = {
 /* STRANGE: on every engine, black keys 1.. load the engines past the white keys (ENGINE_ORDER from LY_INIT on) */
 static const char *eqa_eng_name(const track_t *t, uint32_t i)   /* (an 11th of the row: two letters) */
 {
-    static const char *const A[][2] = {{"RESO", "RS"}, {"GLITCH", "GL"}, {"JUNK", "JK"}, {"DRIFT", "DR"}, {"RITUAL", "RT"}, {"MECH", "MC"}};
+    static const char *const A[][2] = {{"RESO", "RS"}, {"GLITCH", "GL"}, {"JUNK", "JK"}, {"DRIFT", "DR"}, {"RITUAL", "RT"}, {"MECH", "MC"}, {"BIO", "BI"}};
     const char *n = ENGINES[eng_vis(LY_INIT + i)]->name;
     uint32_t k;
     (void)t;
@@ -886,6 +897,12 @@ static uint32_t layer_oct(uint32_t pressed, uint32_t oct)
     if (layer_set_open())
         lys.oct |= (uint8_t)(((pressed >> dn) & 1u) | ((pressed >> up) & 1u) << 1);
     mine = oct & lys.oct;
+#if FELUCCA_STRANGE
+    if ((mine & 2u) && lys.l == LAYER_EDIT) {           /* OCT+ in EDIT: the other page of machines */
+        se_page ^= 1u;
+        ui.force = 1;
+    }
+#endif
     if ((mine & 2u) && lys.l == LAYER_EDIT && LY_PAGES > 1u) {   /* OCT+ in EDIT: the next engine page */
         ly_epage = (uint8_t)((ly_epage + 1u) % LY_PAGES);
         ui.force = 1;
@@ -975,8 +992,8 @@ static uint32_t layer_leds(uint32_t *br)
             can = (mask >> e) & 1u;
 #if FELUCCA_STRANGE
         } else if (l == LAYER_EDIT) {                   /* the engine lit, the other engines and the actions breathe */
-            on = k < NENG_SHOWN ? eng_vis(k) == TSEL->eng_req % NENGINES : k == SE_LATCH && TSEL->p[P_AHOLD];
-            can = k < NENG_SHOWN || k == SE_LATCH || k == SE_RETRIG || k == SE_MUTATE || (k == SE_INIT && !chain_busy());
+            on = se_eng(k) < NENGINES ? se_eng(k) == TSEL->eng_req % NENGINES : k == SE_LATCH && TSEL->p[P_AHOLD];
+            can = se_eng(k) < NENGINES || k == SE_LATCH || k == SE_RETRIG || k == SE_MUTATE || (k == SE_INIT && !chain_busy());
 #endif
         } else if (l == LAYER_EDIT && !b) {             /* the engine lit, the others and INIT breathe */
             on = ly_eng(p) < NENGINES && ly_eng(p) == TSEL->eng_req % NENGINES;
@@ -1207,19 +1224,22 @@ static void eqa_row(uint32_t n)
     }
 }
 #if FELUCCA_STRANGE
-/* the machines on the keys in a row, five a row (five rows: 21), the actions under them in the keys' order */
+/* this page's machines on the keys from F3, four a row (a row a family), the page under them, the actions under that
+ * in the keys' order */
 static void layer_edit(void)
 {
     static const char *const AN[4] = {"LATCH", "MUTATE", "RETRIG", "INIT"};
     uint32_t i;
-    for (i = 0; i < NENG_SHOWN; i++) {
-        int32_t x = 6 + (int32_t)(i % 5u) * 46, y = 4 + (int32_t)(i / 5u) * 18, w = 43;
-        const engine_t *en = ENGINES[eng_vis(i) % NENGINES];
-        uint16_t ink, fill = lc_fill(eng_vis(i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, &ink);
-        fill = lc_box(x, y, w, 16, fill);
-        GFX_HOOK_ALIGN(x, y, x + w, y + 16, AL_HV, "edit engine cell name centred");
-        cv_text_in(x, y + CAP_IN(S, 16), w, &AF_S, eng_abbr(en->name), ink, fill);
+    for (i = 0; se_eng(i) < NENGINES; i++) {
+        int32_t y = 4 + (int32_t)(i / 4u) * 23;
+        uint32_t e = se_eng(i);
+        uint16_t ink, fill = lc_fill(e == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, &ink);
+        fill = lc_box(LC_X(i % 4u), y, LC_W, 20, fill);
+        GFX_HOOK_ALIGN(LC_X(i % 4u), y, LC_X(i % 4u) + LC_W, y + 20, AL_HV, "edit machine cell name centred");
+        cv_text_in(LC_X(i % 4u), y + CAP_IN(S, 20), LC_W, &AF_S, ENGINES[e]->name, ink, fill);
     }
+    GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "edit page centred");
+    cv_text_in(0, 76, 240, &AF_S, se_page ? "2/2 FELUCCA     OCT+: DARKMACHINE" : "1/2 DARKMACHINE     OCT+: FELUCCA", T_DIM, T_SURF);
     for (i = 0; i < 4u; i++) {                          /* (D#5 E5 F#5 G5: the names alone, centred) */
         uint32_t st = i == 0u ? (TSEL->p[P_AHOLD] ? LS_SEL : LS_OFF) : i == 3u && chain_busy() ? LS_DIM : LS_OFF;
         uint16_t ink, fill = lc_box(LC_X(i), LM_Y, LC_W, LM_H, lc_fill(st, &ink));

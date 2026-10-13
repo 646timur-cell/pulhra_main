@@ -241,6 +241,7 @@ static const uint8_t MIDI_CC_ENG[NENGINES] = {
     0x23,                                             /* DRIFT: CC74 TONE, CC71 DRFT */
     0x63,                                             /* RITUAL: CC74 CRSH, CC71 STUT */
     0x63,                                             /* MECH: CC74 CRSH, CC71 STUT */
+    0x63,                                             /* BIO: CC74 CRSH, CC71 STUT */
 #endif
 };
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */

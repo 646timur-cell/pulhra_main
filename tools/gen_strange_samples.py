@@ -5,10 +5,10 @@ gen_samples.py's (SMP_DATA, SMP_ZONES, SMP_SETS, ...): eng_sample.c includes it 
 
   sets (GRAIN's SRC; SAMPLE's SET, hidden in STRANGE), 22,050 Hz; the indices as in Felucca (1 and 4 aliases of 0),
   so USR1..3 stay SRC 5..7:
-    0 GLASS   bowed glass: five inharmonic partials, each a slowly beating pair, a breath of bow noise (0.8 s, A3)
-    2 THROAT  a throat drone: a buzzing source through three formants gliding from "a" to "o" (0.8 s, A2)
-    3 METAL   a struck plate: eight inharmonic modes, each its own decay (0.8 s, D4)
-  the GLITCH kit (eng_glitch.c), 22,050 Hz: 16 slices, C3 .. D#4: glass, short-wave air, neon and current (GLT_ZONES)
+    0 GLASS   bowed glass: five inharmonic partials, each a slowly beating pair, a breath of bow noise (0.5 s, A3)
+    2 THROAT  a throat drone: a buzzing source through three formants gliding from "a" to "o" (0.5 s, A2)
+    3 METAL   a struck plate: eight inharmonic modes, each its own decay (0.5 s, D4)
+  the GLITCH kit (eng_glitch.c), 16,000 Hz: 16 slices, C3 .. D#4: glass, short-wave air, neon and current (GLT_ZONES)
 
   gen_strange_samples.py OUT.h
 Pure Python (math, random with fixed seeds): the same bytes on every run.
@@ -52,7 +52,7 @@ SR = 22050
 
 def glass():
     rnd = random.Random(11)
-    n, f0 = int(SR * 0.8), 220.0
+    n, f0 = int(SR * 0.5), 220.0
     parts = [(1.0, 1.0), (2.756, 0.5), (5.404, 0.33), (8.933, 0.2), (13.34, 0.11)]
     noise = onepole([rnd.uniform(-1, 1) for _ in range(n)], 0.08)
     x = []
@@ -71,7 +71,7 @@ def glass():
 
 def throat():
     rnd = random.Random(23)
-    n, f0 = int(SR * 0.8), 110.0
+    n, f0 = int(SR * 0.5), 110.0
     src, ph = [], 0.0
     for i in range(n):
         f = f0 * (1 + 0.004 * math.sin(TAU * 5.1 * i / SR))
@@ -95,7 +95,7 @@ def throat():
 
 def metal():
     rnd = random.Random(37)
-    n, f0 = int(SR * 0.8), 293.66
+    n, f0 = int(SR * 0.5), 293.66
     modes = [(1.0, 1.0, 1.2), (1.594, 0.8, 0.9), (2.136, 0.6, 0.8), (2.653, 0.55, 0.6), (3.156, 0.4, 0.5),
              (3.652, 0.32, 0.4), (4.06, 0.25, 0.35), (4.602, 0.2, 0.3)]
     ph = [rnd.random() * TAU for _ in modes]
@@ -109,7 +109,7 @@ def metal():
 
 
 # ------------------------------------------------- the GLITCH kit (22,050 Hz): glass, short-wave air, current ---
-GR = 22050
+GR = 16000                                              # (16 kHz: room for RITUAL, MECH, BIO)
 
 
 def N(sec):
@@ -139,6 +139,8 @@ def modes(n, parts, rnd):
     x = [0.0] * n
     for f, a, d in parts:
         ph = rnd.uniform(0, TAU)
+        if f >= GR / 2:
+            continue
         for i in range(n):
             x[i] += a * math.sin(TAU * f * i / GR + ph) * math.exp(-i / (GR * d))
     return x
@@ -481,6 +483,85 @@ def mech_kit():
     return [fade(list(s), 8, 200) for s in k]
 
 
+def bio_kit():
+    """HEARTBEAT, BREATH IN, BREATH OUT, TONGUE CLICK, KNUCKLES, SQUELCH, TWIG SNAP, LEAVES, BUBBLES, RAIN ON LEAVES,
+    CICADA, FROG, BIRD, WOOD CREAK, PURR, GULP"""
+    rnd = random.Random(71)
+    k = []
+    n = _n(0.5)                                                   # a heartbeat: lub-dub
+    def thump(a):
+        x, ph = [], 0.0
+        for j in range(int(RG * 0.12)):
+            ph += (45 + 30 * math.exp(-j / 150)) / RG
+            x.append(a * math.sin(TAU * ph) * math.exp(-j / 260))
+        return x
+    k.append(_hits(n, [(0, 1), (int(RG * 0.16), 0.7)], thump))
+    n = _n(0.45)                                                  # a breath in: a rising band of air
+    x = _noise(n, rnd)
+    a, b = _bp(x, 1100, 1.5), _bp(x, 2400, 2)
+    k.append([(a[i] + 0.5 * b[i]) * math.sin(math.pi * i / n) * (0.3 + 0.7 * i / n) for i in range(n)])
+    n = _n(0.45)                                                  # a breath out: lower, falling
+    x = _noise(n, rnd)
+    a, b = _bp(x, 650, 1.2), _bp(x, 1500, 1.5)
+    k.append([(a[i] + 0.4 * b[i]) * math.sin(math.pi * i / n) * (1 - 0.6 * i / n) for i in range(n)])
+    n = _n(0.25)                                                  # a tongue click: a pop with a hollow ring
+    k.append([math.sin(TAU * (1700 - 600 * min(1, j / 200)) * j / RG) * math.exp(-j / 70) for j in range(n)])
+    n = _n(0.35)                                                  # knuckles cracking: a burst of tiny pops
+    k.append(_hits(n, [(int(rnd.random() ** 2 * RG * 0.08), rnd.uniform(0.3, 1)) for _ in range(9)],
+                   lambda a: [a * rnd.uniform(-1, 1) * math.exp(-j / 8) for j in range(60)]))
+    n = _n(0.4)                                                   # a wet squelch: a resonance sliding, bubbling
+    x, ph = [], 0.0
+    for i in range(n):
+        f = 300 + 500 * math.sin(math.pi * i / n) + 80 * math.sin(TAU * 23 * i / RG)
+        ph += f / RG
+        x.append(math.sin(TAU * ph) * (0.5 + 0.5 * math.sin(TAU * 17 * i / RG)) * math.sin(math.pi * i / n))
+    k.append([v + 0.3 * w for v, w in zip(x, _bp(_noise(n, rnd), 800, 3))])
+    n = _n(0.3)                                                   # a twig snapping
+    k.append(_hits(n, [(0, 1), (int(RG * 0.01), 0.6), (int(RG * 0.025), 0.4)],
+                   lambda a: [a * (rnd.uniform(-1, 1) + 0.6 * math.sin(TAU * 2300 * j / RG)) * math.exp(-j / 25) for j in range(300)]))
+    n = _n(0.5)                                                   # leaves rustling
+    x = _bp(_noise(n, rnd), 3200, 0.8)
+    k.append([v * (0.3 + 0.7 * abs(math.sin(TAU * 3.3 * i / RG)) * rnd.uniform(0.6, 1)) for i, v in enumerate(x)])
+    n = _n(0.45)                                                  # bubbles rising
+    k.append(_hits(n, [(rnd.randrange(n - 600), rnd.uniform(0.3, 1)) for _ in range(12)],
+                   lambda a: [a * math.sin(TAU * f * (1 + j / 600) * j / RG) * math.exp(-j / 260) for f in [rnd.uniform(500, 1400)] for j in range(500)]))
+    n = _n(0.5)                                                   # rain on leaves
+    k.append(_hits(n, [(rnd.randrange(n), rnd.uniform(0.1, 1)) for _ in range(60)],
+                   lambda a: [a * math.sin(TAU * f * j / RG) * math.exp(-j / 30) for f in [rnd.uniform(1500, 4000)] for j in range(150)]))
+    n = _n(0.5)                                                   # a cicada: a pulsed buzz
+    k.append([math.sin(TAU * 4100 * i / RG) * (0.5 + 0.5 * math.sin(TAU * 230 * i / RG)) * (1 if (i // 160) % 3 else 0.5)
+              * math.sin(math.pi * i / n) for i in range(n)])
+    n = _n(0.45)                                                  # a frog: two croaks
+    def croak(a):
+        x = []
+        for j in range(int(RG * 0.14)):
+            p = 1 if (j % int(RG / 95)) < 30 else 0
+            x.append(a * p * math.sin(math.pi * j / (RG * 0.14)))
+        return _bp(x, 700, 3)
+    k.append(_hits(n, [(0, 1), (int(RG * 0.22), 0.9)], croak))
+    n = _n(0.45)                                                  # a bird: chirps sweeping
+    def chirp(a):
+        return [a * math.sin(TAU * (2600 + 1600 * math.sin(math.pi * j / 500)) * j / RG) * math.sin(math.pi * j / 500) for j in range(500)]
+    k.append(_hits(n, [(0, 1), (int(RG * 0.09), 0.8), (int(RG * 0.18), 0.9), (int(RG * 0.3), 0.6)], chirp))
+    n = _n(0.45)                                                  # wood creaking
+    x, ph = [], 0.0
+    for i in range(n):
+        rate = 40 + 25 * math.sin(TAU * 1.1 * i / RG)
+        ph += rate / RG
+        x.append((1 if (ph % 1) < 0.1 else 0) * rnd.uniform(0.5, 1))
+    k.append([a + 0.6 * b for a, b in zip(_bp(x, 420, 5), _bp(x, 1100, 6))])
+    n = _n(0.5)                                                   # a purr: a low rattle on the breath
+    x = [(1 if (i % int(RG / 26)) < 60 else 0) * rnd.uniform(0.5, 1) for i in range(n)]
+    k.append([v * (0.6 + 0.4 * math.sin(TAU * 1.8 * i / RG)) for i, v in enumerate(_bp(x, 180, 1.5))])
+    n = _n(0.35)                                                  # a gulp: a low pop and a sliding throat tone
+    x, ph = [], 0.0
+    for i in range(n):
+        ph += (240 - 140 * i / n) / RG
+        x.append(math.sin(TAU * ph) * math.exp(-i / (RG * 0.08)))
+    k.append(x)
+    return [fade(list(s), 8, 200) for s in k]
+
+
 # --------------------------------------------------------------------------------------- header ---
 def main(out):
     data, zones = bytearray(), []
@@ -503,6 +584,9 @@ def main(out):
     z_mec = len(zones)
     for k, x in enumerate(mech_kit()):
         add(x, RG, 48 + k, 48 + k, 48 + k)
+    z_bio = len(zones)
+    for k, x in enumerate(bio_kit()):
+        add(x, RG, 48 + k, 48 + k, 48 + k)
     L = ["/* generated by tools/gen_strange_samples.py: STRANGE's built-in samples (synthesized) */", "#pragma once",
          f"static const uint8_t SMP_DATA[{len(data)}] = {{"]
     for i in range(0, len(data), 24):
@@ -524,7 +608,7 @@ def main(out):
           'static const uint8_t SMP_SET_ORIG[] = {0, 0, 2, 3, 0};', '#define SMP_NALIAS 1',
           '#define SMP_SET_NAMES_INIT "GLASS", "GLASS", "THROAT", "METAL", "GLASS"',
           'static const char *const SMP_SET_NAMES[] = {"GLASS", "GLASS", "THROAT", "METAL", "GLASS"};', '',
-          f'/* the GLITCH kit (eng_glitch.c): {z_rit - z_glitch} slices, notes 48 .. {48 + z_rit - z_glitch - 1}, 22,050 Hz */',
+          f'/* the GLITCH kit (eng_glitch.c): {z_rit - z_glitch} slices, notes 48 .. {48 + z_rit - z_glitch - 1}, 16,000 Hz */',
           f'#define GLT_NZ {z_rit - z_glitch}', 'static const smp_zone_t GLT_ZONES[] = {']
     for z in zones[z_glitch:z_rit]:
         L.append("    {" + ", ".join(str(v) for v in z) + "},")
@@ -532,12 +616,15 @@ def main(out):
           f"#define RIT_NZ {z_mec - z_rit}", "static const smp_zone_t RIT_ZONES[] = {"]
     for z in zones[z_rit:z_mec]:
         L.append("    {" + ", ".join(str(v) for v in z) + "},")
-    L += ["};", f"#define MEC_NZ {len(zones) - z_mec}", "static const smp_zone_t MEC_ZONES[] = {"]
-    for z in zones[z_mec:]:
+    L += ["};", f"#define MEC_NZ {z_bio - z_mec}", "static const smp_zone_t MEC_ZONES[] = {"]
+    for z in zones[z_mec:z_bio]:
+        L.append("    {" + ", ".join(str(v) for v in z) + "},")
+    L += ["};", f"#define BIO_NZ {len(zones) - z_bio}", "static const smp_zone_t BIO_ZONES[] = {"]
+    for z in zones[z_bio:]:
         L.append("    {" + ", ".join(str(v) for v in z) + "},")
     L += ["};", ""]
     Path(out).write_text("\n".join(L))
-    print(f"strange samples: {len(data)} B ({len(zones)} zones: 3 sources, 16 x 3 kit slices)")
+    print(f"strange samples: {len(data)} B ({len(zones)} zones: 3 sources, 16 x 4 kit slices)")
 
 
 if __name__ == "__main__":

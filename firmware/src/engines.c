@@ -108,6 +108,7 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_DRIFT,                  /* 23 (ENGI_DRIFT) */
     &ENG_RITUAL,                 /* 24 (ENGI_RITUAL) */
     &ENG_MECH,                   /* 25 (ENGI_MECH) */
+    &ENG_BIO,                    /* 26 (ENGI_BIO) */
 #endif
 };
 
@@ -149,7 +150,7 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
     }
 #endif
 #if FELUCCA_STRANGE
-    if (e == &ENG_GLITCH || e == &ENG_RITUAL || e == &ENG_MECH) {   /* KIT: a user slot */
+    if (e == &ENG_GLITCH || e == &ENG_RITUAL || e == &ENG_MECH || e == &ENG_BIO) {   /* KIT: a user slot */
         uint32_t k = (uint32_t)clamp(t->p[P_FM3_REL], 0, SMP_USER_SLOTS);
         *code = 96u + k;
         return k && !usr_nz[k - 1u] ? SMP_ALL_NAMES[SMP_NSETS + k - 1u] : 0;
@@ -165,12 +166,14 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
  * engine indices, never DIGITAL's reserved 1 (with FELUCCA_FM4 it follows FM6). The indices stay as they are (the
  * stores and the protocol hold them); only this table orders them */
 #if FELUCCA_STRANGE
-static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: every engine, its own first, then the textures' kin;
-                                                         * the first 15 are the EDIT layer's keys (ui_layer.c LY_INIT) */
-    ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,  /* STRANGE's own */
-    8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3,      /* GRAIN PHYS GURDY FM6 ANALOG WHEEL PHASE VOICE NOISE LOFI
-                                                                 * (no SAMPLE, TRIO, DRUM, SLICE: a texture module) */
-    ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT, ENGI_RITUAL, ENGI_MECH,   /* (the EDIT layer: on the keys in a row) */
+static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: the EDIT layer's two pages (ui_layer.c SE_P1), the
+                                                         * machines on the keys from F3, four a row */
+    ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO,             /* page 1, darkmachine's own: physical models, */
+    ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT,              /* springs and drones, */
+    ENGI_GLITCH, ENGI_RITUAL, ENGI_MECH, ENGI_BIO,             /* the slice machines */
+    ENGI_PHYS, ENGI_GURDY, 8, 11,                              /* page 2, Felucca's: PHYS GURDY GRAIN NOISE, */
+    0, 2, ENGI_FM6, 7,                                         /* ANALOG PHASE FM6 WHEEL, */
+    5, 3,                                                      /* VOICE LOFI (no SAMPLE, TRIO, DRUM, SLICE) */
 };
 #else
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {

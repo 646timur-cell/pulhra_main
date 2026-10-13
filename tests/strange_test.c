@@ -169,11 +169,12 @@ static int test_engines(void)
 {
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
-    static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3,
-                                       ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT, ENGI_RITUAL, ENGI_MECH};
+    static const uint8_t want[] = {ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO, ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT,
+                                   ENGI_GLITCH, ENGI_RITUAL, ENGI_MECH, ENGI_BIO, ENGI_PHYS, ENGI_GURDY, 8, 11, 0, 2, ENGI_FM6, 7, 5, 3};
     ui_power_on();
-    bad += check("26 engines; LYRA .. DRIFT are 15..23, RITUAL MECH 24, 25", NENGINES == 26 &&
-                 ENGINES[ENGI_RITUAL] == &ENG_RITUAL && ENGINES[ENGI_MECH] == &ENG_MECH && str_eq(N_ENGNAME[ENGI_MECH], "MECH") &&
+    bad += check("27 engines; LYRA .. DRIFT are 15..23, RITUAL MECH BIO 24..26", NENGINES == 27 &&
+                 ENGINES[ENGI_RITUAL] == &ENG_RITUAL && ENGINES[ENGI_MECH] == &ENG_MECH && ENGINES[ENGI_BIO] == &ENG_BIO &&
+                 str_eq(N_ENGNAME[ENGI_BIO], "BIO") &&
                  ENGINES[ENGI_LYRA] == &ENG_LYRA && ENGINES[ENGI_DRIFT] == &ENG_DRIFT && str_eq(N_ENGNAME[ENGI_DRIFT], "DRIFT") &&
                  ENGINES[ENGI_CHAOS] == &ENG_CHAOS && ENGINES[ENGI_STRING] == &ENG_STRING &&
                  ENGINES[ENGI_MODAL] == &ENG_MODAL && ENGINES[ENGI_BLOW] == &ENG_BLOW &&
@@ -308,7 +309,7 @@ static int test_sound(const char *wavs)
             int pitched = e == ENGI_STRING || e == ENGI_BLOW || (e == ENGI_MODAL && en->presets[k].e[0] == 7);
             int hit = (e == ENGI_STRING && en->presets[k].e[0] != SR_BOW) ||
                       (e == ENGI_MODAL && en->presets[k].e[5] <= MX_STICK) ||   /* (struck: it decays while held) */
-                      (e == ENGI_RESO && en->presets[k].e[0] == RX_BALL) || ((e == ENGI_GLITCH || e == ENGI_RITUAL || e == ENGI_MECH) && !en->presets[k].e[2]) ||
+                      (e == ENGI_RESO && en->presets[k].e[0] == RX_BALL) || ((e == ENGI_GLITCH || e == ENGI_RITUAL || e == ENGI_MECH || e == ENGI_BIO) && !en->presets[k].e[2]) ||
                       (e == ENGI_JUNK && en->presets[k].e[0] != JT_RATTLE) || (e == ENGI_DRIFT && en->presets[k].e[0] == DS_PLUCK);
             int forever = e == ENGI_DRIFT && en->presets[k].e[4] >= 118;   /* (a memory that keeps: no tail's end) */
             R = phrase(e, k, mono || pitched ? A3 : CH, mono || pitched ? 1u : 2u, en->presets[k].env[0] >= 80 ? 5.0 : 2.0);
@@ -484,13 +485,27 @@ static int test_edit_pages(void)
     set_engine_of(TSEL, ENGI_LYRA);
     go_home();
     frame();
-    lay_combo(B_EDIT, 1);                                /* F#3: the 2nd engine, CHAOS */
+    lay_combo(B_EDIT, 1);                                /* page 1 (LYRA's), F#3: the 2nd, MODAL */
     key_up(1);
     frame();
-    ok = TSEL->eng_req == ENGI_CHAOS && ui.layer == LAYER_EDIT;
-    key_down(18); key_up(18); frame();                   /* B4: the 19th, DRIFT */
-    ok &= TSEL->eng_req == ENGI_DRIFT;
-    key_down(5); key_up(5); frame();                     /* A#3: the 6th, GRAIN */
+    ok = TSEL->eng_req == ENGI_MODAL && ui.layer == LAYER_EDIT;
+    key_down(11); key_up(11); frame();                   /* E4: the 12th, BIO */
+    ok &= TSEL->eng_req == ENGI_BIO;
+    press(B_OCTUP); frame();                             /* OCT+: page 2, Felucca's */
+    key_down(0); key_up(0); frame();                     /* F3: PHYS */
+    ok &= TSEL->eng_req == ENGI_PHYS;
+    key_down(9); key_up(9); frame();                     /* D4: the 10th, LOFI */
+    ok &= TSEL->eng_req == 3u;
+    key_down(10); key_up(10); frame();                   /* D#4: none on page 2 */
+    ok &= TSEL->eng_req == 3u;
+    press(B_OCTUP); frame();                             /* back to page 1 */
+    key_down(2); key_up(2); frame();                     /* G3: BLOW */
+    ok &= TSEL->eng_req == ENGI_BLOW;
+    key_down(14); key_up(14); frame();                   /* G4: none on page 1 */
+    ok &= TSEL->eng_req == ENGI_BLOW;
+    key_down(14); key_up(14); frame();
+    press(B_OCTUP); frame();
+    key_down(2); key_up(2); frame();                     /* page 2, G3: GRAIN */
     ok &= TSEL->eng_req == 8u;
     TSEL->p[P_AHOLD] = 0;
     key_down(22); key_up(22); frame();                   /* D#5: LATCH */
@@ -506,12 +521,10 @@ static int test_edit_pages(void)
     for (k = 0; k < 8u; k++)
         changed += TSEL->p[P_E0 + k] != e[k];
     ok &= changed > 0 && TSEL->eng_req == 8u;
-    key_down(20); key_up(20); frame();                   /* C#5: the 21st, MECH */
-    ok &= TSEL->eng_req == ENGI_MECH;
     key_down(21); key_up(21); frame();                   /* D5: nothing */
-    ok &= TSEL->eng_req == ENGI_MECH;
+    ok &= TSEL->eng_req == 8u;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT: the 21 machines on the keys in a row, D#5 LATCH, E5 MUTATE, F#5 RETRIG", ok);
+    bad += check("EDIT: two pages (darkmachine's 12, OCT+ Felucca's 10) from F3, D#5 LATCH, E5 MUTATE, F#5 RETRIG", ok);
     return bad;
 }
 
