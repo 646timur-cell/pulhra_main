@@ -179,6 +179,30 @@ static uint32_t kb_map(const track_t *t, uint32_t k)
 #include "chord.c"
 
 /* ------------------------------------------------------------- arp --- */
+/* the arp / EUCLID from its first step on this block; STRANGE, the transport playing (PLAY, or the clock's Start): on the
+ * grid from the Start instead, the step the timeline is on next, so EUCLID stays in phase with the clock's source
+ * whenever a note comes (euc_clk: samples since the Start, events_block) */
+static uint32_t euc_clk;
+static void euc_align(track_t *t)
+{
+    t->arp_pos = 0xFFFFFFF;                         /* fire on this block */
+    t->arp_idx = 0xFFFFFFFFu;
+    t->euc_pos = 0;
+#if FELUCCA_STRANGE
+    if (song.playing && t->p[P_AMODE]) {
+        uint32_t period = div_samples((uint32_t)t->p[P_ARATE]) *
+                          EUC_DIV_X[clamp(t->p[P_FM3_ATK], 0, (int32_t)NELEM(EUC_DIV_X) - 1)];
+        uint32_t k = period ? euc_clk / period : 0u;
+        if (period && euc_clk - k * period) {       /* (on a step's start: that step, now) */
+            t->arp_pos = euc_clk - k * period;      /* the next step's start: arp_step fires at period */
+            k++;
+        }
+        t->euc_pos = (uint8_t)(k % (uint32_t)clamp(t->p[P_SLEN], 1, 32));
+        t->arp_idx = k - 1u;                        /* (SWING's odd steps as the timeline's) */
+    }
+#endif
+}
+
 static void arp_add(track_t *t, uint32_t note)
 {
     uint32_t i, k = in_key - 1u;
@@ -198,11 +222,8 @@ static void arp_add(track_t *t, uint32_t note)
         held_dt[trk_index(t)][t->nheld] = (int8_t)(hk[t->nheld] ? (int32_t)note - kb_note[k] : 0);
         t->held[t->nheld++] = (uint8_t)note;
     }
-    if (t->nheld == 1u) {
-        t->arp_pos = 0xFFFFFFF;                     /* fire on this block */
-        t->arp_idx = 0xFFFFFFFFu;
-        t->euc_pos = 0;                             /* (EUCLID: from its first step) */
-    }
+    if (t->nheld == 1u)
+        euc_align(t);                               /* (EUCLID: from its first step, or the clock's) */
 }
 
 static void arp_remove(track_t *t, uint32_t note)
@@ -473,10 +494,14 @@ static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
     period *= EUC_DIV_X[clamp(t->p[P_FM3_ATK], 0, (int32_t)NELEM(EUC_DIV_X) - 1)];   /* (EUCLID's DIV) */
 #endif
     sw = (int32_t)(period / 250u) * t->p[P_ASWING];
-    t->arp_pos += n;
-    if (t->arp_pos < period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw) && t->arp_pos != 0xFFFFFFF + n)
-        return;
-    t->arp_pos = 0;
+    {
+        uint32_t due = period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw);
+        t->arp_pos += n;
+        if (t->arp_pos < due && t->arp_pos != 0xFFFFFFF + n)
+            return;
+        /* the step's overshoot (up to a block) kept: the steps stay on the grid, no drift from the clock */
+        t->arp_pos = t->arp_pos == 0xFFFFFFF + n || t->arp_pos - due >= due ? 0u : t->arp_pos - due;
+    }
     arp_fire(t, period);
 }
 
@@ -709,9 +734,7 @@ static __attribute__((noinline)) void sc_latch_apply(track_t *t, uint32_t k)
             held_dt[k][t->nheld] = 0;
             t->held[t->nheld++] = sc_latch_note[k][j];
         }
-        t->arp_pos = 0xFFFFFFF;                     /* fire on this block */
-        t->arp_idx = 0xFFFFFFFFu;
-        t->euc_pos = 0;
+        euc_align(t);
     } else if (latch_on(t)) {
         latch_release(t);
         t->arp_phys = 0;
@@ -731,9 +754,7 @@ static __attribute__((noinline)) void sx_retrig(track_t *t, uint32_t k)
     if (t->p[P_AMODE]) {                                /* EUCLID / the arp: from its first step */
         if (t->arp_note)
             arp_off(t);
-        t->arp_pos = 0xFFFFFFF;
-        t->arp_idx = 0xFFFFFFFFu;
-        t->euc_pos = 0;
+        euc_align(t);
         return;
     }
     for (j = 0; j < t->nheld; j++) {                    /* LATCH's notes: off and on again */
@@ -971,6 +992,13 @@ static void seq_start(void)
             t->lfo_ph = (uint32_t)t->p[P_LPHASE] << 25;
     }
     song.tick = 0;
+    euc_clk = 0;                                   /* EUCLID's timeline: the arps from their first step, together */
+    for (i = 0; i < NPART; i++)
+        if (FELUCCA_STRANGE && trk[i].p[P_AMODE] && trk[i].nheld) {
+            if (trk[i].arp_note)
+                arp_off(&trk[i]);
+            euc_align(&trk[i]);
+        }
     beat_pos = 0; beat_n = 0;                      /* the ARP LED's beat from the top too */
     clk_pos = CLK_START;                           /* the metronome's first beat with step 0 */
     song.playing = 1;
@@ -1494,6 +1522,8 @@ static void events_block(uint32_t n)
         click_tick(seq_n);
     for (i = 0; i < NPART; i++)
         arp_step(&trk[i], clock_mode ? seq_n : n, clock_mode && song.playing ? seq_n : n);
+    if (song.playing)
+        euc_clk += clock_mode ? seq_n : n;            /* (EUCLID's timeline, euc_align) */
     beat_pos += clock_mode ? seq_n : n;               /* the beat the ARP LED flashes on (ui_leds) */
     if (beat_pos >= beat_samples()) {
         beat_pos -= beat_samples();

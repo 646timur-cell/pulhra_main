@@ -700,6 +700,58 @@ static int test_scenes(void)
     return bad;
 }
 
+/* EUCLID on a MIDI clock (USB): the steps on the clock's grid from its Start, whenever the notes come: a part
+ * from the Start and one joining late are on the same step; no drift over 16 bars */
+static int test_euclid_clock(void)
+{
+    int bad = 0, ok;
+    int32_t buf[2 * CTL];
+    uint32_t b, pulses = 0, next_ms = 0, blk = 0, period, i, fires0 = 0, last0;
+    ui_power_on();
+    for (i = 0; i < 2u; i++) {
+        set_engine_of(&trk[i], 0); apply_preset_to(&trk[i], 0); trk[i].engine = trk[i].eng_req;
+        trk[i].p[P_REV] = trk[i].p[P_DLY] = trk[i].p[P_CHOR] = 0;
+        trk[i].p[P_AMODE] = 1; trk[i].p[P_SLEN] = 16; trk[i].p[P_SSWING] = 16; trk[i].p[P_SGATE] = 0;
+        trk[i].p[P_FM3_ATK] = 0;
+    }
+    song.g[G_CLOCK] = 1;                                 /* USB */
+    fm1_ms = 0;
+    mix_block(buf, CTL);
+    midi_event(0x90, 0, 60, 100);                        /* part 1: held before the Start (frozen till then) */
+    midi_enqueue(0xFu | 0xFAu << 8, 1u);
+    last0 = trk[0].euc_pos;
+    for (b = 0; pulses < 24u * 64u; b++) {               /* 64 beats at ~117 BPM (a pulse each 21.33 ms) */
+        fm1_ms = (uint32_t)((uint64_t)b * CTL * 1000u / SR);
+        while (fm1_ms >= next_ms && pulses < 24u * 64u) {
+            midi_enqueue(0xFu | 0xF8u << 8, 1u);
+            pulses++;
+            next_ms = pulses * 64u / 3u;
+        }
+        if (pulses == 24u * 9u + 7u && !blk) {           /* part 2 joins mid-beat */
+            midi_event(0x90, 1, 64, 100);
+            blk = b;
+        }
+        mix_block(buf, CTL);
+        if (trk[0].euc_pos != last0) { fires0++; last0 = trk[0].euc_pos; }
+    }
+    period = div_samples((uint32_t)trk[0].p[P_ARATE]);
+    ok = song.playing && trk[0].euc_pos == trk[1].euc_pos && blk && trk[1].nheld;
+    ok &= fires0 >= euc_clk / period && fires0 <= euc_clk / period + 1u;
+    {
+        char m[120];
+        snprintf(m, sizeof m, "EUCLID on MIDI clock: in phase with the Start (part 1 step %u, late part 2 step %u), %u steps in %u",
+                 trk[0].euc_pos, trk[1].euc_pos, fires0, euc_clk / period);
+        bad += check(m, ok);
+    }
+    midi_enqueue(0xFu | 0xFCu << 8, 1u);
+    mix_block(buf, CTL);
+    midi_event(0x80, 0, 60, 0); midi_event(0x80, 1, 64, 0);
+    for (i = 0; i < 2u; i++) trk[i].p[P_AMODE] = 0;
+    song.g[G_CLOCK] = 0;
+    run(8);
+    return bad;
+}
+
 /* MICRO: a note's degree from ROOT moved by the tuning's cents (and its own), heard; values from before it load OFF */
 static int mt_ty, mt_root, mt_deg = -1, mt_ct;
 static void tw_micro(void)
@@ -773,6 +825,7 @@ int main(void)
     bad += test_xy_routes();
     bad += test_scenes();
     bad += test_micro();
+    bad += test_euclid_clock();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);
