@@ -2967,6 +2967,8 @@ const pPan = () => pById("PAN", 39), pMute = () => pById("MUTE", 40);
 
 /* -------------------------------------------------------------- MIDI --- */
 let connecting = false;
+const LIKELY_PORT = /felucca|fm-1|m-vave|composite|sinco|usb-midi|usb midi/i;
+const felPorts = new Set();                         /* the port names the device answered on (onState: its comings and goings) */
 async function connect() {
   if (connecting || dev) return;
   connecting = true;
@@ -2984,10 +2986,34 @@ async function connect() {
       }
       access.onstatechange = onState;
     }
-    const isF = (p) => /felucca/i.test(p.name || "") && p.state !== "disconnected";
-    const input = [...access.inputs.values()].find(isF);
-    const output = [...access.outputs.values()].find(isF);
-    if (!input || !output) { sayK("nodevice"); return; }
+    /* the device's port: named Felucca, or (macOS keeps the name a USB device first had: FM-1, USB-MIDI, ...) any
+       likely port that answers INFO, as the installer finds it (fm1ota.js) */
+    const live = (p) => p.state !== "disconnected";
+    const ins = [...access.inputs.values()].filter(live), outs = [...access.outputs.values()].filter(live);
+    const pairOf = (i) => outs.find((o) => o.name === i.name) || (ins.length === 1 && outs.length === 1 ? outs[0] : null);
+    let input = ins.find((p) => /felucca/i.test(p.name || "")), output = input && pairOf(input);
+    if (!input || !output) {
+      input = output = null;
+      for (const i of ins.filter((p) => LIKELY_PORT.test(p.name || "")).concat(ins.filter((p) => !LIKELY_PORT.test(p.name || "")))) {
+        const o = pairOf(i);
+        if (!o) continue;
+        const probe = new Link((d) => o.send(d), { timeout: 400 });
+        i.onmidimessage = (e) => probe.receive(e.data);
+        try {
+          if (i.open) await i.open().catch(() => {});
+          await probe.request(req.info(), { timeout: 400, retries: 0 });
+          input = i; output = o;
+        } catch (e) { /* not ours */ }
+        i.onmidimessage = null;
+        probe.close();
+        if (input) break;
+      }
+    }
+    if (!input || !output) {
+      sayK("nodevice", ins.length ? ` (MIDI: ${ins.map((p) => p.name).join(", ")})` : " (MIDI: —)");
+      return;
+    }
+    felPorts.add(input.name);
     const link = new Link((d) => output.send(d), {
       timeout: 300,
       onUnknown: (f) => console.debug("ignored reply", f),
@@ -3038,7 +3064,7 @@ function disconnect(reasonKey = "disconnected") {
 
 function onState(e) {
   const p = e.port;
-  if (!p || !/felucca/i.test(p.name || "")) return;
+  if (!p || !(/felucca/i.test(p.name || "") || felPorts.has(p.name))) return;
   if (dev && p.state === "disconnected" && (p.id === dev.input.id || p.id === dev.output.id)) {
     disconnect("lost");
   } else if (!dev && wantConnected && p.state === "connected" && p.type === "output") {
