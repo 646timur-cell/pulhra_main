@@ -170,9 +170,10 @@ static int test_engines(void)
     int bad = 0, ok = 1;
     uint32_t i, k, total, nshown = 0;
     static const uint8_t want[] = {ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, 8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3,
-                                       ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT};
+                                       ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT, ENGI_RITUAL, ENGI_MECH};
     ui_power_on();
-    bad += check("24 engines; LYRA CHAOS STRING MODAL BLOW RESO GLITCH JUNK DRIFT are 15..23", NENGINES == 24 &&
+    bad += check("26 engines; LYRA .. DRIFT are 15..23, RITUAL MECH 24, 25", NENGINES == 26 &&
+                 ENGINES[ENGI_RITUAL] == &ENG_RITUAL && ENGINES[ENGI_MECH] == &ENG_MECH && str_eq(N_ENGNAME[ENGI_MECH], "MECH") &&
                  ENGINES[ENGI_LYRA] == &ENG_LYRA && ENGINES[ENGI_DRIFT] == &ENG_DRIFT && str_eq(N_ENGNAME[ENGI_DRIFT], "DRIFT") &&
                  ENGINES[ENGI_CHAOS] == &ENG_CHAOS && ENGINES[ENGI_STRING] == &ENG_STRING &&
                  ENGINES[ENGI_MODAL] == &ENG_MODAL && ENGINES[ENGI_BLOW] == &ENG_BLOW &&
@@ -307,7 +308,7 @@ static int test_sound(const char *wavs)
             int pitched = e == ENGI_STRING || e == ENGI_BLOW || (e == ENGI_MODAL && en->presets[k].e[0] == 7);
             int hit = (e == ENGI_STRING && en->presets[k].e[0] != SR_BOW) ||
                       (e == ENGI_MODAL && en->presets[k].e[5] <= MX_STICK) ||   /* (struck: it decays while held) */
-                      (e == ENGI_RESO && en->presets[k].e[0] == RX_BALL) || (e == ENGI_GLITCH && !en->presets[k].e[2]) ||
+                      (e == ENGI_RESO && en->presets[k].e[0] == RX_BALL) || ((e == ENGI_GLITCH || e == ENGI_RITUAL || e == ENGI_MECH) && !en->presets[k].e[2]) ||
                       (e == ENGI_JUNK && en->presets[k].e[0] != JT_RATTLE) || (e == ENGI_DRIFT && en->presets[k].e[0] == DS_PLUCK);
             int forever = e == ENGI_DRIFT && en->presets[k].e[4] >= 118;   /* (a memory that keeps: no tail's end) */
             R = phrase(e, k, mono || pitched ? A3 : CH, mono || pitched ? 1u : 2u, en->presets[k].env[0] >= 80 ? 5.0 : 2.0);
@@ -492,23 +493,25 @@ static int test_edit_pages(void)
     key_down(5); key_up(5); frame();                     /* A#3: the 6th, GRAIN */
     ok &= TSEL->eng_req == 8u;
     TSEL->p[P_AHOLD] = 0;
-    key_down(20); key_up(20); frame();                   /* C#5: LATCH */
+    key_down(22); key_up(22); frame();                   /* D#5: LATCH */
     ok &= TSEL->p[P_AHOLD] == 1;
-    key_down(20); key_up(20); frame();
+    key_down(22); key_up(22); frame();
     ok &= TSEL->p[P_AHOLD] == 0;
     sx_retrig_req = 0;
-    key_down(22); key_up(22); frame();                   /* D#5: RETRIG (done by the audio) */
+    key_down(25); key_up(25); frame();                   /* F#5: RETRIG (done by the audio) */
     ok &= (sx_retrig_req & 1u) != 0;
     sx_retrig_req = 0;
     memcpy(e, &TSEL->p[P_E0], sizeof e);
-    key_down(25); key_up(25); frame();                   /* F#5: MUTATE */
+    key_down(23); key_up(23); frame();                   /* E5: MUTATE */
     for (k = 0; k < 8u; k++)
         changed += TSEL->p[P_E0 + k] != e[k];
     ok &= changed > 0 && TSEL->eng_req == 8u;
-    key_down(19); key_up(19); frame();                   /* C5: nothing */
-    ok &= TSEL->eng_req == 8u;
+    key_down(20); key_up(20); frame();                   /* C#5: the 21st, MECH */
+    ok &= TSEL->eng_req == ENGI_MECH;
+    key_down(21); key_up(21); frame();                   /* D5: nothing */
+    ok &= TSEL->eng_req == ENGI_MECH;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT: the 19 engines on the keys in a row, C#5 LATCH, D#5 RETRIG, F#5 MUTATE", ok);
+    bad += check("EDIT: the 21 machines on the keys in a row, D#5 LATCH, E5 MUTATE, F#5 RETRIG", ok);
     return bad;
 }
 
@@ -526,9 +529,9 @@ static int test_mutate(void)
         apply_preset_to(TSEL, 1);
         go_home(); frame();
         memcpy(base, &TSEL->p[P_E0], sizeof base);
-        lay_combo(B_EDIT, 25); key_up(25); frame();
+        lay_combo(B_EDIT, 23); key_up(23); frame();
         for (n = 0; n < 12u; n++) {
-            key_down(25); key_up(25); frame();
+            key_down(23); key_up(23); frame();
             for (k = 0; k < 8u; k++) {
                 const param_desc_t *d = track_desc(TSEL, P_E0 + k);
                 int32_t v = TSEL->p[P_E0 + k], r = d->max - d->min;

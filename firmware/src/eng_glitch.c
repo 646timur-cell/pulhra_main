@@ -58,11 +58,23 @@ static gl_slot_t *gl_slot(track_t *t, voice_t *v)
     return &gl_part(t)->v[i];
 }
 static uint32_t gl_kit(const int16_t *p) { return (uint32_t)clamp(p[P_FM3_REL], 0, SMP_USER_SLOTS); }
-/* kit k's zones (0: the built-in kit, flash; 1..3: a user slot) */
-static uint32_t gl_nz(uint32_t kit) { return kit ? usr_nz[(kit - 1u) % SMP_USER_SLOTS] : GLT_NZ; }
-static const smp_zone_t *gl_zone(uint32_t kit, uint32_t z)
+/* the source a part plays (sc): 1..3 a user slot (KIT), else the machine's own built-in kit: 0 GLITCH's, 4 RITUAL's,
+ * 5 MECH's (the three machines are this one engine) */
+#define GL_RIT 4u
+#define GL_MEC 5u
+static uint32_t gl_src(const track_t *t)
 {
-    return kit ? &usr_zone[(kit - 1u) % SMP_USER_SLOTS][z & 15u] : &GLT_ZONES[z % GLT_NZ];
+    uint32_t kit = gl_kit(t->p);
+    return kit ? kit : t->engine == ENGI_RITUAL ? GL_RIT : t->engine == ENGI_MECH ? GL_MEC : 0u;
+}
+static uint32_t gl_nz(uint32_t sc)
+{
+    return sc - 1u < SMP_USER_SLOTS ? usr_nz[sc - 1u] : sc == GL_RIT ? RIT_NZ : sc == GL_MEC ? MEC_NZ : GLT_NZ;
+}
+static const smp_zone_t *gl_zone(uint32_t sc, uint32_t z)
+{
+    return sc - 1u < SMP_USER_SLOTS ? &usr_zone[sc - 1u][z & 15u] : sc == GL_RIT ? &RIT_ZONES[z % RIT_NZ]
+                                                                 : sc == GL_MEC ? &MEC_ZONES[z % MEC_NZ] : &GLT_ZONES[z % GLT_NZ];
 }
 
 /* one ADPCM sample of zone z at pos */
@@ -81,7 +93,7 @@ static inline int32_t gl_dec(const smp_zone_t *z, uint32_t pos, int32_t *pred, i
     return *pred;
 }
 
-/* the index for slot k (kit k + 1): every zone from the state (0, 0), its entries to build */
+/* the index for source sc (kit = sc + 1): every zone from the state (0, 0), its entries to build */
 static void gl_reset(gl_part_t *P, uint32_t kit, uint32_t stamp)
 {
     uint32_t i, tot = 0, nz = gl_nz(kit), had = P->kit;
@@ -139,11 +151,11 @@ static void gl_build(gl_part_t *P, const track_t *t)
 static void glitch_block(track_t *t)
 {
     gl_part_t *P;
-    uint32_t kit = gl_kit(t->p), st;
+    uint32_t kit = gl_src(t), st;
     if (t < &trk[0] || t >= &trk[NLIVE])
         return;
     P = gl_part(t);
-    st = !kit ? 0u : usr_nz[kit - 1u] ? smp_user_gen : 0xFFFFFFFFu;
+    st = kit - 1u >= SMP_USER_SLOTS ? 0u : usr_nz[kit - 1u] ? smp_user_gen : 0xFFFFFFFFu;
     if (P->kit != kit + 1u || P->stamp != st)
         gl_reset(P, kit, st);
     gl_build(P, t);
@@ -199,7 +211,7 @@ static void glitch_note_on(track_t *t, voice_t *v)
 {
     const int16_t *p = t->p;
     gl_slot_t *S = gl_slot(t, v);
-    uint32_t kit = gl_kit(p), nz = gl_nz(kit), ns = kit && nz == 1u ? (uint32_t)clamp(p[P_FM1_LEVEL], 2, 16) : nz;
+    uint32_t kit = gl_src(t), nz = gl_nz(kit), ns = kit - 1u < SMP_USER_SLOTS && nz == 1u ? (uint32_t)clamp(p[P_FM1_LEVEL], 2, 16) : nz;
     uint32_t sl = ns ? ((uint32_t)v->note + (uint32_t)p[P_E0]) % ns : 0u;
     int32_t dn = (int32_t)v->note - 48, oct = ns ? (dn >= 0 ? dn / (int32_t)ns : -((-dn + (int32_t)ns - 1) / (int32_t)ns)) : 0;
     int32_t d16 = (p[P_E1] + 12 * oct) * 16;
@@ -320,3 +332,73 @@ static const engine_t ENG_GLITCH = {
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},   /* X: STUT CRSH REV (the break), Y: JUMP CHOP PTCH (the chaos) */
     .xya = {{40, 40, 30}, {50, 40, 20}},
 };
+
+/* RITUAL and MECH (STRANGE): GLITCH with kits of their own (tools/gen_strange_samples.py, 11,025 Hz, C3 .. D#4):
+ *   RITUAL  BELL, GONG, CHAINS, STONE GRIND, STONE KNOCK, CANDLE, CHOIR BREATH, CAVE DRIP, COFFIN, BONES, FRAME DRUM,
+ *           BOWL, THROAT, CRYPT WIND, DOOR CREAK, TOLLING
+ *   MECH    CLOCK TICK, TOCK, RATCHET, TYPEWRITER, CARRIAGE, REEL UP, TAPE STOP, PROJECTOR, PISTON, WIND-UP, SHUTTER,
+ *           SERVO, HAMMER, CHAIN DRIVE, STEAM, MUSIC BOX
+ * the same knobs, KIT too (a user slot instead of the kit) */
+#define STRANGE_CAT_RITUAL "FFFFFFFFFF"
+static const preset_t RITUAL_PRESETS[] = {
+    /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
+    {"CRYPT KIT", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 50)},
+    {"LOW TOLL", {15, -12, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 110}, 0, 0, FX(0, 20, 20, 110)},
+    {"CHAIN DRAG", {2, -5, 60, 3, 30, 0, 10, 40}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 20, 70)},
+    {"BONE RAIN", {9, 0, 40, 2, 20, 20, 20, 70}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 60)},
+    {"STONE ALTAR", {3, -7, 90, 6, 40, 10, 0, 30}, {30, 64, 127, 90}, 0, 0, FX(10, 0, 0, 80)},
+    {"CANDLE VIGIL", {5, 0, 110, 16, 30, 0, 20, 60}, {60, 64, 127, 110}, 0, 0, FX(0, 20, 30, 100)},
+    {"BREATH CHOIR", {6, -12, 100, 16, 50, 0, 0, 40}, {80, 64, 127, 120}, 0, 0, FX(0, 40, 30, 120)},
+    {"DRIP CAVE", {7, 5, 0, 1, 10, 0, 0, 20}, {0, 64, 127, 90}, 0, 0, FX(0, 0, 40, 110)},
+    {"BURIAL", {8, -12, 50, 2, 40, 30, 10, 30}, {0, 64, 127, 80}, 0, 0, FX(20, 0, 10, 90)},
+    {"THROAT RITE", {12, -12, 60, 16, 20, 10, 0, 20}, {70, 64, 127, 120}, 0, 0, FX(10, 30, 20, 110)},
+};
+#define STRANGE_CAT_MECH "FFFFFFFFFF"
+static const preset_t MECH_PRESETS[] = {
+    {"WORKSHOP", {4, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
+    {"CLOCKWORK", {0, 0, 80, 4, 0, 0, 10, 20}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 40)},
+    {"TYPE POOL", {3, 0, 30, 2, 10, 10, 20, 70}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 40)},
+    {"REEL TO REEL", {5, 0, 100, 16, 0, 0, 0, 0}, {20, 64, 127, 80}, 0, 0, FX(0, 20, 20, 60)},
+    {"TAPE DEATH", {6, -5, 60, 2, 60, 30, 20, 30}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 20, 70)},
+    {"PROJECTOR", {7, 0, 90, 16, 0, 20, 10, 10}, {10, 64, 127, 70}, 0, 0, FX(0, 0, 10, 50)},
+    {"STEAM WORKS", {8, -7, 50, 3, 20, 20, 10, 40}, {0, 64, 127, 70}, 0, 0, FX(20, 0, 10, 60)},
+    {"FORGE", {12, -12, 20, 2, 0, 40, 0, 20}, {0, 64, 127, 70}, 0, 0, FX(30, 0, 0, 70)},
+    {"SERVO SWARM", {11, 7, 70, 4, 30, 10, 20, 60}, {30, 64, 127, 90}, 0, 0, FX(0, 20, 20, 80)},
+    {"BROKEN BOX", {15, 0, 40, 3, 40, 20, 30, 50}, {0, 64, 127, 90}, 0, 0, FX(0, 20, 30, 90)},
+};
+#define GL_EDIT {{"SLCE", F_INT, 0, 15, 0, 0, 0}, {"PTCH", F_SEMI, -24, 24, 0, 0, 0}, {"STUT", F_PCT, 0, 127, 0, 0, 0}, \
+                 {"REP", F_INT, 1, 16, 1, 0, 0}, {"REV", F_PCT, 0, 127, 0, 0, 0}, {"CRSH", F_PCT, 0, 127, 0, 0, 0}, \
+                 {"CHOP", F_PCT, 0, 127, 0, 0, 0}, {"JUMP", F_PCT, 0, 127, 0, 0, 0}}
+static const engine_t ENG_RITUAL = {
+    .name = "RITUAL",
+    .page_title = {"SLICE", "BREAK"},
+    .edit = GL_EDIT,
+    .presets = RITUAL_PRESETS,
+    .npresets = NELEM(RITUAL_PRESETS),
+    .note_on = glitch_note_on,
+    .render = glitch_render,
+    .block = glitch_block,
+    .knob = {P_E2, P_E3, P_E5, P_E7},
+    .poly = GL_POLY,
+    .sampled = 1,
+    .mem = sizeof(gl_part_t),
+    .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
+    .xya = {{40, 40, 30}, {50, 40, 20}},
+};
+static const engine_t ENG_MECH = {
+    .name = "MECH",
+    .page_title = {"SLICE", "BREAK"},
+    .edit = GL_EDIT,
+    .presets = MECH_PRESETS,
+    .npresets = NELEM(MECH_PRESETS),
+    .note_on = glitch_note_on,
+    .render = glitch_render,
+    .block = glitch_block,
+    .knob = {P_E2, P_E3, P_E5, P_E7},
+    .poly = GL_POLY,
+    .sampled = 1,
+    .mem = sizeof(gl_part_t),
+    .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
+    .xya = {{40, 40, 30}, {50, 40, 20}},
+};
+#undef GL_EDIT

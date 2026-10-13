@@ -411,7 +411,8 @@ static int page_visible(uint32_t i)
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_ARP)
         return PAGES[i].graph == GR_XY || PAGES[i].graph == GR_BROWSE;   /* (STRANGE: ARP is FAV, X, Y) */
     if (FELUCCA_STRANGE && PAGES[i].id[0] == P_FM3_REL)
-        return TSEL->eng_req % NENGINES == ENGI_GLITCH;   /* (KIT: GLITCH's) */
+        return TSEL->eng_req % NENGINES == ENGI_GLITCH || TSEL->eng_req % NENGINES == ENGI_RITUAL ||
+               TSEL->eng_req % NENGINES == ENGI_MECH;   /* (KIT: GLITCH's, RITUAL's, MECH's) */
     if (FELUCCA_STRANGE && PAGES[i].graph == GR_MICRO)
         return 1;                                     /* (STRANGE: SCL > MICRO, the lanes and OP4 its degrees) */
     if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||

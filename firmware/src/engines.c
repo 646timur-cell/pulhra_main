@@ -106,6 +106,8 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_GLITCH,                 /* 21 (ENGI_GLITCH) */
     &ENG_JUNK,                   /* 22 (ENGI_JUNK) */
     &ENG_DRIFT,                  /* 23 (ENGI_DRIFT) */
+    &ENG_RITUAL,                 /* 24 (ENGI_RITUAL) */
+    &ENG_MECH,                   /* 25 (ENGI_MECH) */
 #endif
 };
 
@@ -147,7 +149,7 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
     }
 #endif
 #if FELUCCA_STRANGE
-    if (e == &ENG_GLITCH) {                         /* KIT: a user slot */
+    if (e == &ENG_GLITCH || e == &ENG_RITUAL || e == &ENG_MECH) {   /* KIT: a user slot */
         uint32_t k = (uint32_t)clamp(t->p[P_FM3_REL], 0, SMP_USER_SLOTS);
         *code = 96u + k;
         return k && !usr_nz[k - 1u] ? SMP_ALL_NAMES[SMP_NSETS + k - 1u] : 0;
@@ -168,7 +170,7 @@ static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: every engine
     ENGI_LYRA, ENGI_CHAOS, ENGI_STRING, ENGI_MODAL, ENGI_BLOW,  /* STRANGE's own */
     8, ENGI_PHYS, ENGI_GURDY, ENGI_FM6, 0, 7, 2, 5, 11, 3,      /* GRAIN PHYS GURDY FM6 ANALOG WHEEL PHASE VOICE NOISE LOFI
                                                                  * (no SAMPLE, TRIO, DRUM, SLICE: a texture module) */
-    ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT,              /* the EDIT layer's black keys 1..4 (F#3 G#3 A#3 C#4) */
+    ENGI_RESO, ENGI_GLITCH, ENGI_JUNK, ENGI_DRIFT, ENGI_RITUAL, ENGI_MECH,   /* (the EDIT layer: on the keys in a row) */
 };
 #else
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {

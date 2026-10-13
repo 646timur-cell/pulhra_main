@@ -65,9 +65,9 @@ static uint8_t sc_k = 0xFFu;                            /* the key a scene was p
 /* STRANGE's EDIT layer: the engines on every key in a row (F3 F#3 G3 .. : ENGINE_ORDER), above them on the black keys
  * C#5 LATCH, D#5 RETRIG (the latched notes and EUCLID from the top, seq.c), F#5 MUTATE (the engine's values nudged at
  * random, undone by OCT- / SAVE held), G5 INIT */
-#define SE_LATCH 20u                                    /* chromatic key indices (0 = F3) */
-#define SE_RETRIG 22u
-#define SE_MUTATE 25u
+#define SE_LATCH 22u                                    /* chromatic key indices (0 = F3): the 21 machines F3 .. C#5, */
+#define SE_MUTATE 23u                                   /* then D#5 LATCH, E5 MUTATE, F#5 RETRIG, G5 INIT */
+#define SE_RETRIG 25u
 #define SE_INIT 26u
 static void eqa_latch(track_t *t, uint32_t i, uint32_t down);
 static void edit_load(uint32_t e, int32_t step);
@@ -650,7 +650,7 @@ static const eqa_set_t EQA[] = {
 /* STRANGE: on every engine, black keys 1.. load the engines past the white keys (ENGINE_ORDER from LY_INIT on) */
 static const char *eqa_eng_name(const track_t *t, uint32_t i)   /* (an 11th of the row: two letters) */
 {
-    static const char *const A[][2] = {{"RESO", "RS"}, {"GLITCH", "GL"}, {"JUNK", "JK"}, {"DRIFT", "DR"}};
+    static const char *const A[][2] = {{"RESO", "RS"}, {"GLITCH", "GL"}, {"JUNK", "JK"}, {"DRIFT", "DR"}, {"RITUAL", "RT"}, {"MECH", "MC"}};
     const char *n = ENGINES[eng_vis(LY_INIT + i)]->name;
     uint32_t k;
     (void)t;
@@ -1207,20 +1207,20 @@ static void eqa_row(uint32_t n)
     }
 }
 #if FELUCCA_STRANGE
-/* the engines on the keys in a row, five a row (each its key and its name), the actions under them */
+/* the machines on the keys in a row, five a row (five rows: 21), the actions under them in the keys' order */
 static void layer_edit(void)
 {
-    static const char *const AN[4] = {"LATCH", "RETRIG", "MUTATE", "INIT"};
+    static const char *const AN[4] = {"LATCH", "MUTATE", "RETRIG", "INIT"};
     uint32_t i;
     for (i = 0; i < NENG_SHOWN; i++) {
-        int32_t x = 6 + (int32_t)(i % 5u) * 46, y = 4 + (int32_t)(i / 5u) * 22, w = 43;
+        int32_t x = 6 + (int32_t)(i % 5u) * 46, y = 4 + (int32_t)(i / 5u) * 18, w = 43;
         const engine_t *en = ENGINES[eng_vis(i) % NENGINES];
         uint16_t ink, fill = lc_fill(eng_vis(i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, &ink);
-        fill = lc_box(x, y, w, 19, fill);
-        GFX_HOOK_ALIGN(x, y, x + w, y + 19, AL_HV, "edit engine cell name centred");
-        cv_text_in(x, y + CAP_IN(S, 19), w, &AF_S, eng_abbr(en->name), ink, fill);
+        fill = lc_box(x, y, w, 16, fill);
+        GFX_HOOK_ALIGN(x, y, x + w, y + 16, AL_HV, "edit engine cell name centred");
+        cv_text_in(x, y + CAP_IN(S, 16), w, &AF_S, eng_abbr(en->name), ink, fill);
     }
-    for (i = 0; i < 4u; i++) {                          /* (the black keys C#5 D#5 F#5 G5: the names alone, centred) */
+    for (i = 0; i < 4u; i++) {                          /* (D#5 E5 F#5 G5: the names alone, centred) */
         uint32_t st = i == 0u ? (TSEL->p[P_AHOLD] ? LS_SEL : LS_OFF) : i == 3u && chain_busy() ? LS_DIM : LS_OFF;
         uint16_t ink, fill = lc_box(LC_X(i), LM_Y, LC_W, LM_H, lc_fill(st, &ink));
         GFX_HOOK_ALIGN(LC_X(i), LM_Y, LC_X(i) + LC_W, LM_Y + LM_H, AL_HV, "edit action cell name centred");
