@@ -630,7 +630,10 @@ static int test_euclid(void)
     t->p[P_SLEN] = 8; t->p[P_SSWING] = 3; t->p[P_SGATE] = 0;
     run(4);
     midi_event(0x90, 0, 60, 100); midi_event(0x90, 0, 64, 100);
-    run(1);
+    run(40);
+    ok = t->arp_idx == 0xFFFFFFFFu && !t->arp_note;      /* stopped: EUCLID waits for PLAY */
+    transport_req = 1; run(1);                            /* PLAY: from its first step */
+    ok &= song.playing;
     last_pos = t->euc_pos; last_idx = t->arp_idx;
     pat = t->arp_idx != 0xFFFFFFFFu ? 1u : 0u;            /* (step 0 fired on the first block) */
     hits = pat;
@@ -642,7 +645,7 @@ static int test_euclid(void)
             k++;
         }
     }
-    ok = pat == 0x49u && hits == 3u;                      /* x..x..x. */
+    ok &= pat == 0x49u && hits == 3u;                     /* x..x..x. */
     t->p[P_SGATE] = 1;                                    /* ROT 1: .x..x..x */
     ok &= euc_hit(t, 1) && euc_hit(t, 4) && euc_hit(t, 7) && !euc_hit(t, 0);
     t->p[P_SSWING] = 8;
@@ -660,6 +663,18 @@ static int test_euclid(void)
         for (k = 0; k < 2000u; k++) { run(1); if (t->euc_pos != last) { steps4++; last = t->euc_pos; } }
         midi_event(0x80, 0, 60, 0); run(8);
         t->p[P_FM3_ATK] = 0;
+        t->p[P_AHOLD] = 1;                                /* a latched chord: STOP silences it, PLAY again */
+        midi_event(0x90, 0, 60, 100); run(4); midi_event(0x80, 0, 60, 0); run(40);
+        ok = t->arp_note != 0u || t->arp_idx != 0xFFFFFFFFu;
+        transport_req = 2; run(4);
+        ok &= !song.playing && !t->arp_note;
+        last = t->arp_idx; run(400);
+        ok &= !t->arp_note && t->arp_idx == last;
+        transport_req = 1; run(400);
+        ok &= song.playing && t->arp_idx != last;
+        transport_req = 2; run(4);
+        t->p[P_AHOLD] = 0; run(8);
+        bad += check("EUCLID with the transport: STOP stops it (the latched chord kept), PLAY goes on", ok);
         bad += check("EUCLID DIV /4: a quarter of the steps in the same time", steps1 >= 8u && steps4 * 4u >= steps1 - 2u &&
                      steps4 * 4u <= steps1 + 4u);
     }
@@ -667,12 +682,30 @@ static int test_euclid(void)
     go_home(); frame();
     press(B_SEQ);
     ok = !ui.home && !strcmp(cur_page()->title, "EUCLID") && !song.seq_mode;
-    press(B_SEQ);
+    frames(400); press(B_SEQ);
     ok &= !strcmp(cur_page()->title, "EUCLID 2");
-    press(B_SEQ); press(B_SEQ);
+    frames(400); press(B_SEQ); frames(400); press(B_SEQ);
     ok &= !strcmp(cur_page()->title, "EUCLID");
     go_home(); frame();
     bad += check("SEQ: EUCLID, EUCLID 2, EUCLID 3 round (the keys still play)", ok);
+    {   /* SEQ held: F3 on / off, G#3.. the modes, B4.. the patterns */
+        frames(400);
+        lay_combo(B_SEQ, 0); key_up(0); frame();          /* F3: on */
+        ok = ui.layer == LAYER_SEQ && t->p[P_AMODE] != 0;
+        key_down(5); key_up(5); frame();                  /* A#3: mode 3 */
+        ok &= t->p[P_AMODE] == 3;
+        key_down(19); key_up(19); frame();                /* C5: 5/8 */
+        ok &= t->p[P_SLEN] == 8 && t->p[P_SSWING] == 5 && t->p[P_SGATE] == 0;
+        key_down(0); key_up(0); frame();
+        ok &= t->p[P_AMODE] == 0;
+        key_down(0); key_up(0); frame();
+        ok &= t->p[P_AMODE] == 3;                         /* (back on: the mode it had) */
+        btn_up(B_SEQ); frames(100);
+        ok &= ui.layer == 0;
+        t->p[P_AMODE] = 0; t->p[P_SLEN] = 16; t->p[P_SSWING] = 16;
+        go_home(); frame();
+        bad += check("SEQ held: F3 EUCLID on / off (its mode back), G#3.. modes, B4.. patterns", ok);
+    }
     return bad;
 }
 

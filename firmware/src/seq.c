@@ -492,6 +492,10 @@ static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
             arp_off(t);
         return;
     }
+#if FELUCCA_STRANGE
+    if (!song.playing)                              /* EUCLID runs with the transport (PLAY, or the clock's Start) */
+        return;
+#endif
     period = div_samples((uint32_t)t->p[P_ARATE]);
 #if FELUCCA_STRANGE
     period *= EUC_DIV_X[clamp(t->p[P_FM3_ATK], 0, (int32_t)NELEM(EUC_DIV_X) - 1)];   /* (EUCLID's DIV) */
@@ -1026,7 +1030,7 @@ static void seq_stop(void)
     cin_left = 0;                                  /* (a count-in: cancelled, nothing recorded) */
     cin_flush = 0;
     memset(cin_n, 0, sizeof cin_n);
-    if (song.g[G_CLOCK])                           /* external clock: the arp stops with the transport, */
+    if (song.g[G_CLOCK] || FELUCCA_STRANGE)        /* external clock (STRANGE: always): the arp stops with the transport, */
         for (i = 0; i < NPART; i++)                /* its sounding note too (HOLD keeps the latched chord) */
             if (trk[i].arp_note)
                 arp_off(&trk[i]);

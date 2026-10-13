@@ -86,7 +86,7 @@ static struct {
     uint8_t light, mono;
     uint8_t style;               /* MENU > STYLE (ui.c style_apply): ST_FLAT, ST_LINE */
     uint8_t grime;               /* STRANGE's DARK: the crypt's wear (cv_grime, cv_rrect's torn edges) */
-    uint16_t gk[3], gd[3][2];    /* grime: the flat colours it wears (swapped: BG SURF RAISE), each one's dust and stain */
+    uint16_t gk[3], gd[3][3];    /* grime: the flat colours it wears (swapped: BG SURF RAISE), each one's dust, stain, soot */
     uint32_t gen;                /* bumped by palette_set (the text ramps follow) */
 } ux;
 /* STYLE: FLAT, the filled SURF cards and panels; LINE, no SURF (it is BG) and 1 px T_RULE dividers between the
@@ -146,6 +146,8 @@ static inline uint32_t gm_hash(uint32_t x, uint32_t y)   /* a fixed noise of the
     h *= 0x5bd1e995u;
     return h ^ (h >> 15);
 }
+#define GM_GOUGES 5u
+static int16_t gm_gouge[GM_GOUGES][4];          /* the grime's gouges: y0, y1, x0, slant (/16), palette_set */
 static void palette_set(uint32_t i)
 {
     const ui_pal_t *p = &UI_PALETTES[i % NPALETTES];
@@ -173,10 +175,18 @@ static void palette_set(uint32_t i)
     {                                            /* the wear's colours: per flat colour a dust (lighter) and a stain */
         const uint16_t f[3] = {ux.bg, ux.surf, ux.raise};
         uint32_t k;
+        for (k = 0; k < GM_GOUGES; k++) {
+            uint32_t g = gm_hash(k + 911u, 7u);
+            gm_gouge[k][0] = (int16_t)(g % 200u);
+            gm_gouge[k][1] = (int16_t)(gm_gouge[k][0] + 30 + (int32_t)((g >> 8) % 120u));
+            gm_gouge[k][2] = (int16_t)((g >> 16) % 240u);
+            gm_gouge[k][3] = (int16_t)((int32_t)((g >> 24) % 49u) - 24);
+        }
         for (k = 0; k < 3u; k++) {
             ux.gk[k] = swap16(f[k]);
             ux.gd[k][0] = swap16(ux_mix(f[k], p->text, k ? 9 : 6));
-            ux.gd[k][1] = swap16(k ? ux_mix(f[k], p->bg, 45) : ux_mix(f[k], p->accent, 7));
+            ux.gd[k][1] = swap16(k ? ux_mix(f[k], p->bg, 55) : ux_mix(f[k], p->accent, 9));
+            ux.gd[k][2] = swap16(k ? ux_mix(f[k], p->bg, 28) : ux_mix(f[k], p->text, 3));   /* the scanlines' soot */
         }
     }
     ux.gen++;                                    /* the text ramps change with the coverage curve */
@@ -216,11 +226,16 @@ static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
 /* the worn colour of screen pixel x, y whose flat colour is the k-th (0 BG, 1 SURF, 2 RAISE), c (swapped) as it is */
 static uint16_t gm_px(uint32_t x, uint32_t y, uint32_t k, uint16_t c)
 {
-    uint32_t h = gm_hash(x, y);
-    if (k) {                                     /* a slab (SURF, RAISE): hairline cracks, a cell of 24 in ~1 of 3 */
+    uint32_t h = gm_hash(x, y), s;
+    for (s = 0; s < GM_GOUGES; s++) {            /* long gouges across the whole screen, each its own slant */
+        const int16_t *g = gm_gouge[s];
+        if ((int32_t)y >= g[0] && (int32_t)y < g[1] && (int32_t)x == g[2] + g[3] * ((int32_t)y - g[0]) / 16 && (h & 7u) != 0u)
+            return k ? ux.gk[0] : ux.gd[0][0];   /* through a slab down to the stone; on the stone a pale score */
+    }
+    if (k) {                                     /* a slab (SURF, RAISE): hairline cracks, a cell of 24 in ~1 of 2 */
         uint32_t cx = x / 24u, cy = y / 24u, ch = gm_hash(cx + 501u, cy + 77u);
-        if (ch % 3u == 0u) {
-            int32_t bx = (int32_t)(cx * 24u + (ch >> 4) % 10u), L = 8 + (int32_t)((ch >> 9) % 16u);
+        if (ch % 2u == 0u) {
+            int32_t bx = (int32_t)(cx * 24u + (ch >> 4) % 10u), L = 10 + (int32_t)((ch >> 9) % 20u);
             int32_t sl = (int32_t)((ch >> 14) % 41u) - 20, dx = (int32_t)x - bx;
             int32_t cyp = (int32_t)(cy * 24u + 4u + (ch >> 20) % 16u) + sl * dx / 16 + (int32_t)((gm_hash(x, cy) >> 3) & 1u);
             if (dx >= 0 && dx < L && (int32_t)y == cyp)
@@ -228,12 +243,24 @@ static uint16_t gm_px(uint32_t x, uint32_t y, uint32_t k, uint16_t c)
             if (dx >= 0 && dx < L && (int32_t)y == cyp + 1)
                 return ux.gd[k][0];              /* its lit lip */
         }
-        if ((h & 15u) == 1u)                     /* slabs wear more */
+        {                                        /* torn pixels: a ragged hole in ~1 of 9 cells of 8 */
+            uint32_t hh = gm_hash(x / 8u + 3001u, y / 8u + 17u);
+            if (hh % 9u == 0u) {
+                int32_t hx = (int32_t)(x & 7u) - (int32_t)((hh >> 8) & 7u), hy = (int32_t)(y & 7u) - (int32_t)((hh >> 12) & 7u);
+                if (hx * hx + hy * hy <= (int32_t)((hh >> 16) & 3u) + 1 && (h & 3u) != 0u)
+                    return ux.gk[0];
+            }
+        }
+        if (y % 3u == 0u)                        /* a CRT's soot: every third line */
+            return (h & 7u) ? ux.gd[k][2] : ux.gd[k][1];
+        if ((h & 7u) == 1u)                      /* slabs wear more */
             return (h >> 4) & 1u ? ux.gd[k][0] : ux.gd[k][1];
+    } else if (y % 3u == 0u && (h & 3u) == 0u) {
+        return ux.gd[0][2];                      /* (the stone: its soot faint, broken) */
     }
-    if ((h & 31u) == 0u || ((gm_hash(x / 5u, y / 5u + 977u) & 7u) == 0u && (h & 3u) == 0u))
+    if ((h & 15u) == 0u || ((gm_hash(x / 5u, y / 5u + 977u) & 3u) == 0u && (h & 3u) == 0u))
         return ux.gd[k][0];                      /* dust, thicker in a blotch */
-    if ((h >> 8 & 127u) == 0u || ((gm_hash(x / 3u + 31u, y / 7u) & 63u) == 0u && (h >> 5 & 1u)))
+    if ((h >> 8 & 63u) == 0u || ((gm_hash(x / 3u + 31u, y / 9u) & 31u) == 0u && (h >> 5 & 1u)))
         return ux.gd[k][1];                      /* a stain, a streak run down */
     return c;
 }
@@ -387,15 +414,23 @@ static void cv_rrect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint
         cv_rect(x, y, w, h, c);
         for (i = 0; i < w; i++) {                /* the top and bottom edges: a chip in ~1 of 7, a notch in ~1 of 31 */
             uint32_t a = gm_hash(s0 + (uint32_t)i, 11u), b = gm_hash(s0 + (uint32_t)i, 23u);
-            if (a % 7u == 0u) cv_pset(x + i, y, under);
-            if (a % 31u == 1u) cv_pset(x + i, y + 1, under), cv_pset(x + i, y, under);
-            if (b % 7u == 0u) cv_pset(x + i, y + h - 1, under);
-            if (b % 31u == 1u) cv_pset(x + i, y + h - 2, under), cv_pset(x + i, y + h - 1, under);
+            if (a % 4u == 0u) cv_pset(x + i, y, under);
+            if (a % 13u == 1u) cv_pset(x + i, y + 1, under), cv_pset(x + i, y, under);
+            if (a % 41u == 2u && h > 10) cv_pset(x + i, y + 2, under), cv_pset(x + i, y + 1, under), cv_pset(x + i, y, under);
+            if (b % 4u == 0u) cv_pset(x + i, y + h - 1, under);
+            if (b % 13u == 1u) cv_pset(x + i, y + h - 2, under), cv_pset(x + i, y + h - 1, under);
+            if (b % 23u == 5u && w >= 30 && i > 1 && i < w - 2) {   /* a drip run off the slab's foot (1 .. 3 px) */
+                int32_t d, n = 1 + (int32_t)((b >> 12) % 3u);
+                for (d = 0; d < n; d++)
+                    cv_pset(x + i, y + h + d, c);
+            }
         }
         for (j = 0; j < h; j++) {
             uint32_t a = gm_hash(s0 + (uint32_t)j, 37u), b = gm_hash(s0 + (uint32_t)j, 41u);
-            if (a % 7u == 0u) cv_pset(x, y + j, under);
-            if (b % 7u == 0u) cv_pset(x + w - 1, y + j, under);
+            if (a % 4u == 0u) cv_pset(x, y + j, under);
+            if (a % 17u == 1u) cv_pset(x + 1, y + j, under), cv_pset(x, y + j, under);
+            if (b % 4u == 0u) cv_pset(x + w - 1, y + j, under);
+            if (b % 17u == 1u) cv_pset(x + w - 2, y + j, under), cv_pset(x + w - 1, y + j, under);
         }
         for (j = 0; j < 4; j++) {                /* the corners: 2 .. 4 px bitten off */
             uint32_t a = 2u + gm_hash(s0, 53u + (uint32_t)j) % 3u, d;

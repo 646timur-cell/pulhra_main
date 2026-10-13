@@ -51,7 +51,7 @@ PALETTES = [
     ("MONO",   (0, 0, 0),       (0, 0, 0),       (255, 255, 255), (255, 255, 255), (255, 255, 255)),
     # STRANGE (darkmachine, the build's default): a crypt by candlelight: black stone, parchment text, blood-red values,
     # torch gold for the hot thing
-    ("DARK",   (4, 3, 3),       (20, 16, 13),    (216, 202, 170), (214, 160, 76),  (226, 58, 46)),
+    ("DARK",   (5, 5, 4),       (17, 16, 14),    (206, 200, 184), (160, 152, 134), (234, 54, 44)),
 ]
 BW = "MONO"
 BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE

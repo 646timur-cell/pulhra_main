@@ -1626,9 +1626,7 @@ static void ui_input(void)
             else
                 transport_req = 1;
             break;
-#if !FELUCCA_STRANGE                                    /* (STRANGE: SEQ a page button, EUCLID; no layer) */
-        case B_SEQ:
-#endif
+        case B_SEQ:                                     /* (STRANGE: tap EUCLID's pages, held its layer) */
         case B_REC:                                     /* tap: above; held, its layer (ui_layer.c) */
         case B_SAVE:
         case B_FX:                                      /* the layers' buttons: ui_layer.c */

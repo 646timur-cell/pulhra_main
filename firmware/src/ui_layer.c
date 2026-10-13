@@ -111,6 +111,36 @@ static void se_mutate(track_t *t)
     load_end(t);
     ui_say(n ? "MUTATED" : "NOTHING TO MUTATE", "");
 }
+/* STRANGE's SEQ held: EUCLID on the keys. F3 on / off (NOTES OFF, or the mode it had), G#3 .. A4 the 14 modes (UP ..
+ * CHORD: NOTES), B4 .. G5 nine classic patterns (STEPS HITS, ROT 0); KNOB 1..4 STEPS HITS ROT DIV (LY_SEQ) */
+#define EU_MODE0 3u                                     /* G#3: the first mode, UP */
+#define EU_PAT0 18u                                     /* B4: the first pattern */
+static const uint8_t EU_PAT[9][2] = {{8, 3}, {8, 5}, {5, 2}, {7, 3}, {9, 4}, {12, 5}, {12, 7}, {16, 5}, {16, 7}};
+static const char *const EU_PATN[9] = {"3/8", "5/8", "2/5", "3/7", "4/9", "5/12", "7/12", "5/16", "7/16"};
+static uint8_t eu_last[NPART] = {1, 1, 1, 1};           /* the mode F3 turns back on */
+static uint32_t eu_mode_of(uint32_t k) { return k >= EU_MODE0 && k < EU_MODE0 + 14u ? k - EU_MODE0 + 1u : 0u; }
+static uint32_t eu_pat_of(uint32_t k) { return k >= EU_PAT0 && k < EU_PAT0 + 9u ? k - EU_PAT0 + 1u : 0u; }
+static void eu_key(uint32_t k)
+{
+    track_t *t = TSEL;
+    uint32_t i = song.sel % NPART, m = eu_mode_of(k), pt = eu_pat_of(k);
+    if (k == 0u) {
+        if (t->p[P_AMODE])
+            eu_last[i] = (uint8_t)t->p[P_AMODE], t->p[P_AMODE] = 0;
+        else
+            t->p[P_AMODE] = eu_last[i] ? eu_last[i] : 1;
+        ui_say(t->p[P_AMODE] ? "EUCLID ON" : "EUCLID OFF", "");
+    } else if (m) {
+        t->p[P_AMODE] = (int16_t)m;
+        eu_last[i] = (uint8_t)m;
+        ui_say("NOTES ", N_AMODE[m]);
+    } else if (pt) {
+        t->p[P_SLEN] = EU_PAT[pt - 1u][0];
+        t->p[P_SSWING] = EU_PAT[pt - 1u][1];
+        t->p[P_SGATE] = 0;
+        ui_say("EUCLID ", EU_PATN[pt - 1u]);
+    }
+}
 static void se_key(uint32_t k)
 {
     if (se_eng(k) < NENGINES)
@@ -140,14 +170,22 @@ static const layer_t LAYERS[LAYER_N] = {
     {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
     {B_SCL, LK_SET, FAM_SCL, "[SCL] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
     {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTDN, "UNDO"}, {KC_EDIT, "DONE"}}},
+#if FELUCCA_STRANGE
+    {B_SEQ, LK_SET, FAM_SEQ, "[SEQ] EUCLID", {{KC_KEYS, "ON MODE PATTERN"}, {KC_OCTDN, "UNDO"}, {KC_SEQ, "DONE"}}},
+#else
     {B_SEQ, LK_SET, FAM_SEQ, "[SEQ] TOOLS", {{KC_KEYS, "TOOLS"}, {KC_OCTDN, "UNDO"}, {KC_SEQ, "DONE"}}},
+#endif
     {B_REC, LK_SET, FAM_HOME, "[REC] SET", {{KC_KEYS, "RECORDING"}, {KC_OCTDN, "UNDO"}, {KC_REC, "DONE"}}},
 };
 static const uint8_t LY_KC[LAYER_N] = {0, KC_FX, KC_GLO, KC_SCL, KC_EDIT, KC_SEQ, KC_REC};
 /* SCL's knobs: the key and its chord (cur_page() while the layer edits or draws them: page_over) */
 static const page_t LY_SCL = {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_CHRD, P_VOIC}};
 /* SEQ TOOLS' knobs: LEN DIV SWING GATE (the length the tools work in; up to 1.1.5 the PATTERN page's) */
+#if FELUCCA_STRANGE   /* (STRANGE: SEQ held is EUCLID's: STEPS HITS ROT DIV on the knobs) */
+static const page_t LY_SEQ = {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_SLEN, P_SSWING, P_SGATE, P_FM3_ATK}};
+#else
 static const page_t LY_SEQ = {"PATTERN", FAM_SEQ, SC_TRACK, GR_STEPS, {P_SLEN, P_SDIV, P_SSWING, P_SGATE}};
+#endif
 static const page_t *ly_page(uint32_t l) { return l == LAYER_SCL ? &LY_SCL : l == LAYER_SEQ ? &LY_SEQ : 0; }
 #define LY_OPEN 2u                     /* ui.ly_t0: the map opened (no tap any more) */
 #define LY_COMBO 4u                    /* .. by a combo */
@@ -235,7 +273,7 @@ static void layer_arm(uint32_t pressed, uint32_t now)
     if (ui.ly)
         return;
     for (l = LAYER_FX; l < LAYER_N; l++)
-        if ((pressed & ly_bit(l)) && !(FELUCCA_MODULE && (l == LAYER_SEQ || l == LAYER_REC))) {
+        if ((pressed & ly_bit(l)) && !(FELUCCA_MODULE && ((l == LAYER_SEQ && !FELUCCA_STRANGE) || l == LAYER_REC))) {
             ui.ly = (uint8_t)l;                         /* (sound module: no SEQ TOOLS, no REC layer) */
             ui.ly_t0 = (now & ~15u) | 1u | (layer_allowed() ? 0u : LY_DEAD);
             lys.dtap = lys.dt_l == l && fm1_ms - lys.dt_ms <= LY_DTAP_MS;   /* (#83: the second tap of a double tap?) */
@@ -797,6 +835,10 @@ static void layer_key(uint32_t l, uint32_t k)
     } else if (l == LAYER_REC) {
         if (!key_black(k) && p < 4u)
             rec_key(p);
+#if FELUCCA_STRANGE
+    } else if (l == LAYER_SEQ) {
+        eu_key(k);
+#endif
     } else if (l == LAYER_SEQ) {
         if (!key_black(k))
             tools_key(p);
@@ -994,6 +1036,12 @@ static uint32_t layer_leds(uint32_t *br)
         } else if (l == LAYER_EDIT) {                   /* the engine lit, the other engines and the actions breathe */
             on = se_eng(k) < NENGINES ? se_eng(k) == TSEL->eng_req % NENGINES : k == SE_LATCH && TSEL->p[P_AHOLD];
             can = se_eng(k) < NENGINES || k == SE_LATCH || k == SE_RETRIG || k == SE_MUTATE || (k == SE_INIT && !chain_busy());
+        } else if (l == LAYER_SEQ) {                    /* EUCLID: on, the mode and the pattern lit, the rest breathe */
+            const int16_t *tp = TSEL->p;
+            uint32_t em = eu_mode_of(k), ep = eu_pat_of(k);
+            on = (k == 0u && tp[P_AMODE]) || (em && (uint32_t)tp[P_AMODE] == em) ||
+                 (ep && tp[P_SLEN] == EU_PAT[ep - 1u][0] && tp[P_SSWING] == EU_PAT[ep - 1u][1]);
+            can = k == 0u || em || ep;
 #endif
         } else if (l == LAYER_EDIT && !b) {             /* the engine lit, the others and INIT breathe */
             on = ly_eng(p) < NENGINES && ly_eng(p) == TSEL->eng_req % NENGINES;
@@ -1279,6 +1327,27 @@ static const uint8_t TL_ICON[TL_N] = {ICON_CLEAR, ICON_X_REVERSE, ICON_X_LEFT, I
     ICON_DRUM, 0, ICON_CLEAR, ICON_X_REVERSE, ICON_STEPS, ICON_PROB};
 static const char *const TL_NAME[TL_N] = {"CLEAR", "REVERSE", "SHIFT", "SHIFT", "RANDOM", "COOK", "BEAT", 0,
     "CLR", "REV", "FILL", "RND"};
+#if FELUCCA_STRANGE
+/* STRANGE's SEQ held: ON / OFF and the 14 modes (five a row), the nine patterns under them, the one in effect selected */
+static void eu_cell(int32_t x, int32_t y, int32_t w, const char *s, int on)
+{
+    uint16_t ink, fill = lc_box(x, y, w, 16, lc_fill(on ? LS_SEL : LS_OFF, &ink));
+    GFX_HOOK_ALIGN(x, y, x + w, y + 16, AL_HV, "seq euclid cell centred");
+    cv_text_in(x, y + CAP_IN(S, 16), w, &AF_S, s, ink, fill);
+}
+static void layer_seq(void)
+{
+    const int16_t *p = TSEL->p;
+    uint32_t i;
+    eu_cell(6, 4, 43, p[P_AMODE] ? "ON" : "OFF", p[P_AMODE] != 0);
+    for (i = 0; i < 14u; i++)
+        eu_cell(6 + (int32_t)((i + 1u) % 5u) * 46, 4 + (int32_t)((i + 1u) / 5u) * 18, 43, N_AMODE[i + 1u],
+                p[P_AMODE] == (int16_t)(i + 1u));
+    for (i = 0; i < 9u; i++)
+        eu_cell(6 + (int32_t)(i % 5u) * 46, 64 + (int32_t)(i / 5u) * 18, 43, EU_PATN[i],
+                p[P_SLEN] == EU_PAT[i][0] && p[P_SSWING] == EU_PAT[i][1]);
+}
+#else
 static void layer_seq(void)
 {
     uint32_t p, st = chain_busy() ? LS_DIM : LS_OFF, drum = (uint32_t)drum_track(TSEL);
@@ -1301,6 +1370,7 @@ static void layer_seq(void)
         cv_text_in(x, 100 + CAP_IN(S, 18), 25, &AF_S, drum_lane_abbr(TSEL, p), ink, fill);
     }
 }
+#endif
 
 /* REC: a row a key (26 px, 4 apart): the key's cell (its note, icon and name), then CLEAR's track and what it holds,
  * or the setting's three values, the one now with the selection's fill (as MENU > AUDIO steps them) */
@@ -1417,7 +1487,8 @@ static void draw_layer(void)
     else if (l == LAYER_REC)
         sig += (uint32_t)ui_rec_prefs * 31u + (uint32_t)chain_busy() * 3u + (uint32_t)rec_clearable() * 5u + song.sel * 977u;
     else if (l == LAYER_SEQ)
-        sig += (uint32_t)drum_track(TSEL) * 31u + ui.lane * 5u + (uint32_t)chain_busy() * 3u + (uint32_t)TSEL->p[P_E0] * 131u + song.sel * 977u;
+        sig += (uint32_t)TSEL->p[P_AMODE] * 7919u + (uint32_t)TSEL->p[P_SLEN] * 104729u + (uint32_t)TSEL->p[P_SSWING] * 31337u +
+               (uint32_t)drum_track(TSEL) * 31u + ui.lane * 5u + (uint32_t)chain_busy() * 3u + (uint32_t)TSEL->p[P_E0] * 131u + song.sel * 977u;
     else
         sig += snd_id() * 31u + (uint32_t)preset_favorite() * 5u + (uint32_t)chain_busy() * 3u + up_gen * 101u +
                eqa_sig() * 2654435761u;
