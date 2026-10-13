@@ -71,20 +71,37 @@ static uint8_t sc_k = 0xFFu;                            /* the key a scene was p
 #define SE_INIT 26u
 static void eqa_latch(track_t *t, uint32_t i, uint32_t down);
 static void edit_load(uint32_t e, int32_t step);
+/* MUTATE: a variation of the sound, not a walk away from it: each press scatters the engine's continuous knobs (a share,
+ * a time, a level, a frequency: never a model, an algorithm, a slot, a note, a count) around the sound it started from
+ * (+-20 % of a knob's range), so pressing again gives another variation of the same sound. That sound is the one
+ * before the first press, taken again whenever the knobs were turned or another sound loaded since (se_last differs) */
+static int16_t se_base[NPART][8], se_last[NPART][8];
+static int se_cont(const param_desc_t *d)
+{
+    return d && d->label && d->max - d->min >= 8 && (d->fmt == F_PCT || d->fmt == F_BIPCT || d->fmt == F_TIME ||
+                                                     d->fmt == F_CUTOFF || d->fmt == F_LFOHZ || d->fmt == F_DB);
+}
 static void se_mutate(track_t *t)
 {
-    uint32_t k;
+    uint32_t k, i = trk_index(t) % NPART, n = 0;
+    if (memcmp(se_last[i], &t->p[P_E0], sizeof se_last[i]))
+        memcpy(se_base[i], &t->p[P_E0], sizeof se_base[i]);   /* (turned or loaded since: this is the sound) */
     load_begin(t, UNDO_SOUND);
     for (k = 0; k < 8u; k++) {
         const param_desc_t *d = track_desc(t, P_E0 + k);
-        int32_t r = d->max - d->min, v = t->p[P_E0 + k];
-        if (d->fmt == F_ENUM || r < 8)
-            continue;                                   /* (a model, a mode: kept) */
-        v += (int32_t)(rng() % (uint32_t)(r / 4 + 1)) - r / 8;   /* +-1/8 of its range */
+        int32_t r, v;
+        if (!se_cont(d)) {
+            t->p[P_E0 + k] = se_base[i][k];
+            continue;
+        }
+        r = d->max - d->min;
+        v = se_base[i][k] + (int32_t)(rng() % (uint32_t)(2 * (r / 5) + 1)) - r / 5;
         t->p[P_E0 + k] = (int16_t)clamp(v, d->min, d->max);
+        n++;
     }
+    memcpy(se_last[i], &t->p[P_E0], sizeof se_last[i]);
     load_end(t);
-    ui_say("MUTATED", "");
+    ui_say(n ? "MUTATED" : "NOTHING TO MUTATE", "");
 }
 static void se_key(uint32_t k)
 {

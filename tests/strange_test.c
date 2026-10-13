@@ -512,6 +512,50 @@ static int test_edit_pages(void)
     return bad;
 }
 
+/* MUTATE: variations around the sound (continuous knobs within +-20 % of it, pressing again does not drift), never
+ * a structural knob (FM6's ALG and SLOT, GLITCH's SLCE and REP); a turned knob makes the new sound the base */
+static int test_mutate(void)
+{
+    int bad = 0, ok = 1, moved = 0;
+    uint32_t e, k, n;
+    static const uint32_t ENG[3] = {ENGI_FM6, ENGI_GLITCH, ENGI_LYRA};
+    for (e = 0; e < 3u; e++) {
+        int16_t base[8];
+        ui_power_on();
+        set_engine_of(TSEL, ENG[e]);
+        apply_preset_to(TSEL, 1);
+        go_home(); frame();
+        memcpy(base, &TSEL->p[P_E0], sizeof base);
+        lay_combo(B_EDIT, 25); key_up(25); frame();
+        for (n = 0; n < 12u; n++) {
+            key_down(25); key_up(25); frame();
+            for (k = 0; k < 8u; k++) {
+                const param_desc_t *d = track_desc(TSEL, P_E0 + k);
+                int32_t v = TSEL->p[P_E0 + k], r = d->max - d->min;
+                if (se_cont(d))
+                    ok &= abs(v - base[k]) <= r / 5, moved |= v != base[k];
+                else
+                    ok &= v == base[k];
+            }
+        }
+        btn_up(B_EDIT); frame();
+    }
+    TSEL->p[P_E0 + 1] = (int16_t)(TSEL->p[P_E0 + 1] + 20);   /* turned: the new base */
+    {
+        int16_t b2[8];
+        memcpy(b2, &TSEL->p[P_E0], sizeof b2);
+        se_mutate(TSEL);
+        for (k = 0; k < 8u; k++) {
+            const param_desc_t *d = track_desc(TSEL, P_E0 + k);
+            ok &= abs(TSEL->p[P_E0 + k] - b2[k]) <= (d->max - d->min) / 5;
+        }
+    }
+    bad += check("MUTATE: around the sound (+-20 %, no drift over 12 presses), FM6 ALG / SLOT and GLITCH SLCE / REP kept",
+                 ok && moved);
+    go_home(); frame();
+    return bad;
+}
+
 /* LATCH (P_AHOLD in a module, VOICE 3): notes stay after their keys; a new gesture replaces them, the same single note
  * again stops it, LATCH OFF lets go */
 static void run(uint32_t n)
@@ -938,6 +982,7 @@ int main(void)
     bad += test_xy_routes();
     bad += test_scenes();
     bad += test_micro();
+    bad += test_mutate();
     bad += test_euclid_clock();
     bad += test_glitch_kit();
     bad += test_sound(wavs && *wavs ? wavs : 0);
