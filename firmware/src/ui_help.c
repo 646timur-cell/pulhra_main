@@ -40,6 +40,9 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"EDIT 1", H_EDIT},
     {"EDIT 2", H_EDIT},
     {"FILTER", "[K1]LP BP HP[K2]CUTOFF[EDIT]VOICE"},
+#if FELUCCA_STRANGE
+    {"KIT", "[K1]YOUR SLOTS[K2]CUTS[EDIT]MORE"},
+#endif
     {"LANES", H_LANES},
     {"LANES 2", H_LANES},
     {"SLICES", "[K1]SLICE[K2]MOVE[OCT+]SPLIT, JOIN"},

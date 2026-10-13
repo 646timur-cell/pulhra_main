@@ -752,6 +752,119 @@ static int test_euclid_clock(void)
     return bad;
 }
 
+/* GLITCH's KIT: a user slot (built here from the kit's own slices) read through the seek index plays them bit for bit
+ * as the kit does; one zone is cut in CUTS; an empty slot is silent and named; KIT's page is GLITCH's */
+static void gl_slot_put(uint32_t k, const uint32_t *zs, uint32_t nz)
+{
+    smp_user_hdr_t *h = (smp_user_hdr_t *)((uint8_t *)host_slots + k * SMP_USER_SIZE);
+    uint8_t *d = (uint8_t *)h + SMP_USER_DATA;
+    uint32_t i, len = 0;
+    memset(h, 0, SMP_USER_SIZE);
+    for (i = 0; i < nz; i++) {
+        smp_zone_t z = GLT_ZONES[zs[i]];
+        uint32_t nb = (z.n + 1u) / 2u;
+        memcpy(d + len, &SMP_DATA[z.off], nb);
+        z.off = len;
+        z.ls = 0, z.le = z.n - 1u, z.pred = 0, z.idx = 0, z.looped = 0;
+        z.lo = (uint8_t)(i ? 48u + i : 0u), z.hi = (uint8_t)(i + 1u < nz ? 48u + i : 127u);
+        h->zone[i] = z;
+        len += nb;
+    }
+    h->magic = nz ? SMP_USER_MAGIC : 0u;
+    h->version = 1;
+    h->nz = (uint8_t)nz;
+    h->data_len = len;
+    smp_user_scan(k);
+}
+static int gl_kit_v = 0, gl_cuts_v = 16, gl_stut = -1;
+static void tw_glkit(void)
+{
+    trk[0].p[P_FM3_REL] = (int16_t)gl_kit_v;
+    trk[0].p[P_FM1_LEVEL] = (int16_t)gl_cuts_v;
+    if (gl_stut >= 0)
+        trk[0].p[P_E2] = (int16_t)gl_stut, trk[0].p[P_E4] = 60, trk[0].p[P_E7] = 90, trk[0].p[P_E3] = 3;
+}
+static int32_t gl_ref[SR];
+static int test_glitch_kit(void)
+{
+    int bad = 0, ok = 1;
+    static const uint32_t ZS[4] = {0, 1, 2, 3}, Z1[1] = {5};
+    uint32_t i, j, kk;
+    uint8_t n;
+    phr_t R;
+    gl_slot_put(0, ZS, 4);
+    gl_slot_put(1, ZS, 0);
+    gl_slot_put(2, Z1, 1);
+    phr_tweak = tw_glkit;
+    for (j = 0; j < 3u && ok; j++) {                     /* keys 48 .. 50: zones 0 .. 2, as the kit's slices 0 .. 2 */
+        static int32_t o[2][SR / 2u];                    /* the engine's own output, both ways (no mix, no DC) */
+        uint32_t w;
+        for (w = 0; w < 2u; w++) {
+            track_t *t = &trk[0];
+            voice_t *v = &t->v[0];
+            vmod_t m;
+            ui_power_on();
+            set_engine_of(t, ENGI_GLITCH); apply_preset_to(t, 0); t->engine = t->eng_req;
+            t->p[P_FM3_REL] = (int16_t)w;
+            memset(gl_part(t), 0, sizeof(gl_part_t));
+            memset(&m, 0, sizeof m);
+            m.amp0 = m.amp1 = 32767;
+            memset(v, 0, sizeof *v);
+            v->note = (uint8_t)(48u + j);
+            v->active = 1;
+            glitch_note_on(t, v);
+            memset(o[w], 0, sizeof o[w]);
+            for (i = 0; i + CTL <= SR / 2u; i += CTL) {
+                glitch_block(t);
+                glitch_render(t, v, &o[w][i], CTL, &m);
+            }
+            v->active = 0;
+        }
+        for (i = 0, kk = 0; i < SR / 2u && ok; i++)
+            ok = o[0][i] == o[1][i], kk |= o[0][i] != 0;
+        if (!ok)
+            printf("glitch kit: key %u differs at %u: %d vs %d\n", 48u + j, i - 1u, o[1][i - 1u], o[0][i - 1u]);
+        ok &= kk != 0;
+    }
+    bad += check("GLITCH KIT USR1: a zone a key, read from flash through the index, bit for bit as the kit's own", ok);
+    gl_kit_v = 1, gl_stut = 90;                          /* STUT REP REV JUMP over the flash */
+    n = 52;
+    R = phrase(ENGI_GLITCH, 0, &n, 1, 1.0);
+    ok = R.peak > 500 && R.clip == 0;
+    gl_stut = -1;
+    gl_kit_v = 2;                                        /* USR2 empty: silent, NO SAMPLE names it */
+    R = phrase(ENGI_GLITCH, 0, &n, 1, 0.4);
+    {
+        uint32_t code;
+        const char *nm = snd_missing(&trk[0], &code);
+        ok &= R.peak < 4 && nm && !strcmp(nm, "USR2");
+    }
+    bad += check("GLITCH KIT: stutter, reverse, jumps over a user slot; an empty one silent and named", ok);
+    gl_kit_v = 3, gl_cuts_v = 4;                         /* USR3: one zone in 4 cuts */
+    ok = 1;
+    for (kk = 0; kk < 4u; kk++) {
+        n = (uint8_t)(48u + kk);
+        R = phrase(ENGI_GLITCH, 0, &n, 1, 0.3);
+        ok &= gl_part(&trk[0])->v[0].base == (int32_t)(kk * (GLT_ZONES[5].n / 4u)) || gl_part(&trk[0])->v[1].base ==
+              (int32_t)(kk * (GLT_ZONES[5].n / 4u)) || gl_part(&trk[0])->v[2].base == (int32_t)(kk * (GLT_ZONES[5].n / 4u));
+    }
+    phr_tweak = 0;
+    gl_kit_v = 0, gl_cuts_v = 16;
+    ui_power_on();
+    set_engine_of(&trk[0], ENGI_GLITCH); trk[0].engine = trk[0].eng_req;
+    for (i = 0, kk = 0; i < NPAGES; i++)
+        kk += PAGES[i].id[0] == P_FM3_REL && page_visible(i);
+    ok &= kk == 1u && param_kept(P_FM3_REL);
+    set_engine_of(&trk[0], ENGI_LYRA); trk[0].engine = trk[0].eng_req;
+    for (i = 0, kk = 0; i < NPAGES; i++)
+        kk += PAGES[i].id[0] == P_FM3_REL && page_visible(i);
+    ok &= kk == 0u;
+    bad += check("GLITCH KIT: one zone cut in CUTS (4: a quarter a key); the KIT page only on GLITCH, kept over presets", ok);
+    for (i = 0; i < 3u; i++)
+        gl_slot_put(i, ZS, 0);
+    return bad;
+}
+
 /* MICRO: a note's degree from ROOT moved by the tuning's cents (and its own), heard; values from before it load OFF */
 static int mt_ty, mt_root, mt_deg = -1, mt_ct;
 static void tw_micro(void)
@@ -826,6 +939,7 @@ int main(void)
     bad += test_scenes();
     bad += test_micro();
     bad += test_euclid_clock();
+    bad += test_glitch_kit();
     bad += test_sound(wavs && *wavs ? wavs : 0);
     if (bad) {
         printf("strange: %d FAILED\n", bad);

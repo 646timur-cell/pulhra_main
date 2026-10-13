@@ -35,7 +35,7 @@ const FW_ROOT = process.env.FELUCCA_ROOT || join(HERE, "..");
 const html = readFileSync(join(HERE, "editor.html"), "utf8");
 const proto = html.slice(html.indexOf("/*PROTO-BEGIN*/"), html.indexOf("/*PROTO-END*/"));
 const E = vm.runInNewContext(proto + `
-;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, takeSample, autoTrim, zoomView, rootFromName, buildSlot, crushed, makeMockDevice, CMD, SMP,
+;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, takeSample, autoTrim, zoomView, rootFromName, buildSlot, crushed, transients, sliceCuts, draftZones, makeMockDevice, CMD, SMP,
    UP, bank, capturePatch, auditionPatch, startWatch, libraryFile, readLibraryFile, paramKeys, patternFromSteps, stepsFromPattern, upName,
    mixer, parseNotes, parseHits, hitsText, gridFromSteps, LANE_NOTE, LANE_OF, readDevicePreferences, devicePresetRows, engineOrder, ENGINE_ORDER, aliasOf, fmtValue, FM6, enumShown, F,
    FM4, fromDigital, fromPerc, DRUM_KIT_E,
@@ -1579,6 +1579,24 @@ function samplesMatch() {
        d8.every((v) => v % 256 === 0) && E.crushed({ rate: 22050, alias: false, bits: 16 }, f) === s &&
        hv.getUint32(32 + 16, true) === 16384 && hv.getUint32(32 + 4, true) === 1103,
        "samples: the downsampler (11.025 kHz held = every 2nd sample, smoothed otherwise, 8 bits, the zone's rate 0x4000)");
+  }
+  {   /* the slicer: a loop of 5 hits (decaying noise, 0.3 s apart, the 3rd soft) cut at its transients, or in equal parts */
+    const R = E.SMP.RATE, n = Math.round(R * 1.6), raw = new Float64Array(n), at = [0, 0.3, 0.6, 0.9, 1.2].map((x) => Math.round(x * R));
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 2 - 1;
+    at.forEach((a, k) => { for (let i = 0; i < R * 0.25 && a + i < n; i++) raw[a + i] += rnd() * Math.exp(-i / (R * 0.03)) * (k === 2 ? 0.3 : 1); });
+    const f = { raw, a: 0, b: n, s: E.takeSample(raw, 0, n), root: 60 };
+    const cuts = E.transients(f.s, 1);
+    const near = at.every((a) => cuts.some((c) => c <= a + 2 && a - c <= 70));
+    const d = { files: [f], rate: 11025, alias: false, bits: 16, slice: "tr", sens: 1 };
+    const zs = E.draftZones(d), sl = E.buildSlot("loop", zs), hv = new DataView(sl.hdr.buffer);
+    const d8 = { files: [f], rate: 22050, alias: false, bits: 16, slice: "8", sens: 1 }, z8 = E.draftZones(d8);
+    const off = { files: [f], rate: 22050, alias: false, bits: 16, slice: "off", sens: 1 };
+    ok(cuts.length === 5 && near && zs.length === 5 && zs.map((z) => z.root).join() === "48,49,50,51,52" && sl.hdr[6] === 5 &&
+       hv.getUint32(32 + 16, true) === 16384 && zs[0].lo === 0 && zs[4].hi === 127 && zs[1].lo === 49 && zs[1].hi === 49 &&
+       z8.length === 8 && Math.abs(z8[3].s.length - f.s.length / 8) <= 1 && E.draftZones(off).length === 1 &&
+       E.sliceCuts({ files: [f, f], slice: "tr" }, f).length === 1,
+       `samples: the slicer (cuts ${cuts.join(" ")} for ${at.join(" ")}; 8 equal; off; two files: none)`);
   }
   /* recording / trimming: takeSample (a cut of the raw input, faded at the cuts, normalised), autoTrim */
   const R = E.SMP.RATE, raw = new Float64Array(R);       /* 1 s: silence, a tone from 0.25 to 0.6 s, silence */

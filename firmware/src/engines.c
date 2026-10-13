@@ -146,6 +146,13 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
         return slc_get(si) ? 0 : N_SLC_SRC[si];
     }
 #endif
+#if FELUCCA_STRANGE
+    if (e == &ENG_GLITCH) {                         /* KIT: a user slot */
+        uint32_t k = (uint32_t)clamp(t->p[P_FM3_REL], 0, SMP_USER_SLOTS);
+        *code = 96u + k;
+        return k && !usr_nz[k - 1u] ? SMP_ALL_NAMES[SMP_NSETS + k - 1u] : 0;
+    }
+#endif
     if (e != &ENG_SAMPLE && e != &ENG_GRAIN)
         return 0;
     *code = (e == &ENG_GRAIN ? 32u : 1u) + si % 32u;

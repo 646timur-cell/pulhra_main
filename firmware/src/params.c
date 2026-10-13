@@ -105,6 +105,8 @@ static const int8_t MT_CENTS[MT_RAND - MT_JUST][12] = {
     {0, 36, -64, 0, 0, 0, 0, 0, 0, 0, 0, 0},               /* SHUR: the koron 2nd (~135) */
     {0, 0, -19, -6, 0, -2, 0, 2, -8, 0, -4, 0},            /* USSAK: 53 commas: 181 294 498 702 792 996 */
 };
+/* GLITCH's KIT (EDIT > KIT, OP3's REL): its own kit or a user slot; CUTS (OP1's LVL): a one-zone slot's equal slices */
+static const char *const N_GLKIT[] = {"BUILT", "USR1", "USR2", "USR3"};
 static const char *const N_MDEG[12] = {"1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"};
 #define MDEG_P(d) ((d) < 8u ? P_LN0 + (d) : P_FM4_ATK + (d) - 8u)   /* degree d's own offset */
 /* values from before MICRO (OP4's LVL 127, the lanes 127, AMT 0): MICRO as new, OFF. A valid TUNE is never past MT_N,
@@ -232,6 +234,8 @@ static const param_desc_t TP[P_COUNT] = {
     [P_FM4_LEVEL] = PE("TUNE", N_MTUNE, 0),         /* MICRO: the tuning, how much of it, RAND's seed */
     [P_FM3_DEC] = PD("AMT", F_PCT, 0, 100, 100),
     [P_FM3_SUS] = PD("SEED", F_INT, 0, 99, 0),
+    [P_FM3_REL] = PE("KIT", N_GLKIT, 0),            /* GLITCH: the kit, a user slot's cuts */
+    [P_FM1_LEVEL] = PD("CUTS", F_INT, 2, 16, 16),
 #define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
     MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
 #undef XYR
@@ -579,6 +583,9 @@ static const page_t PAGES[] = {
 #endif
     {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
     {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
+#if FELUCCA_STRANGE
+    {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, P_FM1_LEVEL, 0xFF, 0xFF}},   /* GLITCH only: its samples */
+#endif
     {"FILTER", FAM_EDIT, SC_TRACK, GR_NONE, {P_FTYPE, P_E4, P_E5, P_E7}},   /* ANALOG only (1.5, #104): TYPE CUT RES KTR */
     {"LANES", FAM_EDIT, SC_TRACK, GR_NONE, {P_LN0, P_LN1, P_LN2, P_LN3}},   /* DRUM only: the lane levels */
     {"LANES 2", FAM_EDIT, SC_TRACK, GR_NONE, {P_LN4, P_LN5, P_LN6, P_LN7}},
