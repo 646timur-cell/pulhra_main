@@ -147,7 +147,7 @@ static void fm1_main(void)
     fm1_guard_lock_top();
     fm1_irq_enable_all();
     fm1_delay_ms(30);
-    for (ms = 0; ms < 400u; ms += 10u) {              /* the splash; the pot followed (MIDI IN plays under it) */
+    for (ms = 0; ms < 400u; ms += 10u) {              /* the splash; the pot followed (MIDI IN is not read in stage 1) */
         fm1_delay_ms(10);
         master_poll();
     }

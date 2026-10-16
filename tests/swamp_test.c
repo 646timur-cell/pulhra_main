@@ -837,6 +837,10 @@ static int test_white_key_toggles_trig(void)
     host_notes = 1u << WHITE[2];
     sm_input_poll();
     bad += check("INPUT: ... again: off", smp.pat[smp.cur].step[0][2].n == 0u);
+    host_notes = 1u << 25;                                /* F#5 on a 16-step track: ignored */
+    sm_input_poll();
+    bad += check("INPUT: F#5 with len 16: the bank stays 0", sm_ui.bank == 0u);
+    ksnd(0)->len = 32u;
     host_notes = 1u << 25;                                /* F#5: bank 1 */
     sm_input_poll();
     bad += check("INPUT: F#5: bank 1, no trig", sm_ui.bank == 1u && !smp.pat[smp.cur].step[0][25].n);
@@ -857,6 +861,7 @@ static int test_white_key_toggles_trig(void)
     host_notes = 1u << WHITE[0];
     sm_input_poll();
     bad += check("INPUT: the trig goes to the selected track", smp.pat[smp.cur].step[1][0].n == 1u && !smp.pat[smp.cur].step[0][0].n);
+    ksnd(0)->len = 16u;
     return bad;
 }
 
@@ -1018,6 +1023,7 @@ static int test_held_step_bank_key(void)
 {
     int bad = 0;
     in_reset();
+    ksnd(sm_ui.trk)->len = 32u;                           /* (a bank key works on a 32-step track) */
     host_ticks = 1000u;
     host_notes = 1u << WHITE[5];
     fm1_in.notes = 1u << WHITE[5];
@@ -1028,6 +1034,7 @@ static int test_held_step_bank_key(void)
     sm_input_poll();
     bad += check("INPUT: a bank key pressed while holding: held_step stays the step pressed (5)",
                  sm_ui.bank == 1u && sm_ui.held_step == 5u);
+    ksnd(sm_ui.trk)->len = 16u;
     fm1_in.notes = 0;
     sm_input_poll();
     return bad;

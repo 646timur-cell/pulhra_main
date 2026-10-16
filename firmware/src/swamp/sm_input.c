@@ -100,6 +100,8 @@ static void sm_keys(uint32_t notes, uint32_t now)
         if (!((notes >> k) & 1u))
             continue;
         if (k == SM_KEY_BANK0 || k == SM_KEY_BANK1) {
+            if (smp.pat[smp.cur].kit.snd[sm_ui.trk].len <= 16u)
+                continue;                                 /* (no second page of steps while the track is 16 long) */
             sm_ui.bank = (uint8_t)(k == SM_KEY_BANK1);
             sm_dirty = 1;
             continue;
