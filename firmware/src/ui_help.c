@@ -125,7 +125,7 @@ static const char *help_page(void)
         static char hb[48];
         uint32_t id = mf_sel_id(cur_page());
         if (cur_page()->graph == GR_ROLL)
-            return "[K1]FLAG[PRESETS]NOTE[SELECT]NUDGE";
+            return "[K1]NOTE[PRESETS]FLAG[SELECT]NUDGE";
         if (MF_MIX_PAGE(cur_page()))
             return "[K4]SEND[SELECT]DST CHO DLY REV";
         if (id == 0xFFu)

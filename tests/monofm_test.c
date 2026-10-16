@@ -1239,15 +1239,15 @@ static int test_keys_editor(void)
         uint32_t n0 = t->step[4].note[0];
         key_down(key_at(0, 4));
         frame();
-        turn(EN_PRESET, 1);
-        turn(EN_PRESET, 1);
-        turn(EN_PRESET, 1);
         turn(EN_K1, 1);
+        turn(EN_K1, 1);
+        turn(EN_K1, 1);
+        turn(EN_PRESET, 1);
         turn(EN_K3, 1);
         turn(EN_K3, 1);
         key_up(key_at(0, 4));
         frame();
-        bad += check("MONOFM KEYS: a trig held + PRESETS its NOTE (+3), KNOB 1 ACC, KNOB 3 its LEN (1/4); the trig stays, no lock",
+        bad += check("MONOFM KEYS: a trig held + KNOB 1 its NOTE (+3), PRESETS ACC, KNOB 3 its LEN (1/4); the trig stays, no lock",
                      t->step[4].note[0] == n0 + 3u && t->step[4].acc == 2u && (t->step[4].flags & SF_ACCENT) &&
                      step_on(&t->step[4]) && motion_lock_count(t) == 0u);
         t->step[4].note[0] = (uint8_t)n0;
@@ -1266,11 +1266,11 @@ static int test_keys_editor(void)
     ui.cursor = 4;
     frames(600);
     k4 = t->step[4].note[0];
-    turn(EN_PRESET, 1);
-    turn(EN_PRESET, 1);
+    turn(EN_K1, 1);
+    turn(EN_K1, 1);
     ok = t->step[4].note[0] == k4 + 2u;
-    turn(EN_K1, 1);
-    turn(EN_K1, 1);
+    turn(EN_PRESET, 1);
+    turn(EN_PRESET, 1);
     ok &= (t->step[4].flags & SF_SLIDE) && !(t->step[4].flags & SF_ACCENT);
     turn(EN_K2, -10);
     ok &= t->step[4].vel && t->step[4].vel < 96u;
@@ -1279,7 +1279,7 @@ static int test_keys_editor(void)
     ok &= t->step[4].acc == 5u;                         /* (TRK 1/8 1/4 1/2 3/4 1) */
     turn(EN_K4, -5);
     ok &= step_chance(&t->step[4]) < 100u;
-    bad += check("MONOFM KEYS: the trig picked: PRESETS NOTE (+2), KNOB 1 FLAG (SLD), 2 VEL, 3 LEN (1), 4 COND", ok);
+    bad += check("MONOFM KEYS: the trig picked: KNOB 1 NOTE (+2), PRESETS FLAG (SLD), 2 VEL, 3 LEN (1), 4 COND", ok);
     /* SEQ + ARP: the keyboard */
     btn_down(B_SEQ);
     frame();
@@ -1632,15 +1632,15 @@ static int test_v4(void)
     ui.cursor = 2;
     frame();
     for (i = 0; i < 4u; i++)
-        turn(EN_K1, 1);
+        turn(EN_PRESET, 1);
     ok = step_ratchet(&t->step[2]) == 2u && !(t->step[2].flags & (SF_ACCENT | SF_SLIDE)) && mf_flag_of(&t->step[2]) == 4u;
     for (i = 0; i < 4u; i++)
-        turn(EN_K1, 1);
+        turn(EN_PRESET, 1);
     ok &= step_ratchet(&t->step[2]) == 3u && (t->step[2].flags & SF_ACCENT) && mf_flag_of(&t->step[2]) == 8u;
     for (i = 0; i < 12u; i++)
-        turn(EN_K1, -1);
+        turn(EN_PRESET, -1);
     ok &= mf_flag_of(&t->step[2]) == 0u && step_ratchet(&t->step[2]) == 1u;
-    bad += check("MONOFM v4 STEP: KNOB 1 FLAG goes - ACC SLD A+S X2 X3 X4 AX2 AX3 AX4 (the ratchet)", ok);
+    bad += check("MONOFM v4 STEP: PRESETS (the FLAG) goes - ACC SLD A+S X2 X3 X4 AX2 AX3 AX4 (the ratchet)", ok);
     turn(EN_SELECT, 1);
     turn(EN_SELECT, 1);
     ok = step_nudge(&t->step[2]) == 2 && seq_nudge(t, &t->step[2]) == 2;

@@ -1265,11 +1265,18 @@ static void draw_columns(void)
     }
 #if FELUCCA_MONOFM
     if (cur_page()->scope == SC_STEP && !detail_on() && !(ui_prefs2 & (PREF_ROLL >> 16))) {   /* KEYS: the trig picked:
-                                                                                          * FLAG VEL LEN COND (NOTE: PRESETS) */
+                                                                                          * NOTE VEL LEN COND (FLAG: PRESETS) */
         const step_t *st = &seq_steps(TSEL)[ui.cursor];
         uint32_t on = (uint32_t)step_on(st) && st->n;
-        char sn[8];
-        draw_column(0, "FLAG", on ? MF_FLAG_N[mf_flag_of(st)] : "--", "", on ? VAL(0u) : T_DIM, -1, ICON_AUTO);
+        char sn[8], u[6] = {0};
+        if (on) {                                     /* NOTE: the first, "+2" more of a chord */
+            note_name(sn, st->note[0]);
+            if (st->n > 1u) {
+                u[0] = '+';
+                u[1] = (char)('0' + st->n - 1u);
+            }
+        }
+        draw_column(0, "NOTE", on ? sn : "--", u, on ? VAL(0u) : T_DIM, -1, ICON_AUTO);
         fmt_int(sn, st->vel ? st->vel : 96);
         draw_column(1, "VEL", on ? sn : "--", "", on ? VAL(1u) : T_DIM, -1, ICON_AUTO);
         draw_column(2, "LEN", on ? MF_LEN_N[st->hit ? 0u : st->acc % MF_NLEN] : "--", "", on ? VAL(2u) : T_DIM, -1, ICON_AUTO);

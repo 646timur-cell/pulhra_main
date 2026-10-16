@@ -239,7 +239,7 @@ static void graph_mstep(const track_t *t, uint16_t c)
     if (!on) {
         cv_text_in(0, 44, 240, &AF_M, st->time == ST_TIE ? "TIE" : "NO TRIG", T_DIM, T_SURF);
         cv_text_in(0, 76, 240, &AF_S, mf_kbd ? "PLAY A NOTE: IT GOES HERE" : "TAP A KEY: A TRIG", T_DIM, T_SURF);
-        cv_text_in(0, 96, 240, &AF_S, "PRESETS: NOTE   K1: FLAG   SEL: NUDGE", T_DIM, T_SURF);
+        cv_text_in(0, 96, 240, &AF_S, "PRESETS: FLAG   SEL: NUDGE", T_DIM, T_SURF);
         return;
     }
     b[0] = 0;

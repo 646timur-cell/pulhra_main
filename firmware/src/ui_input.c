@@ -875,7 +875,8 @@ static void mf_trig_edit(uint32_t f, int32_t s, uint64_t mask)
     }
     motion_undo_done(t);
 }
-static void mf_held_turn(uint32_t k, int32_t s, uint64_t held) { mf_trig_edit(k, s, held); }
+static const uint8_t MF_KNOB_FIELD[4] = {4, 1, 2, 3};   /* (v4: KNOB 1 NOTE, 2 VEL, 3 LEN, 4 COND; PRESETS the FLAG) */
+static void mf_held_turn(uint32_t k, int32_t s, uint64_t held) { mf_trig_edit(MF_KNOB_FIELD[k & 3u], s, held); }
 /* a trig held: PRESETS (dir s) steps the page KNOB 1..4 lock through the sound's pages (NOTE.. first), a page button
  * (ENV LFO ARP) jumps to its family's; 1 = taken */
 static int mf_lock_pick(int32_t s, uint32_t fam)
@@ -1166,8 +1167,8 @@ static void step_edit(uint32_t slot, int32_t steps)
         return;
     }
 #if FELUCCA_MONOFM
-    if (!(ui_prefs2 & (PREF_ROLL >> 16))) {               /* KEYS: KNOB 1 FLAG, 2 VEL, 3 LEN, 4 COND of the trig picked */
-        mf_trig_edit(slot & 3u, steps, (uint64_t)1 << (ui.cursor % NSTEP));   /* (its NOTE: PRESETS) */
+    if (!(ui_prefs2 & (PREF_ROLL >> 16))) {               /* KEYS: KNOB 1 NOTE, 2 VEL, 3 LEN, 4 COND of the trig picked */
+        mf_trig_edit(MF_KNOB_FIELD[slot & 3u], steps, (uint64_t)1 << (ui.cursor % NSTEP));   /* (its FLAG: PRESETS) */
         return;
     }
 #endif
@@ -2094,11 +2095,13 @@ static void ui_input(void)
     kq |= lay;
     if (!lay && (s = panel_enc(EN_PRESET)) != 0) {
 #if FELUCCA_MONOFM
-        if (cur_page()->graph == GR_ROLL && grid_on() && !drum_track(TSEL) && !detail_on() && !ui.home) {
-            uint64_t h = lock_held();                   /* STEP (KEYS): PRESETS the NOTE of the trigs held, else the */
-            mf_trig_edit(4u, s, h ? h : (uint64_t)1 << (ui.cursor % NSTEP));   /* one picked */
+        if (cur_page()->graph == GR_ROLL && grid_on() && !drum_track(TSEL) && !ui.home) {
+            uint64_t h = lock_held();                   /* STEP: PRESETS the FLAG of the trigs held, else the one picked */
+            mf_trig_edit(0u, s, h ? h : (uint64_t)1 << (ui.cursor % NSTEP));   /* (elsewhere PRESETS is the sound) */
             ui.force = 1;
         } else if (!(mf_grid_page() && lock_held()))    /* (a trig held on a sound page: no preset load) */
+            preset_step(s);                             /* (v4: PRESETS the sound on every page, SAVE's too) */
+        if (0)
 #endif
         presets_turn(s);
     }
