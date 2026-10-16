@@ -17,23 +17,25 @@
 
 ## Машины MONO
 
-У каждой восемь параметров (EDIT 1 / EDIT 2), последний — TUNE (±100 центов), как у Monomachine. Имена и смысл параметров — по описанию машин в мануале Monomachine; код свой.
+У каждой восемь параметров (EDIT 1 / EDIT 2), последний — TUNE (±100 центов), как у Monomachine, и девятый — на SELECT (столбец «SELECT»; по умолчанию выключен, звук как раньше). Имена и смысл параметров — по описанию машин в мануале Monomachine; код свой.
 
-| Машина | Параметры | Что это |
-|---|---|---|
-| SAW (SWAVE SAW) | UNIL UNIW UNXL AGE · SUBX SUB1 SUB2 TUNE | пила, унисонная пара (уровень, ширина), расширенная пара вдвое шире, AGE — дрейф осцилляторов, саб-меандр −1 окт и синусы −1 и −2 окт |
-| PULSE (SWAVE PULSE) | UNIL UNIW SUB1 SUB2 · PW PWAD PWRS TUNE | импульс и унисонная пара, ширина и её свип к «иголке» и обратно (PWRS — свип заново с каждой нотой), два саб-синуса |
-| ENS (SWAVE ENSEMBLE) | PCH2 PCH3 PCH4 WAVE · PW CHRL CHRW TUNE | до четырёх высот (полутона или чистые 6/5 5/4 4/3 3/2): аккорд на моно-треке, p-lock'ами меняется по шагам; WAVE и PW — от пилы к меандру и иголкам; свой хорус |
-| SID | WAVE PW PWAD MOD · MRAT GRIT NOIS TUNE | осциллятор в духе 6581: TRI SAW PULS NOIS и комбинированные (AND, как у чипа), RING / SYNC / R+S со вторым осциллятором (MRAT полутонов), GRIT — 12 бит вниз до 5 и удержание частоты, NOIS — подмешанный шум |
-| WAVE (DIGIPRO WAVE) | WAVE MORF MSPD MRST · SYNC BITS DEC TUNE | 32 сырые 12-битные волны (синус…вокальные формы, FM, хаос), морф к соседней, свип по волнам, хард-синк до 4 октав, биты, сэмпл-рейт |
-| DDRAW (DIGIPRO DOUBLEDRAW) | WAV1 WAV2 MIX MMOD · DTUN OCT2 BITS TUNE | две волны, вторая со сдвигом октавы и расстройкой, смесь и её LFO |
-| BBOX (DIGIPRO BEAT BOX) | как у GLITCH | 12-битный драм-кит из 16 ударов: BD, BD LONG, SD, SD SNAP, CLAP, RIM, HH CL/OP, три тома, COWBELL, CLAVE, CYMBAL, SHAKER, ZAP; STUT/REP — ретриги |
-| FM-ST (FM+ STATIC) | RAT2 DEP2 RAT3 DEP3 · FB ALGO MDEC TUNE | синус-носитель, два модулятора параллельно или стопкой, фидбек, MDEC — спад глубины (0 — держится) |
-| FM-PAR (FM+ PARALLEL) | RAT2 LEV2 RAT3 LEV3 · RAT4 LEV4 MDEC TUNE | три модулятора параллельно |
-| FM-DYN (FM+ DYNAMIC) | LIN LRAT EXP ERAT · FB PENV PDEC TUNE | линейная и экспоненциальная FM, фидбек носителя, огибающая высоты (кики, лазеры) |
-| VO-6 | CONS CLEN CVOL VOW1 · VOW2 MORF BRTH TUNE | голос: согласная (19 штук и без: B D G P T K M N L R F S SH H V Z CH J TH) в гласную VOW1, переходящую в VOW2; три форманты |
-| SINE (GND SINE) | FOLD SUB · TUNE | синус, вейвфолдер, синус октавой ниже |
-| NOISE (GND NOISE) | RATE COLR · TUNE | шум, удержанный с частотой ноты (питчевый цифровой шум), цвет |
+| Машина | Параметры | SELECT | Что это |
+|---|---|---|---|
+| SAW (SWAVE SAW) | UNIL UNIW UNXL AGE · SUBX SUB1 SUB2 TUNE | SYNC — пила жёстко синхронизирована, до 2 октав над нотой (унисон свободен) | пила, унисонная пара (уровень, ширина), расширенная пара вдвое шире, AGE — дрейф осцилляторов, саб-меандр −1 окт и синусы −1 и −2 окт |
+| PULSE (SWAVE PULSE) | UNIL UNIW SUB1 SUB2 · PW PWAD PWRS TUNE | SYNC — то же для импульса | импульс и унисонная пара, ширина и её свип к «иголке» и обратно (PWRS — свип заново с каждой нотой), два саб-синуса |
+| ENS (SWAVE ENSEMBLE) | PCH2 PCH3 PCH4 WAVE · PW CHRL CHRW TUNE | STRM — ноты аккорда вступают по очереди (до 115 мс между ними) | до четырёх высот (полутона или чистые 6/5 5/4 4/3 3/2): аккорд на моно-треке, p-lock'ами меняется по шагам; WAVE и PW — от пилы к меандру и иголкам; свой хорус |
+| SID | WAVE PW PWAD MOD · MRAT GRIT NOIS TUNE | ARP — чиповое арпеджио C64 50 Гц: OCT 5TH MAJ MIN 7TH SUS DIM OCT2 | осциллятор в духе 6581: TRI SAW PULS NOIS и комбинированные (AND, как у чипа), RING / SYNC / R+S со вторым осциллятором (MRAT полутонов), GRIT — 12 бит вниз до 5 и удержание частоты, NOIS — подмешанный шум |
+| WAVE (DIGIPRO WAVE) | WAVE MORF MSPD MRST · SYNC BITS DEC TUNE | SUB — 12-битный квадрат на октаву ниже | 32 сырые 12-битные волны (синус…вокальные формы, FM, хаос), морф к соседней, свип по волнам, хард-синк до 4 октав, биты, сэмпл-рейт |
+| DDRAW (DIGIPRO DOUBLEDRAW) | WAV1 WAV2 MIX MMOD · DTUN OCT2 BITS TUNE | XMOD — WAV2 модулирует фазу WAV1 | две волны, вторая со сдвигом октавы и расстройкой, смесь и её LFO |
+| BBOX (DIGIPRO BEAT BOX) | как у GLITCH | DCAY — удар затухает (0 — целиком) | 12-битный драм-кит из 16 ударов: BD, BD LONG, SD, SD SNAP, CLAP, RIM, HH CL/OP, три тома, COWBELL, CLAVE, CYMBAL, SHAKER, ZAP; STUT/REP — ретриги |
+| FM-ST (FM+ STATIC) | RAT2 DEP2 RAT3 DEP3 · FB ALGO MDEC TUNE | VSNS — насколько велосити задаёт глубину FM | синус-носитель, два модулятора параллельно или стопкой, фидбек, MDEC — спад глубины (0 — держится) |
+| FM-PAR (FM+ PARALLEL) | RAT2 LEV2 RAT3 LEV3 · RAT4 LEV4 MDEC TUNE | VSNS | три модулятора параллельно |
+| FM-DYN (FM+ DYNAMIC) | LIN LRAT EXP ERAT · FB PENV PDEC TUNE | VSNS | линейная и экспоненциальная FM, фидбек носителя, огибающая высоты (кики, лазеры) |
+| VO-6 | CONS CLEN CVOL VOW1 · VOW2 MORF BRTH TUNE | VIBR — вибрато 5,5 Гц до ±60 центов, вступает за 0,4 с | голос: согласная (19 штук и без: B D G P T K M N L R F S SH H V Z CH J TH) в гласную VOW1, переходящую в VOW2; три форманты |
+| SINE (GND SINE) | FOLD SUB FB SYM · RAT2 LVL2 DRIV TUNE | — | синус, вейвфолдер, синус октавой ниже, самомодуляция, асимметрия фолда, второй синус (кратность и уровень), драйв |
+| NOISE (GND NOISE) | RATE COLR DCAY RES · BITS TUNE | — | шум, удержанный с частотой ноты, цвет, свой спад (хэты), резонанс на ноте, биты |
+
+Слайс-машины (GLITCH ERROR RITUAL MECH BIO) тоже получили DCAY на SELECT. У машин SOMA SELECT пока дублирует главную ручку.
 
 **Шаг:** до 32 на трек (две страницы по 16), на шаге аккорд, accent, slide, ратчет (всё на K1 FLAG), условие (COND), nudge (SELECT), velocity; p-lock любого параметра (держать шаг и крутить ручку; подробно — раздел «Секвенсор»); живая запись нот и ручек (REC + PLAY), пошаговая запись; swing общий на CLOCK (HOME трижды) и свой у трека в SEQ TOOLS; слой FX (зажать FX) — repeat, reverse, фильтр, tape stop, freeze и остальные punch-in эффекты Felucca.
 

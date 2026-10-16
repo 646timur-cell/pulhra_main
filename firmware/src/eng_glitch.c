@@ -32,6 +32,7 @@ typedef struct {
     int32_t w0, wn, rep, chop;                           /* the window: its start, length (samples), repeats so far,
                                                           * dropped */
     int32_t hold, held;                                  /* CRSH's sample hold: samples left, the sample held */
+    int32_t dcy;                                         /* MONOFM: DCAY's level (Q15), full at each hit */
     int32_t base, cc;                                    /* a user slice: its start in the zone; the window's chunk
                                                           * (buf[0..256] = samples cc * 256 ..; -1 none) */
     uint8_t zone, user;                                  /* the slice's zone; 1 = a user slot's (read through the
@@ -260,6 +261,7 @@ static void glitch_note_on(track_t *t, voice_t *v)
     S->w0 = 0;
     S->rep = 0;
     S->hold = 0;
+    S->dcy = 32767;
     gl_window(S, p, 1);
 }
 
@@ -269,10 +271,19 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     gl_slot_t *S = gl_slot(t, v);
     uint32_t i, bits = (uint32_t)p[P_E5] / 9u, hn = 1u + (uint32_t)p[P_E5] / 8u, stut = p[P_E2] != 0;
     int32_t mask = -(1 << bits);
+    int32_t dk = 32767;
     if (!S || !S->len)
         return;
     if (n > CTL)
         n = CTL;
+#if FELUCCA_MONOFM
+    if (p[P_E8] > 0) {                                   /* DCAY (the ninth): the hit falls, 1 the shortest (~5 ms) .. 127
+                                                          * ~3 s to a tenth; 0: its whole length, as before */
+        int32_t k = (int32_t)(32768u - 32768u * n / (uint32_t)(sx_expmap(p[P_E8], 220u << 16, 9) >> 16));
+        S->dcy = mulq15(S->dcy, clamp(k, 0, 32767));
+    }
+    dk = S->dcy;
+#endif
     for (i = 0; i < n; i++) {
         int32_t s = 0, ip = S->pos >> 16, end = stut ? S->w0 + S->wn : (int32_t)S->len;
         if (S->step >= 0 ? ip >= end : ip < (stut ? S->w0 : 0)) {
@@ -298,6 +309,8 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         }
         if (S->chop)
             s = 0;
+        if (dk < 32767)
+            s = mulq15(s, dk);
         if (hn > 1u) {                                   /* CRSH: the rate held, the bits dropped */
             if (S->hold-- <= 0) {
                 S->hold = (int32_t)hn - 1;
@@ -348,6 +361,9 @@ static const engine_t ENG_GLITCH = {
     .mem = sizeof(gl_part_t),
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},   /* X: STUT CRSH REV (the break), Y: JUMP CHOP PTCH (the chaos) */
     .xya = {{40, 40, 30}, {50, 40, 20}},
+#if FELUCCA_MONOFM
+    .e8 = {"DCAY", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };
 
 /* RITUAL, MECH and BIO (STRANGE): GLITCH with kits of their own (tools/gen_strange_samples.py, 11,025 Hz, C3 .. D#4):
@@ -417,6 +433,9 @@ static const engine_t ENG_RITUAL = {
     .mem = sizeof(gl_part_t),
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
     .xya = {{40, 40, 30}, {50, 40, 20}},
+#if FELUCCA_MONOFM
+    .e8 = {"DCAY", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };
 static const engine_t ENG_MECH = {
     .name = "MECH",
@@ -433,6 +452,9 @@ static const engine_t ENG_MECH = {
     .mem = sizeof(gl_part_t),
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
     .xya = {{40, 40, 30}, {50, 40, 20}},
+#if FELUCCA_MONOFM
+    .e8 = {"DCAY", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };
 static const engine_t ENG_BIO = {
     .name = "BIO",
@@ -449,6 +471,9 @@ static const engine_t ENG_BIO = {
     .mem = sizeof(gl_part_t),
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
     .xya = {{40, 40, 30}, {50, 40, 20}},
+#if FELUCCA_MONOFM
+    .e8 = {"DCAY", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };
 /* ERROR: the classic broken digital (the first GLITCH kit, 11,025 Hz): crushed noise, click trains, an FM chirp, a
  * stutter, dropouts, a zap, a rate sweep, crackle, a modem, a thump, a CD skip, LFSR data, a faulty beep, a tick, a
@@ -481,6 +506,9 @@ static const engine_t ENG_ERROR = {
     .mem = sizeof(gl_part_t),
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
     .xya = {{40, 40, 30}, {50, 40, 20}},
+#if FELUCCA_MONOFM
+    .e8 = {"DCAY", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };
 #if FELUCCA_MONOFM
 /* BBOX (MONOFM, after the Monomachine's DIGIPRO BEAT BOX): GLITCH with a 12-bit drum kit (tools/gen_strange_samples.py
@@ -510,6 +538,9 @@ static const engine_t ENG_MBBOX = {
     .mem = sizeof(gl_part_t),
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(1), XY_E(6), XY_E(7)}},
     .xya = {{40, 40, 30}, {30, 40, 40}},
+#if FELUCCA_MONOFM
+    .e8 = {"DCAY", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };
 #endif
 #undef GL_EDIT

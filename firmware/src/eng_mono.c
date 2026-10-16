@@ -152,6 +152,7 @@ static void mpulse_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     const int16_t *p = t->p;
     uint32_t i, b = mf_inc(t, m), wc = (uint32_t)(p[P_E1] * 50 / 127), iu1 = mf_mul(b, (int32_t)wc), iu2 = mf_mul(b, -(int32_t)wc);
     uint32_t ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2], ps1 = (uint32_t)v->s[0], ps2 = (uint32_t)v->s[1], pw;
+    uint32_t pm = (uint32_t)v->s[2], bs = p[P_E8] ? mf_mul(b, p[P_E8] * 2400 / 127) : b;   /* SYNC (the ninth): as SAW's */
     int32_t ul = p[P_E0] * 258, s1 = p[P_E2] * 258, s2 = p[P_E3] * 258, g;
     int32_t pwf = 655 + p[P_E4] * 31457 / 127;          /* PW: 2 % .. 98 % (Q15), 64 the square */
     if (p[P_E5]) {                                       /* PWAD: a triangle 0.1 .. ~13 Hz toward the spike and back */
@@ -166,14 +167,19 @@ static void mpulse_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     pw = (uint32_t)pwf << 17;
     g = mf_norm(32767 + 2 * ul + (s1 + s2) / 2);
     for (i = 0; i < n; i++) {
-        int32_t o = osc_pulse(ph0, b, pw);               /* (at half scale, doubled after the gain: no overflow) */
+        int32_t o = osc_pulse(ph0, bs, pw);              /* (at half scale, doubled after the gain: no overflow) */
         if (ul)
             o += mulq15(osc_pulse(ph1, iu1, pw), ul) + mulq15(osc_pulse(ph2, iu2, pw), ul);
         if (s1)
             o += mulq15(sine_i(ps1), s1) >> 1;
         if (s2)
             o += mulq15(sine_i(ps2), s2) >> 1;
-        ph0 += b;
+        ph0 += bs;
+        if (bs != b) {
+            pm += b;
+            if (pm < b)
+                ph0 = 0;                                 /* (the master round: the slave from its start) */
+        }
         ph1 += iu1;
         ph2 += iu2;
         ps1 += b >> 1;
@@ -185,6 +191,7 @@ static void mpulse_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     v->ph[2] = ph2;
     v->s[0] = (int32_t)ps1;
     v->s[1] = (int32_t)ps2;
+    v->s[2] = (int32_t)pm;
 }
 
 /* =========================================================== SWAVE ENSEMBLE === */
@@ -200,6 +207,7 @@ static int32_t mens_cents(int32_t k)
 typedef struct {
     uint32_t ph[4], pc[4];                               /* each pitch's oscillator and its chorus copy */
     uint32_t lfo;
+    uint32_t age;                                        /* samples since the note (STRUM) */
 } mens_slot_t;
 static mens_slot_t *mens_slot(track_t *t, voice_t *v)
 {
@@ -208,6 +216,7 @@ static mens_slot_t *mens_slot(track_t *t, voice_t *v)
 ENG_MEM_FITS("ENS", sizeof(mens_slot_t) * NVOICE);
 static void mens_note_on(track_t *t, voice_t *v)
 {
+    mens_slot(t, v)->age = 0;                            /* (STRUM: the pitches come in again) */
     if (mf_fresh(v)) {
         mens_slot_t *S = mens_slot(t, v);
         uint32_t k, r = rng() | 1u;
@@ -221,7 +230,9 @@ static void mens_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
 {
     const int16_t *p = t->p;
     mens_slot_t *S = mens_slot(t, v);
-    uint32_t i, k, np = 0, b = mf_inc(t, m), inc[4], incc[4], ph[4], pc[4];
+    uint32_t i, k, np = 0, b = mf_inc(t, m), inc[4], incc[4], ph[4], pc[4], on[4], age = S->age;
+    uint32_t sd = (uint32_t)p[P_E8] * 40u;                /* STRUM (the ninth): each pitch ~0.9 ms x STRUM after the one
+                                                          * before (127: 115 ms), up from the lowest PCH order */
     uint32_t pwo = (uint32_t)(655 + p[P_E4] * 31457 / 127) << 17;   /* the second saw's offset: 2 % .. 98 % */
     int32_t wv = p[P_E3] * 258, cl = p[P_E5] * 258, cw = p[P_E6], g, lfo;
     S->lfo += sx_hz_inc(42598u) * n;                     /* the chorus: 0.65 Hz */
@@ -230,6 +241,7 @@ static void mens_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         int32_t ct = k ? mens_cents(p[P_E0 + k - 1u]) : 0;
         if (k && !ct)
             continue;
+        on[np] = sd * k;                                 /* (its start, samples after the note) */
         inc[np] = mf_mul(b, ct);
         incc[np] = mf_mul(b, ct + ((cw * (lfo * (k & 1u ? -1 : 1))) >> 15) / 5 + cw / 12);   /* up to ~25 cents */
         ph[np] = S->ph[k];
@@ -243,12 +255,15 @@ static void mens_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             int32_t a = osc_saw(ph[k], inc[k]) - mulq15(osc_saw(ph[k] + pwo, inc[k]), wv);
             if (cl)
                 a += mulq15(osc_saw(pc[k], incc[k]) - mulq15(osc_saw(pc[k] + pwo, incc[k]), wv), cl);
+            if (age + i < on[k] + 64u)                   /* STRUM: silent till its start, in over 64 samples */
+                a = age + i < on[k] ? 0 : a * (int32_t)(age + i - on[k]) / 64;
             o += a;
             ph[k] += inc[k];
             pc[k] += incc[k];
         }
         out[i] += voice_amp(clamp(mulq15(o, g), -32767, 32767), m, i);
     }
+    S->age = age + n < 0x40000000u ? age + n : age;
     for (k = 0, np = 0; k < 4u; k++) {
         if (k && !mens_cents(p[P_E0 + k - 1u]))
             continue;
@@ -261,6 +276,10 @@ static void mens_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
 /* ======================================================================= SID === */
 static const char *const N_MSID_WAVE[] = {"TRI", "SAW", "PULS", "NOIS", "T+S", "T+P", "S+P", "TSP"};
 static const char *const N_MSID_MOD[] = {"OFF", "RING", "SYNC", "R+S"};
+/* ARP (the ninth): the C64's chord trick, the note stepping through a chord at 50 Hz (a step each 882 samples) */
+static const char *const N_MSID_ARP[] = {"OFF", "OCT", "5TH", "MAJ", "MIN", "7TH", "SUS", "DIM", "OCT2"};
+static const int8_t MSID_ARP[9][4] = {{0, 0, 0, 0}, {0, 12, 0, 12}, {0, 7, 0, 7}, {0, 4, 7, 4}, {0, 3, 7, 3},
+                                      {0, 4, 7, 10}, {0, 5, 7, 5}, {0, 3, 6, 3}, {0, 12, 24, 12}};
 /* ph[0] the oscillator, ph[1] the modulating one, ph[2] PW's sweep (Q8 of 12 bits), s[0] the noise register (23 bits),
  * s[1] the clocking bit, s[2] GRIT's hold counter, s[3] the held sample, s[4] the DC blocker */
 static void msid_note_on(track_t *t, voice_t *v)
@@ -271,6 +290,7 @@ static void msid_note_on(track_t *t, voice_t *v)
         v->s[0] = 0x7FFFF8;
         v->s[1] = v->s[2] = v->s[3] = v->s[4] = 0;
     }
+    v->s[5] = 0;                                         /* (ARP: from the root at each note) */
 }
 static inline uint32_t msid_noise12(uint32_t r)          /* the chip's eight noise output bits */
 {
@@ -282,6 +302,14 @@ static void msid_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     const int16_t *p = t->p;
     uint32_t i, b = mf_inc(t, m), mi = mf_mul(b, p[P_E4] * 100), wave = (uint32_t)clamp(p[P_E0], 0, 7);
     uint32_t mod = (uint32_t)clamp(p[P_E3], 0, 3), ring = mod & 1u, sync = mod >> 1, ph = v->ph[0], mph = v->ph[1];
+    if (p[P_E8] > 0) {                                   /* ARP: this block's step of the chord */
+        int32_t st = MSID_ARP[clamp(p[P_E8], 0, 8)][((uint32_t)v->s[5] / 882u) & 3u];   /* (two-note ones: 0 x 0 x) */
+        v->s[5] = (int32_t)(((uint32_t)v->s[5] + n) % (882u * 4u));
+        if (st) {
+            b = mf_mul(b, st * 100);
+            mi = mf_mul(mi, st * 100);
+        }
+    }
     if (sync) {                                          /* SYNC: the modulator is the master at the note, the oscillator
                                                           * MRAT semitones off (the sync sweep: MRAT, a p-lock, an LFO) */
         uint32_t x = b;
@@ -357,7 +385,7 @@ static inline int32_t dpro_at(uint32_t w, uint32_t ph)
 static void mwave_note_on(track_t *t, voice_t *v)
 {
     if (mf_fresh(v)) {
-        v->ph[0] = v->ph[1] = 0;
+        v->ph[0] = v->ph[1] = v->ph[2] = 0;
         v->s[0] = v->s[1] = v->s[2] = 0;
     }
     if (t->p[P_E3])                                      /* MRST: the sweep from WAVE again */
@@ -368,7 +396,7 @@ static void mwave_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     const int16_t *p = t->p;
     uint32_t i, b = mf_inc(t, m), si = p[P_E4] ? mf_mul(b, p[P_E4] * 100) : b, ph = v->ph[0], mph = v->ph[1];
     uint32_t pos, w0, w1, sh = MBITS_SH[clamp(p[P_E5], 0, 6)], dec = 1u + (uint32_t)p[P_E6] / 8u, cnt = (uint32_t)v->s[1];
-    int32_t f, held = v->s[2];
+    int32_t f, held = v->s[2], sub = p[P_E8] * 258;
     if (p[P_E2])                                         /* MSPD: through the waves, 0.05 .. ~6 waves a second */
         v->s[0] = (int32_t)(((uint32_t)v->s[0] + (sx_expmap(p[P_E2], 3277u, 7) * n) / 44100u * 65536u / 65536u) %
                             (DPRO_N * 65536u));
@@ -390,6 +418,12 @@ static void mwave_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
             a = dpro_at(w0, ph);
             c = f ? dpro_at(w1, ph) : a;
             held = (a + (((c - a) * f) >> 15)) >> sh << sh;
+        }
+        if (sub) {                                       /* SUB (the ninth): a 12-bit square an octave down */
+            v->ph[2] += b >> 1;
+            out[i] += voice_amp(clamp(mulq15(held, 32767 - sub / 3) + mulq15(v->ph[2] < 0x80000000u ? 20000 : -20000, sub),
+                                      -32767, 32767), m, i);
+            continue;
         }
         out[i] += voice_amp(clamp(held, -32767, 32767), m, i);
     }
@@ -417,7 +451,7 @@ static void mddraw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     uint32_t i, b = mf_inc(t, m), b2 = mf_mul(b, (p[P_E5] - 2) * 1200 + p[P_E4] * 50 / 64), ph1 = v->ph[0], ph2 = v->ph[1];
     uint32_t w1 = (uint32_t)clamp(p[P_E0], 0, DPRO_N - 1), w2 = (uint32_t)clamp(p[P_E1], 0, DPRO_N - 1);
     uint32_t sh = MBITS_SH[clamp(p[P_E6], 0, 6)];
-    int32_t mix = p[P_E2] * 258, mix1;
+    int32_t mix = p[P_E2] * 258, mix1, xm = p[P_E8] * 258;
     if (p[P_E3]) {                                       /* MMOD: a triangle 0.05 .. ~6 Hz, half the range either way */
         uint32_t lf = (uint32_t)v->s[0] + sx_hz_inc(sx_expmap(p[P_E3], 3277u, 7)) * n;
         int32_t tri = osc_tri(lf);
@@ -426,7 +460,9 @@ static void mddraw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     }
     mix1 = 32767 - mix;
     for (i = 0; i < n; i++) {
-        int32_t y = mulq15(dpro_at(w1, ph1), mix1) + mulq15(dpro_at(w2, ph2), mix);
+        int32_t y2 = dpro_at(w2, ph2);
+        int32_t y = mulq15(dpro_at(w1, xm ? ph1 + ((uint32_t)mulq15(y2, xm) << 17) : ph1), mix1) + mulq15(y2, mix);   /* (XMOD:
+                                                         * WAV2 moves WAV1's phase, up to a turn either way) */
         ph1 += b;
         ph2 += b2;
         out[i] += voice_amp(clamp(y >> sh << sh, -32767, 32767), m, i);
@@ -457,6 +493,11 @@ static void mfm_note_on(track_t *t, voice_t *v)
     v->s[7] = 32767;
     v->s[5] = 32767;                                     /* (DYN: its pitch envelope) */
 }
+/* VSNS (the ninth): how much the note's velocity sets the depths, 0: none (full at any velocity) */
+static int32_t mfm_vsns(const track_t *t, const voice_t *v)
+{
+    return 32767 - mulq15(t->p[P_E8] * 258, (127 - clamp(v->vel, 0, 127)) * 258);
+}
 static int32_t mfm_env(voice_t *v, int32_t dec, uint32_t n)
 {
     if (dec) {                                           /* ~20 ms .. ~6 s to a tenth */
@@ -471,7 +512,7 @@ static void mfmst_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     const int16_t *p = t->p;
     uint32_t i, b = mf_inc(t, m), ia = mfm_rinc(b, p[P_E0]), ib = mfm_rinc(b, p[P_E2]), stack = p[P_E5] == 1;
     uint32_t pc = v->ph[0], pa = v->ph[1], pb = v->ph[2];
-    int32_t env = mfm_env(v, p[P_E6], n), da = mulq15(p[P_E1] * 258, env), db = mulq15(p[P_E3] * 258, env);
+    int32_t env = mulq15(mfm_env(v, p[P_E6], n), mfm_vsns(t, v)), da = mulq15(p[P_E1] * 258, env), db = mulq15(p[P_E3] * 258, env);
     int32_t fb = p[P_E4] * 128, prev = v->s[0];
     for (i = 0; i < n; i++) {
         int32_t mb = sine_i(pb), ma, c;
@@ -497,7 +538,7 @@ static void mfmpar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     const int16_t *p = t->p;
     uint32_t i, b = mf_inc(t, m), i1 = mfm_rinc(b, p[P_E0]), i2 = mfm_rinc(b, p[P_E2]), i3 = mfm_rinc(b, p[P_E4]);
     uint32_t pc = v->ph[0], p1 = v->ph[1], p2 = v->ph[2], p3 = (uint32_t)v->s[1];
-    int32_t env = mfm_env(v, p[P_E6], n), d1 = mulq15(p[P_E1] * 258, env), d2 = mulq15(p[P_E3] * 258, env);
+    int32_t env = mulq15(mfm_env(v, p[P_E6], n), mfm_vsns(t, v)), d1 = mulq15(p[P_E1] * 258, env), d2 = mulq15(p[P_E3] * 258, env);
     int32_t d3 = mulq15(p[P_E5] * 258, env);
     for (i = 0; i < n; i++) {
         int32_t s = mulq15(sine_i(p1), d1) + mulq15(sine_i(p2), d2) + mulq15(sine_i(p3), d3);
@@ -526,7 +567,7 @@ static void mfmdyn_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
 {
     const int16_t *p = t->p;
     uint32_t i, b, il, ie, pc = v->ph[0], pl = v->ph[1], pe = v->ph[2];
-    int32_t dl = p[P_E0] * 258, de = p[P_E2] * 258, fb = p[P_E4] * 128, prev = v->s[0];
+    int32_t vs = mfm_vsns(t, v), dl = mulq15(p[P_E0] * 258, vs), de = mulq15(p[P_E2] * 258, vs), fb = p[P_E4] * 128, prev = v->s[0];
     if (p[P_E6]) {                                       /* PDEC: the pitch envelope's fall, ~5 ms .. 3 s */
         int32_t k = (int32_t)(32768u - 32768u * n / (uint32_t)(sx_expmap(p[P_E6], 220u << 16, 9) >> 16));
         v->s[5] = mulq15(v->s[5], clamp(k, 0, 32767));
@@ -605,6 +646,10 @@ static void mvo_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
     uint32_t v1 = (uint32_t)clamp(p[P_E3], 0, 9), v2 = (uint32_t)clamp(p[P_E4], 0, 9), seed = (uint32_t)v->s[7];
     int32_t clen = 441 + p[P_E1] * 87, at = v->s[6], f[3], kk[3], qq[3], av, an, morf, tv, glp = (int32_t)v->ph[1];
     int32_t brth = p[P_E6] * 120, cvol = p[P_E2] * 258;
+    if (p[P_E8]) {                                       /* VIBR (the ninth): 5.5 Hz, up to +-60 cents, in over 0.4 s */
+        int32_t w = sine_i((uint32_t)at * 535608u), in = clamp(at * 32767 / 17640, 0, 32767);   /* (2^32 x 5.5 / 44100) */
+        b = mf_mul(b, mulq15(mulq15(w, in), p[P_E8] * 60 / 127 * 258) / 258);
+    }
     /* where the voice is: the consonant (0 .. clen), then the vowel gliding VOW1 -> VOW2 over MORF */
     if (!cons || at >= clen) {
         int32_t mt = p[P_E5] ? 441 + p[P_E5] * 600 : 0;   /* MORF: 10 ms .. ~1.7 s, 0: VOW1 held */
@@ -677,28 +722,39 @@ static void mvo_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
 static void msine_note_on(track_t *t, voice_t *v)
 {
     (void)t;
-    if (mf_fresh(v))
-        v->ph[0] = v->ph[1] = 0;
+    if (mf_fresh(v)) {
+        v->ph[0] = v->ph[1] = v->ph[2] = 0;
+        v->s[0] = 0;
+    }
 }
 static void msine_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
-    uint32_t i, b = mf_inc(t, m), ph = v->ph[0], ps = v->ph[1];
-    int32_t fold = p[P_E0] * 258, sub = p[P_E1] * 258, g = mf_norm(32767 + sub / 2);
+    uint32_t i, b = mf_inc(t, m), ph = v->ph[0], ps = v->ph[1], p2 = v->ph[2], b2 = mfm_rinc(b, p[P_E4]);
+    int32_t fold = p[P_E0] * 258, sub = p[P_E1] * 258, fb = p[P_E2] * 128, sym = p[P_E3] * 256, l2 = p[P_E5] * 258;
+    int32_t drv = p[P_E6], prev = v->s[0], g = mf_norm(32767 + sub / 2 + l2 / 2);
     for (i = 0; i < n; i++) {
-        int32_t y = sine_i(ph);
-        if (fold) {                                      /* up to 4 x, folded back */
-            y += px_m(y, fold * 3, 15);
+        int32_t y = sine_i(fb ? ph + ((uint32_t)((prev * fb) >> 15) << 16) : ph);   /* FB: the sine on itself */
+        prev = (prev + y) >> 1;
+        if (l2)                                          /* the second partial: RAT2 x the note, LVL2 */
+            y = y - mulq15(y, l2 / 2) + mulq15(sine_i(p2), l2 / 2 + l2 / 4);
+        if (fold || sym) {                               /* up to 4 x, SYM's offset first, folded back */
+            y += px_m(y, fold * 3, 15) + sym;
             while (y > 32767 || y < -32767)
                 y = y > 32767 ? 65534 - y : -65534 - y;
         }
         y += mulq15(sine_i(ps), sub);
+        if (drv)                                         /* DRIV: up to ~5 x into a soft clip */
+            y = softclip(y + px_m(y, drv * 129, 12) >> 1);
         ph += b;
         ps += b >> 1;
+        p2 += b2;
         out[i] += voice_amp(mulq15(y, g), m, i);
     }
     v->ph[0] = ph;
     v->ph[1] = ps;
+    v->ph[2] = p2;
+    v->s[0] = prev;
 }
 /* NOISE: ph[0] the hold's phase (the note's rate), s[0] the noise, s[1] the held sample, s[2] COLR's low-pass */
 static void mnoise_note_on(track_t *t, voice_t *v)
@@ -706,26 +762,51 @@ static void mnoise_note_on(track_t *t, voice_t *v)
     (void)t;
     if (mf_fresh(v)) {
         v->s[0] = (int32_t)(rng() | 1u);
-        v->s[1] = v->s[2] = 0;
+        v->s[1] = v->s[2] = v->s[4] = v->s[5] = 0;
     }
+    v->s[3] = 32767;                                     /* (DCAY: from full at each note) */
 }
 static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
     uint32_t i, ph = v->ph[0], seed = (uint32_t)v->s[0], b = mf_inc(t, m) << 3;   /* (held 8 x the note's pitch) */
-    int32_t rate = p[P_E0], held = v->s[1], lp = v->s[2], k = 1200 + (127 - p[P_E1]) * 250;
+    int32_t rate = p[P_E0], held = v->s[1], lp = v->s[2], k = 1200 + (127 - p[P_E1]) * 250, env = v->s[3];
+    int32_t res = p[P_E3], lo = v->s[4], bd = v->s[5], rk = 0, rq = 0;
+    uint32_t sh = MBITS_SH[clamp(p[P_E4], 0, 6)];
+    if (p[P_E2]) {                                       /* DCAY: its own fall, 1 the shortest (~5 ms) .. 127 ~3 s (0: held) */
+        int32_t kd = (int32_t)(32768u - 32768u * n / (uint32_t)(sx_expmap(p[P_E2], 220u << 16, 9) >> 16));
+        env = mulq15(env, clamp(kd, 0, 32767));
+    } else {
+        env = 32767;
+    }
+    if (res) {                                           /* RES: a band-pass ringing at the note (Chamberlin) */
+        uint32_t f = (uint32_t)(((uint64_t)mf_inc(t, m) * 44100u) >> 32);
+        mvo_coef(f < 60u ? 60u : f > 6000u ? 6000u : f, 8u + (127u - (uint32_t)res) * 2u, &rk, &rq);
+    }
     for (i = 0; i < n; i++) {
         uint32_t was = ph;
+        int32_t y;
         ph += b;
         if (!rate || ph < was || (int32_t)(sx_noise(&seed) & 127) >= rate)
             held = sx_noise(&seed) >> 5;                 /* RATE: how often the note's clock holds it (0: white) */
         lp += px_m(held - lp, k, 15);
-        out[i] += voice_amp(clamp(lp, -32767, 32767), m, i);
+        y = clamp(lp, -32767, 32767);
+        if (res) {
+            int32_t hi = y - lo - px_m(bd, rq, 15);
+            bd = clamp(bd + px_m(hi, rk, 15), -400000, 400000);
+            lo = clamp(lo + px_m(bd, rk, 15), -400000, 400000);
+            y = y + mulq15(clamp(soft_knee(bd, 26000), -32767, 32767) - y, res * 258);
+        }
+        y = clamp(mulq15(y, env), -32767, 32767) >> sh << sh;   /* (BITS: down to 3) */
+        out[i] += voice_amp(y, m, i);
     }
     v->ph[0] = ph;
     v->s[0] = (int32_t)seed;
     v->s[1] = held;
     v->s[2] = lp;
+    v->s[3] = env;
+    v->s[4] = lo;
+    v->s[5] = bd;
 }
 
 /* ================================================================== presets === */
@@ -848,6 +929,7 @@ static const engine_t ENG_MPULSE = {
     .edit = {{"UNIL", F_PCT, 0, 127, 0, 0, 0}, {"UNIW", F_PCT, 0, 127, 40, 0, 0}, {"SUB1", F_PCT, 0, 127, 0, 0, 0},
              {"SUB2", F_PCT, 0, 127, 0, 0, 0}, {"PW", F_BIPCT, 0, 127, 64, 0, 0}, {"PWAD", F_PCT, 0, 127, 0, 0, 0},
              {"PWRS", F_ENUM, 0, 1, 0, N_MF_ONOFF, 0}, MF_TUNE},
+    .e8 = {"SYNC", F_PCT, 0, 127, 0, 0, 0},
     .xyd = {{XY_E(4), XY_E(0), 0}, {XY_E(5), XY_E(1), XY_E(2)}},   /* X: PW, the unison; Y: the sweep, the width, SUB1 */
     .xya = {{50, 40, 0}, {50, 30, 30}},
 };
@@ -858,6 +940,7 @@ static const engine_t ENG_MENS = {
              {"PCH4", F_ENUM, 0, 28, 0, N_MENS_PCH, 0}, {"WAVE", F_PCT, 0, 127, 0, 0, 0},
              {"PW", F_PCT, 0, 127, 64, 0, 0}, {"CHRL", F_PCT, 0, 127, 0, 0, 0}, {"CHRW", F_PCT, 0, 127, 40, 0, 0},
              MF_TUNE},
+    .e8 = {"STRM", F_PCT, 0, 127, 0, 0, 0},              /* (STRUM) */
     .poly = 2,
     .mem = sizeof(mens_slot_t) * NVOICE,
     .xyd = {{XY_E(3), XY_E(4), 0}, {XY_E(5), XY_E(6), 0}},   /* X: the wave (saw .. spikes), Y: the chorus */
@@ -869,6 +952,7 @@ static const engine_t ENG_MSID = {
     .edit = {{"WAVE", F_ENUM, 0, 7, 2, N_MSID_WAVE, 0}, {"PW", F_PCT, 0, 127, 64, 0, 0}, {"PWAD", F_PCT, 0, 127, 0, 0, 0},
              {"MOD", F_ENUM, 0, 3, 0, N_MSID_MOD, 0}, {"MRAT", F_INT, -24, 24, 7, 0, "st"},
              {"GRIT", F_PCT, 0, 127, 0, 0, 0}, {"NOIS", F_PCT, 0, 127, 0, 0, 0}, MF_TUNE},
+    .e8 = {"ARP", F_ENUM, 0, 8, 0, N_MSID_ARP, 0},
     .poly = 3,
     .xyd = {{XY_E(1), XY_E(2), 0}, {XY_E(4), XY_E(5), XY_E(6)}},   /* X: the width and its sweep, Y: MRAT GRIT NOIS */
     .xya = {{50, 40, 0}, {40, 40, 30}},
@@ -879,6 +963,7 @@ static const engine_t ENG_MWAVE = {
              {"MSPD", F_PCT, 0, 127, 0, 0, 0}, {"MRST", F_ENUM, 0, 1, 0, N_MF_ONOFF, 0},
              {"SYNC", F_INT, 0, 48, 0, 0, "st"}, {"BITS", F_ENUM, 0, 6, 0, N_MBITS, 0}, {"DEC", F_PCT, 0, 127, 0, 0, 0},
              MF_TUNE},
+    .e8 = {"SUB", F_PCT, 0, 127, 0, 0, 0},
     .xyd = {{XY_E(1), XY_E(2), 0}, {XY_E(4), XY_E(6), 0}},   /* X: the morph and its sweep, Y: SYNC and the rate */
     .xya = {{60, 30, 0}, {50, 30, 0}},
 };
@@ -887,6 +972,7 @@ static const engine_t ENG_MDDRAW = {
     .edit = {{"WAV1", F_ENUM, 0, DPRO_N - 1, 0, DPRO_NAMES, 0}, {"WAV2", F_ENUM, 0, DPRO_N - 1, 2, DPRO_NAMES, 0},
              {"MIX", F_PCT, 0, 127, 64, 0, 0}, {"MMOD", F_PCT, 0, 127, 0, 0, 0}, {"DTUN", F_INT, -64, 63, 0, 0, 0},
              {"OCT2", F_ENUM, 0, 4, 2, N_MOCT2, 0}, {"BITS", F_ENUM, 0, 6, 0, N_MBITS, 0}, MF_TUNE},
+    .e8 = {"XMOD", F_PCT, 0, 127, 0, 0, 0},
     .xyd = {{XY_E(2), XY_E(4), 0}, {XY_E(3), XY_E(6), 0}},   /* X: the mix, the detune; Y: the LFO, the bits */
     .xya = {{60, 30, 0}, {50, 30, 0}},
 };
@@ -895,6 +981,7 @@ static const engine_t ENG_MFMST = {
     .edit = {{"RAT2", F_ENUM, 0, 19, 1, N_MFM_RAT, 0}, {"DEP2", F_PCT, 0, 127, 40, 0, 0},
              {"RAT3", F_ENUM, 0, 19, 3, N_MFM_RAT, 0}, {"DEP3", F_PCT, 0, 127, 0, 0, 0}, {"FB", F_PCT, 0, 127, 0, 0, 0},
              {"ALGO", F_ENUM, 0, 1, 0, N_MFM_ALG, 0}, {"MDEC", F_PCT, 0, 127, 0, 0, 0}, MF_TUNE},
+    .e8 = {"VSNS", F_PCT, 0, 127, 0, 0, 0},
     .xyd = {{XY_E(1), XY_E(3), 0}, {XY_E(4), XY_E(6), 0}},   /* X: the depths, Y: FB, the decay */
     .xya = {{50, 40, 0}, {50, 30, 0}},
 };
@@ -904,6 +991,7 @@ static const engine_t ENG_MFMPAR = {
              {"RAT3", F_ENUM, 0, 19, 3, N_MFM_RAT, 0}, {"LEV3", F_PCT, 0, 127, 0, 0, 0},
              {"RAT4", F_ENUM, 0, 19, 5, N_MFM_RAT, 0}, {"LEV4", F_PCT, 0, 127, 0, 0, 0}, {"MDEC", F_PCT, 0, 127, 0, 0, 0},
              MF_TUNE},
+    .e8 = {"VSNS", F_PCT, 0, 127, 0, 0, 0},
     .xyd = {{XY_E(1), XY_E(3), XY_E(5)}, {XY_E(6), 0, 0}},   /* X: the three levels, Y: the decay */
     .xya = {{40, 40, 40}, {50, 0, 0}},
 };
@@ -912,6 +1000,7 @@ static const engine_t ENG_MFMDYN = {
     .edit = {{"LIN", F_PCT, 0, 127, 30, 0, 0}, {"LRAT", F_ENUM, 0, 19, 1, N_MFM_RAT, 0}, {"EXP", F_PCT, 0, 127, 0, 0, 0},
              {"ERAT", F_ENUM, 0, 19, 1, N_MFM_RAT, 0}, {"FB", F_PCT, 0, 127, 0, 0, 0}, {"PENV", F_INT, -64, 63, 0, 0, 0},
              {"PDEC", F_PCT, 0, 127, 40, 0, 0}, MF_TUNE},
+    .e8 = {"VSNS", F_PCT, 0, 127, 0, 0, 0},
     .xyd = {{XY_E(0), XY_E(2), 0}, {XY_E(4), XY_E(5), 0}},   /* X: the two FMs, Y: FB and the pitch envelope */
     .xya = {{50, 40, 0}, {50, 30, 0}},
 };
@@ -921,20 +1010,22 @@ static const engine_t ENG_MVO = {
              {"CVOL", F_PCT, 0, 127, 90, 0, 0}, {"VOW1", F_ENUM, 0, 9, 0, N_MVO_VOW, 0},
              {"VOW2", F_ENUM, 0, 9, 3, N_MVO_VOW, 0}, {"MORF", F_PCT, 0, 127, 40, 0, 0},
              {"BRTH", F_PCT, 0, 127, 10, 0, 0}, MF_TUNE},
+    .e8 = {"VIBR", F_PCT, 0, 127, 0, 0, 0},
     .xyd = {{XY_E(3), XY_E(4), 0}, {XY_E(5), XY_E(6), XY_E(1)}},   /* X: the vowels, Y: the glide, breath, CLEN */
     .xya = {{40, 40, 0}, {50, 40, 30}},
 };
 static const engine_t ENG_MSINE = {
-    MF_ENGINE("SINE", "SINE", "-", MSINE_PRESETS, msine_note_on, msine_render, P_E0, P_E1, P_E7, P_REL),
-    .edit = {{"FOLD", F_PCT, 0, 127, 0, 0, 0}, {"SUB", F_PCT, 0, 127, 0, 0, 0}, MF_NONE, MF_NONE, MF_NONE, MF_NONE,
-             MF_NONE, MF_TUNE},
+    MF_ENGINE("SINE", "SINE", "PART", MSINE_PRESETS, msine_note_on, msine_render, P_E0, P_E1, P_E2, P_E5),
+    .edit = {{"FOLD", F_PCT, 0, 127, 0, 0, 0}, {"SUB", F_PCT, 0, 127, 0, 0, 0}, {"FB", F_PCT, 0, 127, 0, 0, 0},
+             {"SYM", F_BIPCT, -64, 63, 0, 0, 0}, {"RAT2", F_ENUM, 0, 19, 3, N_MFM_RAT, 0}, {"LVL2", F_PCT, 0, 127, 0, 0, 0},
+             {"DRIV", F_PCT, 0, 127, 0, 0, 0}, MF_TUNE},
     .xyd = {{XY_E(0), 0, 0}, {XY_E(1), 0, 0}},
     .xya = {{60, 0, 0}, {60, 0, 0}},
 };
 static const engine_t ENG_MNOISE = {
-    MF_ENGINE("NOISE", "NOISE", "-", MNOISE_PRESETS, mnoise_note_on, mnoise_render, P_E0, P_E1, P_REL, P_LEVEL),
-    .edit = {{"RATE", F_PCT, 0, 127, 0, 0, 0}, {"COLR", F_PCT, 0, 127, 0, 0, 0}, MF_NONE, MF_NONE, MF_NONE, MF_NONE,
-             MF_NONE, MF_TUNE},
+    MF_ENGINE("NOISE", "NOISE", "SHAPE", MNOISE_PRESETS, mnoise_note_on, mnoise_render, P_E0, P_E1, P_E2, P_E3),
+    .edit = {{"RATE", F_PCT, 0, 127, 0, 0, 0}, {"COLR", F_PCT, 0, 127, 0, 0, 0}, {"DCAY", F_PCT, 0, 127, 0, 0, 0},
+             {"RES", F_PCT, 0, 127, 0, 0, 0}, {"BITS", F_ENUM, 0, 6, 0, N_MBITS, 0}, MF_NONE, MF_NONE, MF_TUNE},
     .xyd = {{XY_E(0), 0, 0}, {XY_E(1), 0, 0}},
     .xya = {{60, 0, 0}, {60, 0, 0}},
 };
