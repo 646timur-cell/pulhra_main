@@ -11,7 +11,7 @@
 #define SMT_MID 0x8A22u                                   /* rust */
 #define SMT_DIM 0x4100u
 #define SMT_REC 0xF800u
-#define SMT_CLEAN 0x0001u                                 /* near-black that is not a flat ground colour: cv_grime leaves it alone */
+#define SMT_CLEAN 0x0800u                                 /* near-black that is not a flat ground colour: cv_grime leaves it alone */
 
 static void sm_theme_pizdaks(void)
 {
