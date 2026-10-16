@@ -725,6 +725,8 @@ static void in_reset(void)
     seq_reset();
     host_pressed = host_notes = 0;
     fm1_in.notes = 0;
+    fm1_in.buttons = 0;
+    settings_hold = HOLD_DEF;                             /* (test_settings leaves the loaded one) */
     for (k = 0; k < 7u; k++)
         host_enc[k] = 0;
 }
@@ -1041,6 +1043,436 @@ static int test_held_step_bank_key(void)
     return bad;
 }
 
+/* ----------------------------------------------------------- layers --- */
+static void btn_down(uint32_t b) { host_pressed |= 1u << panel.btn[b]; fm1_in.buttons |= 1u << panel.btn[b]; }
+static void btn_up(uint32_t b) { fm1_in.buttons &= ~(1u << panel.btn[b]); }
+static void ms(uint32_t n) { host_ticks += n * 1000u * FM1_TICKS_PER_US; }
+static void key_dn(uint32_t k) { host_notes |= 1u << k; fm1_in.notes |= 1u << k; }
+static void key_up(uint32_t k) { fm1_in.notes &= ~(1u << k); }
+/* a family button held until its layer is open (HOLD_MS + 100), a poll each time */
+static void layer_hold(uint32_t b)
+{
+    btn_down(b);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+}
+static void layer_let_go(uint32_t b)
+{
+    btn_up(b);
+    sm_input_poll();
+}
+
+static int test_tap_vs_hold(void)
+{
+    int bad = 0;
+    uint32_t page0;
+    in_reset();
+    host_ticks = 1000u;
+    page0 = sm_ui.page;
+    btn_down(B_EDIT);
+    sm_input_poll();
+    bad += check("LAYER: EDIT just down: the page has not changed, no layer", sm_ui.page == page0 && sm_layer == SML_NONE);
+    ms(100);
+    btn_up(B_EDIT);
+    sm_input_poll();
+    bad += check("LAYER: EDIT tapped (100 ms): the next page, no layer", !strcmp(sm_cur_page()->name, "EDIT 2") && sm_layer == SML_NONE);
+    btn_down(B_EDIT);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    bad += check("LAYER: EDIT held 500 ms (still down): the EDIT layer, the page as it was",
+                 sm_layer == SML_EDIT && !strcmp(sm_cur_page()->name, "EDIT 2"));
+    btn_up(B_EDIT);
+    sm_input_poll();
+    bad += check("LAYER: ... let go: the layer closes, the page is still EDIT 2", sm_layer == SML_NONE && !strcmp(sm_cur_page()->name, "EDIT 2"));
+    btn_down(B_EDIT);
+    sm_input_poll();
+    ms(399);
+    sm_input_poll();
+    bad += check("LAYER: held 399 ms (HOLD 400): not yet", sm_layer == SML_NONE);
+    ms(1);
+    sm_input_poll();
+    bad += check("LAYER: ... 400 ms: the layer", sm_layer == SML_EDIT);
+    btn_up(B_EDIT);
+    sm_input_poll();
+    settings_hold = 3;                                    /* HOLD 600 */
+    btn_down(B_GLO);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    bad += check("LAYER: HOLD 600: 500 ms is not a hold", sm_layer == SML_NONE);
+    ms(100);
+    sm_input_poll();
+    bad += check("LAYER: ... 600 ms is: the GLO layer, the page unchanged", sm_layer == SML_GLO && !strcmp(sm_cur_page()->name, "EDIT 2"));
+    btn_up(B_GLO);
+    sm_input_poll();
+    settings_hold = HOLD_DEF;
+    /* a key used 50 ms into the hold: the layer at once (and the key is the layer's, not a trig) */
+    sm_ui.page = 0;
+    btn_down(B_EDIT);
+    sm_input_poll();
+    ms(50);
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    bad += check("LAYER: a key 50 ms into EDIT: the EDIT layer, the page as it was, no trig on the key",
+                 sm_layer == SML_EDIT && sm_ui.page == 0u && !smp.pat[smp.cur].step[0][3].n);
+    key_up(WHITE[3]);
+    btn_up(B_EDIT);
+    sm_input_poll();
+    /* a knob turned 50 ms into the hold: the layer, the page's value untouched */
+    {
+        int8_t before = ksnd(0)->p[sm_cur_page()->id[0]];
+        btn_down(B_GLO);
+        sm_input_poll();
+        ms(50);
+        turn(EN_K1, 3);
+        sm_input_poll();
+        bad += check("LAYER: a knob 50 ms into GLO: the GLO layer, the page's K1 value unchanged",
+                     sm_layer == SML_GLO && ksnd(0)->p[sm_cur_page()->id[0]] == before && sm_ui.page == 0u);
+        btn_up(B_GLO);
+        sm_input_poll();
+    }
+    /* SEQ has no page: a tap does nothing; ENV is its page at once */
+    btn_down(B_SEQ);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_SEQ);
+    sm_input_poll();
+    bad += check("LAYER: SEQ tapped: nothing (no page, no layer)", sm_ui.page == 0u && sm_layer == SML_NONE);
+    press(B_ENV);
+    sm_input_poll();
+    bad += check("LAYER: ENV: its page at once", !strcmp(sm_cur_page()->name, "FILTER"));
+    /* another layer button while one is held is swallowed */
+    sm_ui.page = 0;
+    layer_hold(B_EDIT);
+    btn_down(B_GLO);
+    sm_input_poll();
+    ms(500);
+    btn_up(B_GLO);
+    sm_input_poll();
+    bad += check("LAYER: GLO tapped while EDIT is held: swallowed, EDIT stays", sm_layer == SML_EDIT && sm_ui.page == 0u);
+    layer_let_go(B_EDIT);
+    bad += check("LAYER: ... all let go: closed", sm_layer == SML_NONE);
+    /* a tap that is down and up between two polls (the edge only) is a tap */
+    sm_ui.page = 0;
+    press(B_EDIT);
+    sm_input_poll();
+    bad += check("LAYER: a press seen already let go: a tap (EDIT 2)", !strcmp(sm_cur_page()->name, "EDIT 2") && sm_layer == SML_NONE);
+    return bad;
+}
+
+static int test_edit_layer_loads_machine(void)
+{
+    int bad = 0;
+    sm_sound_t ref;
+    uint32_t k, ok = 1;
+    in_reset();
+    host_ticks = 1000u;
+    layer_hold(B_EDIT);
+    bad += check("EDIT: the layer opens on the page of the track's machine (T1 SAW: MONO)", sm_layer == SML_EDIT && sm_lay_epage == 0u);
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    sm_sound_from_preset(&ref, 3, 0);
+    bad += check("EDIT: the 4th white key: machine 3 (preset 0) in the model", ksnd(0)->machine == 3u && !memcmp(&ref, ksnd(0), sizeof ref));
+    run_block();
+    bad += check("EDIT: ... and in the core after a block", trk[0].eng_req == sm_engine_of(3) && trk[0].preset == 0u && core_is_model());
+    key_up(WHITE[3]);
+    bad += check("EDIT: the other tracks are as they were", ksnd(1)->machine == 7u && ksnd(2)->machine == 13u);
+    press(B_OCTUP);
+    sm_input_poll();
+    bad += check("EDIT: OCT+: the next page (SOMA)", sm_lay_epage == 1u);
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    bad += check("EDIT: SOMA's first white key: machine 13", ksnd(0)->machine == 13u);
+    press(B_OCTUP);
+    sm_input_poll();
+    press(B_OCTUP);
+    sm_input_poll();
+    bad += check("EDIT: OCT+ twice more: back on MONO (wraps)", sm_lay_epage == 0u);
+    press(B_OCTUP);
+    sm_input_poll();
+    press(B_OCTUP);
+    sm_input_poll();                                      /* SLICE: 5 machines */
+    for (k = 0; k < 16u; k++) {
+        key_dn(WHITE[k]);
+        sm_input_poll();
+        key_up(WHITE[k]);
+        if (k < 5u)
+            ok &= ksnd(0)->machine == 22u + k;
+        else if (k < 15u)
+            ok &= ksnd(0)->machine == 22u + 4u;           /* (a white key with no machine: nothing happens) */
+    }
+    bad += check("EDIT: SLICE: its 5 machines on the first 5 white keys, the rest of the keys nothing", ok);
+    /* INIT: G5 is the machine's preset 0 (length kept) */
+    layer_let_go(B_EDIT);
+    turn(EN_PRESET, 2);
+    sm_input_poll();
+    ksnd(0)->p[P_FCUT] = 5;
+    ksnd(0)->len = 24u;
+    layer_hold(B_EDIT);
+    key_dn(WHITE[15]);
+    sm_input_poll();
+    key_up(WHITE[15]);
+    sm_sound_from_preset(&ref, ksnd(0)->machine, 0);
+    ref.len = 24u;
+    bad += check("EDIT: G5 INIT: the machine's preset 0, the track length kept", !memcmp(&ref, ksnd(0), sizeof ref));
+    layer_let_go(B_EDIT);
+    ksnd(0)->len = 16u;
+    /* the layer opens on the page of the track's own machine */
+    in_reset();
+    sm_sound_load(24, 0);                                 /* a SLICE machine */
+    run_block();
+    layer_hold(B_EDIT);
+    bad += check("EDIT: the layer opens on the page of a SLICE track (page 3)", sm_lay_epage == 2u);
+    layer_let_go(B_EDIT);
+    return bad;
+}
+
+static int test_edit_layer_backpressure(void)
+{
+    int bad = 0;
+    uint32_t i, full = 0;
+    sm_cmd_t c = {SMC_STOP, 0, 0, 0, 0};
+    in_reset();
+    host_ticks = 1000u;
+    for (i = 0; i < 80u; i++)                             /* the ring full (the audio stream has not run) */
+        full += !sm_cmd_push(c);
+    layer_hold(B_EDIT);
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    key_up(WHITE[3]);
+    bad += check("EDIT: the queue full: the model has the machine, the LOAD waits", full > 0 && ksnd(0)->machine == 3u && (sm_ld_pend & 1u) &&
+                 trk[0].eng_req != sm_engine_of(3));
+    run_block();                                          /* the ring drains */
+    sm_input_poll();                                      /* the retry */
+    run_block();
+    bad += check("EDIT: ... pushed again, the core ends on the model", !(sm_ld_pend & 1u) && trk[0].eng_req == sm_engine_of(3) && core_is_model());
+    layer_let_go(B_EDIT);
+    return bad;
+}
+
+/* T1 and T2 with a trig on every step, PLAY; the note-ons of a second of play */
+static void trigs_play(void)
+{
+    uint32_t s;
+    for (s = 0; s < 16u; s++) {
+        sm_step_toggle(0, s);
+        sm_step_toggle(1, s);
+    }
+    press(B_PLAY);
+    sm_input_poll();
+}
+static void play_blocks(uint32_t n)
+{
+    while (n--)
+        run_block();
+}
+static int test_glo_mute(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    trigs_play();
+    layer_hold(B_GLO);
+    key_dn(1);                                            /* F#3: the first black key */
+    sm_input_poll();
+    key_up(1);
+    layer_let_go(B_GLO);
+    bad += check("GLO: F#3 in the layer: T1 muted (smp.mute bit 0)", smp.mute == 1u);
+    seq_log_clear();
+    play_blocks(1500);                                    /* 1.09 s: 8 steps and a bit */
+    bad += check("GLO: ... T1's trigs do not sound, T2's do", on_n[0] == 0u && on_n[1] >= 8u && !on_n[2] && !on_n[3]);
+    layer_hold(B_GLO);
+    key_dn(1);
+    sm_input_poll();
+    key_up(1);
+    layer_let_go(B_GLO);
+    bad += check("GLO: F#3 again: unmuted", smp.mute == 0u);
+    seq_log_clear();
+    play_blocks(1500);
+    bad += check("GLO: ... T1 sounds again, while playing", on_n[0] >= 8u && on_n[1] >= 8u);
+    layer_hold(B_GLO);                                    /* the other three black keys: T2, T3, T4 */
+    key_dn(3); sm_input_poll(); key_up(3);
+    key_dn(5); sm_input_poll(); key_up(5);
+    key_dn(8); sm_input_poll(); key_up(8);
+    layer_let_go(B_GLO);
+    bad += check("GLO: G#3, A#3, C#4: T2, T3, T4 (bits 1, 2, 3)", smp.mute == 0xEu);
+    seq_log_clear();
+    play_blocks(1500);
+    bad += check("GLO: ... only T1 sounds", on_n[0] >= 8u && !on_n[1] && !on_n[2] && !on_n[3]);
+    return bad;
+}
+
+static int test_glo_solo(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    trigs_play();
+    layer_hold(B_GLO);
+    key_dn(WHITE[1]);                                     /* G3: T2 */
+    sm_input_poll();
+    bad += check("GLO: the 2nd white key held: T2 soloed", sm_solo == 2u && smp.mute == 0u);
+    seq_log_clear();
+    play_blocks(1500);
+    bad += check("GLO: ... only T2 sounds", !on_n[0] && on_n[1] >= 8u && !on_n[2] && !on_n[3]);
+    key_up(WHITE[1]);
+    sm_input_poll();
+    bad += check("GLO: ... the key let go: no solo", sm_solo == 0u);
+    seq_log_clear();
+    play_blocks(1500);
+    bad += check("GLO: ... T1 and T2 sound again", on_n[0] >= 8u && on_n[1] >= 8u);
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    layer_let_go(B_GLO);                                  /* the layer closes with the key still down */
+    bad += check("GLO: the layer let go with a solo key down: the solo ends", sm_solo == 0u && sm_layer == SML_NONE);
+    key_up(WHITE[3]);
+    sm_input_poll();
+    return bad;
+}
+
+/* the mask is read once per block: the main loop flips it between two steps of one block's loop? (one read: the whole block
+ * follows the mask it saw) */
+static int test_mute_read_once(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    smp.bpm10 = 3000;                                     /* 300 BPM: a step every 8820 samples */
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 1);
+    smp.mute = 1u;
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();                                          /* step 0, muted */
+    bad += check("MUTE: a muted track's first step does not start", on_n[0] == 0u);
+    smp.mute = 0u;
+    play_blocks(400);
+    bad += check("MUTE: unmuted: the next trig starts", on_n[0] >= 1u);
+    smp.bpm10 = 1200;
+    return bad;
+}
+
+/* a muted track lets go of what it holds (a LEN INF note would ring on), by note-off: the release, not a cut */
+static int test_mute_releases(void)
+{
+    int bad = 0, held = 0, held_after = 0;
+    uint32_t i;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 0);
+    smp.pat[smp.cur].step[0][0].len = SM_LEN_INF;
+    press(B_PLAY);
+    sm_input_poll();
+    play_blocks(20);
+    for (i = 0; i < NVOICE; i++)
+        held |= trk[0].v[i].gate;
+    bad += check("MUTE: T1's LEN INF note is held while playing", held && sm_nheld[0] == 1u);
+    smp.mute = 1;
+    play_blocks(2);
+    for (i = 0; i < NVOICE; i++)
+        held_after |= trk[0].v[i].gate;
+    bad += check("MUTE: muted: the note is let go (note-off) within a block", !held_after && sm_nheld[0] == 0u);
+    return bad;
+}
+
+static int test_seq_len(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    layer_hold(B_SEQ);
+    bad += check("SEQ: held 500 ms: the SEQ layer", sm_layer == SML_SEQ);
+    turn(EN_K1, 16);
+    sm_input_poll();
+    bad += check("SEQ: K1 +16: the track's length 32", ksnd(0)->len == 32u && ksnd(1)->len == 16u);
+    turn(EN_K1, 5);
+    sm_input_poll();
+    bad += check("SEQ: K1 +5 more: stays 32", ksnd(0)->len == 32u);
+    turn(EN_K1, -100);
+    sm_input_poll();
+    bad += check("SEQ: K1 -100: 1", ksnd(0)->len == 1u);
+    turn(EN_K1, 31);
+    sm_input_poll();
+    bad += check("SEQ: K1 +31: 32", ksnd(0)->len == 32u);
+    {
+        sm_sound_t before = *ksnd(0);
+        before.len = 32u;
+        turn(EN_K2, 5);
+        turn(EN_K3, 5);
+        turn(EN_SELECT, 5);
+        sm_input_poll();
+        bad += check("SEQ: the other knobs are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
+    }
+    layer_let_go(B_SEQ);
+    host_notes = 1u << 25;                                /* F#5: the second bank: the stage 1 gate now opens */
+    sm_input_poll();
+    bad += check("SEQ: the length 32: F#5 selects the bank 1", sm_ui.bank == 1u);
+    host_notes = 1u << 22;
+    sm_input_poll();
+    bad += check("SEQ: ... D#5 the bank 0", sm_ui.bank == 0u);
+    sm_step_toggle(0, 20);
+    sm_step_toggle(0, 31);
+    seq_log_clear();
+    press(B_PLAY);
+    sm_input_poll();
+    play_blocks(5000);                                    /* 160000 samples: 32 steps = 176400 */
+    bad += check("SEQ: steps 17..32 play (the trig on step 21 at 20 x FS/8)", on_n[0] == 1u && near(on_at[0][0], 20u * FS / 8u));
+    play_blocks(1500);
+    bad += check("SEQ: ... and step 32 (31) at 31 x FS/8", on_n[0] == 2u && near(on_at[0][1], 31u * FS / 8u));
+    sm_ui.bank = 1;
+    layer_hold(B_SEQ);
+    turn(EN_K1, -20);
+    sm_input_poll();
+    bad += check("SEQ: K1 down to 12: the bank goes back to 0 (no second page)", ksnd(0)->len == 12u && sm_ui.bank == 0u);
+    layer_let_go(B_SEQ);
+    return bad;
+}
+
+static int test_seq_clear(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t s;
+    in_reset();
+    host_ticks = 1000u;
+    for (s = 0; s < SM_NSTEP; s += 3u) {
+        sm_step_toggle(0, s);
+        sm_step_toggle(1, s);
+    }
+    smp.pat[smp.cur].step[0][7].flags = SMF_REST;
+    layer_hold(B_SEQ);
+    key_dn(WHITE[1]);                                     /* another white key: nothing */
+    sm_input_poll();
+    key_up(WHITE[1]);
+    bad += check("SEQ: G3 in the layer: not a clear, not a trig", smp.pat[smp.cur].step[0][0].n == 1u && !smp.pat[smp.cur].step[0][1].n);
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    for (s = 0; s < SM_NSTEP; s++)
+        ok &= !smp.pat[smp.cur].step[0][s].n && !(smp.pat[smp.cur].step[0][s].flags & SMF_REST);
+    bad += check("SEQ: F3: every step of T1 off (n = 0), no REST left", ok && sm_lay_cleared);
+    ok = 1;
+    for (s = 0; s < SM_NSTEP; s += 3u)
+        ok &= smp.pat[smp.cur].step[1][s].n == 1u;
+    bad += check("SEQ: ... T2 untouched", ok);
+    layer_let_go(B_SEQ);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    ok = 1;
+    for (s = 0; s < SM_NSTEP; s++)
+        ok &= !smp.pat[smp.cur].step[1][s].n;
+    bad += check("SEQ: the selected track (T2) is the one cleared", ok);
+    layer_let_go(B_SEQ);
+    bad += check("SEQ: the layer closed: the CLEARED flag is gone", !sm_lay_cleared);
+    return bad;
+}
+
 /* ------------------------------------------------------------ screen --- */
 #define INK swap16(0xFFFFu)
 #define DIMC swap16(0x4208u)
@@ -1100,6 +1532,9 @@ static int test_px_font_widths(void)
     return bad;
 }
 
+/* the ring at the real centre and radius (sm_draw.c's SMD_RING_*), on a canvas the size of a knob column */
+#define RW 60u
+#define RH SMD_KNOB_H
 static int test_ring_dots(void)
 {
     int bad = 0;
@@ -1107,29 +1542,29 @@ static int test_ring_dots(void)
     sm_ux_mk1();
     for (k = 0; k < 4u; k++) {
         uint32_t x, y, comps = 0, lit = 0, dim = 0;
-        static uint8_t seen[60 * 60];
-        static uint16_t stk[60 * 60];
-        cv_begin(60u, 60u, T_BG);
-        sm_px_ring(30, 30, 22, pos[k], 0, 0);
+        static uint8_t seen[RW * RH];
+        static uint16_t stk[RW * RH];
+        cv_begin(RW, RH, T_BG);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, pos[k], 0, 0);
         memset(seen, 0, sizeof seen);
-        for (y = 0; y < 60u; y++)
-            for (x = 0; x < 60u; x++) {
+        for (y = 0; y < RH; y++)
+            for (x = 0; x < RW; x++) {
                 uint32_t sp = 0, n = 0;
                 uint16_t c = cvp(x, y);
-                if (c == BGC || seen[y * 60u + x])
+                if (c == BGC || seen[y * RW + x])
                     continue;
-                stk[sp++] = (uint16_t)(y * 60u + x);       /* a flood fill of this dot */
-                seen[y * 60u + x] = 1;
+                stk[sp++] = (uint16_t)(y * RW + x);        /* a flood fill of this dot */
+                seen[y * RW + x] = 1;
                 while (sp) {
-                    uint32_t q = stk[--sp], qx = q % 60u, qy = q / 60u, d;
+                    uint32_t q = stk[--sp], qx = q % RW, qy = q / RW, d;
                     int32_t dx[4] = {1, -1, 0, 0}, dy[4] = {0, 0, 1, -1};
                     n++;
                     for (d = 0; d < 4u; d++) {
                         int32_t nx = (int32_t)qx + dx[d], ny = (int32_t)qy + dy[d];
-                        if (nx < 0 || ny < 0 || nx >= 60 || ny >= 60 || seen[ny * 60 + nx] || cvp((uint32_t)nx, (uint32_t)ny) == BGC)
+                        if (nx < 0 || ny < 0 || nx >= (int32_t)RW || ny >= (int32_t)RH || seen[ny * RW + nx] || cvp((uint32_t)nx, (uint32_t)ny) == BGC)
                             continue;
-                        seen[ny * 60 + nx] = 1;
-                        stk[sp++] = (uint16_t)(ny * 60 + nx);
+                        seen[ny * RW + nx] = 1;
+                        stk[sp++] = (uint16_t)(ny * RW + nx);
                     }
                 }
                 comps++;
@@ -1137,20 +1572,48 @@ static int test_ring_dots(void)
                     bad += check("RING: every dot is 3 x 3", 0);
                 if (c == INK) lit++; else if (c == DIMC) dim++;
             }
-        bad += check("RING: exactly 16 dots on the canvas", comps == 16u && lit + dim == 16u);
+        bad += check("RING: exactly 16 dots on the canvas (the real radius)", comps == 16u && lit + dim == 16u);
         bad += check("RING: the lit ones are the first 1 + pos * 15 / 256", lit == want[k]);
     }
     {   /* the centre: empty, a lock dot, a filled disc */
-        cv_begin(60u, 60u, T_BG);
-        sm_px_ring(30, 30, 22, 100, 0, 0);
-        bad += check("RING: the centre is empty", cvp(30, 30) == BGC);
-        cv_begin(60u, 60u, T_BG);
-        sm_px_ring(30, 30, 22, 100, 0, 1);
-        bad += check("RING: a lock dot in the centre (3 x 3)", cvp(30, 30) == INK && cvp(29, 29) == INK && cvp(31, 31) == INK && cvp(32, 30) == BGC);
-        cv_begin(60u, 60u, T_BG);
-        sm_px_ring(30, 30, 22, 100, 1, 0);
-        bad += check("RING: filled: a solid disc", cvp(30, 30) == INK && cvp(30, 20) == INK && cvp(40, 30) == INK && cvp(22, 22) == INK);
+        cv_begin(RW, RH, T_BG);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 0, 0);
+        bad += check("RING: the centre is empty", cvp(SMD_RING_CX, SMD_RING_CY) == BGC);
+        cv_begin(RW, RH, T_BG);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 0, 1);
+        bad += check("RING: a lock dot in the centre (3 x 3)", cvp(30, 62) == INK && cvp(29, 61) == INK && cvp(31, 63) == INK && cvp(32, 62) == BGC);
+        cv_begin(RW, RH, T_BG);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 1, 0);
+        bad += check("RING: filled: a solid disc (inside the dots)", cvp(30, 62) == INK && cvp(30, 52) == INK && cvp(40, 62) == INK &&
+                     cvp(22, 54) == INK && cvp(30, 62 - (SMD_RING_R - 5)) == INK && cvp(30, 62 - (SMD_RING_R - 3)) == BGC);
     }
+    return bad;
+}
+/* no pixel of a ring leaves its 60 px column (the neighbour's ring is a column away): drawn in the middle of a wide canvas,
+ * every pixel of every position / disc / lock dot is inside the 60 columns around the centre, and inside the zone's rows */
+static int test_ring_contained(void)
+{
+    int bad = 0;
+    uint32_t pos, f, x, y, out = 0, left = 999, right = 0, top = 999, bot = 0;
+    sm_ux_mk1();
+    for (pos = 0; pos <= 256u; pos += 16u)
+        for (f = 0; f < 3u; f++) {
+            cv_begin(180u, SMD_KNOB_H, T_BG);
+            sm_px_ring(90, SMD_RING_CY, SMD_RING_R, pos, f == 1u, f == 2u);
+            for (y = 0; y < SMD_KNOB_H; y++)
+                for (x = 0; x < 180u; x++) {
+                    if (cv_px[y * cv_w + x] == BGC)
+                        continue;
+                    out += x < 60u || x >= 120u;
+                    left = x < left ? x : left;
+                    right = x > right ? x : right;
+                    top = y < top ? y : top;
+                    bot = y > bot ? y : bot;
+                }
+        }
+    printf("  ring extent: x %u..%u (column 60..119), y %u..%u\n", left, right, top, bot);
+    bad += check("RING: no pixel outside its 60 px column (centre 30, radius 28)", out == 0 && left >= 60u && right <= 119u);
+    bad += check("RING: ... and inside the knob zone's rows, under the label", top >= 4u + 14u && bot < SMD_KNOB_H - 14u - 4u);
     return bad;
 }
 
@@ -1260,9 +1723,16 @@ typedef struct { int32_t x0, y0, x1, y1; const char *name; } zone_t;
  * the four knob columns (label, ring, value), the SELECT row; the step strip carries no text */
 static const zone_t ZONES[] = {
     {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "page"},
-    {0, 48, 60, 180, "knob0"}, {60, 48, 120, 180, "knob1"}, {120, 48, 180, 180, "knob2"}, {180, 48, 240, 180, "knob3"},
-    {0, 180, 240, 220, "select"},
+    {0, 48, 60, 160, "knob0"}, {60, 48, 120, 160, "knob1"}, {120, 48, 180, 160, "knob2"}, {180, 48, 240, 160, "knob3"},
+    {0, 168, 240, 188, "select"},
 };
+/* an open layer: the header, the page line (its title), the five rows of the map (240 x 34 from y 48) */
+static const zone_t LZONES[] = {
+    {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "title"},
+    {0, 48, 240, 82, "row0"}, {0, 82, 240, 116, "row1"}, {0, 116, 240, 150, "row2"}, {0, 150, 240, 184, "row3"}, {0, 184, 240, 218, "row4"},
+};
+static const zone_t *lint_zones = ZONES;
+static uint32_t lint_nz = sizeof ZONES / sizeof ZONES[0];
 static uint32_t lint_shown;
 static int lint_frame(const char *what)
 {
@@ -1276,9 +1746,9 @@ static int lint_frame(const char *what)
         const zone_t *z = 0;
         if (b->x1 <= b->x0)
             continue;
-        for (j = 0; j < sizeof ZONES / sizeof ZONES[0]; j++)
-            if (b->x0 >= ZONES[j].x0 && b->x0 < ZONES[j].x1 && b->y0 >= ZONES[j].y0 && b->y0 < ZONES[j].y1)
-                z = &ZONES[j];
+        for (j = 0; j < lint_nz; j++)
+            if (b->x0 >= lint_zones[j].x0 && b->x0 < lint_zones[j].x1 && b->y0 >= lint_zones[j].y0 && b->y0 < lint_zones[j].y1)
+                z = &lint_zones[j];
         if (!z || (b->flags & 3u) || b->x0 < z->x0 || b->x1 > z->x1 || b->y1 > z->y1) {
             if (lint_shown++ < 15u) printf("  lint %s: '%s' box %d,%d..%d,%d flags %u zone %s\n", what, b->s, b->x0, b->y0, b->x1, b->y1, b->flags,
                    z ? z->name : "none");
@@ -1350,7 +1820,7 @@ static int test_draw_budget(void)
     px_bad = 0;
     draw_setup();
     px = frame_px();
-    bad += check("budget: the first frame draws the screen", px == 240u * 240u);
+    bad += check("budget: the first frame draws the zones: 48000 px (no blank band nobody needs)", px == 48000u);
     px = frame_px();
     bad += check("budget: nothing changed, nothing drawn", px == 0);
     sm_playing = 1;                                           /* the transport started: the header's glyph */
@@ -1376,11 +1846,11 @@ static int test_draw_budget(void)
         s->p[id] = (int8_t)(s->p[id] + 1);
         sm_dirty = 1;
         px = frame_px();
-        bad += check("budget: one value -> one knob column <= 60 x 132", px > 0 && px <= 60u * 132u);
+        bad += check("budget: one value -> one knob column <= 60 x 112", px > 0 && px <= 60u * 112u);
     }
     sm_redraw_all();
     px = frame_px();
-    bad += check("budget: redraw_all repaints the screen", px == 240u * 240u);
+    bad += check("budget: redraw_all repaints the zones (48000 px)", px == 48000u);
     bad += check("budget: sm_draw_px is what the display got, frame by frame", px_bad == 0);
     return bad;
 }
@@ -1436,19 +1906,19 @@ static int test_strip_dots(void)
     st[5].n = 1; st[5].flags = (uint8_t)(1u << 4);            /* x2 */
     draw_full();
     bad += check("strip: the strip is 20 px high, at the bottom of the screen", SMD_STRIP_H <= 20u && SMD_STRIP_Y + SMD_STRIP_H == 240u);
-    bad += check("strip: a trig is one filled 4 x 4 dot", box_is(15 + 5, 234, 4, 4, INK) && scr_ink(15, 220, 15, 20) == 16u);
-    bad += check("strip: x3 is three 4 x 4 dots stacked at a pitch of 5",
-                 box_is(30 + 5, 234, 4, 4, INK) && box_is(30 + 5, 229, 4, 4, INK) && box_is(30 + 5, 224, 4, 4, INK) &&
-                 scr_ink(30, 220, 15, 20) == 48u && SCR(30 + 6, 233) == BGC && SCR(30 + 6, 228) == BGC);
-    bad += check("strip: x4 is four dots (the stack takes the 19 rows 0..18)",
-                 box_is(45 + 5, 235, 4, 4, INK) && box_is(45 + 5, 220, 4, 4, INK) && scr_ink(45, 220, 15, 20) == 64u);
-    bad += check("strip: x2 is two dots", box_is(75 + 5, 234, 4, 4, INK) && box_is(75 + 5, 229, 4, 4, INK) && scr_ink(75, 220, 15, 20) == 32u);
+    bad += check("strip: a trig is one filled 3 x 3 dot (the lowest place, rows 15..17)", box_is(15 + 6, 235, 3, 3, INK) && scr_ink(15, 220, 15, 20) == 9u);
+    bad += check("strip: x3 is three 3 x 3 dots stacked at a pitch of 4 (a 1 px gap between)",
+                 box_is(30 + 6, 235, 3, 3, INK) && box_is(30 + 6, 231, 3, 3, INK) && box_is(30 + 6, 227, 3, 3, INK) &&
+                 scr_ink(30, 220, 15, 20) == 27u && SCR(30 + 7, 234) == BGC && SCR(30 + 7, 230) == BGC);
+    bad += check("strip: x4 is four dots (rows 3..17)",
+                 box_is(45 + 6, 235, 3, 3, INK) && box_is(45 + 6, 223, 3, 3, INK) && scr_ink(45, 220, 15, 20) == 36u);
+    bad += check("strip: x2 is two dots", box_is(75 + 6, 235, 3, 3, INK) && box_is(75 + 6, 231, 3, 3, INK) && scr_ink(75, 220, 15, 20) == 18u);
     bad += check("strip: a REST is a hollow dot (the outline 4 x 4)",
                  SCR(60 + 5, 234) == INK && SCR(60 + 8, 237) == INK && SCR(60 + 5, 236) == INK && SCR(60 + 8, 235) == INK &&
                  box_is(60 + 6, 235, 2, 2, BGC) && scr_ink(60, 220, 15, 20) == 12u);
     bad += check("strip: an empty step is nothing, the beats 1 5 9 13 a dim 1 x 1",
-                 scr_ink(6 * 15, 220, 15, 20) == 0 && SCR(6, 235) == DIMC && scr_ink(0, 220, 15, 20) == 1u &&
-                 scr_ink(8 * 15, 220, 15, 20) == 1u && SCR(8 * 15 + 6, 235) == DIMC && SCR(6 * 15 + 6, 235) == BGC);
+                 scr_ink(6 * 15, 220, 15, 20) == 0 && SCR(7, 236) == DIMC && scr_ink(0, 220, 15, 20) == 1u &&
+                 scr_ink(8 * 15, 220, 15, 20) == 1u && SCR(8 * 15 + 7, 236) == DIMC && SCR(6 * 15 + 7, 236) == BGC);
     for (i = 0; i < 240u * 20u; i++) {                        /* nothing but the three inks */
         uint16_t c = SCR(i % 240u, 220u + i / 240u);
         if (c != INK && c != DIMC && c != BGC)
@@ -1463,7 +1933,23 @@ static int test_strip_dots(void)
     bad += check("strip: the step playing has a bar 8 x 1 under its place", box_is(15 + 3, 239, 8, 1, INK) && SCR(15 + 2, 239) == BGC &&
                                                                           SCR(15 + 11, 239) == BGC && SCR(15 + 3, 238) == BGC);
     bad += check("strip: the step held has a bar 8 x 2 over its place", box_is(30 + 3, 220, 8, 2, INK) && SCR(30 + 2, 220) == BGC &&
-                                                                       SCR(30 + 11, 221) == BGC && box_is(30 + 5, 224, 4, 4, INK));
+                                                                       SCR(30 + 11, 221) == BGC && box_is(30 + 6, 227, 3, 3, INK));
+    {   /* a x4 stack keeps a 1 px gap to the bar under it (playing) and to the one over it (held) */
+        uint32_t x, gap = 1, bars;
+        sm_pos[0] = 3;
+        sm_ui.held_step = 3;
+        sm_dirty = 1;
+        sm_draw();
+        for (x = 45 + 6; x < 45 + 9u; x++)
+            gap &= SCR(x, 222) == BGC && SCR(x, 238) == BGC;
+        bars = box_is(45 + 3, 220, 8, 2, INK) && box_is(45 + 3, 239, 8, 1, INK);
+        bad += check("strip: x4 playing and held at once: both bars, a 1 px gap to the stack on each side (rows 2 and 18)",
+                     bars && gap && box_is(45 + 6, 223, 3, 3, INK) && box_is(45 + 6, 235, 3, 3, INK));
+        sm_pos[0] = 1;
+        sm_ui.held_step = 2;
+        sm_dirty = 1;
+        sm_draw();
+    }
     sm_ui.held_step = 0xFFu;
     sm_pos[0] = 4;
     sm_dirty = 1;
@@ -1641,6 +2127,206 @@ static int test_leds_family(void)
     ok &= led_of(fm1_led_dim, panel.btn[B_EDIT]) == 0;      /* OFF: no glow */
     return check("LEDS: the page's family button is lit (FILTER -> ENV), the others glow by the LEDS mode", ok);
 }
+/* ------------------------------------------------------ layer maps --- */
+static int lint_has(const char *t, int32_t *y0, int32_t *y1)
+{
+    uint32_t i;
+    for (i = 0; i < lint_n && i < 256u; i++)
+        if (!strcmp(lint_box[i].s, t)) {
+            if (y0) *y0 = lint_box[i].y0;
+            if (y1) *y1 = lint_box[i].y1;
+            return 1;
+        }
+    return 0;
+}
+static uint32_t lint_machines(void)                       /* the machine cells of an EDIT map (not INIT, not the page key) */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < lint_n && i < 256u; i++)
+        n += lint_box[i].y0 >= 48 && lint_box[i].y0 < 184 && lint_box[i].s[0] && strcmp(lint_box[i].s, "INIT") != 0;
+    return n;
+}
+static void layer_draw(uint32_t layer)
+{
+    sm_layer = (uint8_t)layer;
+    lint_zones = LZONES;
+    lint_nz = sizeof LZONES / sizeof LZONES[0];
+    draw_full();
+}
+static void layer_close_draw(void)
+{
+    sm_layer = SML_NONE;
+    lint_zones = ZONES;
+    lint_nz = sizeof ZONES / sizeof ZONES[0];
+    sm_dirty = 1;
+    sm_draw();
+}
+static int test_layer_maps(void)
+{
+    int bad = 0, ok;
+    int32_t y0 = 0, y1 = 0;
+    uint32_t i;
+    draw_setup();
+    layer_draw(SML_EDIT);
+    sm_lay_epage = 0;
+    layer_draw(SML_EDIT);
+    bad += check("MAP: EDIT: the machines of the page, INIT, the page key, the title (all inside their rows, none cut)",
+                 lint_frame("edit") == 0 && lint_has("SAW", 0, 0) && lint_has("INIT", 0, 0) && lint_has("OCT+ NEXT PAGE", 0, 0) &&
+                 lint_has("MACHINE MONO", 0, 0) && lint_machines() == 13u);
+    ok = lint_has("INIT", &y0, &y1);
+    bad += check("MAP: the labels of the keys are scale 2 (14 px high)", ok && y1 - y0 == 14);
+    bad += check("MAP: the track's machine (SAW) is inverted, its neighbour is not", SCR(10, 56) == INK && SCR(64, 56) == BGC);
+    sm_lay_epage = 2;
+    layer_draw(SML_EDIT);
+    bad += check("MAP: EDIT page 3: the 5 SLICE machines (GLIT first) and INIT", lint_frame("slice") == 0 &&
+                 lint_has("MACHINE SLICE", 0, 0) && lint_machines() == 5u && lint_has("GLIT", 0, 0) && lint_has("INIT", 0, 0));
+    sm_lay_epage = 1;
+    layer_draw(SML_EDIT);
+    bad += check("MAP: EDIT page 2: the 9 SOMA machines", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == 9u);
+    layer_draw(SML_GLO);
+    bad += check("MAP: GLO: MUTE and SOLO rows, T1..T4 in each", lint_frame("glo") == 0 && lint_has("MUTE", 0, 0) && lint_has("SOLO", 0, 0) &&
+                 lint_has("T1", 0, 0) && lint_has("T4", 0, 0) && lint_has("MUTE SOLO", 0, 0));
+    bad += check("MAP: ... nothing muted: no cell inverted", SCR(16, 90) == BGC && SCR(16, 192) == BGC);
+    smp.mute = 1;
+    sm_solo = 4;
+    sm_dirty = 1;
+    lcd_px = 0;
+    sm_draw();
+    bad += check("MAP: ... T1 muted: its mute cell inverted, T2's not; T3 soloed: its solo cell", SCR(16, 90) == INK && SCR(76, 90) == BGC &&
+                 SCR(136, 192) == INK && SCR(16, 192) == BGC);
+    bad += check("MAP: ... a mute toggled redraws the rows that changed only (<= 3 rows)", lcd_px > 0 && lcd_px <= 3u * 240u * SMD_MAP_ROW_H + 240u * 20u);
+    smp.mute = 0;
+    sm_solo = 0;
+    layer_draw(SML_SEQ);
+    smp.pat[smp.cur].kit.snd[0].len = 24;
+    layer_draw(SML_SEQ);
+    bad += check("MAP: SEQ: the length (K1 LEN 24), F3 CLEAR, the title", lint_frame("seq") == 0 && lint_has("K1 LEN 24", 0, 0) &&
+                 lint_has("F3 CLEAR", 0, 0) && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
+    sm_lay_cleared = 1;
+    layer_draw(SML_SEQ);
+    bad += check("MAP: SEQ: CLEARED after a clear", lint_has("CLEARED", 0, 0));
+    sm_lay_cleared = 0;
+    smp.pat[smp.cur].kit.snd[0].len = 16;
+    ok = 1;
+    for (i = 0; i < 240u * 240u; i++) {
+        uint16_t c = host_screen[i];
+        ok &= c == INK || c == DIMC || c == BGC;
+    }
+    bad += check("MAP: nothing but the three inks", ok);
+    lint_zones = ZONES;
+    lint_nz = sizeof ZONES / sizeof ZONES[0];
+    sm_layer = SML_NONE;
+    return bad;
+}
+/* the layer closed: the screen is the page's again, pixel for pixel (nothing of the map left in the bands the knobs do not cover) */
+static int test_layer_close_restores(void)
+{
+    static uint16_t before[240 * 240];
+    int bad = 0;
+    uint32_t l, same, px;
+    for (l = SML_EDIT; l <= SML_SEQ; l++) {
+        draw_setup();
+        smp.pat[smp.cur].step[0][2].n = 1;
+        draw_full();
+        memcpy(before, host_screen, sizeof before);
+        sm_layer = (uint8_t)l;
+        sm_dirty = 1;
+        lcd_px = 0;
+        sm_draw();
+        px = lcd_px;
+        bad += check("MAP: opening the layer: the page line and the five rows (<= 240 x 28 + 5 x 240 x 34)", px > 0 && px <= 240u * 28u + 5u * 240u * SMD_MAP_ROW_H);
+        sm_dirty = 1;
+        lcd_px = 0;
+        sm_draw();
+        bad += check("MAP: ... nothing changed: nothing drawn", lcd_px == 0);
+        sm_layer = SML_NONE;
+        sm_dirty = 1;
+        sm_draw();
+        same = !memcmp(before, host_screen, sizeof before);
+        bad += check("MAP: the layer closed: the screen is the page's again, pixel for pixel", same);
+    }
+    return bad;
+}
+static int test_header_muted(void)
+{
+    int bad = 0;
+    draw_setup();
+    draw_full();
+    bad += check("HEADER: an unmuted track: T1 on the ground", SCR(0, 0) == BGC);
+    smp.mute = 2;                                         /* T2 muted, T1 is shown */
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("HEADER: another track muted: T1 not inverted", SCR(0, 0) == BGC);
+    smp.mute = 1;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("HEADER: T1 muted: its label inverted", SCR(0, 0) == INK && SCR(1, 1) == INK);
+    sm_solo = 2;                                          /* T2 soloed: T1 does not play either */
+    smp.mute = 0;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("HEADER: another track soloed: T1 inverted too", SCR(0, 0) == INK);
+    sm_solo = 0;
+    smp.mute = 0;
+    return bad;
+}
+static int test_knob_band(void)
+{
+    int bad = 0;
+    uint32_t y, last = 0, first = 0;
+    draw_setup();
+    draw_full();
+    for (y = 48; y < 168u; y++)
+        if (scr_ink(0, y, 240, 1))
+            last = y;
+    for (y = 168; y < 220u && !first; y++)
+        if (scr_ink(0, y, 240, 1))
+            first = y;
+    printf("  knobs end at row %u, SELECT starts at row %u\n", last, first);
+    bad += check("LAYOUT: SELECT follows the knobs (at most 12 blank rows between)", last > 0 && first > last && first - last <= 12u);
+    bad += check("LAYOUT: the knob zone ends where its content does (a row of ink within 2 of its bottom)", last + 2u >= SMD_KNOB_Y + SMD_KNOB_H - 1u && last < SMD_KNOB_Y + SMD_KNOB_H);
+    return bad;
+}
+/* the LEDs of an open layer */
+static int test_leds_layer(void)
+{
+    int ok = 1, keys = 1;
+    uint32_t m, l;
+    static const uint8_t modes[] = {LEDS_DIM, LEDS_DIM_LO, LEDS_OFF, LEDS_INV};
+    for (l = SML_EDIT; l <= SML_SEQ; l++)
+        for (m = 0; m < 4u; m++) {
+            uint32_t b = l == SML_EDIT ? B_EDIT : l == SML_GLO ? B_GLO : B_SEQ, o = l == SML_EDIT ? B_GLO : B_EDIT;
+            leds_setup(modes[m]);
+            sm_ui.page = (uint8_t)page_by_name("EDIT 1");       /* (the EDIT family button is the lit one) */
+            sm_layer = (uint8_t)l;
+            sm_leds();
+            ok &= led_of(fm1_led_breath, panel.btn[b]) == 1 && led_of(fm1_led, panel.btn[b]) == 0 && led_of(fm1_led_dim, panel.btn[b]) == 0;
+            ok &= led_of(fm1_led_breath, panel.btn[o]) == 0;
+            sm_layer = SML_NONE;
+            sm_leds();
+            ok &= led_of(fm1_led_breath, panel.btn[b]) == 0;
+        }
+    leds_setup(LEDS_DIM);
+    sm_layer = SML_EDIT;
+    sm_lay_epage = 0;
+    sm_leds();
+    keys &= wl(0) == 1 && wd(1) == 1 && wl(1) == 0 && wd(12) == 1 && wd(13) == 0 && wd(15) == 1 && wm(0) == 0;   /* SAW lit, 13 machines, INIT */
+    smp.pat[smp.cur].step[0][5].n = 1;                    /* (the steps are not shown in a layer) */
+    sm_leds();
+    keys &= wany(5) == 1 && wl(5) == 0;
+    leds_setup(LEDS_DIM);
+    sm_layer = SML_GLO;
+    smp.mute = 4;
+    sm_solo = 2;
+    sm_leds();
+    keys &= led_of(fm1_led, 14u + 5u) == 1 && led_of(fm1_led_dim, 14u + 1u) == 1 && led_of(fm1_led, 14u + 1u) == 0 &&   /* A#3 lit: T3 muted */
+            wl(1) == 1 && wd(0) == 1 && wd(2) == 1 && wl(0) == 0;
+    smp.mute = 0;
+    sm_solo = 0;
+    sm_layer = SML_NONE;
+    return check("LEDS: an open layer's button breathes: no lit, no glow, in every LEDS mode and layer; the others not", ok) +
+           check("LEDS: the layer's keys: EDIT machines (the track's lit), GLO mutes and solos", keys);
+}
 static void write_ppm(const char *dir, const char *name)
 {
     char path[256];
@@ -1674,13 +2360,14 @@ static int test_draw_shots(void)
             st[4].n = 1;
             st[5].flags = SMF_REST;
             st[8].n = 1; st[8].flags = (uint8_t)(1u << 4);
+            st[9].n = 1; st[9].flags = (uint8_t)(3u << 4);   /* x4, held and playing: a 1 px gap to both bars */
             st[12].n = 1;
             st[14].flags = SMF_REST;
         }
         sm_ui.page = (uint8_t)pg;
         sm_ui.trk = (uint8_t)(pg % 2u);
         sm_playing = 1;
-        sm_pos[sm_ui.trk] = 6;                            /* (the playhead on an empty step) */
+        sm_pos[sm_ui.trk] = 9;
         sm_ui.held_step = 9;
         sm_rec = (uint8_t)(pg % 2u);
         smp.pat[smp.cur].nlock = 1;
@@ -1692,6 +2379,31 @@ static int test_draw_shots(void)
                 *c = '_';
         write_ppm(dir, n);
         smp.pat[smp.cur].nlock = 0;
+    }
+    {   /* the three layer maps, over the EDIT 1 page: T1 SAW, T3 muted, T4 soloed (the header shows T1 muted), 24 steps */
+        static const char *const NAME[4] = {"", "EDIT", "GLO", "SEQ"};
+        uint32_t l;
+        for (l = SML_EDIT; l <= SML_SEQ; l++) {
+            char n[48];
+            draw_setup();
+            sm_step_t *st = smp.pat[smp.cur].step[0];
+            st[0].n = 1; st[4].n = 1; st[8].n = 1;
+            smp.pat[smp.cur].kit.snd[0].len = 24;
+            smp.mute = l == SML_GLO ? 5u : 0u;
+            sm_solo = l == SML_GLO ? 8u : 0u;
+            sm_lay_cleared = l == SML_SEQ;
+            sm_lay_epage = 1;                         /* EDIT: the SOMA page, the track on its 2nd machine (inverted) */
+            if (l == SML_EDIT)
+                smp.pat[smp.cur].kit.snd[0].machine = 14;
+            sm_layer = (uint8_t)l;
+            draw_full();
+            snprintf(n, sizeof n, "swamp_layer_%s", NAME[l]);
+            write_ppm(dir, n);
+            sm_layer = SML_NONE;
+            sm_lay_cleared = 0;
+            smp.mute = 0;
+            sm_solo = 0;
+        }
     }
     return 0;
 }
@@ -1725,8 +2437,18 @@ int main(void)
     bad += test_input_backpressure();
     bad += test_cmd_e8_guard();
     bad += test_held_step_bank_key();
+    bad += test_tap_vs_hold();
+    bad += test_edit_layer_loads_machine();
+    bad += test_edit_layer_backpressure();
+    bad += test_glo_mute();
+    bad += test_glo_solo();
+    bad += test_mute_read_once();
+    bad += test_mute_releases();
+    bad += test_seq_len();
+    bad += test_seq_clear();
     bad += test_px_font_widths();
     bad += test_ring_dots();
+    bad += test_ring_contained();
     bad += test_lock_find();
     bad += test_ring_lock_fill();
     bad += test_header_rec();
@@ -1735,11 +2457,16 @@ int main(void)
     bad += test_draw_lint();
     bad += test_draw_budget();
     bad += test_draw_playhead_snapshot();
+    bad += test_layer_maps();
+    bad += test_layer_close_restores();
+    bad += test_header_muted();
+    bad += test_knob_band();
     bad += test_leds_three_states();
     bad += test_leds_trigs();
     bad += test_leds_playhead();
     bad += test_leds_rec_play();
     bad += test_leds_family();
+    bad += test_leds_layer();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

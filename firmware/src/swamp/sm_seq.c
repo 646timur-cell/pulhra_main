@@ -8,12 +8,22 @@
  * <= 1693440000 at bpm10 300, fits): the next step's start is a q8 count from this block's start, added to, never
  * restarted, so steps do not drift; the q8 floor loses < 1/256 sample a step (< 4 samples in 64 bars). */
 static volatile uint8_t sm_playing;
+static volatile uint8_t sm_solo;                          /* bit per track soloed (the GLO layer's held keys; the main loop writes) */
 static uint32_t sm_next_q8;                               /* the next step starts this many q8 samples after this block's start */
 static uint8_t sm_pos[SM_NTRK], sm_next[SM_NTRK];         /* the step playing, the step to play next */
 static uint8_t sm_held[SM_NTRK][4], sm_nheld[SM_NTRK];    /* the notes the sequencer holds, per track */
 static int32_t sm_gate[SM_NTRK];                          /* samples left of their LEN (SM_GATE_INF: to the next trig) */
 #define SM_GATE_INF 0x7FFFFFFF
 #define SM_LEN_INF 255u                                   /* a step's len: 0 the track's GATE, 1..254 in 1/8 steps, INF */
+
+/* the tracks that do not start notes, bit per track: smp.mute (the GLO layer's toggles), or, while a solo key is held, every
+ * track but the soloed. The main loop writes both bytes; events_block reads this once per block, so a block never plays
+ * half of a change. A note already sounding is not cut: at the next block it is let go (note-off: its own RELEASE rings out) */
+static uint32_t sm_mute_eff(void)
+{
+    uint32_t solo = sm_solo, m = smp.mute;
+    return (solo ? ~solo : m) & ((1u << SM_NTRK) - 1u);
+}
 
 /* the step playing on track t (the screen's playhead) */
 static uint32_t sm_seq_pos(uint32_t t) { return sm_pos[t % SM_NTRK]; }
@@ -40,6 +50,7 @@ static void sm_seq_init(void)
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
     memset(sm_nheld, 0, sizeof sm_nheld);
+    sm_solo = 0;
     sm_cq.head = sm_cq.tail = 0;
     sm_cov.head = sm_cov.tail = 0;
 }
@@ -73,7 +84,7 @@ static void sm_seq_stop(void)
 }
 
 /* the start of track t's next step: its trig (n > 0, not REST) lets go of the notes before and plays its own */
-static void sm_seq_step(uint32_t t, uint32_t step_q8)
+static void sm_seq_step(uint32_t t, uint32_t step_q8, uint32_t muted)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP), i = sm_next[t], k;
@@ -83,8 +94,8 @@ static void sm_seq_step(uint32_t t, uint32_t step_q8)
     sm_pos[t] = (uint8_t)i;
     sm_next[t] = (uint8_t)(i + 1u < len ? i + 1u : 0u);
     s = &pt->step[t][i];
-    if (!s->n || (s->flags & SMF_REST))                   /* (n first: the main loop writes it last, sm_step_toggle) */
-        return;                                           /* (no trig: the notes before run out their LEN) */
+    if (!s->n || (s->flags & SMF_REST) || muted)          /* (n first: the main loop writes it last, sm_step_toggle) */
+        return;                                           /* (no trig, or a muted track: the notes before run out their LEN) */
     sm_seq_release(t);
     for (k = 0; k < s->n && k < 4u; k++) {
         sm_held[t][k] = s->note[k];
@@ -118,13 +129,13 @@ static void events_block(uint32_t n)
     if (!sm_playing)
         return;
     {
-        uint32_t step_q8 = sm_step_q8(), nq8 = n << 8;
-        for (t = 0; t < SM_NTRK; t++)                     /* LEN run out at this block's start */
-            if (sm_nheld[t] && sm_gate[t] != SM_GATE_INF && sm_gate[t] <= 0)
+        uint32_t step_q8 = sm_step_q8(), nq8 = n << 8, mute = sm_mute_eff();   /* (the mask: once per block) */
+        for (t = 0; t < SM_NTRK; t++)                     /* LEN run out at this block's start; a muted track lets go (a LEN INF */
+            if (sm_nheld[t] && (((mute >> t) & 1u) || (sm_gate[t] != SM_GATE_INF && sm_gate[t] <= 0)))   /* note would ring on) */
                 sm_seq_release(t);
         while (sm_next_q8 < nq8) {
             for (t = 0; t < SM_NTRK; t++)
-                sm_seq_step(t, step_q8);
+                sm_seq_step(t, step_q8, (mute >> t) & 1u);
             sm_next_q8 += step_q8;
         }
         sm_next_q8 -= nq8;

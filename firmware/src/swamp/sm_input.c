@@ -31,6 +31,10 @@ static void sm_input_init(void)
     sm_dirty = 1;
 }
 
+static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);   /* sm_layer.c (after this file) */
+static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k);
+static void sm_layer_end(void);
+
 static sm_sound_t *sm_ui_sound(void) { return &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK]; }
 
 static void sm_param_push(uint32_t t, uint32_t id)
@@ -61,10 +65,25 @@ static void sm_turn(uint32_t id, int32_t s)
     sm_dirty = 1;
 }
 
+/* the selected track's whole sound from a machine's preset, then the LOAD: built here, off to the side, then copied into the
+ * model with the audio interrupt off for the copy only (a LOAD still queued must not drain half a sound). The track's
+ * length is the sequencer's, not the sound's: it stays. Used by the PRESETS knob and the EDIT layer */
+static void sm_sound_load(uint32_t machine, uint32_t preset)
+{
+    sm_sound_t *sd = sm_ui_sound(), n;
+    sm_sound_from_preset(&n, machine, preset);
+    n.len = sd->len;
+    fm1_irq_off();
+    *sd = n;
+    fm1_irq_on();
+    sm_ld_pend |= (uint8_t)(1u << sm_ui.trk);
+    sm_dirty = 1;
+}
+
 /* PRESETS: the next / previous preset of the track's machine (wraps), the whole sound from it, then the LOAD */
 static void sm_preset_turn(int32_t s)
 {
-    sm_sound_t *sd = sm_ui_sound(), n;
+    sm_sound_t *sd = sm_ui_sound();
     uint32_t np = ENGINES[sm_engine_of(sd->machine)]->npresets;
     int32_t p;
     if (!s || !np)
@@ -72,12 +91,7 @@ static void sm_preset_turn(int32_t s)
     p = ((int32_t)sd->preset + s) % (int32_t)np;
     if (p < 0)
         p += (int32_t)np;
-    sm_sound_from_preset(&n, sd->machine, (uint32_t)p);
-    fm1_irq_off();
-    *sd = n;
-    fm1_irq_on();
-    sm_ld_pend |= (uint8_t)(1u << sm_ui.trk);
-    sm_dirty = 1;
+    sm_sound_load(sd->machine, (uint32_t)p);
 }
 
 /* the keys: a white key is a step of the bank (F3 .. G5, the 16 white keys), D#5 / F#5 the bank. A tap toggles the trig
@@ -164,12 +178,17 @@ static void sm_input_poll(void)
     int32_t sel = panel_enc(EN_SELECT), alg = panel_enc(EN_ALGO), pre = panel_enc(EN_PRESET), k[4], i;
     for (i = 0; i < 4; i++)
         k[i] = panel_enc(EN_K1 + (uint32_t)i);
-    if ((pressed >> panel.btn[B_EDIT]) & 1u)
-        sm_page_press(SMFAM_EDIT);
-    if ((pressed >> panel.btn[B_GLO]) & 1u)
-        sm_page_press(SMFAM_GLO);
-    if ((pressed >> panel.btn[B_ENV]) & 1u)
-        sm_page_press(SMFAM_ENV);
+    /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is
+     * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
+    sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);
+    if (sm_layer) {
+        sm_layer_keys(pressed, notes, k);
+        notes = 0;
+        sel = 0;
+        for (i = 0; i < 4; i++)
+            k[i] = 0;
+    }
+    sm_layer_end();
     if ((pressed >> panel.btn[B_PLAY]) & 1u)              /* (against a PLAY / STOP not pushed yet, if there is one) */
         sm_tr_pend = (uint8_t)(sm_tr_pend ? (sm_tr_pend == 1u ? 2u : 1u) : (sm_playing ? 2u : 1u));
     if (alg) {
