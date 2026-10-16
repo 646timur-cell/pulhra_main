@@ -1214,6 +1214,24 @@ static __attribute__((noinline)) void seq_play(track_t *t, uint32_t idx, uint32_
         }
         t->rskip_n = 0;
     }
+#if FELUCCA_MONOFM
+    if (t->p[P_EUC]) {                              /* EUCLID: the steps play where the pattern hits (their locks
+                                                     * applied above, on every step); a hit on an empty step plays
+                                                     * the track's ROOT (C3 + ROOT, its SCL TRN on top) */
+        step_t es;
+        if (!mf_euc_hit(t->p, idx))
+            return;
+        if (!s->n && !s->hit) {
+            es = *s;
+            es.n = 1;
+            es.note[0] = (uint8_t)(48 + clamp(t->p[P_ROOT], 0, 11));
+            es.time = ST_NOTE;
+            es.vel = s->vel ? s->vel : 100u;
+            seq_step(t, &es, idx, period, skip);
+            return;
+        }
+    }
+#endif
     seq_step(t, s, idx, period, skip);
 }
 

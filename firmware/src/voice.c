@@ -597,6 +597,39 @@ static __attribute__((noinline)) void spread_sum(int32_t *out)
 /* render one block of a part into out (cleared here); returns the voices rendered */
 /* Channel bend is live performance state, outside projects/presets. Q8 semitones. */
 static int32_t midi_bend_q8[NTRK], midi_bend_target[NTRK];
+#if FELUCCA_MONOFM
+/* MONOFM's track FILTER (ENV > FILTER: P_FLT LP / BP / HP, P_FCUT, P_FRES), after the machine, a voice at a time (a mono
+ * track: one): Simper's SVF, its cutoff CUT + ENV DEST's FLT, the LFO's and the matrix's CUT and the accent (m.cutoff);
+ * the voice's two integrators kept here */
+static int32_t mf_fst[NPART][NVOICE][2];
+static __attribute__((noinline)) void mf_filter_voice(track_t *t, voice_t *v, const engine_t *e, uint32_t n,
+                                                      const vmod_t *m, int32_t *dst)
+{
+    int32_t buf[CTL], *st = mf_fst[(uint32_t)(t - trk) % NPART][(uint32_t)(v - t->v) % NVOICE];
+    int32_t k = 8192 - t->p[P_FRES] * 7800 / 127, ic1 = st[0], ic2 = st[1];
+    uint32_t i, ty = (uint32_t)t->p[P_FLT];
+    tsvf_t c;
+    if (n > CTL)
+        n = CTL;
+    for (i = 0; i < n; i++)
+        buf[i] = 0;
+    if (!v->env && !v->env_out && v->stage == 1u)      /* (a fresh voice: the filter from rest) */
+        ic1 = ic2 = 0;
+    e->render(t, v, buf, n, m);
+    tsvf_coef_k(&c, (t->p[P_FCUT] << 8) + m->cutoff, k);
+    for (i = 0; i < n; i++) {
+        int32_t in = clamp(buf[i], -120000, 120000), v3 = in - ic2;
+        int32_t v1 = (c.a1 * ic1 + c.a2 * v3) >> 13, v2 = ic2 + ((c.a2 * ic1 + c.a3 * v3) >> 13), y;
+        ic1 = clamp(2 * v1 - ic1, -150000, 150000);
+        ic2 = clamp(2 * v2 - ic2, -150000, 150000);
+        y = ty == 1u ? v2 : ty == 2u ? v1 : in - ((k * v1) >> 12) - v2;
+        dst[i] += y;
+    }
+    st[0] = ic1;
+    st[1] = ic2;
+}
+#endif
+
 static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
 {
     const engine_t *e = ENGINES[t->engine];
@@ -697,6 +730,13 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         m.shape = (64 << 8) + ((lfo * p[P_LD_SHP]) >> 7) + ((m.envq15 * p[P_ED_SHP]) >> 7);
         if (mod.on)                                     /* the modulation matrix (mod.c) */
             mod_voice(t, v, &m, fine);
+#if FELUCCA_MONOFM
+        if (p[P_FLT] > 0 && p[P_FLT] <= 3) {            /* the track's FILTER (ENV > FILTER): the voice alone, then into */
+            mf_filter_voice(t, v, e, n, &m, spread_on > v->side ? spread_buf : out);   /* the sum */
+            nr++;
+            continue;
+        }
+#endif
         e->render(t, v, spread_on > v->side ? spread_buf : out, n, &m);   /* (SPREAD: the left ones) */
         nr++;
     }

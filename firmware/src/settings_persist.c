@@ -90,6 +90,20 @@ static int settings_import(persist_t *p, int n)
     if (p->panel.magic == PANEL_MAGIC) panel = p->panel;
     return current ? 1 : 2;
 }
+#if FELUCCA_MONOFM && defined(FELUCCA_FAVORITES)
+/* MONOFM's first start (over settings of another build, or none): HOME's knobs the four tracks' LEVELs (MENU > HOME
+ * LEVELS, ui.c ui_home_view), DARK; once (favorites.factory[15][12], a byte nothing else uses), then as saved */
+#define MONOFM_SEEN 0xA6u
+static void monofm_first_start(void)
+{
+    if (favorites.factory[15][12] == MONOFM_SEEN)
+        return;
+    favorites.factory[15][12] = MONOFM_SEEN;
+    favorites.factory[15][26] = 2u;                     /* HV_LEVELS */
+    settings.palette = UI_DARK_INDEX;
+    palette_set(settings.palette);
+}
+#endif
 
 /* Start with the last imported/saved object, including fields owned by a
  * feature absent from this build. No save-on-boot or extra flash writes. */

@@ -1754,6 +1754,15 @@ static void ui_input(void)
             if (home_xy(k))
                 xy_link(song.sel % NTRK, (k & 3u) - NLIVE);   /* XY LINK: the other part along */
 #endif
+#if FELUCCA_MONOFM
+            if (ui.home == HOME_XY) {                   /* XY: X / Y on every track, recorded on the selected one; */
+                if ((k & 3u) < 2u) {                     /* HPF / LPF the master's */
+                    xy_set(k & 1u, *vp);
+                    motion_capture(TSEL, (uint32_t)(vp - TSEL->p), *vp);
+                }
+                continue;
+            }
+#endif
             if (!home_xy(k) && !home_mfilt(k)) {         /* (STRANGE's X / Y, master filters: not a track's) */
                 motion_capture(home_trk(k), (uint32_t)(vp - home_trk(k)->p), *vp);   /* (LEVELS: that track's, as MIXER) */
                 ml_knob(home_trk(k), (uint32_t)(vp - home_trk(k)->p));

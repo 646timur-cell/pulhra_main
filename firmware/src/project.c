@@ -1094,6 +1094,9 @@ static void persist_boot(void)                    /* before settings_init / pane
         if (settings_import(&p, n))
             persist_saved = p;
     }
+#if FELUCCA_MONOFM && defined(FELUCCA_FAVORITES)
+    monofm_first_start();
+#endif
     {   /* projects: fill empty RAM slots from flash, so the slot list is right after power-on */
         uint32_t i;
         for (i = 0; i < 4u; i++)

@@ -734,7 +734,7 @@ static void draw_foot(void)
     int32_t x;
     sound_name(t, pn);
     if (ui.home)
-        str_cpy(ti, ui.home == HOME_TRANSPOSE ? "TRANSPOSE" : "HOME", sizeof ti);
+        str_cpy(ti, ui.home == HOME_TRANSPOSE ? (FELUCCA_MONOFM ? "XY" : "TRANSPOSE") : ui.home == 3u ? "XY" : "HOME", sizeof ti);
     else                                               /* page title + number in its family: "ENV DEST 2/2" */
         page_title(ti);
     str_cpy(s, ename, sizeof s);
@@ -874,7 +874,8 @@ static void draw_columns(void)
             const param_desc_t *d = home_param(c, &vp);
             param_format(d, *vp, val, &unit);
             card_mot_of(vp);
-            if (home_xy(c) || home_mfilt(c))            /* STRANGE: X / Y of the selected track, the master filters */
+            if (home_xy(c) || home_mfilt(c) || (FELUCCA_MONOFM && ui.home == 3u))   /* STRANGE: X / Y of the selected
+                                                     * track, the master filters; MONOFM's XY: X Y of every track, HPF LPF */
                 draw_column(c, d->label, val, unit, *vp ? VAL(c) : T_DIM, RATIO(d, *vp), ICON_MOD);
             else if (ui.home == HOME_TRANSPOSE)             /* sound module: T1..T4 TRN, the semitones; 0 (none): DIM */
                 draw_column(c, "TRN", val, unit, *vp ? VAL(c) : T_DIM, RATIO(d, *vp), trk_icon(c, 1));

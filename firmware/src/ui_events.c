@@ -56,6 +56,10 @@ static int ev_id_ok(const track_t *t, uint32_t id)
     const param_desc_t *d;
     if (ev_sid(id))
         return 1;
+#if FELUCCA_MONOFM                                      /* (MONOFM's X Y, HITS ROT, CUT RES FILT: rows of their own) */
+    if (id == P_XV || id == P_YV || id == P_EHITS || id == P_EROT || id == P_FCUT || id == P_FRES || id == P_FLT)
+        return 1;
+#endif
     if (id >= P_COUNT || !motion_param(id) || id == P_ED_FX || (id >= P_FM1_ATK && id <= P_FM4_LEVEL))
         return 0;
     if (id >= P_LN0 && id <= P_LN7)

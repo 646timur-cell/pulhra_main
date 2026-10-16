@@ -297,6 +297,27 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
 #define XY_REV 9u
 #define XY_E(k) (12u + (k))
 
+#if FELUCCA_MONOFM
+/* MONOFM's own track parameters, on ids no MONOFM sound uses (DIGITAL's operators, ANALOG's filter TYPE, the unused
+ * ENV FX): stored, recalled and lockable as any other (ids and formats unchanged) */
+#define P_EUC P_ED_FX            /* EUCLID ON: the track's steps play where a euclidean pattern of LEN hits (seq.c) */
+#define P_EHITS P_FM2_LEVEL      /* .. its HITS (0..64) */
+#define P_EROT P_FM3_LEVEL       /* .. its ROT (0..63) */
+#define P_XV P_FTYPE             /* X and Y (0..127): the XY morph of the track, set on every track at once (HOME XY, */
+#define P_YV P_FM3_ATK           /* CC16 / CC17), recorded and locked as the track's (mod.c) */
+#define P_FLT P_FM3_DEC          /* the track's FILTER (voice.c): OFF LP BP HP, after the machine, per voice */
+#define P_FCUT P_FM3_SUS         /* .. its CUTOFF, moved by ENV's FLT, the LFO's and the matrix's CUT */
+#define P_FRES P_FM1_LEVEL       /* .. its RESONANCE */
+/* step i (0..LEN-1) of a euclidean pattern of hits k over n = LEN steps, rotated by r: x..x..x. for 3 of 8 */
+static inline int mf_euc_hit(const int16_t *p, uint32_t i)
+{
+    uint32_t n = p[P_SLEN] > 0 ? (uint32_t)p[P_SLEN] : 1u, k = p[P_EHITS] > 0 ? (uint32_t)p[P_EHITS] : 0u;
+    uint32_t r = p[P_EROT] > 0 ? (uint32_t)p[P_EROT] % n : 0u;
+    k = k < n ? k : n;
+    return k && (((i + r) % n) * k) % n < k;
+}
+#endif
+
 /* ------------------------------------------------- tracks, the song --- */
 enum { ST_NOTE, ST_TIE, ST_REST };
 #define SF_ACCENT 1u

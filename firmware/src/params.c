@@ -58,6 +58,9 @@ static const char *const N_GO[] = {"--", "GO"};
 #if FELUCCA_STRANGE
 static const char *const N_XYLINK[] = {"OFF", "ON", "INV", "CROSS"};   /* XY LINK (G_XYLINK) */
 #endif
+#if FELUCCA_MONOFM
+static const char *const N_MFILT[] = {"OFF", "LP", "BP", "HP"};      /* MONOFM's track FILTER (P_FLT, voice.c) */
+#endif
 static const char *const N_SLCR[] = {"OFF", "GATE", "STUT"};             /* SL_OFF .. SL_STUT (slicer.c) */
 static const char *const N_SLDIV[] = {"1/8", "1/16", "1/32", "8T", "16T", "32T"};   /* SL_DEN */
 /* the INSERT's types (1.5, fx.c IT_*; append-only: stored). Its three values A B C mean what the type says (ins_desc) */
@@ -120,8 +123,10 @@ static void micro_fix(int16_t *p)
     if (p[P_FM4_LEVEL] >= 0 && p[P_FM4_LEVEL] < MT_N)
         return;
     p[P_FM4_LEVEL] = MT_OFF;
+#if !FELUCCA_MONOFM                                      /* (MONOFM: those ids are its FILTER's) */
     p[P_FM3_DEC] = 100;
     p[P_FM3_SUS] = 0;
+#endif
     for (d = 0; d < 12u; d++)
         p[MDEG_P(d)] = 0;
 }
@@ -134,13 +139,14 @@ static int32_t micro_cents(const int16_t *p, uint32_t deg)
         return 0;
     deg %= 12u;
     if (ty == MT_RAND && deg) {                          /* the dice: +-50, the same for a SEED (ROOT stays) */
-        uint32_t h = ((uint32_t)p[P_FM3_SUS] * 12u + deg + 1u) * 2654435761u;
+        uint32_t h = ((uint32_t)(FELUCCA_MONOFM ? 0 : p[P_FM3_SUS]) * 12u + deg + 1u) * 2654435761u;   /* (MONOFM: one
+                                                                                                  * SEED, AMT all) */
         h ^= h >> 15;
         base = (int32_t)((h * 2246822519u) >> 25) % 101 - 50;
     } else if (ty >= MT_JUST && ty < MT_RAND) {
         base = MT_CENTS[ty - MT_JUST][deg];
     }
-    return base * clamp(p[P_FM3_DEC], 0, 100) / 100 + p[MDEG_P(deg)];
+    return base * (FELUCCA_MONOFM ? 100 : clamp(p[P_FM3_DEC], 0, 100)) / 100 + p[MDEG_P(deg)];
 }
 #endif
 static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN", "PHYS",
@@ -275,6 +281,16 @@ static const param_desc_t TP[P_COUNT] = {
     [P_IMIX] = PD("MIX", F_PCT, 0, 127, 127),
     [P_FTYPE] = PE("TYPE", N_FTYPE, 0),           /* 1.5 (#104): ANALOG's filter, LP = as before (eng_analog.c) */
     [P_ESYNC] = PE("ESYNC", N_ONOFF, 0),          /* 1.5 (#175): OFF = ATK DEC REL in ms, as before (voice.c esync) */
+#if FELUCCA_MONOFM   /* MONOFM's own (core.h P_EUC ..): EUCLID, X / Y, the track FILTER on ids no MONOFM sound uses */
+    [P_EUC] = PE("EUCL", N_ONOFF, 0),
+    [P_EHITS] = PD("HITS", F_INT, 0, 64, 4),
+    [P_EROT] = PD("ROT", F_INT, 0, 63, 0),
+    [P_XV] = PD("X", F_PCT, 0, 127, 0),
+    [P_YV] = PD("Y", F_PCT, 0, 127, 0),
+    [P_FLT] = PE("FILT", N_MFILT, 0),
+    [P_FCUT] = PD("CUT", F_CUTOFF, 0, 127, 127),
+    [P_FRES] = PD("RES", F_PCT, 0, 127, 0),
+#endif
 };
 
 /* the INSERT's A B C as its TYPE means them (TP's ranges and defaults): the drives DRIVE TONE LEVEL, CRUSH BITS RATE
@@ -572,6 +588,9 @@ static const page_t PAGES[] = {
     {"ENV", FAM_ENV, SC_TRACK, GR_ADSR, {P_ATK, P_DEC, P_SUS, P_REL}},
     {"ENV DEST", FAM_ENV, SC_TRACK, GR_NONE, {P_ED_FLT, P_ED_PIT, P_ED_SHP, P_ESYNC}},   /* (P_ED_FX: nothing reads it);
                                                                              * 1.5: ESYNC, ENV's times as note values */
+#if FELUCCA_MONOFM   /* ENV: then the track's FILTER (voice.c), its cutoff moved by ENV DEST's FLT */
+    {"FILTER", FAM_ENV, SC_TRACK, GR_NONE, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}},
+#endif
     {"LFO", FAM_LFO, SC_TRACK, GR_LFO, {P_LRATE, P_LWAVE, P_LPHASE, P_LFADE}},
     {"LFO 2", FAM_LFO, SC_TRACK, GR_LFO, {P_LSYNC, P_LTRIG, P_LPOL, 0xFF}},   /* 1.2: SYNC TRIG POL */
     {"LFO DEST", FAM_LFO, SC_TRACK, GR_NONE, {P_LD_PIT, P_LD_FLT, P_LD_SHP, P_LD_AMP}},
@@ -586,14 +605,21 @@ static const page_t PAGES[] = {
     {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}},
     {"CHORD", FAM_SCL, SC_TRACK, GR_CHORD, {P_CHRD, P_VOIC, 0xFF, 0xFF}},   /* SCL again: the chord keys (chord.c) */
 #if FELUCCA_DARK   /* SCL: MICRO, the part's tuning, then its 12 degrees' own offsets */
+#if FELUCCA_MONOFM   /* (MONOFM: all of the tuning, one RAND; AMT and SEED's ids are its FILTER's) */
+    {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_ROOT, 0xFF, 0xFF}},
+#else
     {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_FM3_DEC, P_FM3_SUS, P_ROOT}},
+#endif
     {"MICRO 1", FAM_SCL, SC_TRACK, GR_MICRO, {P_LN0, P_LN1, P_LN2, P_LN3}},
     {"MICRO 2", FAM_SCL, SC_TRACK, GR_MICRO, {P_LN4, P_LN5, P_LN6, P_LN7}},
     {"MICRO 3", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_ATK, P_FM4_DEC, P_FM4_SUS, P_FM4_REL}},
 #endif
     {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
     {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
-#if FELUCCA_DARK
+#if FELUCCA_MONOFM
+    {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, 0xFF, 0xFF, 0xFF}},   /* the slice machines' samples (a user slot of
+                                                                            * one zone: 16 cuts; CUTS' id is RES's) */
+#elif FELUCCA_DARK
     {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, P_FM1_LEVEL, 0xFF, 0xFF}},   /* GLITCH only: its samples */
 #endif
     {"FILTER", FAM_EDIT, SC_TRACK, GR_NONE, {P_FTYPE, P_E4, P_E5, P_E7}},   /* ANALOG only (1.5, #104): TYPE CUT RES KTR */
@@ -631,6 +657,10 @@ static const page_t PAGES[] = {
 #endif
     {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}},
     {"ARP 2", FAM_ARP, SC_TRACK, GR_NONE, {P_ASWING, P_APROB, P_AHOLD, P_AORDER}},
+#if FELUCCA_MONOFM   /* ARP: then X / Y, the track's routes of the XY morph (HOME tapped twice: X / Y on every track) */
+    {"X", FAM_ARP, SC_TRACK, GR_XY, {P_FM1_ATK, P_FM1_DEC, P_FM1_SUS, P_FM1_REL}},
+    {"Y", FAM_ARP, SC_TRACK, GR_XY, {P_FM2_ATK, P_FM2_DEC, P_FM2_SUS, P_FM2_REL}},
+#endif
 #if FELUCCA_STRANGE   /* SEQ: EUCLID, the arp (MODE OFF: off) stepping through a euclidean pattern, the held / LATCHed notes */
     {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_AMODE, P_SLEN, P_SSWING, P_SGATE}},
     {"EUCLID 2", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_ARATE, P_FM3_ATK, P_AGATE, P_AHOLD}},
@@ -641,6 +671,9 @@ static const page_t PAGES[] = {
                                                              * (ui.c detail_on, ui_input.c sd_turn) */
     {"AUTOMATION", FAM_SEQ, SC_TRACK, GR_EVENTS, {0xFF, 0xFF, 0xFF, 0xFF}},  /* the locks, events, CHANCE and RATCH as a
                                                                              * list, PLAY and CLEAR (ui_events.c) */
+#if FELUCCA_MONOFM   /* SEQ tapped twice: EUCLID on / off (ui_layer.c); its page: ON, LEN, HITS, ROT, the pattern drawn */
+    {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_EUC, P_SLEN, P_EHITS, P_EROT}},
+#endif
     /* HOME's pages (1.2): HOME tapped on HOME the MIXER (up to 1.1.5 GLO's; LEVEL PAN REV MUTE), again CLOCK (up to 1.1.5
      * GLO > GLOBAL; its TUNE is MENU > AUDIO's now), again HOME (ui.c home_tap) */
     {"MIXER", FAM_TRK, SC_TRK, GR_TRK, {0, 1, 2, 3}},

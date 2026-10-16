@@ -55,6 +55,19 @@ _Static_assert(XY_DLY == MD_DLY && XY_REV == MD_REV && XY_E(0) == MD_E1, "core.h
  * and CC16 / CC17 on the track's channel (mod_midi). Performance state, as the mod wheel: not stored. With no matrix
  * slot taking an axis, the engine's own routes for it play (engine_t.xyd / xya: mod_begin) */
 static int16_t xy_val[NTRK][2];
+/* track t's X (ax 0) or Y (1), 0..127. MONOFM: the track's parameters (core.h P_XV, P_YV: recorded, locked, stored),
+ * set on every track at once (xy_set); STRANGE: its performance state */
+#if FELUCCA_MONOFM
+static int32_t xy_of(const track_t *t, uint32_t ax) { return t->p[ax ? P_YV : P_XV]; }
+static void xy_set(uint32_t ax, int32_t v)
+{
+    uint32_t i;
+    for (i = 0; i < NPART; i++)
+        trk[i].p[ax ? P_YV : P_XV] = (int16_t)clamp(v, 0, 127);
+}
+#else
+static int32_t xy_of(const track_t *t, uint32_t ax) { return xy_val[(t - trk) % NTRK][ax & 1u]; }
+#endif
 #if FELUCCA_STRANGE
 /* XY LINK (G_XYLINK): part s's axis ax just turned on HOME; the other parts along: ON the same, INV the other way,
  * CROSS on the other axis */
@@ -133,7 +146,7 @@ static int32_t mod_tsrc(const track_t *t, uint32_t s, int32_t lfo)
 #if FELUCCA_DARK
     case MS_X:
     case MS_Y:
-        return xy_val[(t - trk) % NTRK][s - MS_X] * 258;
+        return xy_of(t, s - MS_X) * 258;
 #endif
     default:
         return (127 - t->ex_off) * 258;
@@ -209,7 +222,7 @@ static __attribute__((noinline)) int mod_begin(track_t *t)
         uint32_t ax, r, used;
         for (ax = 0; ax < 2u; ax++) {
             const int16_t *q = &p[XY_ROUTE(ax)];
-            if (!xy_val[(t - trk) % NTRK][ax])
+            if (!xy_of(t, ax))
                 continue;
             for (used = 0, k = 0; k < nv; k++)
                 used |= vs[k] == MS_X + ax;
@@ -344,8 +357,12 @@ static __attribute__((noinline)) void mod_midi(track_t *t, uint32_t st, uint32_t
         else if (d1 == 121u)
             t->mw = t->at = t->ex_off = 0;
 #if FELUCCA_DARK
-        else if (d1 == 16u || d1 == 17u)                /* STRANGE: X, Y of the XY morph */
+        else if (d1 == 16u || d1 == 17u)                /* STRANGE: X, Y of the XY morph (MONOFM: every track's) */
+#if FELUCCA_MONOFM
+            xy_set(d1 - 16u, (int32_t)d2);
+#else
             xy_val[(t - trk) % NTRK][d1 - 16u] = (int16_t)d2;
+#endif
 #endif
     }
 }

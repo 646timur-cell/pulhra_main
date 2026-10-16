@@ -496,7 +496,7 @@ static void graph_slicer(const track_t *t, uint16_t c)
 /* MOD page: the four slots as rows "1 LFO > CUT +50%" (M, a list's rows: the source to x 78, the arrow 84..98, the
  * destination of up to 5 characters 106..160, the amount from 172), the one KNOB 2..4 edit selected, slots that do
  * nothing (SRC, DST or AMT at 0) dim */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 /* ARP > X / Y: the axis' value (HOME KNOB 3 / 4, CC16 / CC17) as a bar, then the routes it plays: the sound's own
  * (OWN) or, with none set, the engine's (ENGINE, dim); a matrix slot taking the axis overrides both (MOD) */
 static void graph_xy(const track_t *t, uint16_t c)
@@ -504,7 +504,7 @@ static void graph_xy(const track_t *t, uint16_t c)
     uint32_t ax = cur_page()->title[0] == 'Y', r, n = 0, k, mod = 0;
     const int16_t *q = &t->p[XY_ROUTE(ax)];
     const engine_t *e = ENGINES[t->eng_req % NENGINES];
-    int32_t v = xy_val[trk_index(t)][ax];
+    int32_t v = xy_of(t, ax);
     char b[24];
     const char *unit;
     for (k = 0; k < NMSLOT; k++)
@@ -529,6 +529,63 @@ static void graph_xy(const track_t *t, uint16_t c)
         cv_text(12, 42, &AF_M, "NOTHING", T_DIM);
 }
 
+#if FELUCCA_MONOFM
+/* HOME XY (HOME tapped twice): the pad, its point at X / Y (every track's), the selected track's routes of each axis
+ * under it (ARP > X, Y; the engine's when it has none) */
+static void graph_xypad(const track_t *t, uint16_t c)
+{
+    int32_t x = xy_of(t, 0), y = xy_of(t, 1), px = 14 + x * 92 / 127, py = 92 - y * 82 / 127, ax;
+    cv_rrect(10, 6, 100, 90, 4, T_RAISE, T_SURF);
+    cv_rect(10 + 50, 8, 1, 86, T_SURF);
+    cv_rect(12, 51, 96, 1, T_SURF);
+    cv_rrect(px - 4, py - 4, 9, 9, 4, c, T_RAISE);
+    for (ax = 0; ax < 2; ax++) {                      /* the routes: "X  CUT +40" */
+        const int16_t *q = &t->p[XY_ROUTE((uint32_t)ax)];
+        const engine_t *e = ENGINES[t->eng_req % NENGINES];
+        int own = xy_custom(t->p, (uint32_t)ax), r, n = 0;
+        cv_text(122, 6 + 46 * ax, &AF_M, ax ? "Y" : "X", c);
+        for (r = 0; r < 3 && n < 2; r++) {
+            int32_t d = own ? (r < 2 ? q[2 * r] : 0) : e->xyd[ax][r], a = own ? (r < 2 ? q[2 * r + 1] : 0) : e->xya[ax][r];
+            if (!d || !a)
+                continue;
+            cv_text(140, 8 + 46 * ax + 18 * n, &AF_S, mod_dst_name(t, d), own ? T_TEXT : T_MID);
+            n++;
+        }
+        if (!n)
+            cv_text(140, 8 + 46 * ax, &AF_S, "NOTHING", T_DIM);
+    }
+}
+/* SEQ > EUCLID (MONOFM): the track's LEN steps in rows of 16, a hit THEME, a rest RAISE, a hit with a note of its own a
+ * dot in it, the step playing ACCENT; EUCLID OFF: all of it dim. Under it what it does */
+static void graph_meuc(const track_t *t, uint16_t c)
+{
+    uint32_t n = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP), i, rows = (n + 15u) / 16u, m = n < 16u ? n : 16u;
+    uint32_t on = t->p[P_EUC] != 0, cur = song.playing ? t->seq_idx : 0xFFFFu, k = 0;
+    int32_t w = (216 - 2 * ((int32_t)m - 1)) / (int32_t)m, x0 = 120 - ((int32_t)m * (w + 2) - 2) / 2;
+    int32_t ch = rows > 2u ? 12 : 18, gap = rows > 2u ? 3 : 4;
+    char b[28];
+    for (i = 0; i < n; i++) {
+        int32_t x = x0 + (int32_t)(i % 16u) * (w + 2), y = 6 + (int32_t)(i / 16u) * (ch + gap);
+        int hit = mf_euc_hit(t->p, i);
+        uint16_t col = i == cur ? T_ACCENT : !hit ? T_RAISE : on ? c : T_DIM;
+        k += (uint32_t)hit;
+        cv_rrect(x, y, w, ch, w > 8 ? 2 : 1, col, T_SURF);
+        if (hit && (t->step[i].n || t->step[i].hit) && w > 6)
+            cv_rect(x + w / 2 - 1, y + ch / 2 - 1, 3, 3, i == cur ? T_SURF : T_TEXT);
+    }
+    if (!on)
+        str_cpy(b, "SEQ TWICE (K1) TO START", sizeof b);
+    else {
+        fmt_int(b, (int32_t)k);
+        str_cpy(b + str_len(b), " OF ", sizeof b - str_len(b));
+        fmt_int(b + str_len(b), (int32_t)n);
+        str_cpy(b + str_len(b), " STEPS PLAY", sizeof b - str_len(b));
+    }
+    GFX_HOOK_ALIGN(0, 0, 240, 0, AL_H, "euclid status centred");
+    cv_text_in(0, 86, 240, &AF_S, b, on ? T_MID : T_TEXT, T_SURF);
+}
+#endif
+#if FELUCCA_STRANGE
 /* EUCLID (STRANGE's SEQ): the pattern, a row of STEPS cells (two rows past 16): a hit THEME, a rest RAISE, the step
  * the arp is on (a note held or LATCHed, MODE on) ACCENT; MODE OFF: all of it dim */
 static void graph_euclid(const track_t *t, uint16_t c)
@@ -559,6 +616,7 @@ static void graph_euclid(const track_t *t, uint16_t c)
         cv_text_in(0, 84, 240, &AF_S, s, on && t->nheld ? T_MID : T_TEXT, T_SURF);
     }
 }
+#endif
 #endif
 
 #if FELUCCA_DARK
@@ -1270,6 +1328,11 @@ static uint32_t graph_signature(void)
     const page_t *pg = cur_page();
     const track_t *t = TSEL;
     uint32_t h = 2166136261u, i;
+#if FELUCCA_MONOFM
+    if (ui.home == HOME_XY)                          /* XY: the point, the filters, the routes of the selected track */
+        return h ^ ((uint32_t)xy_of(t, 0) * 131u + (uint32_t)xy_of(t, 1) * 7919u + (uint32_t)song.g[G_MHPF] * 31u +
+                    (uint32_t)song.g[G_MLPF] * 977u + song.sel * 65537u);
+#endif
     if (ui.home)
         return h ^ (ui.frame / 2u);                  /* scope: redraw every other frame */
     h ^= (uint32_t)pg->graph * 131u + TSEL->eng_req + song.sel * 7777u + ui.page * 1291u;
@@ -1300,12 +1363,12 @@ static uint32_t graph_signature(void)
             h ^= (ui_prefs & PREF_LARGE) ? 0x2545F491u : 0u;
         }
     }
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     if (pg->graph == GR_XY)                          /* (the axis' value) */
-        h ^= (uint32_t)xy_val[song.sel % NTRK][pg->title[0] == 'Y'] * 40503u;
+        h ^= (uint32_t)xy_of(t, pg->title[0] == 'Y') * 40503u;
 #endif
-    if (pg->graph == GR_EUCLID)                      /* (the step the arp is on) */
-        h ^= (uint32_t)t->euc_pos * 2654435761u + t->nheld;
+    if (pg->graph == GR_EUCLID)                      /* (the step the arp is on; MONOFM: the step playing) */
+        h ^= (uint32_t)(FELUCCA_MONOFM ? t->seq_idx * 7u + song.playing : t->euc_pos) * 2654435761u + t->nheld;
     if (pg->graph == GR_MOD)
         h ^= (mod_ui_slot + 1u) * 40503u;
     if (pg->graph == GR_SLCR && t->p[P_SLCR])        /* the SLICER's step playing */
@@ -1321,13 +1384,13 @@ static uint32_t graph_signature(void)
 #if FELUCCA_SLICE
     if (pg->graph == GR_SLICES && slice_page_ok()) h ^= slice_sig();
 #endif
-    if (pg->scope == SC_ENGINE && (ENGINES[t->eng_req % NENGINES] == &ENG_WHEEL || t->eng_req % NENGINES == ENGI_FM6 ||
+    if (pg->scope == SC_ENGINE && (ENGINES[t->eng_req % NENGINES] == FELREF(ENG_WHEEL) || t->eng_req % NENGINES == ENGI_FM6 ||
                                    (FELUCCA_FM4 && t->eng_req % NENGINES == ENGI_DIGITAL)))
         h ^= (ui.hot_t ? ui.hot_col + 1u : 0u) * 65537u;
     if ((pg->scope == SC_ENGINE || fop_page(pg->graph)) && t->eng_req % NENGINES == ENGI_FM6)   /* the patch (PAT's algorithm,
                                                      * levels, FB; the operator pages: the operator, the stage) */
         h ^= (fm6_pgen[(t - trk) % NTRK] + 1u) * 2246822519u + (fop_op + 1u) * 40503u + (fop_stg + 1u) * 7919u;
-    if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_SAMPLE) h ^= sample_wave.pos * 13u + sample_wave.key;
+    if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == FELREF(ENG_SAMPLE)) h ^= sample_wave.pos * 13u + sample_wave.key;
     if (pg->graph == GR_ROLL) {
         uint32_t ph = song.playing ? t->seq_idx : 0xFFFFu;
         if (ph / 16u != ui.bank)
@@ -2348,11 +2411,11 @@ static void draw_graph(void)
         draw_tracks();
         return;
     }
-    if (ui.home && home_tracks()) {                  /* MENU > HOME TRACKS (1.3) */
+    if (ui.home && home_tracks() && !(FELUCCA_MONOFM && ui.home == 3u)) {   /* MENU > HOME TRACKS (1.3; MONOFM: not XY) */
         draw_home_tracks();
         return;
     }
-    if (!ui.home && pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_SAMPLE) sample_wave_tick(t);
+    if (!ui.home && pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == FELREF(ENG_SAMPLE)) sample_wave_tick(t);
     sig = graph_signature();
     if (!ui.force && sig == ui.graph_sig)
         return;
@@ -2372,6 +2435,11 @@ static void draw_graph(void)
         graph_ht = 100;
     } else if (ui.home) {
         cv_oy = 0;
+#if FELUCCA_MONOFM
+        if (ui.home == HOME_XY)
+            graph_xypad(t, c);
+        else
+#endif
         graph_scope(c);
     } else {
         switch (pg->graph) {
@@ -2410,9 +2478,13 @@ static void draw_graph(void)
             cv_oy = 0;
             graph_mod(t, c);
             break;
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
         case GR_EUCLID:
+#if FELUCCA_MONOFM
+            graph_meuc(t, c);
+#else
             graph_euclid(t, c);
+#endif
             break;
         case GR_XY:
             graph_xy(t, c);
@@ -2463,8 +2535,8 @@ static void draw_graph(void)
             if (fop_ok()) graph_fm6env(t, c);
             break;
         default:
-            if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_WHEEL) graph_wheel(t, c);
-            else if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_SAMPLE && sample_wave.ready) graph_sample(c);
+            if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == FELREF(ENG_WHEEL)) graph_wheel(t, c);
+            else if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == FELREF(ENG_SAMPLE) && sample_wave.ready) graph_sample(c);
             else if (pg->scope == SC_ENGINE && t->eng_req % NENGINES == ENGI_FM6) graph_fm6(t, c, 6u);   /* EDIT 1 and 2 */
 #if FELUCCA_FM4
             else if ((pg->scope == SC_ENGINE || pg->id[0] == P_FM1_LEVEL) && t->eng_req % NENGINES == ENGI_DIGITAL)

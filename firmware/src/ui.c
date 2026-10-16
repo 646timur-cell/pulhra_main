@@ -425,7 +425,7 @@ static int page_visible(uint32_t i)
     if (PAGES[i].scope == SC_TRACK && PAGES[i].id[0] >= P_LN0 && PAGES[i].id[0] <= P_LN7)
         return TSEL->eng_req % NENGINES == ENGI_DRUM;
     if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): ANALOG's */
-        return ENGINES[TSEL->eng_req % NENGINES] == &ENG_ANALOG;
+        return ENGINES[TSEL->eng_req % NENGINES] == FELREF(ENG_ANALOG);
     if (PAGES[i].graph >= GR_FMOP && PAGES[i].graph <= GR_FMENV)
         return TSEL->eng_req % NENGINES == ENGI_FM6;
 #if FELUCCA_SLICE
@@ -722,12 +722,54 @@ static void go_home(void)
     help_start();
 }
 
+#if FELUCCA_MONOFM
+/* SEQ tapped twice (ui_layer.c layer_tick): the selected track's EUCLID on / off, and its page shown */
+static void mf_euclid_toggle(void)
+{
+    uint32_t i;
+    TSEL->p[P_EUC] = (int16_t)!TSEL->p[P_EUC];
+    for (i = 0; i < NPAGES; i++)
+        if (PAGES[i].graph == GR_EUCLID)
+            break;
+    if (i < NPAGES) {
+        ui.page = (uint8_t)i;
+        ui.fam_last[FAM_SEQ] = (uint8_t)i;
+        ui.home = 0;
+        page_entered();
+    }
+    ui_message(TSEL->p[P_EUC] ? "EUCLID ON" : "EUCLID OFF");
+    ui.force = 1;
+}
+/* HOME tapped twice (on HOME, the second tap within 0.4 s of the first): XY, HOME's knobs X and Y of every track
+ * (mod.c xy_set; recorded on the selected one) and the master filters; HOME again: HOME */
+#define HOME_XY 3u
+static uint32_t home_tap_ms;
+#endif
 /* HOME tapped (1.2): HOME -> MIXER (up to 1.1.5 GLO's first page) -> CLOCK (up to 1.1.5 GLO > GLOBAL) -> HOME; from any
  * other page HOME. HOME's pages are FAM_TRK's, in PAGES order, always from the first (none remembered). Held: the menu
  * (ui_input) */
 static void home_tap(void)
 {
     uint32_t i = ui.page + 1u;
+#if FELUCCA_MONOFM
+    {
+        uint32_t was = home_tap_ms, from_home = ui.home == 1u || (!ui.home && cur_page()->fam == FAM_TRK);
+        home_tap_ms = fm1_ms;
+        if (ui.home == HOME_XY) {                     /* XY: back to HOME */
+            go_home();
+            home_tap_ms = 0;
+            return;
+        }
+        if (from_home && was && fm1_ms - was <= 400u && !ui.home && cur_page()->fam == FAM_TRK) {
+            go_home();                                /* the second tap (the first went to the MIXER): XY */
+            ui.home = HOME_XY;
+            home_tap_ms = 0;
+            return;
+        }
+        if (ui.home != 1u)
+            home_tap_ms = 0;                          /* (a double tap counts from HOME only) */
+    }
+#endif
     if (FELUCCA_MODULE && ui.home == 1u) {            /* sound module: HOME twice is TRANSPOSE (then MIXER, CLOCK) */
         ui.home = HOME_TRANSPOSE;
         ui.force = 1;
@@ -1169,6 +1211,12 @@ static void pat_load_ui(track_t *t, uint32_t n)
  * insert, which chops whatever the track plays in time with its sequencer */
 static int param_kept(uint32_t i)
 {
+#if FELUCCA_MONOFM                                      /* (MONOFM: EUCLID and X / Y are the track's; its FILTER the sound's) */
+    if (i == P_EUC || i == P_EHITS || i == P_EROT || i == P_XV || i == P_YV)
+        return 1;
+    if (i == P_FLT || i == P_FCUT || i == P_FRES)
+        return 0;
+#endif
     return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_DARK && (i == P_FM3_ATK ||
            i == P_FM3_DEC || i == P_FM3_SUS || i == P_FM3_REL || i == P_FM1_LEVEL || (i >= P_FM4_ATK && i <= P_FM4_LEVEL) || (i >= P_LN0 && i <= P_LN7))) ||
            (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT;
@@ -1621,6 +1669,17 @@ static int home_mfilt(uint32_t k) { (void)k; return 0; }
 #endif
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
+#if FELUCCA_MONOFM
+    if (ui.home == HOME_XY) {                         /* XY: X Y (the selected track's, every track's: xy_set), HPF LPF */
+        static const uint8_t ID[2] = {P_XV, P_YV};
+        if ((k & 3u) < 2u) {
+            *vp = &TSEL->p[ID[k & 1u]];
+            return &TP[ID[k & 1u]];
+        }
+        *vp = &song.g[(k & 3u) == 2u ? G_MHPF : G_MLPF];
+        return &GP[(k & 3u) == 2u ? G_MHPF : G_MLPF];
+    }
+#endif
 #if FELUCCA_STRANGE
     if (home_xy(k)) {
         *vp = &xy_val[song.sel % NTRK][(k & 3u) - NLIVE];

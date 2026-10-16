@@ -364,6 +364,144 @@ static int test_midi_parts(void)
     return check("MONOFM: MIDI channels 1..4 play T1..T4", ok);
 }
 
+
+/* EUCLID: LEN 8, 3 hits: steps 0 3 6 play (x..x..x.); an empty hit plays C3 + ROOT, a hit with a note its note, a step
+ * off the pattern nothing even with a note; a lock on a hit applies; ROT 1 moves it; SEQ tapped twice toggles it and
+ * shows its page */
+static uint32_t eu_played[16], eu_note[16];
+static int test_euclid(void)
+{
+    int32_t buf[2 * CTL];
+    int bad = 0;
+    uint32_t k, last = 0xFFFFu, ok;
+    track_t *t = &trk[0];
+    ui_power_on();
+    song.g[G_BPM] = 120;
+    song.sel = 0;
+    set_engine_of(t, ENGI_MSINE);
+    apply_preset_to(t, 0);
+    for (k = 0; k < 8u; k++)
+        mix_block(buf, CTL);
+    memset(t->step, 0, sizeof t->step);
+    t->p[P_SLEN] = 8;
+    t->p[P_ROOT] = 2;                                    /* (D: C3 + 2 = 50) */
+    t->step[3].n = 1;                                    /* a note on a hit */
+    t->step[3].note[0] = 67;
+    t->step[3].time = ST_NOTE;
+    t->step[4].n = 1;                                    /* a note off the pattern */
+    t->step[4].note[0] = 72;
+    t->step[4].time = ST_NOTE;
+    t->p[P_EUC] = 1;
+    t->p[P_EHITS] = 3;
+    t->p[P_EROT] = 0;
+    motion_set_lock(t, 6, P_E0, 90);                     /* (FOLD locked on step 6) */
+    memset(eu_played, 0, sizeof eu_played);
+    seq_start();
+    for (k = 0; k < (uint32_t)(SR * 4u / CTL); k++) {
+        uint32_t j;
+        mix_block(buf, CTL);
+        if (t->seq_idx != last) {                        /* a step started: what sounds now */
+            last = t->seq_idx;
+            for (j = 0; j < NVOICE; j++)
+                if (t->v[j].active && t->v[j].gate) {
+                    eu_played[last % 16u]++;
+                    eu_note[last % 16u] = t->v[j].note;
+                }
+            if (last == 6u && t->p[P_E0] != 90)
+                eu_played[15] = 99;                      /* (the lock missing) */
+        }
+    }
+    seq_stop();
+    ok = eu_played[0] && eu_played[3] && eu_played[6] && !eu_played[1] && !eu_played[2] && !eu_played[4] &&
+         !eu_played[5] && !eu_played[7] && eu_note[0] == 50u && eu_note[3] == 67u && eu_note[6] == 50u && !eu_played[15];
+    bad += check("MONOFM EUCLID: 3 of 8 plays steps 0 3 6, the root on empty hits, a hit's own note, its lock", ok);
+    t->p[P_EROT] = 1;
+    bad += check("MONOFM EUCLID: ROT 1 moves the hits (steps 2 5 7)", !mf_euc_hit(t->p, 0) && mf_euc_hit(t->p, 2) &&
+                 mf_euc_hit(t->p, 5) && mf_euc_hit(t->p, 7) && !mf_euc_hit(t->p, 3));
+    t->p[P_EHITS] = 0;
+    bad += check("MONOFM EUCLID: HITS 0 plays nothing", !mf_euc_hit(t->p, 0) && !mf_euc_hit(t->p, 2));
+    t->p[P_EHITS] = 3;
+    t->p[P_EUC] = 0;
+    frames(600);
+    press(B_SEQ);
+    press(B_SEQ);
+    frames(200);
+    ok = t->p[P_EUC] == 1 && !ui.home && cur_page()->graph == GR_EUCLID && !ui.lock;
+    press(B_SEQ);
+    press(B_SEQ);
+    frames(200);
+    bad += check("MONOFM EUCLID: SEQ tapped twice turns it on (its page), again off; no layer lock", ok && t->p[P_EUC] == 0);
+    bad += check("MONOFM EUCLID: its parameters stay with a sound load", (apply_preset_to(t, 1), t->p[P_EHITS] == 3 &&
+                 t->p[P_SLEN] == 8));
+    return bad;
+}
+
+/* HOME tapped twice: XY; KNOB 1 / 2 set X / Y on every track; HOME again: HOME. X drives a route (ARP > X: X -> FOLD) */
+static int test_xy(void)
+{
+    int bad = 0, ok;
+    uint32_t i;
+    ui_power_on();
+    frames(600);
+    if (!ui.home)
+        press(B_HOME);
+    frames(600);
+    press(B_HOME);
+    press(B_HOME);
+    frames(100);
+    ok = ui.home == HOME_XY;
+    turn(EN_K1, 40);
+    turn(EN_K2, 20);
+    for (i = 0; i < NPART; i++)
+        ok &= trk[i].p[P_XV] > 20 && trk[i].p[P_YV] > 10 && trk[i].p[P_XV] == trk[0].p[P_XV];
+    bad += check("MONOFM XY: HOME twice opens it, KNOB 1 / 2 set X / Y on all four tracks", ok);
+    press(B_HOME);
+    frames(100);
+    bad += check("MONOFM XY: HOME again: HOME", ui.home == 1u);
+    midi_event(0xB0, 2, 16, 100);
+    ok = 1;
+    for (i = 0; i < NPART; i++)
+        ok &= trk[i].p[P_XV] == 100;
+    bad += check("MONOFM XY: CC16 on any channel sets X everywhere; the matrix source reads it", ok &&
+                 mod_tsrc(&trk[1], MS_X, 0) == 100 * 258);
+    return bad;
+}
+
+/* the track FILTER: a saw through LP at a low CUT is much quieter than open; HP at a high CUT too; OFF as before */
+static double flt_rms(int32_t ty, int32_t cut)
+{
+    int32_t buf[2 * CTL];
+    uint32_t k, i;
+    double sq = 0;
+    ui_power_on();
+    song.master_q12 = 4096;
+    set_engine_of(&trk[0], ENGI_MSAW);
+    apply_preset_to(&trk[0], 1);
+    trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;
+    trk[0].p[P_FLT] = (int16_t)ty;
+    trk[0].p[P_FCUT] = (int16_t)cut;
+    trk[0].p[P_FRES] = 0;
+    for (k = 0; k < 8u; k++)
+        mix_block(buf, CTL);
+    midi_event(0x90, 0, 45, 100);
+    for (k = 0; k < 1000u; k++) {
+        mix_block(buf, CTL);
+        if (k > 200u)
+            for (i = 0; i < CTL; i++)
+                sq += (double)buf[2u * i] * buf[2u * i];
+    }
+    midi_event(0x80, 0, 45, 0);
+    return sqrt(sq / (800.0 * CTL));
+}
+static int test_filter(void)
+{
+    double off = flt_rms(0, 127), lp = flt_rms(1, 8), lpo = flt_rms(1, 127), hp = flt_rms(3, 110), bp = flt_rms(2, 60);
+    char what[160];
+    snprintf(what, sizeof what, "MONOFM FILTER: rms OFF %.0f, LP open %.0f, LP 8 %.0f, HP 110 %.0f, BP 60 %.0f", off, lpo, lp,
+             hp, bp);
+    return check(what, lp < off * 0.4 && fabs(lpo / off - 1.0) < 0.25 && hp < off * 0.6 && bp > 50.0 && bp < off);
+}
+
 int main(void)
 {
     const char *wavs = getenv("WAVS");
@@ -380,6 +518,9 @@ int main(void)
     bad += test_plock();
     bad += test_steps(wavs);
     bad += test_machines(wavs);
+    bad += test_euclid();
+    bad += test_xy();
+    bad += test_filter();
     printf(bad ? "monofm: %d FAILED\n" : "monofm: all passed\n", bad);
     return bad != 0;
 }

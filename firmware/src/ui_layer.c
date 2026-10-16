@@ -413,6 +413,14 @@ static uint32_t layer_gesture(uint32_t now, uint32_t combo)
         return 0;
     }
     l = *t0 & (LY_OPEN | LY_DEAD) || combo ? 0u : l;   /* (a knob turned as it was let go: a combo, no tap) */
+#if FELUCCA_MONOFM
+    if (l == LAYER_SEQ && lys.dtap) {                   /* MONOFM: SEQ tapped twice is the track's EUCLID (no lock) */
+        lys.dtap = 0;
+        layer_let_go(0);
+        mf_euclid_toggle();
+        return 0;
+    }
+#endif
     if (l && lys.dtap) {                                /* #83: a double tap: locked open (no tap) */
         lys.dtap = 0;
         layer_lock(l, now);

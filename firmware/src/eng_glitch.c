@@ -228,7 +228,7 @@ static void glitch_note_on(track_t *t, voice_t *v)
 {
     const int16_t *p = t->p;
     gl_slot_t *S = gl_slot(t, v);
-    uint32_t kit = gl_src(t), nz = gl_nz(kit), ns = kit - 1u < SMP_USER_SLOTS && nz == 1u ? (uint32_t)clamp(p[P_FM1_LEVEL], 2, 16) : nz;
+    uint32_t kit = gl_src(t), nz = gl_nz(kit), ns = kit - 1u < SMP_USER_SLOTS && nz == 1u ? (FELUCCA_MONOFM ? 16u : (uint32_t)clamp(p[P_FM1_LEVEL], 2, 16)) : nz;   /* (MONOFM: CUTS's id is the FILTER's RES) */
     uint32_t sl = ns ? ((uint32_t)v->note + (uint32_t)p[P_E0]) % ns : 0u;
     int32_t dn = (int32_t)v->note - 48, oct = ns ? (dn >= 0 ? dn / (int32_t)ns : -((-dn + (int32_t)ns - 1) / (int32_t)ns)) : 0;
     int32_t d16 = (p[P_E1] + 12 * oct) * 16;

@@ -75,8 +75,10 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
  * engines are not in it (FEL: the reserved stub plays their numbers, silent; their code drops out unreferenced) */
 #if FELUCCA_MONOFM
 #define FEL(e) (&ENG_FM4_GONE)
+#define FELREF(e) ((const engine_t *)0)  /* (a test for one of them elsewhere: never, and no reference keeps its code) */
 #else
 #define FEL(e) (&(e))
+#define FELREF(e) (&(e))
 #endif
 static const engine_t *const ENGINES[NENGINES] = {
     FEL(ENG_ANALOG),                 /* 0 */
@@ -191,9 +193,9 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
         return k && !usr_nz[k - 1u] ? SMP_ALL_NAMES[SMP_NSETS + k - 1u] : 0;
     }
 #endif
-    if (e != &ENG_SAMPLE && e != &ENG_GRAIN)
+    if (e != FELREF(ENG_SAMPLE) && e != FELREF(ENG_GRAIN))
         return 0;
-    *code = (e == &ENG_GRAIN ? 32u : 1u) + si % 32u;
+    *code = (e == FELREF(ENG_GRAIN) ? 32u : 1u) + si % 32u;
     return smp_set_missing(si) ? SMP_ALL_NAMES[si] : 0;
 }
 

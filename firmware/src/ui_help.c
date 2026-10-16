@@ -39,7 +39,11 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
 #endif
     {"EDIT 1", H_EDIT},
     {"EDIT 2", H_EDIT},
+#if FELUCCA_MONOFM
+    {"FILTER", "[K1]LP BP HP[K2]CUTOFF[K4]ENV"},
+#else
     {"FILTER", "[K1]LP BP HP[K2]CUTOFF[EDIT]VOICE"},
+#endif
 #if FELUCCA_DARK
     {"KIT", "[K1]YOUR SLOTS[K2]CUTS[EDIT]MORE"},
 #endif
@@ -64,9 +68,15 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"X", "[K1]X TO[K2]AMOUNT[ARP]Y"},
     {"Y", "[K1]Y TO[K2]AMOUNT[ARP]LINK"},
     {"XY LINK", "[K1]HOME X/Y ON T1+T2[ARP]X"},
+#elif FELUCCA_MONOFM
+    {"X", "[K1]X TO[K2]AMOUNT[ARP]Y"},
+    {"Y", "[K1]Y TO[K2]AMOUNT[HOME]2 TAPS: XY"},
 #endif
     {"ARP", "[K1]MODE[KEYS]CHORD[ARP]ARP 2"},
     {"ARP 2", "[K3]LATCH[K4]ORDER[ARP]ARP"},
+#if FELUCCA_MONOFM
+    {"EUCLID", "[K1]ON[K3]HITS[K4]ROTATE"},
+#endif
 #if FELUCCA_STRANGE
     {"EUCLID", "[K1]NOTES[K3]HITS[SEQ]RATE"},
     {"EUCLID 2", "[K1]RATE[K2]SLOWER[SEQ]MORE"},
@@ -98,7 +108,8 @@ static const char *help_page(void)
     uint32_t i;
     const char *t;
     if (ui.home)
-        return ui.home == HOME_TRANSPOSE ? H_TRANS : home_levels() ? H_LEVELS : H_HOME;
+        return FELUCCA_MONOFM && ui.home == 3u ? "[K1-2]X Y[K3-4]HPF LPF[HOME]BACK" : ui.home == HOME_TRANSPOSE ? H_TRANS
+               : home_levels() ? H_LEVELS : H_HOME;
     if (grid_on() && !detail_on())
         return H_GRID;
     t = cur_page()->title;
