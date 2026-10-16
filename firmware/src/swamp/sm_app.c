@@ -16,8 +16,10 @@ static volatile uint8_t panic_req;
 #include "sm_pages.c"                                     /* the pages, sm_ui */
 #include "sm_input.c"                                     /* sm_input_poll: the knobs and keys into the model */
 
-/* the main loop's second half (sm_main.c): the model onto the screen (Task 6 replaces it) */
-static void sm_draw(void) {}
+#include "sm_theme.c"                                     /* the theme PIZDAKS: ux, the grain */
+
+/* the main loop's second half (sm_main.c): the model onto the screen */
+#include "sm_draw.c"
 
 /* power-on, before audio_init: every track with its parameter defaults and empty steps, the master level, then the kit
  * of the current pattern onto the tracks (T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX), the sequencer stopped, the queue empty */

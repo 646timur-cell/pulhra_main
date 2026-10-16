@@ -6,6 +6,7 @@
  *   SEQ    the step sequencer (sm_seq.c): timing at 30 / 120 / 300 BPM, track lengths 1 and 32, trigs while playing, STOP
  *   CMD    the command queue (sm_cmd.c): full ring, coalesced and clamped values, a drain in the middle of a push
  *   STEP   sm_step_toggle (the main loop's); LOAD before engine_block; PANIC
+ *   DRAW   the screen (sm_draw.c): every text inside its cell, the budget of pixels per change, the clean ink on a grained ground
  *   cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/swamp_test tests/swamp_test.c -lm */
 #include "swamp_host.h"
 /* the settings record as the firmware reads it (swamp.c: gfx, panel, settings_persist, storage on a simulated NOR) */
@@ -13,8 +14,39 @@ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 static void lcd_sync(void) {}
 static void lcd_power(uint32_t s) { (void)s; }
 static void lcd_wake_now(void) {}
+/* the screen as the panel gets it (byte-swapped RGB565), and what the draw hooks of gfx.c see: the ink boxes of the texts of
+ * the canvas being drawn, moved to screen rows when it is blitted (the lint of test_draw_lint) */
+static uint16_t host_screen[240 * 240];
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
-{ (void)x; (void)y; (void)w; (void)h; (void)p; }
+{
+    uint32_t j;
+    for (j = 0; j < h; j++)
+        memcpy(host_screen + (y + j) * 240u + x, p + j * w, w * 2u);
+}
+typedef struct { int32_t x0, y0, x1, y1; uint32_t flags; char s[16]; } lint_box_t;
+static lint_box_t lint_box[256];
+static uint32_t lint_n, lint_band;                       /* the boxes of a frame; those of the canvas not blitted yet start here */
+static void lint_text(int32_t x0, int32_t y0, int32_t x1, int32_t y1, const char *s, uint32_t flags)
+{
+    lint_box_t *b = &lint_box[lint_n < 256u ? lint_n : 255u];
+    b->x0 = x0; b->y0 = y0; b->x1 = x1; b->y1 = y1; b->flags = flags;
+    strncpy(b->s, s, 15);
+    b->s[15] = 0;
+    lint_n++;
+}
+static void lint_blit(uint32_t x, uint32_t y)
+{
+    uint32_t i;
+    for (i = lint_band; i < lint_n && i < 256u; i++) {
+        lint_box[i].x0 += (int32_t)x; lint_box[i].x1 += (int32_t)x;
+        lint_box[i].y0 += (int32_t)y; lint_box[i].y1 += (int32_t)y;
+    }
+    lint_band = lint_n;
+}
+#define GFX_HOOK_TEXT(x0, y0, x1, y1, s, flags) lint_text(x0, y0, x1, y1, s, flags)
+#define GFX_HOOK_BLIT(x, y, r0) lint_blit(x, y)
+#define GFX_HOOK_BEGIN() ((void)0)
+#define GFX_HOOK_PIXELS(n) ((void)0)
 static void fm1_led_key(unsigned k, int on) { (void)k; (void)on; }
 #include "../firmware/src/gfx.c"
 #include "../firmware/src/panel.c"
@@ -961,6 +993,207 @@ static int test_held_step_bank_key(void)
     return bad;
 }
 
+/* ------------------------------------------------------------ screen --- */
+static void draw_setup(void)
+{
+    sm_core_init();
+    sm_theme_pizdaks();
+    sm_playing = 0;
+    memset(sm_pos, 0, sizeof sm_pos);
+    sm_rec = 0;
+    sm_ui.page = 0; sm_ui.trk = 0; sm_ui.held_step = 0xFFu; sm_ui.bank = 0;
+    sm_redraw_all();
+    sm_dirty = 1;
+}
+static void draw_full(void)
+{
+    lint_n = lint_band = 0;
+    sm_redraw_all();
+    sm_dirty = 1;
+    sm_draw();
+}
+typedef struct { int32_t x0, y0, x1, y1, inset; const char *name; } zone_t;
+/* where a text may stand, by the screen (independent of the firmware's own layout constants): the header above its
+ * frame, the page name, the four cells (a margin inside each), the SELECT row; the step strip carries no text */
+static const zone_t ZONES[] = {
+    {0, 0, 240, 20, 2, "header"}, {0, 24, 240, 48, 2, "page"},
+    {0, 48, 120, 112, 4, "cell0"}, {120, 48, 240, 112, 4, "cell1"},
+    {0, 112, 120, 176, 4, "cell2"}, {120, 112, 240, 176, 4, "cell3"},
+    {0, 178, 240, 198, 2, "select"},
+};
+static uint32_t lint_shown;
+static int lint_frame(const char *what)
+{
+    uint32_t i, j, bad = 0;
+    if (lint_n < 4u) {                                       /* a header, a page name, a label and a value at least */
+        printf("  lint %s: only %u texts drawn\n", what, lint_n);
+        return 1;
+    }
+    for (i = 0; i < lint_n && i < 256u; i++) {
+        const lint_box_t *b = &lint_box[i];
+        const zone_t *z = 0;
+        if (b->x1 <= b->x0)
+            continue;
+        for (j = 0; j < sizeof ZONES / sizeof ZONES[0]; j++)
+            if (b->x0 >= ZONES[j].x0 && b->x0 < ZONES[j].x1 && b->y0 >= ZONES[j].y0 && b->y0 < ZONES[j].y1)
+                z = &ZONES[j];
+        if (!z || (b->flags & 3u) || b->x0 < z->x0 + z->inset || b->x1 > z->x1 - z->inset || b->y1 > z->y1) {
+            if (lint_shown++ < 15u) printf("  lint %s: '%s' box %d,%d..%d,%d flags %u zone %s\n", what, b->s, b->x0, b->y0, b->x1, b->y1, b->flags,
+                   z ? z->name : "none");
+            bad++;
+        }
+        for (j = i + 1u; j < lint_n && j < 256u; j++) {   /* two texts of a zone never overlap (the page name's shadow aside) */
+            const lint_box_t *c = &lint_box[j];
+            if (z && z->name[0] != 'p' && c->x1 > c->x0 && b->x0 < c->x1 && c->x0 < b->x1 && b->y0 < c->y1 && c->y0 < b->y1) {
+                printf("  lint %s: '%s' overlaps '%s'\n", what, b->s, c->s);
+                bad++;
+            }
+        }
+    }
+    return bad != 0;
+}
+static int test_draw_lint(void)
+{
+    uint32_t pg, m, i, v, bad = 0, frames = 0;
+    for (m = 0; m < SM_NMACHINE; m++) {
+        for (pg = 0; pg < sm_page_count(); pg++) {
+            const sm_page_t *P = &SM_PAGES[pg];
+            uint32_t slot;
+            for (slot = 0; slot < 5u; slot++) {              /* the four knobs and SELECT */
+                uint32_t id = slot < 4u ? P->id[slot] : P->sel;
+                const param_desc_t *d;
+                int32_t vals[3];
+                char what[64];
+                if (id == SM_NOPARAM)
+                    continue;
+                d = sm_desc_safe(sm_engine_of(m), id);
+                if (!d)
+                    continue;
+                vals[0] = d->min; vals[1] = d->max; vals[2] = d->def;
+                for (v = 0; v < 3u; v++) {
+                    sm_sound_t *s;
+                    draw_setup();
+                    s = ksnd(0);
+                    sm_sound_from_preset(s, m, 0);
+                    s->p[id] = (int8_t)clamp(vals[v], -64, 127);
+                    smp.bpm10 = 3000;                       /* the widest header: 300.0, REC, T1, the longest name */
+                    smp.cur = 15;
+                    sm_rec = 1;
+                    sm_ui.page = (uint8_t)pg;
+                    sm_ui.bank = 1;
+                    draw_full();
+                    snprintf(what, sizeof what, "machine %u page %s id %u val %d", m, P->name, id, (int)vals[v]);
+                    bad += lint_frame(what);
+                    frames++;
+                }
+            }
+        }
+    }
+    (void)i;
+    printf("  lint: %u frames\n", frames);
+    return check("draw lint: every text inside its cell, none cut, none overlapping", bad == 0 && frames > 500u);
+}
+static int test_draw_budget(void)
+{
+    int bad = 0;
+    draw_setup();
+    sm_draw();
+    bad += check("budget: the first frame draws the screen", sm_draw_px >= 240u * 200u && sm_draw_px <= 240u * 240u);
+    sm_draw();
+    bad += check("budget: nothing changed, nothing drawn", sm_draw_px == 0);
+    sm_playing = 1;                                           /* the transport started: the header's glyph */
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("budget: play -> header and strip only", sm_draw_px > 0 && sm_draw_px <= 240u * 70u);
+    sm_pos[0] = 3;                                            /* the playing step moved (no flag: the sequencer does not set it) */
+    sm_draw();
+    bad += check("budget: the playing step moved -> <= 240 x 40", sm_draw_px > 0 && sm_draw_px <= 240u * 40u);
+    sm_pos[0] = 4;
+    sm_draw();
+    bad += check("budget: ... again", sm_draw_px > 0 && sm_draw_px <= 240u * 40u);
+    sm_page_press(SMFAM_GLO);
+    sm_draw();
+    bad += check("budget: a page change <= a full frame, more than a step", sm_draw_px > 240u * 40u && sm_draw_px <= 240u * 240u);
+    sm_ui.trk = 1;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("budget: a track change <= a full frame", sm_draw_px > 0 && sm_draw_px <= 240u * 240u);
+    {   /* a knob turned: its row of cells only (and the SELECT row never) */
+        sm_sound_t *s = ksnd(sm_ui.trk);
+        uint32_t id = sm_cur_page()->id[0];
+        s->p[id] = (int8_t)(s->p[id] + 1);
+        sm_dirty = 1;
+        sm_draw();
+        bad += check("budget: one value -> one row of cells <= 240 x 64", sm_draw_px > 0 && sm_draw_px <= 240u * 64u);
+    }
+    sm_redraw_all();
+    sm_draw();
+    bad += check("budget: redraw_all repaints the screen", sm_draw_px >= 240u * 200u && sm_draw_px <= 240u * 240u);
+    return bad;
+}
+static int test_draw_grain(void)
+{
+    const uint16_t TEXT = swap16(0xEF5Bu), DIM = swap16(0x4100u), BG = swap16(0x0000u);
+    uint32_t x, y, grain = 0, tot = 0;
+    int bad = 0;
+    draw_setup();
+    smp.pat[smp.cur].step[0][2].n = 1;                         /* a trig on step 2, none on step 3 */
+    smp.pat[smp.cur].step[0][3].n = 0;
+    draw_full();
+    bad += check("grain: a trig is bone all through", host_screen[220 * 240 + 2 * 15 + 7] == TEXT && host_screen[208 * 240 + 2 * 15 + 3] == TEXT);
+    bad += check("grain: an empty step has its dim frame, a bare inside", host_screen[206 * 240 + 3 * 15 + 6] == DIM &&
+                 (host_screen[220 * 240 + 3 * 15 + 6] == BG || host_screen[220 * 240 + 3 * 15 + 6] != TEXT));
+    for (y = 202; y < 240; y++)                                /* the strip's background rows between the cells */
+        for (x = 0; x < 240; x++) {
+            uint16_t c = host_screen[y * 240 + x];
+            if (y < 206 || y >= 236) { tot++; grain += c != BG; }
+        }
+    bad += check("grain: the background wears the photocopy, sparsely", grain > tot / 50 && grain < tot / 3);
+    return bad;
+}
+static void write_ppm(const char *dir, const char *name)
+{
+    char path[256];
+    FILE *f;
+    uint32_t k;
+    snprintf(path, sizeof path, "%s/%s.ppm", dir, name);
+    if (!(f = fopen(path, "wb")))
+        return;
+    fprintf(f, "P6\n240 240\n255\n");
+    for (k = 0; k < 240u * 240u; k++) {
+        uint16_t v = swap16(host_screen[k]);
+        uint8_t rgb[3] = {(uint8_t)((v >> 11) * 255 / 31), (uint8_t)(((v >> 5) & 63) * 255 / 63), (uint8_t)((v & 31) * 255 / 31)};
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+}
+/* SHOTS=dir: swamp_<page>.ppm for every page, a playing pattern with some trigs (to look at, no assert) */
+static int test_draw_shots(void)
+{
+    const char *dir = getenv("SHOTS");
+    uint32_t pg, k;
+    if (!dir)
+        return 0;
+    for (pg = 0; pg < sm_page_count(); pg++) {
+        char n[48], *c;
+        draw_setup();
+        for (k = 0; k < 16u; k += (k % 4u == 0 ? 2u : 3u))
+            smp.pat[smp.cur].step[0][k].n = 1;
+        sm_ui.page = (uint8_t)pg;
+        sm_ui.trk = (uint8_t)(pg % 2u);
+        sm_playing = 1;
+        sm_pos[sm_ui.trk] = 5;
+        sm_ui.held_step = 9;
+        draw_full();
+        snprintf(n, sizeof n, "swamp_%s", SM_PAGES[pg].name);
+        for (c = n; *c; c++)
+            if (*c == ' ' || *c == '.')
+                *c = '_';
+        write_ppm(dir, n);
+    }
+    return 0;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -989,6 +1222,10 @@ int main(void)
     bad += test_input_backpressure();
     bad += test_cmd_e8_guard();
     bad += test_held_step_bank_key();
+    bad += test_draw_lint();
+    bad += test_draw_budget();
+    bad += test_draw_grain();
+    bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;
 }

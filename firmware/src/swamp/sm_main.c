@@ -116,6 +116,7 @@ static void fm1_main(void)
     if (flash_ok)
         ota_boot_cleanup();                             /* staging area left by an update */
     settings_init();
+    sm_theme_pizdaks();                                 /* PIZDAKS over whatever palette the settings picked */
     lcd_init();
     lcd_fill(0, 0, 240, 240, T_BG);
     draw_text_box(0, 100, 240, &AF_L, "SWAMP", T_THEME, 1);
@@ -169,6 +170,7 @@ static void fm1_main(void)
                 if (sm_uboot) {
                     sm_uboot = 0;
                     lcd_fill(0, 100, 240, 40, T_BG);    /* what the countdown covered */
+                    sm_redraw_all();                    /* (the zones it covered, drawn again) */
                 }
                 t0 = fm1_ms;
             } else if (fm1_ms - t0 > 2000u && fm1_ms - t0 <= 5000u) {
@@ -204,6 +206,7 @@ static void fm1_main(void)
             if (flash_ok)
                 ota_session();                          /* returns only if nothing was committed */
             lcd_fill(0, 0, 240, 240, T_BG);
+            sm_redraw_all();                            /* (the update's screens gone: the whole screen again) */
         }
         if (usb.uboot_req) {                            /* SysEx F0 22 24 35 7D F7 from the host */
             fm1_audio_stop();
