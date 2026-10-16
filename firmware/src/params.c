@@ -384,6 +384,10 @@ static const param_desc_t GP[G_COUNT] = {
 
 static const param_desc_t *track_desc(const track_t *t, uint32_t id)
 {
+#if FELUCCA_MONOFM
+    if (id == P_E8 && ENGINES[eng_idx(t->eng_req)]->e8.label)   /* (the machine's ninth) */
+        return &ENGINES[eng_idx(t->eng_req)]->e8;
+#endif
     if (id >= P_E0 && id <= P_E7) {                   /* the engine asked for (t->engine follows after a fade) */
         const engine_t *e = ENGINES[eng_idx(t->eng_req)];
         const param_desc_t *d = e->desc ? e->desc(t, id - P_E0) : 0;   /* a mode-dependent label / names */
@@ -400,6 +404,10 @@ static const param_desc_t *track_desc(const track_t *t, uint32_t id)
  * only; range and default are the same): what the editor protocol, user presets and projects use */
 static const param_desc_t *param_desc_of(uint32_t e, uint32_t id)
 {
+#if FELUCCA_MONOFM
+    if (id == P_E8 && ENGINES[e % NENGINES]->e8.label)
+        return &ENGINES[e % NENGINES]->e8;
+#endif
     return id >= P_E0 ? &ENGINES[e]->edit[id - P_E0] : &TP[id];
 }
 

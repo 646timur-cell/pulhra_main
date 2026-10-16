@@ -299,6 +299,11 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
      * destination (XY_E(k) = E k+1, XY_REV ..) and its amount (-64..63, as AMT); 0 = none */
     uint8_t xyd[2][3];
     int8_t xya[2][3];
+#if FELUCCA_MONOFM
+    /* MONOFM v4: the machine's ninth value, on the SELECT knob of its EDIT pages (core.h P_E8; label 0: none, SELECT then
+     * doubles its most used knob, engines.c mf_sel_e) */
+    param_desc_t e8;
+#endif
 } engine_t;
 #define XY_DLY 8u                /* (mod.c MD_DLY, MD_REV, MD_E1: checked there) */
 #define XY_REV 9u
@@ -325,6 +330,7 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
 #define P_DLCUT P_LN4            /* .. LOW CUT, 0..127 (0: ~55 Hz as before) */
 #define P_DOUT P_LN5             /* .. OUT, -64..63 dB-ish trim (0: as before) */
 #define MF_FENV_ID(i) ((i) >= P_LN0 && (i) <= P_LN5)
+#define P_E8 P_LN6               /* the machine's ninth value (engine_t e8; its SELECT on EDIT): the engine's, as E1..E8 */
 /* step i (0..LEN-1) of a euclidean pattern of hits k over n = LEN steps, rotated by r: x..x..x. for 3 of 8 */
 static inline int mf_euc_hit(const int16_t *p, uint32_t i)
 {

@@ -425,6 +425,8 @@ static uint32_t mf_sel_id(const page_t *pg)
         return pg->sel - 1u;
     if (pg->scope != SC_ENGINE)
         return 0xFFu;
+    if (ENGINES[TSEL->eng_req % NENGINES]->e8.label)    /* (the machine's ninth value) */
+        return P_E8;
     e = mf_sel_e(TSEL->eng_req);
     return e < 8u ? P_E0 + e : 0xFFu;
 }
@@ -1401,7 +1403,7 @@ static int param_kept(uint32_t i)
 #if FELUCCA_MONOFM                                      /* (MONOFM: EUCLID and X / Y are the track's; its FILTER the sound's) */
     if (i == P_EUC || i == P_EHITS || i == P_EROT || i == P_XV || i == P_YV)
         return 1;
-    if (i == P_FLT || i == P_FCUT || i == P_FRES || MF_FENV_ID(i) || i == P_HBASE || i == P_HWIDTH || i == P_HRES)
+    if (i == P_FLT || i == P_FCUT || i == P_FRES || MF_FENV_ID(i) || i == P_E8 || i == P_HBASE || i == P_HWIDTH || i == P_HRES)
         return 0;                                       /* (F.ENV, DIST's own, HYBRID: the sound's too) */
 #endif
     return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_DARK && (i == P_FM3_ATK ||
@@ -1504,6 +1506,10 @@ static void apply_preset_to(track_t *t, uint32_t pi)
             t->p[i] = TP[i].def;
     for (i = 0; i < 8u; i++)
         t->p[P_E0 + i] = (int16_t)e->presets[pi].e[i];
+#if FELUCCA_MONOFM
+    t->p[P_E8] = e->e8.label ? e->e8.def : 0;         /* (the ninth: its default; a preset may set it, mf_preset_e8) */
+    mf_preset_e8(t, e, pi);
+#endif
     t->p[P_ATK] = e->presets[pi].env[0];
     t->p[P_DEC] = e->presets[pi].env[1];
     t->p[P_SUS] = e->presets[pi].env[2];

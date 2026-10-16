@@ -603,8 +603,8 @@ static int16_t st_val(uint32_t e, uint32_t id)
     uint32_t r = st_rand() % 4u, span = (uint32_t)(d->max - d->min + 1);
     return (int16_t)(r == 0u ? d->min : r == 1u ? d->max : d->min + (int32_t)(st_rand() % span));
 }
-static const uint8_t ST_IDS[] = {P_E0, P_E0 + 1, P_E0 + 2, P_E0 + 3, P_E0 + 4, P_E0 + 5, P_E0 + 6, P_E0 + 7,
-                                 P_VOICE, P_GLIDE, P_DETUNE, P_ATK, P_DEC, P_SUS, P_REL, P_FLT, P_FCUT, P_FRES,
+static const uint8_t ST_IDS[] = {P_E0, P_E0 + 1, P_E0 + 2, P_E0 + 3, P_E0 + 4, P_E0 + 5, P_E0 + 6, P_E0 + 7, P_E8,
+                                 P_FATK, P_FDEC, P_DIST, P_DTYPE, P_DTONE, P_DLCUT, P_DOUT, P_VOICE, P_GLIDE, P_DETUNE, P_ATK, P_DEC, P_SUS, P_REL, P_FLT, P_FCUT, P_FRES,
                                  P_HBASE, P_HWIDTH, P_HRES, P_ED_FLT, P_LEVEL};
 static double st_level(uint32_t e, uint32_t preset, double secs, double *late, int32_t *peak)
 {
@@ -1529,9 +1529,9 @@ static int test_v4(void)
 
     /* EDIT: the machine's most used value; INSERT: its dry / wet; AMP: ENV SYNC */
     v4_page("EDIT 1");
-    i = (uint32_t)t->p[P_E0 + mf_sel_e(ENGI_MSAW)];
+    i = (uint32_t)t->p[P_E8];
     turn(EN_SELECT, 4);
-    ok = t->p[P_E0 + mf_sel_e(ENGI_MSAW)] != (int16_t)i && mf_sel_id(cur_page()) == P_E0 + mf_sel_e(ENGI_MSAW);
+    ok = t->p[P_E8] > (int16_t)i && mf_sel_id(cur_page()) == P_E8;   /* (SAW: its ninth, SYNC) */
     v4_page("INSERT");
     t->p[P_IMIX] = 127;
     turn(EN_SELECT, -5);
@@ -1544,7 +1544,28 @@ static int test_v4(void)
     for (e = 0, i = 0; i < NENGINES; i++)
         e += ENGINES[i]->name && mf_sel_e(i) != 0xFFu && eng_rank(i) < NENG_SHOWN;
     ok &= e == NENG_SHOWN;
-    bad += check("MONOFM v4 SELECT: EDIT the machine's own (every machine has one), INSERT dry / wet, AMP ENV SYNC", ok);
+    bad += check("MONOFM v4 SELECT: EDIT the machine's ninth (SAW SYNC; every machine has one or doubles its most used), "
+                 "INSERT dry / wet, AMP ENV SYNC", ok);
+
+    /* SAW's ninth, SYNC: the note's pitch stays, its spectrum changes; SYNC LEAD sets it; a sound load resets it */
+    {
+        double r0, r1;
+        ui_power_on();
+        song.master_q12 = 4096;
+        set_engine_of(t, ENGI_MSAW);
+        apply_preset_to(t, 1);
+        t->p[P_DLY] = t->p[P_REV] = t->p[P_CHOR] = 0;
+        r0 = v4_rms(300, 45);
+        t->p[P_E8] = 100;
+        r1 = v4_rms(300, 45);
+        apply_preset_to(t, 6);
+        ok = t->p[P_E8] == 80 && str_eq(MSAW_PRESETS[6].name, "SYNC LEAD");
+        apply_preset_to(t, 0);
+        ok &= t->p[P_E8] == 0;
+        snprintf(what, sizeof what, "MONOFM v4 SAW SYNC: rms %.0f -> %.0f (sounds), SYNC LEAD 80, another sound 0", r0, r1);
+        bad += check(what, ok && r1 > 300.0 && fabs(r1 - r0) > 20.0);
+        set_engine_of(t, ENGI_MSAW);
+    }
 
     /* GLO > MIX: KNOB 4 a send, SELECT which (DST CHO DLY REV) */
     v4_page("MIX");

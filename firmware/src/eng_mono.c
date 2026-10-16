@@ -70,7 +70,7 @@ static void msaw_note_on(track_t *t, voice_t *v)
         v->ph[2] = r * 2654435761u;
         v->s[0] = (int32_t)(r * 40503u);
         v->s[1] = (int32_t)(r ^ 0x5BD1E995u);
-        v->s[2] = v->s[3] = v->s[4] = 0;              /* (a voice's state from another engine: never read) */
+        v->s[2] = v->s[3] = v->s[4] = v->s[6] = 0;    /* (a voice's state from another engine: never read) */
         v->s[5] = (int32_t)(r * 69069u + 1u);
     }
 }
@@ -80,7 +80,8 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     uint32_t i, b, iu1, iu2, ix1, ix2, isub, ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
     uint32_t px1 = (uint32_t)v->s[0], px2 = (uint32_t)v->s[1], ps1 = (uint32_t)v->s[2], ps2 = (uint32_t)v->s[3];
     int32_t ul = p[P_E0] * 258, xl = p[P_E2] * 258, sx = p[P_E4] * 258, s1 = p[P_E5] * 258, s2 = p[P_E6] * 258;
-    int32_t wc = p[P_E1] * 50 / 127, age = p[P_E3], g, drift = 0;
+    int32_t wc = p[P_E1] * 50 / 127, age = p[P_E3], g, drift = 0, sy = p[P_E8];   /* (SYNC: the ninth, SELECT) */
+    uint32_t bs, pm = (uint32_t)v->s[6];
     if (age) {                                           /* AGE: a slow walk of up to +-12 cents on the pairs, a third of
                                                           * it on the saw */
         uint32_t rs = (uint32_t)v->s[5];
@@ -94,9 +95,10 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     ix1 = mf_mul(b, 2 * wc - drift);
     ix2 = mf_mul(b, -2 * wc + drift);
     isub = b >> 1;
-    g = mf_norm(32767 + 2 * ul + 2 * xl + (sx + s1 + s2) / 2);
+    bs = sy ? mf_mul(b, sy * 2400 / 127) : b;           /* SYNC: the saw a slave up to 2 octaves over the note, reset at */
+    g = mf_norm(32767 + 2 * ul + 2 * xl + (sx + s1 + s2) / 2);   /* the note's period (the unison pairs stay free) */
     for (i = 0; i < n; i++) {
-        int32_t o = osc_saw(ph0, b);
+        int32_t o = osc_saw(ph0, bs);
         if (ul)
             o += mulq15(osc_saw(ph1, iu1), ul) + mulq15(osc_saw(ph2, iu2), ul);   /* (each alone: no overflow) */
         if (xl)
@@ -107,7 +109,12 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             o += mulq15(sine_i(ps1), s1);
         if (s2)
             o += mulq15(sine_i(ps2), s2);
-        ph0 += b;
+        ph0 += bs;
+        if (sy) {
+            pm += b;
+            if (pm < b)
+                ph0 = 0;                                 /* (the master came round: the slave from its start) */
+        }
         ph1 += iu1;
         ph2 += iu2;
         px1 += ix1;
@@ -123,6 +130,7 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     v->s[1] = (int32_t)px2;
     v->s[2] = (int32_t)ps1;
     v->s[3] = (int32_t)ps2;
+    v->s[6] = (int32_t)pm;
 }
 
 /* ============================================================== SWAVE PULSE === */
@@ -722,7 +730,7 @@ static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
 
 /* ================================================================== presets === */
 /* name, {E1 .. E8}, {A D S R}, fenv, mono, FX(dist, chorus, delay, reverb); categories a letter a preset (category.c) */
-#define MONO_CAT_MSAW "BLPLBL"
+#define MONO_CAT_MSAW "BLPLBLL"
 static const preset_t MSAW_PRESETS[] = {
     {"SUPER SAW", {110, 60, 90, 20, 0, 0, 0, 0}, {0, 64, 127, 40}, 0, 1, FX(0, 20, 20, 40)},
     {"SAW LEAD", {50, 30, 0, 10, 0, 40, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(10, 0, 30, 30)},
@@ -730,6 +738,7 @@ static const preset_t MSAW_PRESETS[] = {
     {"WIDE PAD", {90, 40, 70, 70, 0, 50, 20, 0}, {90, 64, 127, 110}, 0, 0, FX(0, 40, 30, 110)},
     {"SUB SAW", {0, 0, 0, 0, 80, 110, 60, 0}, {0, 64, 127, 20}, 0, 1, FX(10, 0, 0, 10)},
     {"OLD SYNTH", {70, 20, 30, 110, 40, 0, 0, 0}, {5, 64, 127, 50}, 0, 1, FX(0, 20, 20, 50)},
+    {"SYNC LEAD", {40, 25, 0, 15, 0, 50, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(15, 0, 30, 30)},   /* (SYNC 80: mf_preset_e8) */
 };
 #define MONO_CAT_MPULSE "BLLPBK"
 static const preset_t MPULSE_PRESETS[] = {
@@ -819,11 +828,18 @@ static const preset_t MNOISE_PRESETS[] = {
 #define MF_ENGINE(nm, t1, t2, pre, on, ren, k0, k1, k2, k3) \
     .name = nm, .page_title = {t1, t2}, .presets = pre, .npresets = NELEM(pre), .note_on = on, .render = ren, \
     .knob = {k0, k1, k2, k3}, .poly = MF_POLY
+/* a factory sound's ninth value (engine_t e8, P_E8) where it is not the default */
+static void mf_preset_e8(track_t *t, const engine_t *e, uint32_t pi)
+{
+    if (e->presets == MSAW_PRESETS && pi == 6u)         /* SAW SYNC LEAD */
+        t->p[P_E8] = 80;
+}
 static const engine_t ENG_MSAW = {
     MF_ENGINE("SAW", "SAW", "SUBS", MSAW_PRESETS, msaw_note_on, msaw_render, P_E0, P_E1, P_E2, P_E4),
     .edit = {{"UNIL", F_PCT, 0, 127, 0, 0, 0}, {"UNIW", F_PCT, 0, 127, 40, 0, 0}, {"UNXL", F_PCT, 0, 127, 0, 0, 0},
              {"AGE", F_PCT, 0, 127, 0, 0, 0}, {"SUBX", F_PCT, 0, 127, 0, 0, 0}, {"SUB1", F_PCT, 0, 127, 0, 0, 0},
              {"SUB2", F_PCT, 0, 127, 0, 0, 0}, MF_TUNE},
+    .e8 = {"SYNC", F_PCT, 0, 127, 0, 0, 0},             /* (SELECT: the saw hard-synced, up to 2 octaves) */
     .xyd = {{XY_E(0), XY_E(1), XY_E(2)}, {XY_E(4), XY_E(5), XY_E(3)}},   /* X: the unison (the width), Y: the subs, AGE */
     .xya = {{50, 40, 40}, {50, 40, 40}},
 };
