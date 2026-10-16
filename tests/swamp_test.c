@@ -2142,7 +2142,7 @@ static int test_leds_family(void)
     ok &= led_of(fm1_led_dim, panel.btn[B_EDIT]) == 1 && led_of(fm1_led_dim, panel.btn[B_GLO]) == 1;     /* the rest glow */
     for (pg = 0; pg < sm_page_count(); pg++) {
         uint32_t b = SM_PAGES[pg].fam == SMFAM_EDIT ? B_EDIT : SM_PAGES[pg].fam == SMFAM_GLO ? B_GLO :
-                     SM_PAGES[pg].fam == SMFAM_SEQ ? B_SEQ : B_ENV;
+                     SM_PAGES[pg].fam == SMFAM_SEQ ? B_SEQ : SM_PAGES[pg].fam == SMFAM_HOME ? B_HOME : B_ENV;
         sm_ui.page = (uint8_t)pg;
         sm_leds();
         ok &= led_of(fm1_led, panel.btn[b]) == 1;
@@ -3402,6 +3402,280 @@ static int test_step_draw(void)
     return bad;
 }
 
+
+/* ------------------------------------------------------------------------------------------------ HOME (Task 6) --- */
+static int test_home_mixer(void)
+{
+    int bad = 0;
+    int8_t before[4];
+    uint32_t t, ok = 1;
+    in_reset();
+    host_ticks = 1000u;
+    press(B_HOME);
+    sm_input_poll();
+    bad += check("HOME: HOME tapped: MIXER (no layer)", !strcmp(sm_cur_page()->name, "MIXER") && sm_layer == SML_NONE);
+    for (t = 0; t < SM_NTRK; t++)
+        before[t] = ksnd(t)->p[P_LEVEL];
+    turn(EN_K3, -7);
+    sm_input_poll();
+    run_block();
+    bad += check("HOME: K3 turned down: T3's LEVEL lower in the model and on the core",
+                 ksnd(2)->p[P_LEVEL] < before[2] && trk[2].p[P_LEVEL] == ksnd(2)->p[P_LEVEL]);
+    for (t = 0; t < SM_NTRK; t++)
+        if (t != 2u)
+            ok &= ksnd(t)->p[P_LEVEL] == before[t] && trk[t].p[P_LEVEL] == before[t];
+    bad += check("HOME: ... the other three tracks' levels as they were", ok);
+    turn(EN_ALGO, 2);                                     /* the selected track is T3: K1 is still T1 */
+    sm_input_poll();
+    turn(EN_K1, 5);
+    sm_input_poll();
+    run_block();
+    bad += check("HOME: K1 is T1's LEVEL whichever track is selected",
+                 sm_ui.trk == 2u && ksnd(0)->p[P_LEVEL] > before[0] && trk[0].p[P_LEVEL] == ksnd(0)->p[P_LEVEL]);
+    turn(EN_K4, 500);
+    sm_input_poll();
+    run_block();
+    bad += check("HOME: K4 +500: T4's LEVEL at its maximum (clamped), model and core",
+                 ksnd(3)->p[P_LEVEL] == TP[P_LEVEL].max && trk[3].p[P_LEVEL] == TP[P_LEVEL].max);
+    press(B_HOME);
+    sm_input_poll();
+    bad += check("HOME: tapped again: CLOCK", !strcmp(sm_cur_page()->name, "CLOCK"));
+    press(B_HOME);
+    sm_input_poll();
+    bad += check("HOME: ... again: MIXER", !strcmp(sm_cur_page()->name, "MIXER"));
+    btn_down(B_HOME);                                     /* a hold does nothing for now (the menu is a later stage) */
+    sm_input_poll();
+    ms(900);
+    sm_input_poll();
+    bad += check("HOME: held 900 ms: no layer, still MIXER", sm_layer == SML_NONE && !strcmp(sm_cur_page()->name, "MIXER"));
+    btn_up(B_HOME);
+    sm_input_poll();
+    bad += check("HOME: ... let go: still MIXER (a hold is not a tap)", !strcmp(sm_cur_page()->name, "MIXER") && sm_layer == SML_NONE);
+    btn_down(B_HOME);                                     /* a knob turned while it is down: a hold too */
+    sm_input_poll();
+    turn(EN_K2, 1);
+    sm_input_poll();
+    btn_up(B_HOME);
+    sm_input_poll();
+    bad += check("HOME: a knob turned with HOME down is no tap either", !strcmp(sm_cur_page()->name, "MIXER"));
+    press(B_EDIT);                                        /* other families still reach their pages and back */
+    sm_input_poll();
+    press(B_HOME);
+    sm_input_poll();
+    bad += check("HOME: from EDIT, HOME goes to its first page, MIXER", !strcmp(sm_cur_page()->name, "MIXER"));
+    return bad;
+}
+
+static int test_home_bpm_select(void)
+{
+    int bad = 0;
+    uint32_t b;
+    double S;
+    in_reset();
+    host_ticks = 1000u;
+    press(B_HOME);
+    sm_input_poll();
+    turn(EN_SELECT, 10);
+    sm_input_poll();
+    bad += check("HOME: SELECT +10 on MIXER: 121.0 BPM", smp.bpm10 == 1210u);
+    turn(EN_SELECT, -3);
+    sm_input_poll();
+    bad += check("HOME: SELECT -3: 120.7", smp.bpm10 == 1207u);
+    press(B_HOME);
+    sm_input_poll();
+    bad += check("HOME: CLOCK page", !strcmp(sm_cur_page()->name, "CLOCK"));
+    turn(EN_SELECT, 3);
+    sm_input_poll();
+    bad += check("HOME: SELECT on CLOCK too: 121.0", smp.bpm10 == 1210u);
+    turn(EN_K1, 2);
+    sm_input_poll();
+    bad += check("HOME: K1 slowly (2 detents): 0.1 BPM each", smp.bpm10 == 1212u);
+    turn(EN_K1, -5);
+    sm_input_poll();
+    bad += check("HOME: K1 fast (5 detents in one poll): 1.0 BPM each", smp.bpm10 == 1162u);
+    turn(EN_K1, -5000);
+    sm_input_poll();
+    bad += check("HOME: K1 far down: 30.0 BPM", smp.bpm10 == 300u);
+    turn(EN_SELECT, -10);
+    sm_input_poll();
+    bad += check("HOME: ... SELECT below it stays at 30.0", smp.bpm10 == 300u);
+    turn(EN_K1, 5000);
+    sm_input_poll();
+    turn(EN_SELECT, 10);
+    sm_input_poll();
+    bad += check("HOME: K1 far up, SELECT above it: 300.0", smp.bpm10 == 3000u);
+    turn(EN_K2, 7);
+    sm_input_poll();
+    bad += check("HOME: K2 SWING +7: 57 %", smp.swing == 57u);
+    turn(EN_K2, -30);
+    sm_input_poll();
+    bad += check("HOME: K2 -30: 50 % at least", smp.swing == 50u);
+    turn(EN_K2, 100);
+    sm_input_poll();
+    bad += check("HOME: K2 +100: 75 % at most", smp.swing == 75u);
+    /* the sequencer takes the tempo set on the panel: 150.0 BPM = FS x 150 / 1500 samples a 1/16 */
+    in_reset();
+    host_ticks = 1000u;
+    press(B_HOME);
+    sm_input_poll();
+    turn(EN_SELECT, 300);
+    sm_input_poll();
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    S = (double)FS * 150.0 / 1500.0;
+    seq_run((uint32_t)(5.0 * S));
+    b = on_n[0];
+    bad += check("HOME: 150.0 BPM from SELECT: the trig on step 4 at 4 steps of that tempo",
+                 smp.bpm10 == 1500u && b == 2u && near_d(on_at[0][1], 4.0 * S));
+    return bad;
+}
+
+static int test_home_draw(void)
+{
+    int bad = 0;
+    uint32_t nb = 0;
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("MIXER");
+    draw_full();
+    nb += lint_frame("MIXER");
+    bad += check("HOMEDRAW: MIXER: the page line and the four rings' labels T1 T2 T3 T4",
+                 lint_has("MIXER", 0, 0) && lint_has("T1", 0, 0) && lint_has("T2", 0, 0) && lint_has("T3", 0, 0) && lint_has("T4", 0, 0));
+    bad += check("HOMEDRAW: ... SELECT is TEMPO with the BPM", lint_has("TEMPO", 0, 0) && lint_has("120.0", 0, 0));
+    ksnd(2)->p[P_LEVEL] = 40;
+    {
+        uint32_t a = smd_knob_sig(2);
+        ksnd(2)->p[P_LEVEL] = 41;
+        bad += check("HOMEDRAW: a T3 level change changes the K3 ring's signature", smd_knob_sig(2) != a);
+    }
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("CLOCK");
+    smp.bpm10 = 3000;
+    smp.swing = 75;
+    draw_full();
+    nb += lint_frame("CLOCK");
+    bad += check("HOMEDRAW: CLOCK: BPM and SWING labels, 300.0 and 75%",
+                 lint_has("BPM", 0, 0) && lint_has("SWING", 0, 0) && lint_has("300.0", 0, 0) && lint_has("75%", 0, 0));
+    {
+        uint32_t a = smd_knob_sig(0), b = smd_knob_sig(1), c = smd_sel_sig();
+        smp.bpm10 = 2999;
+        bad += check("HOMEDRAW: BPM changes the K1 ring's and SELECT's signatures", smd_knob_sig(0) != a && smd_sel_sig() != c);
+        smp.swing = 74;
+        bad += check("HOMEDRAW: SWING changes the K2 ring's signature", smd_knob_sig(1) != b);
+    }
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("CLOCK");
+    smp.bpm10 = 300;
+    draw_full();
+    nb += lint_frame("CLOCK 30.0");
+    bad += check("HOMEDRAW: every text inside its cell (300.0, 30.0, 75 %)", nb == 0u);
+    return bad;
+}
+
+/* SWING: every second 1/16 (the 2nd, 4th, ..: steps 1, 3, .. counting from 0) a share of (swing - 50) / 50 of a step late */
+static int test_swing(void)
+{
+    const seq_ev_t *e;
+    int bad = 0;
+    uint32_t k, ok = 1;
+    seq_reset();
+    for (k = 0; k < 8u; k++)
+        sm_step_toggle(0, k);
+    smp.swing = 66;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(8.9 * S120));
+    for (k = 0; k < 8u; k++) {
+        e = ev_nth(1, 0, k);
+        ok &= e != 0 && near_d(e->at, ((double)k + (k & 1u ? 0.32 : 0.0)) * S120);
+    }
+    e = ev_nth(1, 0, 1);
+    printf("swamp: SWING 66: step 1 at %.3f steps (want 1.32), step 0 at %u\n", e ? (double)e->at / S120 : -1.0, ev_nth(1, 0, 0)->at);
+    bad += check("SWING 66: the even steps on the grid, the odd 0.32 of a step (about a third) late, every one of 8", ok && on_n[0] == 8u);
+    e = ev_nth(1, 0, 1);
+    bad += check("SWING 66: ... about a third of a step (within 0.02 step of 1/3)", e && fabs((double)e->at / S120 - 1.0 - 1.0 / 3.0) < 0.02);
+    seq_reset();
+    for (k = 0; k < 2u; k++)
+        sm_step_toggle(0, k);
+    smp.swing = 75;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(2.9 * S120));
+    bad += check("SWING 75: the odd step half a step late", near_d(ev_nth(1, 0, 1)->at, 1.5 * S120));
+    /* 50: nothing moves (the other tests run at 50 already); other tracks swing with the grid, not with their own length */
+    seq_reset();
+    smp.pat[smp.cur].kit.snd[1].len = 5;                 /* 5 long: its pass 2 starts on an odd grid step */
+    for (k = 0; k < 5u; k++)
+        sm_step_toggle(1, k);
+    smp.swing = 60;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(10.9 * S120));
+    ok = 1;
+    for (k = 0; k < 10u; k++) {
+        e = ev_nth(1, 1, k);
+        ok &= e != 0 && near_d(e->at, ((double)k + (k & 1u ? 0.2 : 0.0)) * S120);
+    }
+    bad += check("SWING 60 on a 5-step track: the grid's odd steps late, in the second pass too (the grid's, not the track's)", ok);
+    return bad;
+}
+
+/* swing with NUDGE, ratchets and the rest of the step's timing (the steps 1 and 3 are the swung ones) */
+static int test_swing_with_nudge_ratchet(void)
+{
+    const seq_ev_t *e;
+    int bad = 0;
+    seq_reset();
+    smp.swing = 66;                                       /* 0.32 of a step */
+    sm_step_toggle(0, 1);
+    stp(0, 1)->nudge = 4;                                 /* + a quarter: 1.57 */
+    sm_step_toggle(0, 3);
+    stp(0, 3)->nudge = -4;                                /* - a quarter: 3.07 (its own start, after the grid) */
+    sm_step_toggle(0, 5);
+    stp(0, 5)->flags = (uint8_t)(1u << 4);                /* x2: on its swung start, then half of what is left of the step */
+    sm_step_toggle(0, 6);
+    stp(0, 6)->nudge = -4;                                /* an even step: 5.75.. as before; the swung step 5's ratchet is whole */
+    sm_step_toggle(0, 9);
+    stp(0, 9)->nudge = -8;                                /* half a step early, swung 0.32 late: 8.82 (before its start) */
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(10.9 * S120));
+    printf("swamp: SWING+NUDGE: on at");
+    for (e = ev_nth(1, 0, 0); e && e < seq_ev + seq_nev; e++)
+        if (e->on)
+            printf(" %.3f", (double)e->at / S120);
+    printf("\n");
+    e = ev_nth(1, 0, 0);
+    bad += check("SWING: step 1 swung and NUDGE +4: 1 + 0.32 + 0.25", e && near_d(e->at, 1.57 * S120));
+    e = ev_nth(1, 0, 1);
+    bad += check("SWING: step 3 swung and NUDGE -4: 3 + 0.32 - 0.25, once", e && near_d(e->at, 3.07 * S120));
+    e = ev_nth(1, 0, 2);
+    bad += check("SWING: a x2 ratchet on a swung step: the first part on the swung start", e && near_d(e->at, 5.32 * S120));
+    e = ev_nth(1, 0, 3);
+    bad += check("SWING: ... the second part half of the rest of the step later (5.66), not into step 6",
+                 e && near_d(e->at, (5.32 + 0.34) * S120));
+    e = ev_nth(1, 0, 4);
+    bad += check("SWING: an even step NUDGE -4: 6 - 0.25 as ever", e && near_d(e->at, 5.75 * S120));
+    e = ev_nth(1, 0, 5);
+    bad += check("SWING: a swung step NUDGE -8: 9 + 0.32 - 0.5, before its start (early fire), once",
+                 e && near_d(e->at, 8.82 * S120) && on_n[0] == 6u);
+    return bad;
+}
+
+/* the tempo and the swing the ISR reads once per block: a change between two blocks moves no step inside a block */
+static int test_swing_read_once(void)
+{
+    int bad = 0;
+    uint32_t k, ok = 1;
+    seq_reset();
+    for (k = 0; k < 4u; k++)
+        sm_step_toggle(0, k);
+    smp.swing = 50;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(1.5 * S120));
+    smp.swing = 75;                                       /* the main loop between two blocks */
+    seq_run((uint32_t)(3.0 * S120));
+    ok = on_n[0] == 4u && near_d(ev_nth(1, 0, 3)->at, 3.5 * S120);
+    bad += check("SWING: turned up while playing: the next odd step takes it (3.5), no step lost or doubled", ok);
+    return bad;
+}
+
 static void write_ppm(const char *dir, const char *name)
 {
     char path[256];
@@ -3613,6 +3887,12 @@ int main(void)
     bad += test_step_fix1();
     bad += test_step_page();
     bad += test_step_draw();
+    bad += test_home_mixer();
+    bad += test_home_bpm_select();
+    bad += test_home_draw();
+    bad += test_swing();
+    bad += test_swing_with_nudge_ratchet();
+    bad += test_swing_read_once();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

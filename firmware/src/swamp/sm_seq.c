@@ -10,6 +10,10 @@
  * step, they end there. A ratchet x2..x4 plays the step's notes that many times in equal parts of the step (each part
  * the track's GATE of the part; no NUDGE, no LEN, no slide out). PSLIDE: the values the trig locks (and those the next
  * trig locks) move in straight lines to the next trig's (its locks, else the base) over the step, in 1/32 steps.
+ * SWING (smp.swing, 50..75 %): every second 1/16 of the one grid of the four tracks (the 2nd, 4th, .. since PLAY, not the
+ * track's own step number: a 5-step track swings with the grid) starts (swing - 50) / 50 of a step late, 0.5 at 75; a trig's
+ * fire is that delay + its NUDGE (a sum below 0 fires early, in the step before, as a NUDGE alone does); a ratchet's parts
+ * share what is left of a swung step, so they never run into the next one. PSLIDE's glide keeps the step's length.
  *
  * Timing: a block (n = CTL samples) is the unit; an event (a step's start, a nudged fire, a ratchet part) whose time
  * falls inside a block plays at the block's start (0 .. CTL-1 samples early). The step is FS x 60 / (BPM x 4) =
@@ -21,6 +25,8 @@
 static volatile uint8_t sm_solo;                          /* bit per track soloed (the GLO layer's held keys; the main loop writes) */
 static volatile uint8_t sm_fill;                          /* FILL held (Task 6: GLO + G5); COND FILL / !FILL read it */
 static uint32_t sm_next_q8;                               /* the next step starts this many q8 samples after this block's start */
+static uint32_t sm_swd_q8;                                /* a swung step's delay (q8), from smp.swing read once at the block's start */
+static uint8_t sm_gcur;                                   /* the grid step playing is odd (the swung ones: the 2nd, 4th, ..) */
 static uint8_t sm_pos[SM_NTRK], sm_next[SM_NTRK];         /* the step playing, the step to play next */
 static uint8_t sm_held[SM_NTRK][4], sm_nheld[SM_NTRK];    /* the notes the sequencer holds, per track */
 static int32_t sm_gate[SM_NTRK];                          /* samples left of their LEN (SM_GATE_INF: to the next trig) */
@@ -177,6 +183,7 @@ static void sm_seq_play(void)
     if (sm_playing)
         return;
     sm_next_q8 = 0;
+    sm_gcur = 1;                                          /* (the first step's start makes it 0: the grid's first step is on time) */
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
     memset(sm_pre, 0, sizeof sm_pre);
@@ -336,8 +343,9 @@ static void sm_seq_notes(uint32_t t, const sm_step_t *s, uint32_t vel, uint32_t 
 
 /* track t's trig on step st fires at `at` (q8 from this block's start): COND, the locks, PSLIDE, then the notes (none for
  * a REST), their LEN, a ratchet's parts. sm_gen counts the fires (an SMC_UNLOCK carries the one it saw, sm_cmd.c).
- * next_pass: step 0 fired early, in the last step of the pass before: COND counts the pass it belongs to */
-static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, uint32_t next_pass)
+ * next_pass: step 0 fired early, in the last step of the pass before: COND counts the pass it belongs to. sw: the swing
+ * delay of the step (q8): a ratchet's parts share the step less it */
+static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, uint32_t next_pass, uint32_t sw)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     const sm_step_t *s = &pt->step[t][st];
@@ -370,7 +378,7 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
     sm_seq_notes(t, s, vel, sm_slid[t] && sm_nheld[t]);
     sm_slid[t] = 0;
     if (hits > 1u) {                                      /* RATCHET: the parts, the track's GATE of a part each */
-        uint32_t part = step_q8 / hits;
+        uint32_t part = (step_q8 > sw ? step_q8 - sw : step_q8) / hits;
         sm_gate[t] = (int32_t)((part >> 8) * (uint32_t)clamp(trk[t].p[P_SGATE], 1, 127) / 128u);
         sm_rat_left[t] = (uint8_t)(hits - 1u);
         sm_rat_vel[t] = (uint8_t)vel;
@@ -421,8 +429,9 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP), i = sm_next[t], j;
+    uint32_t sw = sm_gcur ? sm_swd_q8 : 0u, swn = sm_gcur ? 0u : sm_swd_q8;   /* (this step's swing delay, the next step's) */
     const sm_step_t *s;
-    int32_t d;
+    int32_t off;
     if (i >= len)                                         /* (the length got shorter) */
         i = 0;
     sm_pos[t] = (uint8_t)i;
@@ -441,20 +450,20 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
             sm_slid[t] = 0;
         }
         if (s->n && !muted) {
-            d = sm_nudge_of(s);
-            if (d > 0) {
-                sm_late_q8[t] = at + (uint32_t)d * step_q8 / 16u;
+            off = (int32_t)sw + sm_nudge_of(s) * (int32_t)step_q8 / 16;
+            if (off > 0) {
+                sm_late_q8[t] = at + (uint32_t)off;
                 sm_late_st[t] = (uint8_t)i;
             } else {
-                sm_seq_fire(t, i, at, step_q8, 0);        /* (on time; early but not yet fired, PLAY's first step: now) */
+                sm_seq_fire(t, i, at, step_q8, 0, sw);    /* (on time; early but not yet fired, PLAY's first step: now) */
             }
         }
     }
     j = sm_next[t];
     s = &pt->step[t][j];
     sm_early_q8[t] = SM_Q8_NONE;
-    if (!muted && s->n && (d = sm_nudge_of(s)) < 0) {
-        sm_early_q8[t] = at + step_q8 - (uint32_t)(-d) * step_q8 / 16u;
+    if (!muted && s->n && (off = (int32_t)swn + sm_nudge_of(s) * (int32_t)step_q8 / 16) < 0) {
+        sm_early_q8[t] = at + step_q8 + (uint32_t)off;    /* (a sum below 0: before the step's start; else its own start does it) */
         sm_early_st[t] = (uint8_t)j;
     }
 }
@@ -482,6 +491,7 @@ static void events_block(uint32_t n)
         return;
     {
         uint32_t step_q8 = sm_step_q8(), nq8 = n << 8, mute = sm_mute_eff();   /* (the mask: once per block) */
+        sm_swd_q8 = step_q8 * (uint32_t)(clamp(smp.swing, 50, 75) - 50) / 50u;   /* (the swing: once per block, as the tempo) */
         for (t = 0; t < SM_NTRK; t++)                     /* LEN run out at this block's start; a muted track lets go (a LEN INF */
             {
             if (sm_nheld[t] && (((mute >> t) & 1u) || (sm_gate[t] != SM_GATE_INF && sm_gate[t] <= 0))) {   /* note would ring on) */
@@ -503,18 +513,19 @@ static void events_block(uint32_t n)
             if (!kind)
                 break;
             if (kind == 1u) {
+                sm_gcur ^= 1u;
                 for (t = 0; t < SM_NTRK; t++)
                     sm_seq_step(t, best, step_q8, (mute >> t) & 1u);
                 sm_next_q8 += step_q8;
             } else if (kind == 2u) {
                 sm_late_q8[bt] = SM_Q8_NONE;
                 if (!((mute >> bt) & 1u))
-                    sm_seq_fire(bt, sm_late_st[bt], best, step_q8, 0);
+                    sm_seq_fire(bt, sm_late_st[bt], best, step_q8, 0, sm_gcur ? sm_swd_q8 : 0u);
             } else if (kind == 3u) {
                 sm_early_q8[bt] = SM_Q8_NONE;
                 if (!((mute >> bt) & 1u)) {
                     sm_done[bt] = sm_early_st[bt];        /* (its own start then plays nothing) */
-                    sm_seq_fire(bt, sm_early_st[bt], best, step_q8, sm_early_st[bt] == 0u);
+                    sm_seq_fire(bt, sm_early_st[bt], best, step_q8, sm_early_st[bt] == 0u, sm_gcur ? 0u : sm_swd_q8);
                 }
             } else {
                 if ((mute >> bt) & 1u) {

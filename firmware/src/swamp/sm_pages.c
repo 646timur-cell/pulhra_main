@@ -2,16 +2,19 @@
 /* SWAMP MACHINE pages: four knobs and SELECT per page, grouped in the families of the buttons EDIT / GLO / ENV / SEQ
  * (a second press of a family's button goes to its next page). The screen (sm_draw) reads sm_ui and sm_cur_page().
  * STEP (SEQ tapped) is the one page whose knobs edit a step, not the sound (sm_input.c sm_step_page): K1 NOTE, K2 VEL,
- * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG */
+ * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
+ * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both */
 #define SM_NOPARAM 0xFFu
 
-enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_COUNT };
+enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_COUNT };
+enum { SMH_NONE, SMH_MIXER, SMH_CLOCK };                  /* a HOME page's kind (sm_page_t.home) */
 
 typedef struct {
     const char *name;
     uint8_t fam;
     uint8_t id[4];                                        /* the parameters on K1..K4, SM_NOPARAM: none */
     uint8_t sel;                                          /* the parameter on SELECT, SM_NOPARAM: none */
+    uint8_t home;                                         /* SMH_*: the HOME pages, whose knobs are not the selected track's sound */
 } sm_page_t;
 
 static const sm_page_t SM_PAGES[] = {
@@ -22,7 +25,9 @@ static const sm_page_t SM_PAGES[] = {
     {"MIX", SMFAM_GLO, {P_LEVEL, P_PAN, P_DIST, P_REV}, SM_NOPARAM},
     {"FILTER", SMFAM_ENV, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}, P_HWIDTH},
     {"F.ENV", SMFAM_ENV, {P_FATK, P_FDEC, P_ED_FLT, SM_NOPARAM}, SM_NOPARAM},
-    {"STEP", SMFAM_SEQ, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
+    {"STEP", SMFAM_SEQ, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_NONE},
+    {"MIXER", SMFAM_HOME, {P_LEVEL, P_LEVEL, P_LEVEL, P_LEVEL}, SM_NOPARAM, SMH_MIXER},   /* K1..K4: the LEVEL of T1..T4 */
+    {"CLOCK", SMFAM_HOME, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_CLOCK},   /* K1 BPM, K2 SWING */
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
@@ -56,6 +61,7 @@ static void sm_page_press(uint32_t fam)
 }
 
 static int sm_page_is_step(void) { return sm_cur_page()->fam == SMFAM_SEQ; }
+static uint32_t sm_page_home(void) { return sm_cur_page()->home; }   /* SMH_*: 0 not a HOME page */
 
 /* the STEP page's FLAG list (the PRESETS knob, round): the flags byte of each place, its name */
 #define SM_NFLAG 12u

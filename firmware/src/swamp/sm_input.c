@@ -16,7 +16,10 @@
  * only if it has a trig; the base stays.
  * The STEP page (SEQ tapped): the knobs edit a step's fields, not the sound (sm_step_page): the step of the white key
  * down on the selected track (the last pressed), else the step selected last (sm_ui.sel_step); none: nothing. Field
- * writes are single bytes the audio stream reads at a fire (a step edited between two fires is whole by bytes). */
+ * writes are single bytes the audio stream reads at a fire (a step edited between two fires is whole by bytes).
+ * HOME (sm_home_page): MIXER's knobs are the LEVEL of T1..T4 (a base value, no locks), CLOCK's K1 the tempo and K2 the swing,
+ * SELECT the tempo on both. smp.bpm10 and smp.swing are written here, in the main loop, 16 and 8 bits at once; the audio
+ * stream reads each once per block (sm_seq.c). */
 #define SM_HOLD_US 350000u                                /* a key held longer is a select, not a tap */
 #define SM_BLACK_KEYS 0x252A52Au                          /* the black keys of F3 .. G5, bit n = key n (ui_input.c) */
 #define SM_KEY_BANK0 22u                                  /* D#5: steps 0..15 */
@@ -82,13 +85,26 @@ static void sm_turn_held(uint32_t id, int32_t s)
     }
 }
 
-/* a knob: the model's value turned by s detents (param_turn: the descriptor's own steps and range), then the command.
+/* track t's base value of parameter id turned by s detents (param_turn: the descriptor's own steps and range) in the model,
+ * then the command */
+static void sm_turn_base(uint32_t t, uint32_t id, int32_t s)
+{
+    sm_sound_t *sd = &smp.pat[smp.cur % SM_NPAT].kit.snd[t % SM_NTRK];
+    const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), id);
+    int32_t v;
+    if (!s || !d)
+        return;
+    v = param_turn(d, sd->p[id], s);
+    sd->p[id] = (int8_t)clamp(v, d->min, d->max);        /* (a byte write: the audio stream sees the old or the new) */
+    sm_param_push(t % SM_NTRK, id);
+    sm_dirty = 1;
+}
+
+/* a knob: the model's value turned by s detents, then the command.
  * A white key down: a lock of the held step instead; REC while playing: a lock of the playing step (a trig there only) */
 static void sm_turn(uint32_t id, int32_t s)
 {
-    sm_sound_t *sd = sm_ui_sound();
-    const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), id);
-    int32_t v;
+    const param_desc_t *d = sm_desc_safe(sm_engine_of(sm_ui_sound()->machine), id);
     if (!s || !d)
         return;
     if (sm_key_arm) {
@@ -104,10 +120,7 @@ static void sm_turn(uint32_t id, int32_t s)
         }
         return;
     }
-    v = param_turn(d, sd->p[id], s);
-    sd->p[id] = (int8_t)clamp(v, d->min, d->max);        /* (a byte write: the audio stream sees the old or the new) */
-    sm_param_push(sm_ui.trk, id);
-    sm_dirty = 1;
+    sm_turn_base(sm_ui.trk, id, s);
 }
 
 /* the selected track's whole sound from a machine's preset, then the LOAD: built here, off to the side, then copied into the
@@ -253,6 +266,37 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
     s->nudge = (int8_t)clamp((int32_t)s->nudge + sel, -8, 7);
 }
 
+/* the tempo turned: s units of 0.1 BPM, 30.0 .. 300.0 (the main loop's alone to write) */
+static void sm_bpm_turn(int32_t s)
+{
+    int32_t v = clamp((int32_t)smp.bpm10 + s, 300, 3000);
+    if (s && (uint16_t)v != smp.bpm10) {
+        smp.bpm10 = (uint16_t)v;
+        sm_dirty = 1;
+    }
+}
+
+/* the HOME pages' knobs. MIXER: K1..K4 the LEVEL of T1..T4. CLOCK: K1 BPM (0.1 a detent, 1.0 a detent when four or more come
+ * in one poll: a quick turn), K2 SWING 50 .. 75 %. SELECT: the tempo, 0.1 a detent. */
+static void sm_home_page(const int32_t *k, int32_t sel)
+{
+    uint32_t i;
+    if (sm_page_home() == SMH_MIXER) {
+        for (i = 0; i < SM_NTRK; i++)
+            sm_turn_base(i, P_LEVEL, k[i]);
+    } else {
+        sm_bpm_turn(k[0] >= 4 || k[0] <= -4 ? k[0] * 10 : k[0]);
+        if (k[1]) {
+            int32_t v = clamp((int32_t)smp.swing + k[1], 50, 75);
+            if ((uint8_t)v != smp.swing) {
+                smp.swing = (uint8_t)v;
+                sm_dirty = 1;
+            }
+        }
+    }
+    sm_bpm_turn(sel);
+}
+
 /* everything the queue refused so far, again */
 static void sm_flush(void)
 {
@@ -316,6 +360,9 @@ static void sm_input_poll(void)
         sm_key_used |= sm_key_arm;                                           /* too: no toggle) */
     if (sm_page_is_step()) {
         sm_step_page(k, sel, pre);
+    } else if (sm_page_home()) {
+        sm_preset_turn(pre);
+        sm_home_page(k, sel);
     } else {
         sm_preset_turn(pre);
         for (i = 0; i < 4; i++)

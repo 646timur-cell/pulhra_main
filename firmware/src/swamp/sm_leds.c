@@ -8,7 +8,7 @@
  *  - the step playing is a soft running light: the MID level, never a full flash: on an empty step mid, a trig comes down
  *    to mid, a REST has mid in place of its breath; a held step is mid too (and a frame on the screen);
  *  - D#5 / F#5: the page of steps in view is lit (only while the track is longer than 16), the other page glows;
- *  - buttons: the family of the page in view lit, REC lit while recording, PLAY's own LED glows (dark while playing, its
+ *  - buttons: the family of the page in view lit (HOME's too), REC lit while recording, PLAY's own LED glows (dark while playing, its
  *    green one lit), the rest glow, as settings_leds (OFF / DIM LO / DIM HI / INV) says;
  *  - a layer open (sm_layer.c): its button breathes (not lit, no glow), and the keys show what they do in it instead of the
  *    steps: EDIT the machines of the page glow, the track's own lit; GLO the mutes (black keys 1..4, lit = muted) and the
@@ -110,7 +110,7 @@ static void sm_leds(void)
         sm_led_put(ni, panel.btn[k], 1);
     }
     sm_led_put(nl, panel.btn[sm_cur_page()->fam == SMFAM_EDIT ? B_EDIT : sm_cur_page()->fam == SMFAM_GLO ? B_GLO :
-                             sm_cur_page()->fam == SMFAM_SEQ ? B_SEQ : B_ENV], 1);
+                             sm_cur_page()->fam == SMFAM_SEQ ? B_SEQ : sm_cur_page()->fam == SMFAM_HOME ? B_HOME : B_ENV], 1);
     if (sm_layer)                                         /* the open layer's button breathes: masked out of lit and glow below */
         sm_led_put(nb, panel.btn[sm_layer_button(sm_layer)], 1);
     sm_led_put(nl, panel.btn[B_REC], *(volatile uint8_t *)&sm_rec != 0u);

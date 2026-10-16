@@ -3,6 +3,8 @@
  * Felucca's quick layers, ui_layer.c, and its HOLD setting: HOLD_MS[settings_hold], 300 .. 600 ms).
  *   EDIT, GLO  tap: the family's next page (the page changes when the button is let go: a hold must not change it)
  *   SEQ        tap: the STEP page; ENV: its page at once (no layer)
+ *   HOME       tap: the family's next page (MIXER, CLOCK); a hold has no layer yet (the menu is a later stage): it does
+ *              nothing, and the page does not change when the button is let go
  *   hold       the button down for HOLD_MS, or a key pressed / a knob turned while it is down (even at 50 ms): the layer is
  *              open until the button is let go; the page under it stays as it was
  *   EDIT       white keys from F3: the machines of the page (MONO 13, SOMA 9, SLICE 5: engines.c MF_PAGE, in the order of
@@ -17,9 +19,11 @@ static uint8_t sm_lay_arm;                                /* the layer button do
 static uint32_t sm_lay_t0;                                /* when it went down (fm1_ticks) */
 static uint8_t sm_lay_epage;                              /* EDIT: the page of machines in view */
 static uint8_t sm_lay_cleared;                            /* SEQ: the track was cleared since the layer opened (CLEARED) */
+static uint8_t sm_lay_void;                               /* a button with no layer (HOME) was held: its release is no tap */
 
-static const struct { uint8_t btn, layer, fam; } SM_LBTN[3] = {
-    {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ},
+#define SM_NLBTN 4u
+static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
+    {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ}, {B_HOME, SML_NONE, SMFAM_HOME},
 };
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_NEPAGE 3u
@@ -31,6 +35,7 @@ static void sm_layer_init(void)
     sm_lay_t0 = 0;
     sm_lay_epage = 0;
     sm_lay_cleared = 0;
+    sm_lay_void = 0;
     sm_solo = 0;
 }
 
@@ -69,7 +74,7 @@ static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used)
 {
     uint32_t i, held = fm1_in.buttons;
     if (!sm_lay_arm) {
-        for (i = 0; i < 3u; i++) {
+        for (i = 0; i < SM_NLBTN; i++) {
             uint32_t b = panel.btn[SM_LBTN[i].btn];
             if (!((pressed >> b) & 1u))
                 continue;
@@ -79,15 +84,20 @@ static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used)
             } else {
                 sm_lay_arm = (uint8_t)(i + 1u);
                 sm_lay_t0 = now;
+                sm_lay_void = 0;
             }
             break;
         }
         if (!sm_lay_arm && ((pressed >> panel.btn[B_ENV]) & 1u))
             sm_page_press(SMFAM_ENV);
     }
-    if (sm_lay_arm && !sm_layer &&
-        (used || (uint32_t)(now - sm_lay_t0) >= (uint32_t)HOLD_MS[settings_hold % 4u] * 1000u * FM1_TICKS_PER_US))
-        sm_layer_open(SM_LBTN[sm_lay_arm - 1u].layer);
+    if (sm_lay_arm && !sm_layer && !sm_lay_void &&
+        (used || (uint32_t)(now - sm_lay_t0) >= (uint32_t)HOLD_MS[settings_hold % 4u] * 1000u * FM1_TICKS_PER_US)) {
+        if (SM_LBTN[sm_lay_arm - 1u].layer == SML_NONE)
+            sm_lay_void = 1;                              /* (a hold of a button with no layer: nothing, and no tap at its release) */
+        else
+            sm_layer_open(SM_LBTN[sm_lay_arm - 1u].layer);
+    }
 }
 
 /* every poll, last: the layer button let go: a tap (no layer opened) is the page; an open layer closes */
@@ -96,8 +106,9 @@ static void sm_layer_end(void)
     if (sm_lay_arm && !((fm1_in.buttons >> panel.btn[SM_LBTN[sm_lay_arm - 1u].btn]) & 1u)) {
         if (sm_layer)
             sm_layer_close();
-        else if (SM_LBTN[sm_lay_arm - 1u].fam < SMFAM_COUNT)
+        else if (!sm_lay_void && SM_LBTN[sm_lay_arm - 1u].fam < SMFAM_COUNT)
             sm_page_press(SM_LBTN[sm_lay_arm - 1u].fam);
+        sm_lay_void = 0;
         sm_lay_arm = 0;
     }
 }

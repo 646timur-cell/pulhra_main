@@ -215,6 +215,8 @@ static void smd_page(void)
             b[n] = 0;
             smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");
         }
+    } else if (sm_page_home()) {                        /* MIXER, CLOCK: the page alone (the sound is not what the knobs edit) */
+        smd_upper(b, sm_cur_page()->name, 8u);
     } else {
         smd_upper(b, sm_cur_page()->name, 8u);
         for (n = 0; b[n]; n++) {}
@@ -284,6 +286,44 @@ static void smd_step_knob(uint32_t k, smd_knob_t *o)
     }
     o->v = (int32_t)o->pos;
 }
+/* the HOME pages' knob k: MIXER the LEVEL of T(k+1) (label T1..T4); CLOCK K1 BPM "120.0" (30.0 .. 300.0), K2 SWING "57%" */
+static void smd_home_knob(uint32_t k, smd_knob_t *o)
+{
+    uint32_t i;
+    o->on = 1;
+    if (sm_page_home() == SMH_MIXER) {
+        const sm_sound_t *s = &smp.pat[smp.cur % SM_NPAT].kit.snd[k % SM_NTRK];
+        const param_desc_t *d = sm_desc_safe(sm_engine_of(s->machine), P_LEVEL);
+        const char *unit;
+        o->lab[0] = 'T'; o->lab[1] = (char)('1' + k % SM_NTRK); o->lab[2] = 0;
+        o->on = d != 0;
+        if (!d)
+            return;
+        o->d = d;
+        o->v = clamp(s->p[P_LEVEL], d->min, d->max);
+        o->pos = d->max > d->min ? (uint32_t)((o->v - d->min) * 256 / (d->max - d->min)) : 0u;
+        param_format(d, o->v, o->val, &unit);
+        o->val[5] = 0;
+    } else if (k == 0u) {
+        o->lab[0] = 'B'; o->lab[1] = 'P'; o->lab[2] = 'M'; o->lab[3] = 0;
+        fmt_fix(o->val, smp.bpm10, 1);
+        o->v = smp.bpm10;
+        o->pos = ((uint32_t)clamp(smp.bpm10, 300, 3000) - 300u) * 256u / 2700u;
+    } else if (k == 1u) {
+        const char *w = "SWING";
+        for (i = 0; w[i]; i++)
+            o->lab[i] = w[i];
+        o->lab[i] = 0;
+        smd_int(o->val, clamp(smp.swing, 50, 75), 0);
+        for (i = 0; o->val[i]; i++) {}
+        o->val[i] = '%';
+        o->val[i + 1u] = 0;
+        o->v = smp.swing;
+        o->pos = ((uint32_t)clamp(smp.swing, 50, 75) - 50u) * 256u / 25u;
+    } else {
+        o->on = 0;
+    }
+}
 static void smd_knob_get(uint32_t k, smd_knob_t *o)
 {
     const sm_sound_t *s = smd_snd();
@@ -298,6 +338,10 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     o->on = 0;
     if (sm_page_is_step()) {
         smd_step_knob(k & 3u, o);
+        return;
+    }
+    if (sm_page_home()) {
+        smd_home_knob(k & 3u, o);
         return;
     }
     if (id == SM_NOPARAM)
@@ -378,6 +422,8 @@ static uint32_t smd_sel_sig(void)
             h = smd_mix(h, (uint8_t)b[i]);
         return h;
     }
+    if (sm_page_home())                                   /* (the tempo) */
+        return smd_mix(h, smp.bpm10);
     return id == SM_NOPARAM ? h : smd_mix(smd_mix(h, id), (uint32_t)smd_sel_val(id));
 }
 static void smd_select(void)
@@ -391,6 +437,11 @@ static void smd_select(void)
         int32_t x;
         smd_step_nudge(val);
         x = sm_px_text(4, 2, 2u, "NUDGE", T_TEXT, 0) + 4 + 12;
+        sm_px_text(x, 2, 2u, val, T_TEXT, 1);
+    } else if (sm_page_home()) {                          /* HOME: SELECT is the tempo */
+        char val[8];
+        int32_t x = sm_px_text(4, 2, 2u, "TEMPO", T_TEXT, 0) + 4 + 12;
+        fmt_fix(val, smp.bpm10, 1);
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
     } else if (d) {
         char lab[8], val[12];
