@@ -94,6 +94,10 @@ static void sm_cmd_drain(void);
 /* every note-on of the app code included below (the sequencer's) goes through the counter; the tests' own calls after
  * the #undef go to voice.c's directly */
 #define trk_note_on seq_note_on
+static void lock_applied(uint32_t t, uint32_t s, uint32_t p, int32_t v);   /* the locks test: every lock the ISR applies */
+static void lock_preempt(void);                                            /* ... and the ISR's moment inside a lock write */
+#define SM_LOCK_APPLIED(t, s, p, v) lock_applied(t, s, p, v)
+#define SM_LOCK_PREEMPT() lock_preempt()
 #include "../firmware/src/swamp/sm_app.c"
 #undef trk_note_on
 
@@ -2327,6 +2331,387 @@ static int test_leds_layer(void)
     return check("LEDS: an open layer's button breathes: no lit, no glow, in every LEDS mode and layer; the others not", ok) +
            check("LEDS: the layer's keys: EDIT machines (the track's lit), GLO mutes and solos", keys);
 }
+/* ------------------------------------------------------------------------------------------------ locks --- */
+#define LK_NONE (-32768)
+static int16_t lk_shadow[SM_NTRK][SM_NSTEP][P_COUNT];    /* the stress test's model of the pool: LK_NONE no lock */
+static int lk_on;                                         /* the stress test is checking */
+static uint32_t lk_applied, lk_bad_val, lk_bad_dead, lk_preempt_n, lk_preempts;
+static uint32_t lk_rng = 12345u;
+static uint32_t lk_rand(uint32_t n) { lk_rng = lk_rng * 1103515245u + 12345u; return (lk_rng >> 8) % n; }
+static void lock_applied(uint32_t t, uint32_t s, uint32_t p, int32_t v)
+{
+    lk_applied++;
+    if (!lk_on)
+        return;
+    if (lk_shadow[t][s][p] == LK_NONE)
+        lk_bad_dead++;
+    else if (lk_shadow[t][s][p] != v && !lk_bad_val++)
+        printf("  first bad: t%u s%u p%u applied %d, model %d\n", t, s, p, v, lk_shadow[t][s][p]);
+}
+static void lock_preempt(void)
+{
+    if (lk_preempt_n && !lk_rand(lk_preempt_n)) {          /* the audio interrupt between two stores of a lock write */
+        lk_preempts++;
+        run_block();
+    }
+}
+static sm_pattern_t *cpat(void) { return &smp.pat[smp.cur]; }
+static int32_t lk_val(uint32_t t, uint32_t s, uint32_t p)  /* the lock's value, LK_NONE: none */
+{
+    int32_t i = sm_lock_find(cpat(), t, s, p);
+    return i < 0 ? LK_NONE : cpat()->lock[i].val;
+}
+static uint32_t lk_count_live(void)
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < cpat()->nlock; i++)
+        n += cpat()->lock[i].param != 0xFFu;
+    return n;
+}
+static void lk_tap(uint32_t w)                            /* a white key down and up (two polls) */
+{
+    key_dn(WHITE[w]);
+    sm_input_poll();
+    key_up(WHITE[w]);
+    sm_input_poll();
+}
+static void filter_page(void)
+{
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+}
+/* run blocks until track t's step s has just fired (at most a bar and a step) */
+static int run_to_step(uint32_t t, uint32_t s)
+{
+    uint32_t b, was = sm_pos[t];
+    for (b = 0; b < 20000u; b++) {
+        run_block();
+        if (sm_pos[t] == s && was != s)
+            return 1;
+        was = sm_pos[t];
+    }
+    return 0;
+}
+
+static int test_lock_hold_turn(void)
+{
+    int bad = 0;
+    int8_t base;
+    smd_knob_t o;
+    in_reset();
+    host_ticks = 1000u;
+    filter_page();
+    base = ksnd(0)->p[P_FCUT] = 100;
+    key_dn(WHITE[4]);                                     /* a tap: the trig on when the key is let go, not when it goes down */
+    sm_input_poll();
+    bad += check("LOCK: a white key down: no toggle yet", !cpat()->step[0][4].n);
+    key_up(WHITE[4]);
+    sm_input_poll();
+    bad += check("LOCK: ... let go without a turn: the trig on", cpat()->step[0][4].n == 1u);
+    key_dn(WHITE[4]);
+    sm_input_poll();
+    turn(EN_K2, 10);                                      /* FILTER K2: CUT */
+    sm_input_poll();
+    bad += check("LOCK: step 4 held, K2 +10: a CUT lock on step 4 = base + 10", lk_val(0, 4, P_FCUT) == base + 10);
+    bad += check("LOCK: ... the base did not change", ksnd(0)->p[P_FCUT] == base);
+    bad += check("LOCK: ... the step held shows at once (held_step 4)", sm_ui.held_step == 4u);
+    smd_knob_get(1, &o);
+    bad += check("LOCK: ... the CUT ring is filled and shows the lock", o.filled && o.v == base + 10);
+    smd_knob_get(2, &o);
+    bad += check("LOCK: ... the RES ring (no lock) shows the base, not filled", !o.filled && o.v == ksnd(0)->p[P_FRES]);
+    turn(EN_K2, -3);
+    sm_input_poll();
+    bad += check("LOCK: a second turn edits the lock (base + 7), one entry", lk_val(0, 4, P_FCUT) == base + 7 && cpat()->nlock == 1u);
+    key_up(WHITE[4]);
+    sm_input_poll();
+    bad += check("LOCK: let go after a turn: the trig stays on", cpat()->step[0][4].n == 1u && sm_ui.held_step == 0xFFu);
+    bad += check("LOCK: CUT is locked on some step (the ring's centre dot)", sm_param_locked_any(0, P_FCUT) &&
+                 !sm_param_locked_any(0, P_FRES) && !sm_param_locked_any(1, P_FCUT));
+    key_dn(WHITE[6]);                                     /* an empty step held and turned: nothing (no lock, no trig) */
+    sm_input_poll();
+    turn(EN_K2, 5);
+    turn(EN_SELECT, 2);
+    sm_input_poll();
+    key_up(WHITE[6]);
+    sm_input_poll();
+    bad += check("LOCK: an EMPTY step held + turned: no lock, no trig, no toggle, base kept",
+                 lk_val(0, 6, P_FCUT) == LK_NONE && !cpat()->step[0][6].n && cpat()->nlock == 1u && ksnd(0)->p[P_FCUT] == base &&
+                 ksnd(0)->p[P_HWIDTH] == TP[P_HWIDTH].def);
+    key_dn(WHITE[4]);                                     /* SELECT while held: its parameter (HWIDTH) locked */
+    sm_input_poll();
+    turn(EN_SELECT, -2);
+    sm_input_poll();
+    key_up(WHITE[4]);
+    sm_input_poll();
+    bad += check("LOCK: SELECT while held: a lock of its parameter, no toggle", lk_val(0, 4, P_HWIDTH) == TP[P_HWIDTH].def - 2 &&
+                 cpat()->step[0][4].n == 1u);
+    sm_ui.held_step = 4;
+    bad += check("LOCK: SELECT shows the held step's lock, the base otherwise", smd_sel_val(P_HWIDTH) == TP[P_HWIDTH].def - 2 &&
+                 (sm_ui.held_step = 0xFFu, smd_sel_val(P_HWIDTH) == TP[P_HWIDTH].def));
+    return bad;
+}
+
+static int test_lock_applies(void)
+{
+    int bad = 0;
+    in_reset();
+    filter_page();
+    set_param(0, P_FCUT, 100);
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
+    bad += check("LOCK: sm_lock_set on a trig", sm_lock_set(0, 4, P_FCUT, 20) == 1);
+    press(B_PLAY);
+    sm_input_poll();
+    bad += check("LOCK: playing, after step 4: trk CUT == 20", run_to_step(0, 4) && trk[0].p[P_FCUT] == 20);
+    bad += check("LOCK: ... the next step 0: back to the base 100", run_to_step(0, 0) && trk[0].p[P_FCUT] == 100);
+    run_to_step(0, 4);
+    set_param(0, P_FCUT, 90);                             /* the base turned while the lock holds: the lock stays till the next trig */
+    run_block();
+    bad += check("LOCK: the base turned on a locked step: the lock is kept", trk[0].p[P_FCUT] == 20);
+    bad += check("LOCK: ... the next unlocked trig takes the new base", run_to_step(0, 0) && trk[0].p[P_FCUT] == 90);
+    run_to_step(0, 4);
+    press(B_PLAY);                                        /* STOP on the locked step: the base comes back */
+    sm_input_poll();
+    run_block();
+    bad += check("LOCK: STOP on a locked step: the base again", !sm_playing && trk[0].p[P_FCUT] == 90);
+    return bad;
+}
+
+static int test_lock_during_play_300bpm(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t s, p, i, b;
+    in_reset();
+    host_ticks = 1000u;
+    filter_page();
+    smp.bpm10 = 3000u;
+    set_param(0, P_FCUT, 60);
+    for (s = 0; s < 16u; s++)
+        sm_step_toggle(0, s);
+    press(B_PLAY);
+    sm_input_poll();
+    key_dn(WHITE[7]);
+    sm_input_poll();
+    for (i = 0; i < 50u; i++) {                           /* 50 detents over 4 bars (64 steps of ~69 blocks) */
+        turn(EN_K2, (i & 1u) ? -1 : 2);
+        sm_input_poll();
+        for (b = 0; b < 88u; b++)
+            run_block();
+        ms(2);
+    }
+    for (s = 0; s < SM_NSTEP; s++)
+        for (p = 0; p < P_COUNT; p++)
+            if (s != 7u)
+                ok &= lk_val(0, s, p) == LK_NONE;
+    bad += check("LOCK/300: held step 7, 50 detents during 4 bars: no lock on any other step", ok);
+    bad += check("LOCK/300: ... the one lock is CUT on step 7 (base 60, 25 x +2 and 25 x -1: 85), base kept",
+                 cpat()->nlock == 1u && lk_val(0, 7, P_FCUT) == 85 && ksnd(0)->p[P_FCUT] == 60);
+    key_up(WHITE[7]);
+    sm_input_poll();
+    bad += check("LOCK/300: let go: the trig of step 7 still on", cpat()->step[0][7].n == 1u);
+    bad += check("LOCK/300: step 7 plays its lock", run_to_step(0, 7) && trk[0].p[P_FCUT] == lk_val(0, 7, P_FCUT));
+    bad += check("LOCK/300: step 8 the base", run_to_step(0, 8) && trk[0].p[P_FCUT] == ksnd(0)->p[P_FCUT]);
+    return bad;
+}
+
+static int test_lock_stress(void)
+{
+    static const uint8_t PRM[6] = {P_FCUT, P_FRES, P_LEVEL, P_PAN, P_DEC, P_DIST};
+    int bad = 0, ok_base = 1;
+    uint32_t op, t, s, p, refused = 0, maxn = 0, sets = 0, clears = 0, trigs = 0;
+    in_reset();
+    smp.bpm10 = 3000u;
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < SM_NSTEP; s++)
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[t][s][p] = LK_NONE;
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < 16u; s++)
+            sm_step_toggle(t, s);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    lk_applied = lk_bad_val = lk_bad_dead = lk_preempts = 0;
+    lk_on = 1;
+    lk_preempt_n = 3u;
+    for (op = 0; op < 10000u; op++) {
+        uint32_t r = lk_rand(100);
+        t = lk_rand(SM_NTRK);
+        s = lk_rand(16);
+        if (op % 2500u == 1250u) {                        /* now and then stopped a while: the pool is compacted */
+            push(SMC_STOP, 0, 0, 0, 0);
+            run_block();
+        } else if (op % 2500u == 1400u) {
+            push(SMC_PLAY, 0, 0, 0, 0);
+        }
+        if (r < 88u) {                                    /* a lock (an existing one: its value) */
+            const param_desc_t *d;
+            p = PRM[lk_rand(6)];
+            d = sm_desc_safe(sm_engine_of(ksnd(t)->machine), p);
+            int32_t v = d->min + (int32_t)lk_rand((uint32_t)(d->max - d->min + 1));
+            if (sm_lock_set(t, s, p, v))
+                lk_shadow[t][s][p] = (int16_t)v, sets++;
+            else
+                refused++;
+        } else if (r < 95u) {                             /* the step's locks deleted, the trig kept */
+            sm_lock_clear_step(t, s);
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[t][s][p] = LK_NONE;
+            clears++;
+        } else {                                          /* the trig off, or on again (a toggle takes the step's locks) */
+            sm_step_toggle(t, s);
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[t][s][p] = LK_NONE;
+            trigs++;
+        }
+        maxn = cpat()->nlock > maxn ? cpat()->nlock : maxn;
+        run_block();
+        for (t = 0; t < SM_NTRK; t++)                     /* a parameter not locked by the last trig is the base */
+            for (p = 0; p < 6u; p++)
+                if (!((sm_lk_on[t][PRM[p] >> 3] >> (PRM[p] & 7u)) & 1u))
+                    ok_base &= trk[t].p[PRM[p]] == ksnd(t)->p[PRM[p]];
+    }
+    lk_on = 0;
+    lk_preempt_n = 0;
+    printf("  stress: %u sets (%u refused), %u clears, %u trig flips, %u applied, %u preempted writes, nlock max %u\n",
+           sets, refused, clears, trigs, lk_applied, lk_preempts, maxn);
+    bad += check("LOCK/STRESS: 10000 ops between ISR blocks: every applied lock == the model's", lk_applied > 1000u && !lk_bad_val);
+    bad += check("LOCK/STRESS: ... no lock of a deleted step ever applied", !lk_bad_dead);
+    bad += check("LOCK/STRESS: ... nlock <= 192, the pool full sometimes (refused)", maxn <= SM_NLOCK && refused > 0u);
+    bad += check("LOCK/STRESS: ... an unlocked parameter is the base after every block", ok_base);
+    {
+        int ok = 1;
+        for (t = 0; t < SM_NTRK; t++)
+            for (s = 0; s < SM_NSTEP; s++)
+                for (p = 0; p < 6u; p++)
+                    ok &= lk_val(t, s, PRM[p]) == lk_shadow[t][s][PRM[p]];
+        bad += check("LOCK/STRESS: ... the pool == the model at the end", ok);
+    }
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_lock_clear_step(0, 0);                             /* stopped: the pool compacted to its live locks */
+    bad += check("LOCK/STRESS: stopped, a clear compacts: nlock == the live locks", cpat()->nlock == lk_count_live());
+    return bad;
+}
+
+static int test_lock_full(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t i, t, s, p;
+    static const uint8_t PRM[6] = {P_FCUT, P_FRES, P_LEVEL, P_PAN, P_DEC, P_DIST};
+    in_reset();
+    host_ticks = 1000u;
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < 16u; s++)
+            sm_step_toggle(t, s);
+    for (i = 0; i < SM_NLOCK; i++)                        /* 192 distinct locks: 4 tracks x 16 steps x 3 */
+        ok &= sm_lock_set(i % 4u, i / 4u % 16u, PRM[i / 64u], (int32_t)(i % 100u)) == 1;
+    bad += check("LOCK/FULL: 192 locks set, no message", ok && cpat()->nlock == SM_NLOCK && !sm_lock_msg);
+    bad += check("LOCK/FULL: the 193rd refused, LOCKS FULL", sm_lock_set(0, 0, PRM[4], 5) == 0 && sm_lock_msg);
+    ok = 1;
+    for (i = 0; i < SM_NLOCK; i++)
+        ok &= lk_val(i % 4u, i / 4u % 16u, PRM[i / 64u]) == (int32_t)(i % 100u);
+    bad += check("LOCK/FULL: ... the 192 intact, nlock 192", ok && cpat()->nlock == SM_NLOCK);
+    bad += check("LOCK/FULL: an existing lock still takes a new value when full", sm_lock_set(1, 0, PRM[0], 77) == 1 &&
+                 lk_val(1, 0, PRM[0]) == 77);
+    sm_playing = 1;                                       /* playing: a cleared step's slots are taken again by new locks */
+    sm_lock_clear_step(2, 3);
+    p = sm_lock_set(2, 5, P_FLT, 1) && sm_lock_set(2, 5, P_FATK, 1) && sm_lock_set(2, 5, P_FDEC, 1);
+    bad += check("LOCK/FULL: playing: a step cleared frees its 3 slots for new locks, nlock stays 192",
+                 p && cpat()->nlock == SM_NLOCK && sm_lock_set(2, 5, P_SUS, 1) == 0);
+    sm_playing = 0;
+    draw_setup();
+    sm_lock_full_msg();
+    lint_n = lint_band = 0;
+    sm_draw();
+    {
+        int32_t y0, y1;
+        bad += check("LOCK/FULL: the header shows LOCKS FULL", lint_has("LOCKS FULL", &y0, &y1) && y1 < (int32_t)SMD_HDR_H);
+    }
+    ms(900);
+    sm_input_poll();
+    bad += check("LOCK/FULL: ... still at 0.9 s", sm_lock_msg);
+    ms(200);
+    sm_input_poll();
+    lint_n = lint_band = 0;
+    sm_draw();
+    {
+        int32_t y0, y1;
+        bad += check("LOCK/FULL: ... gone after 1 s (the header redrawn without it)", !sm_lock_msg && !lint_has("LOCKS FULL", &y0, &y1));
+    }
+    return bad;
+}
+
+static int test_retrig_clears_locks(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    lk_tap(0);
+    sm_lock_set(0, 0, P_FCUT, 10);
+    sm_lock_set(0, 0, P_FRES, 50);
+    sm_lock_set(0, 1, P_FRES, 50);                        /* (another step: kept) */
+    lk_tap(0);
+    bad += check("LOCK: the trig taken off: its locks gone", !cpat()->step[0][0].n && lk_val(0, 0, P_FCUT) == LK_NONE &&
+                 lk_val(0, 0, P_FRES) == LK_NONE && lk_val(0, 1, P_FRES) == 50);
+    lk_tap(0);
+    bad += check("LOCK: placed again: a trig without locks", cpat()->step[0][0].n == 1u && lk_val(0, 0, P_FCUT) == LK_NONE &&
+                 lk_val(0, 0, P_FRES) == LK_NONE);
+    bad += check("LOCK: stopped: the pool compacted (one lock left)", cpat()->nlock == 1u);
+    sm_step_toggle(1, 0);
+    sm_lock_set(0, 0, P_FCUT, 10);                        /* the SEQ layer's CLEAR takes the track's locks too */
+    sm_lock_set(1, 0, P_FCUT, 10);
+    layer_hold(B_SEQ);
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    layer_let_go(B_SEQ);
+    bad += check("LOCK: SEQ CLEAR: the track's locks gone, the other track's kept", lk_val(0, 0, P_FCUT) == LK_NONE &&
+                 lk_val(0, 1, P_FRES) == LK_NONE && lk_val(1, 0, P_FCUT) == 10);
+    return bad;
+}
+
+static int test_rec_records_on_trigs(void)
+{
+    int bad = 0, ok = 1, any = 0;
+    uint32_t s, i, b;
+    int8_t base;
+    in_reset();
+    host_ticks = 1000u;
+    filter_page();
+    base = ksnd(0)->p[P_FCUT] = 64;
+    for (s = 0; s < 16u; s += 4u)
+        sm_step_toggle(0, s);
+    press(B_REC);
+    sm_input_poll();
+    bad += check("REC: the REC key: sm_rec on", sm_rec == 1u);
+    turn(EN_K2, 3);                                       /* stopped: a turn is the base, as ever */
+    sm_input_poll();
+    bad += check("REC: stopped: a turn moves the base, no lock", ksnd(0)->p[P_FCUT] == base + 3 && cpat()->nlock == 0u);
+    base = ksnd(0)->p[P_FCUT];
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    for (i = 0; i < 64u; i++) {                           /* two bars at 120: a turn every ~43 blocks */
+        turn(EN_K2, -1);
+        sm_input_poll();
+        for (b = 0; b < 43u; b++)
+            run_block();
+    }
+    for (s = 0; s < 16u; s++) {
+        int32_t v = lk_val(0, s, P_FCUT);
+        if (s % 4u)
+            ok &= v == LK_NONE;
+        else
+            any += v != LK_NONE;
+    }
+    bad += check("REC: playing, CUT turned: locks only on the steps with trigs", ok && any == 4);
+    bad += check("REC: ... the base did not change", ksnd(0)->p[P_FCUT] == base);
+    press(B_REC);
+    sm_input_poll();
+    bad += check("REC: the REC key again: off", sm_rec == 0u);
+    return bad;
+}
+
 static void write_ppm(const char *dir, const char *name)
 {
     char path[256];
@@ -2379,6 +2764,30 @@ static int test_draw_shots(void)
                 *c = '_';
         write_ppm(dir, n);
         smp.pat[smp.cur].nlock = 0;
+    }
+    {   /* locks: FILTER, T1 step 9 held, CUT and RES locked on it (filled), TYPE locked on step 4 (the centre dot); then the
+         * pool full: LOCKS FULL in the header */
+        draw_setup();
+        smp.pat[smp.cur].step[0][0].n = 1;
+        smp.pat[smp.cur].step[0][4].n = 1;
+        smp.pat[smp.cur].step[0][9].n = 1;
+        smp.pat[smp.cur].step[0][12].n = 1;
+        sm_lock_set(0, 9, P_FCUT, 40);
+        sm_lock_set(0, 9, P_FRES, 90);
+        sm_lock_set(0, 4, P_FLT, 2);
+        sm_ui.page = (uint8_t)page_by_name("FILTER");
+        sm_ui.held_step = 9;
+        sm_playing = 1;
+        sm_pos[0] = 12;
+        sm_rec = 1;
+        draw_full();
+        write_ppm(dir, "swamp_lock_held");
+        sm_lock_full_msg();
+        draw_full();
+        write_ppm(dir, "swamp_locks_full");
+        sm_lock_msg = 0;
+        sm_rec = 0;
+        sm_playing = 0;
     }
     {   /* the three layer maps, over the EDIT 1 page: T1 SAW, T3 muted, T4 soloed (the header shows T1 muted), 24 steps */
         static const char *const NAME[4] = {"", "EDIT", "GLO", "SEQ"};
@@ -2467,6 +2876,13 @@ int main(void)
     bad += test_leds_rec_play();
     bad += test_leds_family();
     bad += test_leds_layer();
+    bad += test_lock_hold_turn();
+    bad += test_lock_applies();
+    bad += test_lock_during_play_300bpm();
+    bad += test_lock_stress();
+    bad += test_lock_full();
+    bad += test_retrig_clears_locks();
+    bad += test_rec_records_on_trigs();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

@@ -101,8 +101,8 @@ static void sm_layer_end(void)
     }
 }
 
-/* the selected track's steps all off (n first: the audio stream reads n before the rest of a step) and no REST. Task 4: the
- * track's locks of the pattern go here too (sm_lock_*) */
+/* the selected track's steps all off (n first: the audio stream reads n before the rest of a step) and no REST, then the
+ * track's locks of the pattern (no step of it fires any more while they are removed) */
 static void sm_track_clear(uint32_t t)
 {
     sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
@@ -111,6 +111,8 @@ static void sm_track_clear(uint32_t t)
         pt->step[t % SM_NTRK][s].n = 0;
         pt->step[t % SM_NTRK][s].flags = 0;
     }
+    for (s = 0; s < SM_NSTEP; s++)
+        sm_lock_clear_step(t % SM_NTRK, s);
 }
 
 /* the open layer's keys (the white key number is its place among the white keys, F3 = 0) and knobs, this poll's edges */

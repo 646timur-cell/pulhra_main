@@ -2,7 +2,8 @@
 /* SWAMP MACHINE screen, Elektron mk1 look: one ink (white) on black, a 5 x 7 pixel font at scale 2, no smoothing, no grain;
  * a selection is an inversion. 240 x 240, every band its own canvas:
  *   y   0..19   header: T1 SAW 03 (track, machine, preset) left, the track inverted while it is muted; A01 120.0 > (pattern,
- *               tempo, transport) right; while recording REC (inverted) at the right corner in place of the pattern
+ *               tempo, transport) right; while recording REC (inverted) at the right corner in place of the pattern;
+ *               the lock pool full: LOCKS FULL (inverted) alone for a second
  *   y  20..47   the page and the preset: EDIT 1 . SYNC LEAD (a layer open: its name instead)
  *   y  48..159  the four knobs, a column of 60 each: the label, a ring of 16 dots, the value. A ring of a value locked on the
  *               held step is a filled disc; a dot in its centre: locked on another step
@@ -35,7 +36,6 @@
 #define SMD_Z_STRIP 7u
 
 static uint32_t sm_draw_px;                               /* the pixels the last frame sent (the test's budget) */
-static volatile uint8_t sm_rec;                           /* recording (the REC key, stage 2 task 4): REC in the header */
 static uint32_t sm_zsig[SMD_NZONE];                       /* what each zone shows now (its inputs' signature) */
 static uint8_t smd_mapped;                                /* a layer map is on the screen (the bands the knobs do not cover to be cleared) */
 static uint8_t sm_zvalid;                                 /* the bit per zone: sm_zsig is on the screen */
@@ -111,7 +111,7 @@ static uint32_t smd_hdr_sig(void)
     const sm_sound_t *s = smd_snd();
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, smp.cur);
-    h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play);
+    h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_lock_msg);
     return smd_mix(h, smd_rec);
 }
 static void smd_two(char *b, uint32_t v)
@@ -127,6 +127,11 @@ static void smd_header(void)
     int32_t x;
     const sm_sound_t *s = smd_snd();
     smd_begin(0, SMD_HDR_Y, 240u, SMD_HDR_H);
+    if (sm_lock_msg) {                                    /* the pool full: LOCKS FULL, inverted, the whole header for 1 s */
+        sm_px_text((240 - 12 * 10) / 2, 2, 2u, "LOCKS FULL", T_TEXT, 1);
+        smd_end();
+        return;
+    }
     /* left: T1 SAW 03 - track, machine (four letters), preset; pieces a half pitch (6 px) apart */
     l[0] = 'T'; l[1] = (char)('1' + sm_ui.trk % SM_NTRK); l[2] = 0;
     x = sm_px_text(2, 2, 2u, l, T_TEXT, (int)smd_muted()) + 2 + 6;   /* (a muted track: inverted) */
@@ -255,12 +260,18 @@ static void smd_knob(uint32_t k)
 }
 
 /* ------------------------------------------------------------ SELECT --- */
+static int32_t smd_sel_val(uint32_t id)                  /* SELECT's value: the held step's lock of it, else the base */
+{
+    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    int32_t li = sm_ui.held_step < SM_NSTEP ? sm_lock_find(pt, sm_ui.trk % SM_NTRK, sm_ui.held_step, id) : -1;
+    return li >= 0 ? pt->lock[li].val : smd_snd()->p[id];
+}
 static uint32_t smd_sel_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_cur_page()->sel;
     uint32_t h = smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine);
-    return id == SM_NOPARAM ? h : smd_mix(smd_mix(h, id), (uint8_t)s->p[id]);
+    return id == SM_NOPARAM ? h : smd_mix(smd_mix(h, id), (uint32_t)smd_sel_val(id));
 }
 static void smd_select(void)
 {
@@ -273,7 +284,7 @@ static void smd_select(void)
         const char *unit;
         int32_t x;
         smd_upper(lab, d->label, 6u);
-        param_format(d, clamp(s->p[id], d->min, d->max), val, &unit);
+        param_format(d, clamp(smd_sel_val(id), d->min, d->max), val, &unit);
         x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
         val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;   /* (what fits the row) */
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);

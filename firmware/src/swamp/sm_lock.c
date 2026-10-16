@@ -1,12 +1,32 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* SWAMP MACHINE parameter locks, the read side. sm_lock_find is a pure read of the pattern's pool (the main loop is the only
- * writer, sm_model.h); an entry of param 0xFF is a removed one (a tombstone) and never matches. Task 4 adds the writers. */
+/* SWAMP MACHINE parameter locks: the pattern's pool of SM_NLOCK entries {ts = trk << 5 | step, param, val}, nlock of them
+ * in use. Ownership (sm_model.h): the main loop is the ONLY writer of the pool; the audio stream reads it when a trig
+ * fires (sm_seq.c sm_seq_locks) and is never preempted by the main loop, so it sees the pool between two stores of the
+ * main loop, never inside one. Every write below keeps each of those in-between states whole:
+ *  - a new value of an existing lock: one 16-bit store of val;
+ *  - a new lock in a removed slot (param 0xFF): ts and val first, SM_BARRIER(), then the param byte (until that store
+ *    the slot is still a removed one, skipped);
+ *  - a new lock at the end: ts, param, val, SM_BARRIER(), then nlock + 1 (the reader never looks past nlock);
+ *  - a removed lock: its param byte 0xFF (a tombstone; one byte store; never matches, sm_lock_find, sm_seq_locks);
+ *  - compaction (the tombstones squeezed out, nlock down): many stores, so only while stopped AND with the audio
+ *    interrupt off for the copy (<= 192 x 4 bytes, a few microseconds; a block is 0.73 ms): a PLAY still in the queue
+ *    could otherwise start the sequencer between two of its stores. While playing the tombstones stay and are reused.
+ * A lock lives only on a step with a trig (n > 0): the gesture and REC write none elsewhere (a lock on an EMPTY step makes
+ * nothing in this stage: no lock trig; the REST lock trigs come later), and taking a trig off removes its locks. */
+#define SM_LOCK_DEAD 0xFFu
+#define SM_LOCK_MSG_US 1000000u                           /* LOCKS FULL: 1 s in the header */
+#ifndef SM_LOCK_PREEMPT
+#define SM_LOCK_PREEMPT() ((void)0)                       /* (the host test runs an audio block here: the interrupt's moment) */
+#endif
+
+static uint8_t sm_lock_msg;                               /* LOCKS FULL is in the header (since sm_lock_msg_t0) */
+static uint32_t sm_lock_msg_t0;
 
 /* the index in p->lock[] of the lock of (track t, step s, parameter param), -1: none */
 static int32_t sm_lock_find(const sm_pattern_t *p, uint32_t t, uint32_t s, uint32_t param)
 {
     uint32_t i, ts = (t << 5) | s, n = p->nlock;
-    if (param >= 0xFFu)
+    if (param >= SM_LOCK_DEAD)
         return -1;
     if (n > SM_NLOCK)
         n = SM_NLOCK;
@@ -16,10 +36,123 @@ static int32_t sm_lock_find(const sm_pattern_t *p, uint32_t t, uint32_t s, uint3
     return -1;
 }
 
-/* is the parameter locked on any step of the track (the dot in the centre of its ring); Task 4 fills it */
+/* is the parameter locked on any step of the track (the dot in the centre of its ring) */
 static int sm_param_locked_any(uint32_t t, uint32_t param)
 {
-    (void)t;
-    (void)param;
+    const sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t i, n = p->nlock;
+    if (param >= SM_LOCK_DEAD)
+        return 0;
+    if (n > SM_NLOCK)
+        n = SM_NLOCK;
+    for (i = 0; i < n; i++)
+        if ((uint32_t)(p->lock[i].ts >> 5) == t && p->lock[i].param == param)
+            return 1;
     return 0;
+}
+
+/* LOCKS FULL for a second (the only message of the locks) */
+static void sm_lock_full_msg(void)
+{
+    sm_lock_msg = 1;
+    sm_lock_msg_t0 = fm1_ticks();
+    sm_dirty = 1;
+}
+
+/* every poll: the message gone after its second */
+static void sm_lock_msg_poll(uint32_t now)
+{
+    if (sm_lock_msg && (uint32_t)(now - sm_lock_msg_t0) >= SM_LOCK_MSG_US * FM1_TICKS_PER_US) {
+        sm_lock_msg = 0;
+        sm_dirty = 1;
+    }
+}
+
+/* the removed entries squeezed out (the order of the live ones kept). Stopped only, the interrupt off for the copy */
+static void sm_lock_compact(sm_pattern_t *p)
+{
+    uint32_t i, j, n;
+    fm1_irq_off();
+    if (!sm_playing) {
+        n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock;
+        for (i = j = 0; i < n; i++)
+            if (p->lock[i].param != SM_LOCK_DEAD)
+                p->lock[j++] = p->lock[i];
+        p->nlock = (uint16_t)j;
+    }
+    fm1_irq_on();
+}
+
+/* the main loop: the lock of (t, s, param) is v (the caller clamps it). 1 = set; 0 = the pool is full (LOCKS FULL, nothing
+ * changed). An existing lock takes the value; else a removed slot is taken again; else one at the end */
+static int sm_lock_set(uint32_t t, uint32_t s, uint32_t param, int32_t v)
+{
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    int32_t i;
+    uint32_t k, n;
+    if (t >= SM_NTRK || s >= SM_NSTEP || param >= P_COUNT)
+        return 0;
+    i = sm_lock_find(p, t, s, param);
+    if (i >= 0) {
+        SM_LOCK_PREEMPT();
+        p->lock[i].val = (int16_t)v;                      /* (one 16-bit store) */
+        return 1;
+    }
+    n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock;
+    for (k = 0; k < n; k++)
+        if (p->lock[k].param == SM_LOCK_DEAD)
+            break;
+    if (k < n) {                                          /* a removed slot: still skipped until its param byte lands */
+        p->lock[k].ts = (uint8_t)((t << 5) | s);
+        p->lock[k].val = (int16_t)v;
+        SM_LOCK_PREEMPT();
+        SM_BARRIER();
+        p->lock[k].param = (uint8_t)param;
+        return 1;
+    }
+    if (n >= SM_NLOCK) {
+        sm_lock_full_msg();
+        return 0;
+    }
+    p->lock[n].ts = (uint8_t)((t << 5) | s);
+    p->lock[n].param = (uint8_t)param;
+    p->lock[n].val = (int16_t)v;
+    SM_LOCK_PREEMPT();
+    SM_BARRIER();
+    p->nlock = (uint16_t)(n + 1u);                        /* (counted last: the entry is whole before the reader sees it) */
+    return 1;
+}
+
+/* the main loop: every lock of step s of track t removed (tombstones); stopped, the pool compacted at once */
+static void sm_lock_clear_step(uint32_t t, uint32_t s)
+{
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t i, n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock, ts = (t << 5) | s, any = 0;
+    for (i = 0; i < n; i++)
+        if (p->lock[i].ts == ts && p->lock[i].param != SM_LOCK_DEAD) {
+            SM_LOCK_PREEMPT();
+            p->lock[i].param = SM_LOCK_DEAD;
+            any = 1;
+        }
+    if (any && !sm_playing)
+        sm_lock_compact(p);
+}
+
+/* the main loop: the lock of (t, s, id) turned by d detents from its value (none yet: from the base), clamped. A step
+ * without a trig takes no lock (0) */
+static int sm_lock_turn(uint32_t t, uint32_t s, uint32_t id, int32_t d)
+{
+    const sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    const sm_sound_t *sd = &p->kit.snd[t % SM_NTRK];
+    const param_desc_t *dc = sm_desc_safe(sm_engine_of(sd->machine), id);
+    int32_t i, v;
+    if (!d || !dc || t >= SM_NTRK || s >= SM_NSTEP || !p->step[t][s].n)
+        return 0;
+    i = sm_lock_find(p, t, s, id);
+    v = i >= 0 ? p->lock[i].val : sd->p[id];
+    v = clamp(param_turn(dc, clamp(v, dc->min, dc->max), d), dc->min, dc->max);
+    if (!sm_lock_set(t, s, id, v))
+        return 0;
+    sm_dirty = 1;
+    return 1;
 }

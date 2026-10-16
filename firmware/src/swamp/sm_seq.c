@@ -42,6 +42,66 @@ static void sm_seq_release(uint32_t t)
     sm_nheld[t] = 0;
 }
 
+#ifndef SM_LOCK_APPLIED
+#define SM_LOCK_APPLIED(t, s, p, v) ((void)0)             /* (the host test checks every lock applied against its model) */
+#endif
+
+/* a value onto track t's core, clamped to the parameter's range on the engine the track is on its way to (as SMC_PARAM) */
+static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock)
+{
+    const param_desc_t *d = sm_desc_safe(eng_idx(trk[t].eng_req), p);
+    (void)st;
+    if (!d)
+        return;
+    v = clamp(v, d->min, d->max);
+    trk[t].p[p] = (int16_t)v;
+    if (lock)
+        SM_LOCK_APPLIED(t, st, p, v);
+}
+
+/* track t's trig on step st fires: its locks onto the core; what the trig before locked and this one does not goes back
+ * to the model's base. The pool is the main loop's (sm_lock.c): nlock read once, the entries below it are whole (an
+ * entry is published before nlock counts it, a reused slot before its param byte stops being 0xFF); 0xFF: a removed
+ * one, skipped. This interrupt is never preempted by the main loop, so an entry is read whole */
+static void sm_seq_locks(uint32_t t, uint32_t st)
+{
+    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    uint8_t now[SM_LKB];
+    uint32_t i, n = pt->nlock, ts = (t << 5) | st, b;
+    memset(now, 0, sizeof now);
+    if (n > SM_NLOCK)
+        n = SM_NLOCK;
+    SM_BARRIER();
+    for (i = 0; i < n; i++) {
+        const sm_lock_t *l = &pt->lock[i];
+        uint32_t p = l->param;
+        if (l->ts != ts || p >= P_COUNT)                  /* (0xFF >= P_COUNT: a removed entry) */
+            continue;
+        now[p >> 3] |= (uint8_t)(1u << (p & 7u));
+        sm_seq_pset(t, p, l->val, st, 1);
+    }
+    for (b = 0; b < SM_LKB; b++) {
+        uint32_t back = sm_lk_on[t][b] & ~now[b], k;
+        for (k = 0; back; k++, back >>= 1)
+            if (back & 1u)
+                sm_seq_pset(t, b * 8u + k, pt->kit.snd[t].p[b * 8u + k], st, 0);
+        sm_lk_on[t][b] = now[b];
+    }
+}
+
+/* every track's locked values back to the base (STOP) */
+static void sm_seq_unlock_all(void)
+{
+    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t t, p;
+    for (t = 0; t < SM_NTRK; t++) {
+        for (p = 0; p < P_COUNT; p++)
+            if (sm_lk_is(t, p))
+                sm_seq_pset(t, p, pt->kit.snd[t].p[p], 0, 0);
+        memset(sm_lk_on[t], 0, SM_LKB);
+    }
+}
+
 /* power-on (before the audio starts: nothing runs concurrently): stopped, at step 0, the queue empty */
 static void sm_seq_init(void)
 {
@@ -50,6 +110,7 @@ static void sm_seq_init(void)
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
     memset(sm_nheld, 0, sizeof sm_nheld);
+    memset(sm_lk_on, 0, sizeof sm_lk_on);
     sm_solo = 0;
     sm_cq.head = sm_cq.tail = 0;
     sm_cov.head = sm_cov.tail = 0;
@@ -78,6 +139,7 @@ static void sm_seq_stop(void)
                 voice_kill(&trk[t].v[i]);
         sm_nheld[t] = 0;
     }
+    sm_seq_unlock_all();
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
     sm_playing = 0;
@@ -97,6 +159,7 @@ static void sm_seq_step(uint32_t t, uint32_t step_q8, uint32_t muted)
     if (!s->n || (s->flags & SMF_REST) || muted)          /* (n first: the main loop writes it last, sm_step_toggle) */
         return;                                           /* (no trig, or a muted track: the notes before run out their LEN) */
     sm_seq_release(t);
+    sm_seq_locks(t, i);                                   /* (before the notes: they start with the step's values) */
     for (k = 0; k < s->n && k < 4u; k++) {
         sm_held[t][k] = s->note[k];
         trk_note_on(&trk[t], s->note[k], (uint32_t)clamp(s->vel, 1, 127));

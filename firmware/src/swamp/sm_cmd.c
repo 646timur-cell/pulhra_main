@@ -115,6 +115,13 @@ static int sm_cmd_push(sm_cmd_t c)
 
 static void sm_seq_play(void);
 static void sm_seq_stop(void);
+static void sm_lock_clear_step(uint32_t t, uint32_t s);  /* sm_lock.c */
+
+/* the sequencer's (the audio stream's) own: bit per parameter, the parameters the last trig fired on each track locked
+ * (sm_seq.c sm_seq_locks). While a bit is set, trk[t].p holds the lock's value, not the model's base */
+#define SM_LKB ((P_COUNT + 7u) / 8u)
+static uint8_t sm_lk_on[SM_NTRK][SM_LKB];
+static int sm_lk_is(uint32_t t, uint32_t p) { return p < P_COUNT && ((sm_lk_on[t % SM_NTRK][p >> 3] >> (p & 7u)) & 1u); }
 
 /* one command onto the core (the audio stream's side; the model is the main loop's and was written before the push).
  * A value is clamped to its parameter's range (P_E0..P_E8: the range of the engine the track is on its way to) */
@@ -132,13 +139,15 @@ static void sm_cmd_apply(const sm_cmd_t *c)
     case SMC_PARAM:
         if (t < SM_NTRK) {
             const param_desc_t *d = sm_desc_safe(eng_idx(trk[t].eng_req), c->param);
-            if (d)                                        /* (none: P_E8 of a machine without one, an id out of range) */
-                trk[t].p[c->param] = (int16_t)clamp(c->val, d->min, d->max);
+            if (d && !sm_lk_is(t, c->param))              /* (none: P_E8 of a machine without one, an id out of range; */
+                trk[t].p[c->param] = (int16_t)clamp(c->val, d->min, d->max);   /* locked now: the next trig takes the base) */
         }
         break;
     case SMC_LOAD:
-        if (t < SM_NTRK)
+        if (t < SM_NTRK) {
             sm_track_load(t, &pt->kit.snd[t]);
+            memset(sm_lk_on[t], 0, SM_LKB);               /* (every value the sound's base now) */
+        }
         break;
     }
 }
@@ -155,7 +164,9 @@ static void sm_cmd_drain(void)
 
 /* the main loop: toggle the trig of step st on track t in the current pattern. On: C3 + the track's ROOT, vel 100, LEN 0
  * (the track's GATE), no flags; every field first, then a compiler barrier, then n (one byte store): the audio stream
- * (sm_seq_step reads n first) sees either no trig or the whole one. Off: n = 0 (one byte). */
+ * (sm_seq_step reads n first) sees either no trig or the whole one. Off: n = 0 (one byte). Either way the step's
+ * locks go (after n = 0 when off: the step no longer fires while they are removed; before n when on: a trig placed
+ * again starts with none) */
 static void sm_step_toggle(uint32_t t, uint32_t st)
 {
     sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
@@ -165,8 +176,10 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     s = &pt->step[t][st];
     if (s->n) {
         s->n = 0;
+        sm_lock_clear_step(t, st);
         return;
     }
+    sm_lock_clear_step(t, st);
     s->note[0] = (uint8_t)(48 + clamp(pt->kit.snd[t].p[P_ROOT], 0, 11));
     s->note[1] = s->note[2] = s->note[3] = 0;
     s->vel = 100;
