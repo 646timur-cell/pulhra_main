@@ -5,10 +5,18 @@
 
 #include "sm_model.h"
 #include "sm_model.c"
+#include "sm_kit.c"
 
-/* the sequencer's side of the audio block (fx.c mix_block calls it first); the stub plays nothing (Task 4 replaces it:
- * the audio stream is the only writer of trk[]) */
-static void events_block(uint32_t n) { (void)n; }
+/* the sequencer's side of the audio block (fx.c mix_block calls it first); it plays nothing yet (Task 4 replaces it: the
+ * audio stream is the only writer of trk[]), but a machine change (sm_track_load) is served: engine_block at each block
+ * start, as seq.c events_block does for every track */
+static void events_block(uint32_t n)
+{
+    uint32_t t;
+    (void)n;
+    for (t = 0; t < NTRK; t++)
+        engine_block(&trk[t]);
+}
 
 /* bit per track: release every sounding note (M-UPGRADE sets it before it takes the flash; events_block, Task 4, serves it) */
 static volatile uint8_t panic_req;
@@ -18,8 +26,8 @@ static volatile uint8_t panic_req;
 static void sm_input_poll(void) {}
 static void sm_draw(void) {}
 
-/* power-on, before audio_init: every track with its parameter defaults and empty steps, the master level; the
- * engines at rest (Task 3 gives each track its machine) */
+/* power-on, before audio_init: every track with its parameter defaults and empty steps, the master level, then the kit
+ * of the current pattern onto the tracks (T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX) */
 static void sm_core_init(void)
 {
     uint32_t i, k;
@@ -32,6 +40,7 @@ static void sm_core_init(void)
             trk[k].step[i].time = ST_REST;
     }
     sm_project_init();
+    sm_kit_boot(&smp.pat[smp.cur].kit);
     song.master_q12 = 2048;                   /* (master_boot replaces it with the pot's level before the audio starts) */
 }
 
