@@ -493,9 +493,18 @@ static uint32_t page_first(uint32_t fam)
 }
 
 /* transient message in the top bar, right of the transport and the BPM: a + b */
+#if FELUCCA_MONOFM
+static uint8_t mf_msg_glitch;    /* CRYPT: this message comes up garbled (ui_draw.c head_msg): only one after quiet, never
+                                  * one that replaces another (a knob turned: its values one after another) */
+#else
+#define mf_msg_glitch 0
+#endif
 static void ui_say(const char *a, const char *b)
 {
     uint32_t n;
+#if FELUCCA_MONOFM
+    mf_msg_glitch = ui.msg_t == 0;
+#endif
     str_cpy(ui.msg, a, sizeof ui.msg);
     n = str_len(ui.msg);
     str_cpy(ui.msg + n, b, sizeof ui.msg - n);
@@ -550,7 +559,7 @@ static int lock_page_ok(uint32_t i)
 }
 static uint32_t lock_id(uint32_t k)
 {
-    uint32_t id = ui.plk_src && lock_page_ok(ui.plk_src - 1u) ? PAGES[ui.plk_src - 1u].id[k & 3u]
+    uint32_t id = ui.plk_src && lock_page_ok(ui.plk_src - 1u) ? page_track_id(&PAGES[ui.plk_src - 1u], k)
                                                                : ENGINES[TSEL->eng_req % NENGINES]->knob[k & 3u];
     return id < P_COUNT && motion_param(id) ? id : 0xFFu;
 }

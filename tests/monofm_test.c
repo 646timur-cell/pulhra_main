@@ -1577,6 +1577,19 @@ static int test_v4(void)
     turn(EN_K4, 5);
     ok &= mf_mix_send == 2u && t->p[P_DLY] > 10;
     bad += check("MONOFM v4 GLO > MIX: KNOB 4 a send (REV), SELECT another (DLY)", ok);
+    {   /* a trig held: KNOB 4 locks the send SELECT picked, not DST */
+        int16_t v;
+        mf_mix_send = 3u;
+        track_defaults_steps(t);
+        frames(400);
+        key_down(key_at(0, 3));
+        frame();
+        turn(EN_K4, 5);
+        key_up(key_at(0, 3));
+        frames(100);
+        ok = motion_lock_get(t, 3, P_REV, &v) && !motion_lock_get(t, 3, P_DIST, &v);
+        bad += check("MONOFM v4 GLO > MIX: a trig held + KNOB 4 locks the picked send (REV), not DST", ok);
+    }
 
     /* XY: SELECT the axis */
     v4_page("XY");
@@ -1667,6 +1680,36 @@ static int test_v4(void)
     bad += check("MONOFM v4 OCT- + OCT+: the keys play the track (the octave kept), again: the trigs; one OCT- still "
                  "the octave", ok);
     song.octave = 0;
+
+    /* SEQ held, the white keys (spread out): F CLEAR, G COPY P, A COPY T, B PASTE T, C held SAVE, D PASTE P, E / F SHIFT,
+     * B / C (the next) TRN */
+    {
+        uint32_t k;
+        v4_page("EDIT 1");
+        frames(400);
+        btn_down(B_SEQ);
+        frames(100);
+#define SEQ_TAP(w) do { key_down(key_at(0, w)); frame(); key_up(key_at(0, w)); frame(); } while (0)
+        SEQ_TAP(11);
+        SEQ_TAP(11);
+        SEQ_TAP(10);
+        SEQ_TAP(7);
+        ok = mf_pat_trn(song.sel) == 1 && mf_pat_shift(song.sel) == 1;
+        SEQ_TAP(6);
+        ok &= mf_pat_shift(song.sel) == 0;
+        key_down(key_at(0, 4));
+        for (k = 0; k < 60u; k++)
+            frame();
+        key_up(key_at(0, 4));
+        frame();
+        ok &= !mf_pat_unsaved();
+        SEQ_TAP(0);
+#undef SEQ_TAP
+        ok &= mf_pat_trn(song.sel) == 0;
+        btn_up(B_SEQ);
+        frames(400);
+        bad += check("MONOFM v4 SEQ held: B / C TRN, E / F SHIFT, C held SAVE, F CLEAR (keys spread out)", ok);
+    }
 
     /* RETRIG: ARP held, a key: its note again every RATE (1/16), not toggling a trig; KNOB 1 its RATE; ARP let go: the
      * hits stop, ARP's page not opened */

@@ -258,7 +258,7 @@ static void head_msg(int32_t x, int32_t maxw)
     if (icon)
         x += cv_icon_mid(x, H_HEAD / 2, 16, ICON_X_NOFILE, T_ACCENT, T_BG) + KH_GAP;
 #if FELUCCA_MONOFM
-    if (big && ui.msg_t > 34u && ui.msg_t <= 40u && !icon && !(ui_prefs & PREF_ANIM_OFF)) {               /* CRYPT: a new message comes up garbled, its letters falling */
+    if (big && mf_msg_glitch && ui.msg_t > 34u && ui.msg_t <= 40u && !icon && !(ui_prefs & PREF_ANIM_OFF)) {               /* CRYPT: a new message comes up garbled, its letters falling */
         static const char GL[] = "X#0KZ8N%7H";          /* into place over its first six frames */
         char g[32];
         uint32_t i, left = ui.msg_t - 34u;
@@ -348,7 +348,7 @@ static void draw_head(void)
                    (ui.msg_t ? str_hash(7u, ui.msg) : ui.layer * 7919u + (uint32_t)layer_locked() * 3u) + (uint32_t)song.g[G_BPM] * 101u + (ui.bpm_t != 0) * 31u +
                    (uint32_t)seq_counting() * 7u + (ui_prefs & PREF_BPM_LOCK) * 4099u +
                    (uint32_t)batt_shown() * 7777u + (chain.running ? (chain.row + 1u) * 104729u : 0u) +
-                   (slot ? str_hash(11u, sl) : 0u) + (FELUCCA_MONOFM && ui.msg_t > 34u && ui.msg_t <= 40u ? ui.msg_t * 7919u : 0u);
+                   (slot ? str_hash(11u, sl) : 0u) + (FELUCCA_MONOFM && mf_msg_glitch && ui.msg_t > 34u && ui.msg_t <= 40u ? ui.msg_t * 7919u : 0u);
     int msg = ui.msg_t || ui.layer;
     int centre = !msg || ui.bpm_t || ui.layer == LAYER_GLO;   /* the BPM being changed: it stays, the message right */
     int32_t rx = HEAD_REC_X;

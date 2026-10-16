@@ -52,9 +52,14 @@
 #if FELUCCA_MONOFM
 /* MONOFM's SEQ held (mf_pat.c): ALGORITHM picks a pattern (msq.pick), OCT+ adds it to a chain, OCT- forgets both; let go
  * of SEQ, the pick (or the chain) is asked for. White keys F3 .. G4 the actions (MA_*); black keys: F#3 the change
- * mode, G#3 the chain off, F#5 held MSQ_SAVE_MS: SAVE the project */
+ * mode, G#3 the chain off, C4 (white) held MSQ_SAVE_MS: SAVE the project */
 #define MSQ_SAVE_MS 800u
-#define MSQ_KEY_SAVE 10u                                /* (F#5: the black key place) */
+/* the white keys (places from F3), spread out so the hands do not meet (v4): F3 CLEAR, G3 COPY the pattern, A3 COPY the
+ * track, B3 PASTE it, C4 held SAVE, D4 PASTE the pattern; E4 / F4 SHIFT < >; B4 / C5 TRN - + */
+#define MSQ_SAVE 0xFEu
+#define MSQ_NONE 0xFFu
+static const uint8_t MSQ_WHITE[16] = {MA_CLEAR, MA_CPAT, MA_CTRK, MA_PTRK, MSQ_SAVE, MA_PPAT, MA_LEFT, MA_RIGHT,
+                                      MSQ_NONE, MSQ_NONE, MA_TDN, MA_TUP, MSQ_NONE, MSQ_NONE, MSQ_NONE, MSQ_NONE};
 static struct {
     uint8_t pick, picked, n, chain[16];
     uint8_t save_k;                                     /* the SAVE key down (+ 1), since save_t */
@@ -954,17 +959,16 @@ static void layer_key(uint32_t l, uint32_t k)
             ;                                           /* (SEQ + ARP: the keyboard's toggle, nothing else) */
         else if (chain_busy())
             ui_message("STOP TO EDIT");
-        else if (!key_black(k) && p < MA_N)
-            mf_pat_action(p);
+        else if (!key_black(k) && p < 16u && MSQ_WHITE[p] == MSQ_SAVE) {
+            msq.save_k = (uint8_t)(k + 1u);              /* (held: SAVE, layer_keys) */
+            msq.save_t = fm1_ms;
+            ui_message("HOLD: SAVE PROJECT");
+        } else if (!key_black(k) && p < 16u && MSQ_WHITE[p] < MA_N)
+            mf_pat_action(MSQ_WHITE[p]);
         else if (key_black(k) && p == 0u)
             mf_pat_mode_step();
         else if (key_black(k) && p == 1u)
             mf_chain_stop();
-        else if (key_black(k) && p == MSQ_KEY_SAVE) {
-            msq.save_k = (uint8_t)(k + 1u);              /* (held: SAVE, msq_keys) */
-            msq.save_t = fm1_ms;
-            ui_message("HOLD: SAVE PROJECT");
-        }
 #endif
     } else if (l == LAYER_SEQ) {
         if (!key_black(k))
@@ -991,7 +995,7 @@ static void layer_keys(uint32_t keys)
     }
 #endif
 #if FELUCCA_MONOFM
-    if (msq.save_k) {                                   /* F#5 held MSQ_SAVE_MS: SAVE */
+    if (msq.save_k) {                                   /* C4 held MSQ_SAVE_MS: SAVE */
         if (!((kb_layer >> (msq.save_k - 1u)) & 1u))
             msq.save_k = 0;
         else if (fm1_ms - msq.save_t >= MSQ_SAVE_MS) {
@@ -1212,9 +1216,9 @@ static uint32_t layer_leds(uint32_t *br)
         } else if (l == LAYER_SEQ) {                    /* the actions and the modes breathe; the chain on lit */
             if (b) {
                 on = p == 1u && mf_pat_nchain();
-                can = p == 0u || p == 1u || p == MSQ_KEY_SAVE;
+                can = p == 0u || p == 1u;
             } else {
-                can = p < MA_N && !chain_busy();
+                can = p < 16u && (MSQ_WHITE[p] == MSQ_SAVE || (MSQ_WHITE[p] < MA_N && !chain_busy()));
             }
 #endif
         } else if (l == LAYER_SEQ) {                    /* the tools breathe (not while a song plays); DRUM: the lane */
@@ -1531,7 +1535,7 @@ static void layer_seq(void)
 #elif FELUCCA_MONOFM
 /* MONOFM's SEQ held: the 16 patterns compact, 8 a row (playing: selected; picked with ALGORITHM: the accent; asked
  * for: waiting; in the chain being built: its place; empty: dim), the mode and the chain, then what the white keys do
- * with the selected track's TRN and SHIFT so far, and F#5's SAVE */
+ * with the selected track's TRN and SHIFT so far, and its SAVE */
 static void mf_val(char *b, const char *what, int32_t v)   /* "TRN +3" */
 {
     str_cpy(b, what, 12);
@@ -1571,16 +1575,15 @@ static void layer_seq(void)
         }
         cv_text_r(232, 40, &AF_S, b, T_ACCENT, T_SURF);
     }
-    lcell(LC_X(0), 56, 28, "F3", ICON_CLEAR, 0, "CLEAR", st, 0);
+    lcell(LC_X(0), 56, 28, "F", ICON_CLEAR, 0, "CLEAR", st, 0);
+    lcell(LC_X(1), 56, 28, "A", ICON_STEPS, 0, "COPY T", st, 0);
+    lcell(LC_X(2), 56, 28, "B", ICON_STEPS, 0, "PASTE T", st, 0);
+    lcell(LC_X(3), 56, 28, "C", ICON_SAVE, 0, "SAVE", mf_pat_unsaved() ? LS_OFF : LS_DIM, 1);
+    lcell(LC_X(0), 88, 28, "G D", ICON_STEPS, 0, "COPY P", st, 0);
     mf_val(b, "SHIFT ", mf_pat_shift(song.sel));
-    lcell(LC_X(1), 56, 28, "G A", ICON_X_RIGHT, 0, b, mf_pat_shift(song.sel) ? LS_SEL : st, 0);
+    lcell(LC_X(1), 88, 28, "E F", ICON_X_RIGHT, 0, b, mf_pat_shift(song.sel) ? LS_SEL : st, 0);
     mf_val(b, "TRN ", mf_pat_trn(song.sel));
-    lcell(LC_X(2), 56, 28, "B C", ICON_PITCH, 0, b, mf_pat_trn(song.sel) ? LS_SEL : st, 0);
-    lcell(LC_X(3), 56, 28, "F#5", ICON_SAVE, 0, "SAVE", mf_pat_unsaved() ? LS_OFF : LS_DIM, 1);
-    lcell(LC_X(0), 88, 28, "D4", ICON_STEPS, 0, "COPY T", st, 0);
-    lcell(LC_X(1), 88, 28, "E4", ICON_STEPS, 0, "PASTE T", st, 0);
-    lcell(LC_X(2), 88, 28, "F4", ICON_STEPS, 0, "COPY P", st, 0);
-    lcell(LC_X(3), 88, 28, "G4", ICON_STEPS, 0, "PASTE P", st, 0);
+    lcell(LC_X(2), 88, 28, "B C", ICON_PITCH, 0, b, mf_pat_trn(song.sel) ? LS_SEL : st, 0);
 }
 #else
 static void layer_seq(void)

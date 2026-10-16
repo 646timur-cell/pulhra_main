@@ -1020,6 +1020,9 @@ static void mf_sel_turn(int32_t s)
     *vp = (int16_t)param_turn(d, *vp, accel(EN_SELECT, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
     motion_capture(TSEL, id, *vp);
     ml_knob(TSEL, id);
+    ui.force = 1;
+    if (grid_on())                                      /* (the footer shows it: "SEL CUT 64", no message over the header) */
+        return;
     param_format(d, *vp, val, &unit);
     str_cpy(b, d->label, sizeof b);
     str_cpy(b + str_len(b), " ", 4);

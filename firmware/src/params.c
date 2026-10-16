@@ -791,6 +791,23 @@ static uint8_t mf_mix_send = 3u; /* GLO > MIX: the send KNOB 4 is, 0 DST 1 CHO 2
 #define mf_xy_axis 0u
 #endif
 
+/* the track parameter knob `slot` of a track page edits as shown: MOD's slot picked, MONOFM's XY axis and MIX send
+ * (SELECT); the locks take the same (ui.c lock_id) */
+static uint32_t page_track_id(const page_t *pg, uint32_t slot)
+{
+    uint32_t id = pg->id[slot & 3u];
+    if (id == 0xFFu)
+        return id;
+    if (pg->graph == GR_MOD)
+        id += 3u * mod_ui_slot;
+#if FELUCCA_MONOFM
+    if (pg->graph == GR_XY && mf_xy_axis)
+        id += 5u;
+    if (MF_MIX_PAGE(pg) && (slot & 3u) == 3u)
+        id = P_DIST + mf_mix_send % 4u;
+#endif
+    return id;
+}
 static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **valp)
 {
     uint32_t id = pg->id[slot];
@@ -806,14 +823,7 @@ static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **
         *valp = &song.g[id];
         return &GP[id];
     }
-    if (pg->graph == GR_MOD)                          /* SRC DST AMT of the slot shown */
-        id += 3u * mod_ui_slot;
-#if FELUCCA_MONOFM
-    if (pg->graph == GR_XY && mf_xy_axis)
-        id += 5u;
-    if (MF_MIX_PAGE(pg) && slot == 3u)
-        id = P_DIST + mf_mix_send % 4u;
-#endif
+    id = page_track_id(pg, slot);                     /* (MOD's slot, MONOFM's XY axis and MIX send) */
     *valp = &TSEL->p[id];
     return track_desc(TSEL, id);
 }
