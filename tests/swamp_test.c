@@ -535,9 +535,11 @@ static int test_step_toggle(void)
     int bad = 0;
     seq_reset();
     smp.pat[0].kit.snd[2].p[P_ROOT] = 3;
+    smp.pat[0].step[2][9] = (sm_step_t){{70, 71, 72, 73}, 0, 9, 7, 2, SMF_REST | SMF_SLIDE, 3};   /* (an old step's leftovers) */
     sm_step_toggle(2, 9);
     bad += check("STEP: on: C3 + ROOT, vel 100, LEN 0 (the track's GATE), no flags, n 1",
-                 s->n == 1u && s->note[0] == 51u && s->vel == 100u && !s->len && !s->flags && !s->cond && !s->nudge);
+                 s->n == 1u && s->note[0] == 51u && s->vel == 100u && !s->len && !s->flags && !s->cond && !s->nudge &&
+                     !s->note[1] && !s->note[2] && !s->note[3]);
     sm_step_toggle(2, 9);
     bad += check("STEP: off: n 0", !s->n);
     sm_step_toggle(4, 0);
