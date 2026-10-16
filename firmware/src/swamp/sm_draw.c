@@ -34,7 +34,7 @@ static uint8_t sm_zvalid;                                 /* the bit per zone: s
 static uint8_t sm_last_pos = 0xFFu, sm_last_play = 0xFFu; /* the playing step and transport seen by the last frame */
 /* the playing step of the selected track and the transport, read ONCE per frame (the audio stream moves them at any time):
  * every signature and every zone of the frame uses these two, so what is drawn is what the signature said */
-static uint8_t smd_pos, smd_play;
+static uint8_t smd_pos, smd_play, smd_rec;                /* (and REC, which the REC key sets from the main loop) */
 
 /* the colours of the look (gfx.c's ux, what the splash and the canvas read): ink, dim, ground; nothing else is ever drawn */
 static void sm_ux_mk1(void)
@@ -99,7 +99,7 @@ static uint32_t smd_hdr_sig(void)
     uint32_t h = 2166136261u;
     h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, smp.cur);
     h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play);
-    return smd_mix(h, sm_rec != 0);
+    return smd_mix(h, smd_rec);
 }
 static void smd_two(char *b, uint32_t v)
 {
@@ -110,7 +110,7 @@ static void smd_two(char *b, uint32_t v)
 static void smd_header(void)
 {
     char l[8], a[4], t[12], nm[6];
-    uint32_t rec = sm_rec != 0;
+    uint32_t rec = smd_rec;
     int32_t x;
     const sm_sound_t *s = smd_snd();
     smd_begin(0, SMD_HDR_Y, 240u, SMD_HDR_H);
@@ -302,6 +302,7 @@ static void sm_draw(void)
     sm_draw_px = 0;
     smd_play = *(volatile uint8_t *)&sm_playing != 0;     /* the snapshot of the frame (the audio stream moves both) */
     smd_pos = *(volatile uint8_t *)&sm_pos[sm_ui.trk % SM_NTRK];
+    smd_rec = *(volatile uint8_t *)&sm_rec != 0;
     if (!sm_dirty && smd_pos == sm_last_pos && smd_play == sm_last_play)
         return;
     sm_dirty = 0;

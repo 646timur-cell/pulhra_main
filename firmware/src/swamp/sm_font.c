@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* SWAMP MACHINE pixel font, 5 x 7, drawn for this project (no third-party glyph data). A glyph is five columns, bit 0 the top
- * row. Codes: ASCII 32..95 (capitals, figures, punctuation; sm_px_text folds a-z to capitals), then 0x10 play, 0x11 stop,
- * 0x12 a centred dot (the separator of the page line). Any other code draws as a space. */
+/* SWAMP MACHINE pixel font, 5 x 7. The glyphs derive from the standard 5 x 7 font (glcdfont) of the Adafruit GFX Library,
+ * Copyright (c) 2012 Adafruit Industries, BSD-2-Clause (<https://github.com/adafruit/Adafruit-GFX-Library>; the licence text
+ * is LICENSES/BSD-2-Clause-Adafruit-GFX.txt, listed in LICENSING.md). This project's own: the play, stop and centred-dot
+ * glyphs (0x10, 0x11, 0x12), and whatever glyph differs from the original. A glyph is five columns, bit 0 the top row.
+ * Codes: ASCII 32..95 (capitals, figures, punctuation; sm_px_text folds a-z to capitals), then 0x10 play, 0x11 stop, 0x12 a
+ * centred dot (the separator of the page line). Any other code draws as a space. */
 #define SM_FONT_N 67u
 static const uint8_t SM_FONT[SM_FONT_N][5] = {
     {0x00, 0x00, 0x00, 0x00, 0x00},   /*   */
