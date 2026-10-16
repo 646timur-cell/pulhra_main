@@ -35,6 +35,7 @@ static void sm_input_init(void)
     memset(sm_pdirty, 0, sizeof sm_pdirty);
     sm_ld_pend = sm_tr_pend = 0;
     sm_key_arm = sm_key_used = 0;
+    sm_unl_pend = 0;
     sm_rec = 0;
     sm_lock_msg = 0;
     sm_dirty = 1;
@@ -91,8 +92,13 @@ static void sm_turn(uint32_t id, int32_t s)
         sm_turn_held(id, s);
         return;
     }
-    if (sm_rec && sm_playing) {
-        (void)sm_lock_turn(sm_ui.trk, *(volatile uint8_t *)&sm_pos[sm_ui.trk % SM_NTRK], id, s);   /* (the audio stream's) */
+    if (sm_rec && sm_playing) {                           /* (the playing step: the audio stream's byte) */
+        uint32_t t = sm_ui.trk % SM_NTRK, st = *(volatile uint8_t *)&sm_pos[t];
+        if (sm_lock_turn(t, st, id, s)) {                 /* heard at once: the lock onto the core (a refused preview: */
+            sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, 0, (uint8_t)id, 0};   /* the step's next fire plays it) */
+            c.val = smp.pat[smp.cur % SM_NPAT].lock[sm_lock_find(&smp.pat[smp.cur % SM_NPAT], t, st, id)].val;
+            (void)sm_cmd_push(c);
+        }
         return;
     }
     v = param_turn(d, sd->p[id], s);
@@ -130,8 +136,10 @@ static void sm_preset_turn(int32_t s)
     sm_sound_load(sd->machine, (uint32_t)p);
 }
 
-/* the keys: a white key is a step of the bank (F3 .. G5, the 16 white keys), D#5 / F#5 the bank. A key let go toggles the
- * trig unless a knob was turned while it was down; a key held past SM_HOLD_US, or turned, is the step shown (held_step) */
+/* the keys: a white key is a step of the bank (F3 .. G5, the 16 white keys), D#5 / F#5 the bank. Pressed: armed (before
+ * the knobs of the poll, so a turn in the same poll is a lock of it). Let go: the trig toggles only if it was down at most
+ * SM_HOLD_US and no knob or SELECT turned meanwhile (a hold is a look at the step's locks, not a toggle); a key held past
+ * SM_HOLD_US, or turned, is the step shown (held_step) */
 static int32_t sm_white_of(uint32_t key)
 {
     uint32_t k, w = 0;
@@ -142,9 +150,9 @@ static int32_t sm_white_of(uint32_t key)
     return (int32_t)w;
 }
 
-static void sm_keys(uint32_t notes, uint32_t now)
+static void sm_keys_press(uint32_t notes, uint32_t now)
 {
-    uint32_t k, held = fm1_in.notes, hs = 0xFFu;
+    uint32_t k;
     for (k = 0; k < SM_NKEYS; k++) {
         int32_t w;
         if (!((notes >> k) & 1u))
@@ -167,12 +175,17 @@ static void sm_keys(uint32_t notes, uint32_t now)
         sm_key_arm |= 1u << k;
         sm_key_used &= ~(1u << k);
     }
+}
+
+static void sm_keys_release(uint32_t now)
+{
+    uint32_t k, held = fm1_in.notes, hs = 0xFFu;
     for (k = 0; k < SM_NKEYS; k++) {
         if (!((sm_key_arm >> k) & 1u))
             continue;
         if (!((held >> k) & 1u)) {
             sm_key_arm &= ~(1u << k);
-            if (!((sm_key_used >> k) & 1u))
+            if (!((sm_key_used >> k) & 1u) && (uint32_t)(now - sm_key_t0[k]) <= SM_HOLD_US * FM1_TICKS_PER_US)
                 sm_step_toggle(sm_key_trk[k], sm_key_step[k]);   /* (off: its locks go too) */
             sm_key_used &= ~(1u << k);
             sm_dirty = 1;
@@ -207,6 +220,7 @@ static void sm_flush(void)
                 if ((sm_pdirty[t][w] >> b) & 1u)
                     sm_param_push(t, w * 32u + b);
     }
+    sm_unlock_flush();
     if (sm_tr_pend) {
         sm_cmd_t c = {sm_tr_pend == 1u ? SMC_PLAY : SMC_STOP, 0, 0, 0, 0};
         if (sm_cmd_push(c))
@@ -245,12 +259,15 @@ static void sm_input_poll(void)
         sm_ui.held_step = 0xFFu;
         sm_dirty = 1;
     }
+    sm_keys_press(notes, now);
+    if (sel || k[0] || k[1] || k[2] || k[3])              /* (any of them, a knob without a parameter too: no toggle) */
+        sm_key_used |= sm_key_arm;
     sm_preset_turn(pre);
     for (i = 0; i < 4; i++)
         if (sm_cur_page()->id[i] != SM_NOPARAM)
             sm_turn(sm_cur_page()->id[i], k[i]);
     if (sm_cur_page()->sel != SM_NOPARAM)
         sm_turn(sm_cur_page()->sel, sel);
-    sm_keys(notes, now);
+    sm_keys_release(now);
     sm_flush();
 }

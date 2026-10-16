@@ -47,6 +47,7 @@ static uint32_t sm_epage_n(uint32_t pg) { return (uint32_t)MF_PAGE[pg % SM_NEPAG
 
 static void sm_layer_open(uint32_t l)
 {
+    sm_key_arm = sm_key_used = 0;                         /* (a trig key down before the layer never toggles inside it) */
     sm_layer = (uint8_t)l;
     sm_lay_cleared = 0;
     if (l == SML_EDIT)                                    /* (opens on the page of the selected track's machine) */
@@ -113,6 +114,7 @@ static void sm_track_clear(uint32_t t)
     }
     for (s = 0; s < SM_NSTEP; s++)
         sm_lock_clear_step(t % SM_NTRK, s);
+    sm_unlock_req(t % SM_NTRK, 0xFFu);                    /* (a lock on the core: back to the base) */
 }
 
 /* the open layer's keys (the white key number is its place among the white keys, F3 = 0) and knobs, this poll's edges */

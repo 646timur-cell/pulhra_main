@@ -19,7 +19,11 @@
  *  - SMC_PARAM with the ring full and no pending value of its {trk, param}: a second small ring of values only (sm_cov),
  *    drained after the main one and coalesced the same way. While it holds anything the main ring takes nothing (a later
  *    command must not overtake an earlier value), the values go on into sm_cov; anything else is refused (0). */
-enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD };
+enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD, SMC_UNLOCK, SMC_PREVIEW };
+/* SMC_UNLOCK {trk, step}: the trig of step (0xFF: every step, SEQ CLEAR) was taken off; if the values locked on the core
+ *   came from it, they go back to the model's base (a removed trig's lock must not stay on the core till the next trig).
+ * SMC_PREVIEW {trk, param, val}: a lock REC just wrote, onto the core at once; the parameter counts as locked, so the
+ *   next unlocked trig of the track takes the base again. */
 typedef struct { uint8_t kind, trk, step, param; int16_t val; } sm_cmd_t;
 
 #define SM_NCMD 64u                                       /* the ring */
@@ -121,6 +125,9 @@ static void sm_lock_clear_step(uint32_t t, uint32_t s);  /* sm_lock.c */
  * (sm_seq.c sm_seq_locks). While a bit is set, trk[t].p holds the lock's value, not the model's base */
 #define SM_LKB ((P_COUNT + 7u) / 8u)
 static uint8_t sm_lk_on[SM_NTRK][SM_LKB];
+static uint8_t sm_lk_step[SM_NTRK];                       /* the step whose trig set sm_lk_on (0xFF: none) */
+static void sm_seq_unlock(uint32_t t);                    /* sm_seq.c: the locked values of track t back to the base */
+static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock);
 static int sm_lk_is(uint32_t t, uint32_t p) { return p < P_COUNT && ((sm_lk_on[t % SM_NTRK][p >> 3] >> (p & 7u)) & 1u); }
 
 /* one command onto the core (the audio stream's side; the model is the main loop's and was written before the push).
@@ -143,10 +150,21 @@ static void sm_cmd_apply(const sm_cmd_t *c)
                 trk[t].p[c->param] = (int16_t)clamp(c->val, d->min, d->max);   /* locked now: the next trig takes the base) */
         }
         break;
+    case SMC_UNLOCK:
+        if (t < SM_NTRK && (c->step == 0xFFu || c->step == sm_lk_step[t]))
+            sm_seq_unlock(t);
+        break;
+    case SMC_PREVIEW:
+        if (t < SM_NTRK && c->param < P_COUNT) {
+            sm_seq_pset(t, c->param, c->val, 0, 0);
+            sm_lk_on[t][c->param >> 3] |= (uint8_t)(1u << (c->param & 7u));
+        }
+        break;
     case SMC_LOAD:
         if (t < SM_NTRK) {
             sm_track_load(t, &pt->kit.snd[t]);
             memset(sm_lk_on[t], 0, SM_LKB);               /* (every value the sound's base now) */
+            sm_lk_step[t] = 0xFFu;
         }
         break;
     }
@@ -160,6 +178,32 @@ static void sm_cmd_drain(void)
         sm_cmd_apply(&c);
     while (sm_ring_get(&sm_cov, &c))
         sm_cmd_apply(&c);
+}
+
+/* the main loop: SMC_UNLOCK for track t (step st, 0xFF every step); refused (the queue full): kept, sm_flush pushes it
+ * again on every poll (one per track: a later request widens to every step) */
+static uint8_t sm_unl_pend, sm_unl_step[SM_NTRK];
+static void sm_unlock_req(uint32_t t, uint32_t st)
+{
+    sm_cmd_t c = {SMC_UNLOCK, (uint8_t)t, (uint8_t)st, 0, 0};
+    if ((sm_unl_pend >> t) & 1u) {
+        sm_unl_step[t] = sm_unl_step[t] == st ? (uint8_t)st : 0xFFu;
+        return;
+    }
+    if (!sm_cmd_push(c)) {
+        sm_unl_pend |= (uint8_t)(1u << t);
+        sm_unl_step[t] = (uint8_t)st;
+    }
+}
+static void sm_unlock_flush(void)
+{
+    uint32_t t;
+    for (t = 0; t < SM_NTRK; t++)
+        if ((sm_unl_pend >> t) & 1u) {
+            sm_cmd_t c = {SMC_UNLOCK, (uint8_t)t, sm_unl_step[t], 0, 0};
+            if (sm_cmd_push(c))
+                sm_unl_pend &= (uint8_t)~(1u << t);
+        }
 }
 
 /* the main loop: toggle the trig of step st on track t in the current pattern. On: C3 + the track's ROOT, vel 100, LEN 0
@@ -177,6 +221,7 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     if (s->n) {
         s->n = 0;
         sm_lock_clear_step(t, st);
+        sm_unlock_req(t, st);                             /* (its lock may be on the core: back to the base) */
         return;
     }
     sm_lock_clear_step(t, st);

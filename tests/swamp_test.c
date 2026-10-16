@@ -2712,6 +2712,166 @@ static int test_rec_records_on_trigs(void)
     return bad;
 }
 
+/* fix round 1: a long hold does not toggle; a removed trig's lock leaves the core; REC heard at once; press before knobs;
+ * a layer disarms the trig keys */
+static int test_lock_long_hold(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 3);
+    sm_lock_set(0, 3, P_FCUT, 33);
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    ms(400);
+    sm_input_poll();
+    key_up(WHITE[3]);
+    sm_input_poll();
+    bad += check("FIX1: held past SM_HOLD_US, let go without a turn: trig and lock intact",
+                 cpat()->step[0][3].n == 1u && lk_val(0, 3, P_FCUT) == 33);
+    sm_ui.page = (uint8_t)page_by_name("F.ENV");          /* K4 has no parameter there */
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    turn(EN_K4, 2);
+    sm_input_poll();
+    key_up(WHITE[3]);
+    sm_input_poll();
+    bad += check("FIX1: a turn of a knob without a parameter while down: no toggle", cpat()->step[0][3].n == 1u);
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    ms(300);
+    key_up(WHITE[3]);
+    sm_input_poll();
+    bad += check("FIX1: a tap of 0.3 s still toggles (off, its lock gone)", !cpat()->step[0][3].n && lk_val(0, 3, P_FCUT) == LK_NONE);
+    return bad;
+}
+
+static int test_lock_press_turn_same_poll(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    filter_page();
+    sm_step_toggle(0, 6);
+    key_dn(WHITE[6]);
+    turn(EN_K2, -5);                                      /* the press edge and the turn in one poll */
+    sm_input_poll();
+    key_up(WHITE[6]);
+    sm_input_poll();
+    bad += check("FIX1: press and turn in one poll: a lock of that step, base kept, no toggle",
+                 lk_val(0, 6, P_FCUT) == TP[P_FCUT].def - 5 && ksnd(0)->p[P_FCUT] == TP[P_FCUT].def && cpat()->step[0][6].n == 1u);
+    return bad;
+}
+
+static int test_lock_layer_disarms(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    key_dn(WHITE[8]);                                     /* a trig key down, then the SEQ layer opens under it */
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    bad += check("FIX1: the layer open, the key no longer armed", sm_layer == SML_SEQ && !sm_key_arm);
+    key_up(WHITE[8]);
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+    sm_input_poll();
+    bad += check("FIX1: the key let go inside the layer: no toggle", !cpat()->step[0][8].n);
+    return bad;
+}
+
+static int test_lock_unlock_on_remove(void)
+{
+    int bad = 0;
+    uint32_t i;
+    in_reset();
+    host_ticks = 1000u;
+    set_param(0, P_FCUT, 100);
+    sm_step_toggle(0, 4);
+    sm_lock_set(0, 4, P_FCUT, 20);
+    press(B_PLAY);
+    sm_input_poll();
+    bad += check("FIX1: the only trig (locked) fires: 20", run_to_step(0, 4) && trk[0].p[P_FCUT] == 20);
+    lk_tap(4);                                            /* taken off while playing */
+    run_block();
+    bad += check("FIX1: the trig taken off: the base (100) after the next block", !cpat()->step[0][4].n && trk[0].p[P_FCUT] == 100);
+    set_param(0, P_FCUT, 90);
+    run_block();
+    bad += check("FIX1: ... and a base turn of that parameter is heard", trk[0].p[P_FCUT] == 90);
+    /* SEQ CLEAR while playing */
+    sm_step_toggle(0, 4);
+    sm_lock_set(0, 4, P_FCUT, 20);
+    run_to_step(0, 4);
+    bad += check("FIX1: locked again: 20", trk[0].p[P_FCUT] == 20);
+    layer_hold(B_SEQ);
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    layer_let_go(B_SEQ);
+    run_block();
+    bad += check("FIX1: SEQ CLEAR while playing: the base after the next block", trk[0].p[P_FCUT] == 90);
+    /* another trig taken off: the lock of the trig that fired stays */
+    sm_step_toggle(0, 4);
+    sm_step_toggle(0, 9);
+    sm_lock_set(0, 4, P_FCUT, 20);
+    run_to_step(0, 4);
+    sm_step_toggle(0, 9);
+    run_block();
+    bad += check("FIX1: another trig taken off: the sounding lock stays (20)", trk[0].p[P_FCUT] == 20);
+    /* a muted track with a lock on the core */
+    smp.mute = 1u;
+    run_block();
+    sm_step_toggle(0, 4);
+    run_block();
+    bad += check("FIX1: muted track, its locked trig taken off: restored", trk[0].p[P_FCUT] == 90);
+    smp.mute = 0;
+    /* the queue full: the unlock waits and goes through */
+    sm_step_toggle(0, 4);
+    sm_lock_set(0, 4, P_FCUT, 20);
+    run_to_step(0, 4);
+    {
+        sm_cmd_t f = {SMC_PARAM, 3, 0, P_LRATE, 0};
+        f.val = ksnd(3)->p[P_LRATE];
+        for (i = 0; i < SM_NCMD; i++)
+            sm_ring_put(&sm_cq, f);
+    }
+    sm_step_toggle(0, 4);
+    bad += check("FIX1: the queue full: the unlock is kept", (sm_unl_pend & 1u) != 0u);
+    for (i = 0; i < 4u; i++) {
+        run_block();
+        sm_input_poll();
+    }
+    run_block();
+    bad += check("FIX1: ... pushed again on a poll: the base", !sm_unl_pend && trk[0].p[P_FCUT] == 90);
+    return bad;
+}
+
+static int test_rec_preview(void)
+{
+    int bad = 0;
+    uint32_t s;
+    int32_t v;
+    in_reset();
+    host_ticks = 1000u;
+    filter_page();
+    set_param(0, P_FCUT, 64);
+    for (s = 0; s < 16u; s++)
+        sm_step_toggle(0, s);
+    press(B_REC);
+    press(B_PLAY);
+    sm_input_poll();
+    run_to_step(0, 5);
+    turn(EN_K2, 10);
+    sm_input_poll();
+    v = lk_val(0, 5, P_FCUT);
+    bad += check("FIX1: REC turn on step 5: lock 74, base 64", v == 74 && ksnd(0)->p[P_FCUT] == 64);
+    run_block();
+    bad += check("FIX1: ... the core has it after the next block", sm_pos[0] == 5u && trk[0].p[P_FCUT] == 74);
+    bad += check("FIX1: ... the next (unlocked) trig: the base again", run_to_step(0, 6) && trk[0].p[P_FCUT] == 64);
+    bad += check("FIX1: ... step 5 again: its lock", run_to_step(0, 5) && trk[0].p[P_FCUT] == 74);
+    return bad;
+}
+
 static void write_ppm(const char *dir, const char *name)
 {
     char path[256];
@@ -2883,6 +3043,11 @@ int main(void)
     bad += test_lock_full();
     bad += test_retrig_clears_locks();
     bad += test_rec_records_on_trigs();
+    bad += test_lock_long_hold();
+    bad += test_lock_press_turn_same_poll();
+    bad += test_lock_layer_disarms();
+    bad += test_lock_unlock_on_remove();
+    bad += test_rec_preview();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

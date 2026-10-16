@@ -87,19 +87,26 @@ static void sm_seq_locks(uint32_t t, uint32_t st)
                 sm_seq_pset(t, b * 8u + k, pt->kit.snd[t].p[b * 8u + k], st, 0);
         sm_lk_on[t][b] = now[b];
     }
+    sm_lk_step[t] = (uint8_t)st;
 }
 
-/* every track's locked values back to the base (STOP) */
-static void sm_seq_unlock_all(void)
+/* track t's locked values back to the model's base, the mask cleared (SMC_UNLOCK, STOP) */
+static void sm_seq_unlock(uint32_t t)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t t, p;
-    for (t = 0; t < SM_NTRK; t++) {
-        for (p = 0; p < P_COUNT; p++)
-            if (sm_lk_is(t, p))
-                sm_seq_pset(t, p, pt->kit.snd[t].p[p], 0, 0);
-        memset(sm_lk_on[t], 0, SM_LKB);
-    }
+    uint32_t p;
+    t %= SM_NTRK;
+    for (p = 0; p < P_COUNT; p++)
+        if (sm_lk_is(t, p))
+            sm_seq_pset(t, p, pt->kit.snd[t].p[p], 0, 0);
+    memset(sm_lk_on[t], 0, SM_LKB);
+    sm_lk_step[t] = 0xFFu;
+}
+static void sm_seq_unlock_all(void)
+{
+    uint32_t t;
+    for (t = 0; t < SM_NTRK; t++)
+        sm_seq_unlock(t);
 }
 
 /* power-on (before the audio starts: nothing runs concurrently): stopped, at step 0, the queue empty */
@@ -111,6 +118,7 @@ static void sm_seq_init(void)
     memset(sm_next, 0, sizeof sm_next);
     memset(sm_nheld, 0, sizeof sm_nheld);
     memset(sm_lk_on, 0, sizeof sm_lk_on);
+    memset(sm_lk_step, 0xFF, sizeof sm_lk_step);
     sm_solo = 0;
     sm_cq.head = sm_cq.tail = 0;
     sm_cov.head = sm_cov.tail = 0;
