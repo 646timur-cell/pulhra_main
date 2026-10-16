@@ -913,6 +913,54 @@ static int test_input_backpressure(void)
     return bad;
 }
 
+/* P_E8 on a machine without a ninth value: the descriptor does not exist (param_desc_of would read past edit[]) */
+static int test_cmd_e8_guard(void)
+{
+    int bad = 0;
+    uint32_t m, e = NENGINES, p;
+    int16_t before[P_COUNT];
+    in_reset();
+    for (m = 0; m < SM_NMACHINE && e == NENGINES; m++)
+        if (!ENGINES[sm_engine_of(m)]->e8.label)
+            e = sm_engine_of(m);
+    bad += check("CMD/E8: a machine without a ninth value exists", e != NENGINES);
+    if (e == NENGINES)
+        return bad;
+    trk[0].eng_req = (uint8_t)e;
+    trk[0].p[P_E8] = 33;
+    memcpy(before, trk[0].p, sizeof before);
+    push(SMC_PARAM, 0, 0, P_E8, 99);
+    push(SMC_PARAM, 0, 0, P_COUNT, 5);
+    run_block();
+    for (p = 0; p < P_COUNT; p++)
+        if (trk[0].p[p] != before[p])
+            break;
+    bad += check("CMD/E8: SMC_PARAM P_E8 (and an id past P_COUNT) there: nothing changes", p == P_COUNT && trk[0].p[P_E8] == 33);
+    push(SMC_PARAM, 0, 0, P_FCUT, 40);
+    run_block();
+    bad += check("CMD/E8: a normal value on that track still lands", trk[0].p[P_FCUT] == 40);
+    return bad;
+}
+
+static int test_held_step_bank_key(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    host_notes = 1u << WHITE[5];
+    fm1_in.notes = 1u << WHITE[5];
+    sm_input_poll();
+    host_notes = 1u << 25;                                /* F#5 pressed while it is held */
+    fm1_in.notes |= 1u << 25;
+    host_ticks += 400000u * FM1_TICKS_PER_US;
+    sm_input_poll();
+    bad += check("INPUT: a bank key pressed while holding: held_step stays the step pressed (5)",
+                 sm_ui.bank == 1u && sm_ui.held_step == 5u);
+    fm1_in.notes = 0;
+    sm_input_poll();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -939,6 +987,8 @@ int main(void)
     bad += test_presets_knob_loads();
     bad += test_held_step();
     bad += test_input_backpressure();
+    bad += test_cmd_e8_guard();
+    bad += test_held_step_bank_key();
     printf("swamp: %d failed\n", bad);
     return bad != 0;
 }

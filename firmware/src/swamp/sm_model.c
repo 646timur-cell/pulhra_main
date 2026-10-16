@@ -6,6 +6,15 @@ static sm_project_t smp;
 /* machine (0..SM_NMACHINE-1) -> the engine's ENGI_* */
 static uint32_t sm_engine_of(uint32_t machine) { return eng_vis(machine); }
 
+/* the descriptor of parameter id on engine e, 0 when there is none: P_E8 of a machine without a ninth value (param_desc_of
+ * would read edit[8], past the array), an id out of range */
+static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
+{
+    if (id >= P_COUNT || (id == P_E8 && !ENGINES[e % NENGINES]->e8.label))
+        return 0;
+    return param_desc_of(e % NENGINES, id);
+}
+
 /* a machine's preset as the sound ui.c apply_preset_to + set_engine_of leave on a track (the sound only, nothing of the
  * track's own, no undo, no UI): the parameter defaults, the engine's eight values and its ninth, the ADSR, F.ENV, the
  * voice mode, the sends */

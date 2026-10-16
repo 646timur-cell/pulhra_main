@@ -130,9 +130,10 @@ static void sm_cmd_apply(const sm_cmd_t *c)
         sm_seq_stop();
         break;
     case SMC_PARAM:
-        if (t < SM_NTRK && c->param < P_COUNT) {
-            const param_desc_t *d = param_desc_of(eng_idx(trk[t].eng_req), c->param);
-            trk[t].p[c->param] = (int16_t)clamp(c->val, d->min, d->max);
+        if (t < SM_NTRK) {
+            const param_desc_t *d = sm_desc_safe(eng_idx(trk[t].eng_req), c->param);
+            if (d)                                        /* (none: P_E8 of a machine without one, an id out of range) */
+                trk[t].p[c->param] = (int16_t)clamp(c->val, d->min, d->max);
         }
         break;
     case SMC_LOAD:

@@ -19,6 +19,7 @@ static uint32_t sm_pdirty[SM_NTRK][4];                    /* bit per parameter (
 static uint8_t sm_ld_pend;                                /* bit per track: a LOAD still to push */
 static uint8_t sm_tr_pend;                                /* 0 none, 1 PLAY, 2 STOP still to push */
 static uint32_t sm_key_t0[SM_NKEYS], sm_key_arm;          /* press time of the white keys down, bit per key */
+static uint8_t sm_key_step[SM_NKEYS];                     /* the step each of them was pressed on (a bank key may move on) */
 
 static void sm_input_init(void)
 {
@@ -50,12 +51,10 @@ static void sm_param_push(uint32_t t, uint32_t id)
 static void sm_turn(uint32_t id, int32_t s)
 {
     sm_sound_t *sd = sm_ui_sound();
-    const engine_t *e = ENGINES[sm_engine_of(sd->machine)];
-    const param_desc_t *d;
+    const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), id);
     int32_t v;
-    if (!s || id >= P_COUNT || (id == P_E8 && !e->e8.label))
+    if (!s || !d)
         return;
-    d = param_desc_of(sm_engine_of(sd->machine), id);
     v = param_turn(d, sd->p[id], s);
     sd->p[id] = (int8_t)clamp(v, d->min, d->max);        /* (a byte write: the audio stream sees the old or the new) */
     sm_param_push(sm_ui.trk, id);
@@ -108,7 +107,8 @@ static void sm_keys(uint32_t notes, uint32_t now)
         w = sm_white_of(k);
         if (w < 0)
             continue;
-        sm_step_toggle(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);
+        sm_key_step[k] = (uint8_t)((uint32_t)sm_ui.bank * 16u + (uint32_t)w);
+        sm_step_toggle(sm_ui.trk, sm_key_step[k]);
         sm_key_t0[k] = now;
         sm_key_arm |= 1u << k;
         sm_dirty = 1;
@@ -121,7 +121,7 @@ static void sm_keys(uint32_t notes, uint32_t now)
             continue;
         }
         if ((uint32_t)(now - sm_key_t0[k]) > SM_HOLD_US * FM1_TICKS_PER_US)
-            hs = (uint32_t)sm_white_of(k) + (uint32_t)sm_ui.bank * 16u;
+            hs = sm_key_step[k];
     }
     if (hs != sm_ui.held_step) {
         sm_ui.held_step = (uint8_t)hs;
@@ -155,6 +155,7 @@ static void sm_flush(void)
     }
 }
 
+/* (never with the interrupts masked: sm_preset_turn's fm1_irq_on is an unconditional sti) */
 static void sm_input_poll(void)
 {
     uint32_t pressed = fm1_input_edges(0), notes = fm1_input_note_edges(), now = fm1_ticks();
