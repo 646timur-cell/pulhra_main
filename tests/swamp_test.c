@@ -57,6 +57,7 @@ static void lint_blit(uint32_t x, uint32_t y)
 #define GFX_HOOK_BLIT(x, y, r0) lint_blit(x, y)
 #define GFX_HOOK_BEGIN() lint_begin()
 #define GFX_HOOK_PIXELS(n) ((void)0)
+#define SM_PX_HOOK(x0, y0, x1, y1, s, flags) lint_text(x0, y0, x1, y1, s, flags)   /* (sm_px.c's texts) */
 static void fm1_led_key(unsigned k, int on) { (void)k; (void)on; }
 #include "../firmware/src/gfx.c"
 #include "../firmware/src/panel.c"
@@ -1041,10 +1042,13 @@ static int test_held_step_bank_key(void)
 }
 
 /* ------------------------------------------------------------ screen --- */
+#define INK swap16(0xFFFFu)
+#define DIMC swap16(0x4208u)
+#define BGC swap16(0x0000u)
 static void draw_setup(void)
 {
     sm_core_init();
-    sm_theme_pizdaks();
+    sm_ux_mk1();
     sm_playing = 0;
     memset(sm_pos, 0, sizeof sm_pos);
     sm_rec = 0;
@@ -1059,20 +1063,210 @@ static void draw_full(void)
     sm_dirty = 1;
     sm_draw();
 }
-typedef struct { int32_t x0, y0, x1, y1, inset; const char *name; } zone_t;
-/* where a text may stand, by the screen (independent of the firmware's own layout constants): the header above its
- * frame, the page name, the four cells (a margin inside each), the SELECT row; the step strip carries no text */
+static uint16_t cvp(uint32_t x, uint32_t y) { return cv_px[y * cv_w + x]; }   /* (swapped, as host_screen) */
+static uint32_t page_by_name(const char *n)
+{
+    uint32_t i;
+    for (i = 0; i < sm_page_count(); i++)
+        if (!strcmp(SM_PAGES[i].name, n))
+            return i;
+    return 0;
+}
+
+static int test_px_font_widths(void)
+{
+    int bad = 0;
+    uint32_t sc;
+    sm_ux_mk1();
+    cv_begin(240u, 40u, T_BG);
+    for (sc = 1; sc <= 3u; sc++) {
+        bad += check("PX: width of 'ABC' is 6 * scale * 3", sm_px_text(0, 0, sc, "ABC", T_TEXT, 0) == (int32_t)(6u * sc * 3u));
+        bad += check("PX: lower case folds to the same width", sm_px_text(0, 0, sc, "abc", T_TEXT, 0) == (int32_t)(6u * sc * 3u));
+        bad += check("PX: an empty text is 0 wide", sm_px_text(0, 0, sc, "", T_TEXT, 0) == 0);
+    }
+    cv_begin(240u, 40u, T_BG);
+    sm_px_text(0, 0, 1u, "I", T_TEXT, 0);                /* 'I': the middle column all seven rows, nothing in column 5 */
+    {
+        uint32_t r, col = 1;
+        for (r = 0; r < 7u; r++)
+            col &= cvp(2, r) == INK && cvp(5, r) == BGC;
+        bad += check("PX: 'I' is a column of seven in the middle", col && cvp(2, 7) == BGC);
+    }
+    cv_begin(240u, 40u, T_BG);
+    sm_px_text(10, 10, 2u, "A", T_TEXT, 1);              /* inverted: ink box, the glyph in the ground colour */
+    bad += check("PX: inverted text: the box is ink around the glyph", cvp(8, 8) == INK && cvp(10 + 2 * 5 + 1, 10) == INK);
+    bad += check("PX: inverted text: the glyph is the ground (top of the A's bar)", cvp(10 + 2 * 2, 10) == BGC);
+    return bad;
+}
+
+static int test_ring_dots(void)
+{
+    int bad = 0;
+    uint32_t pos[4] = {0, 128, 256, 77}, want[4] = {1, 8, 16, 1 + 77u * 15u / 256u}, k;
+    sm_ux_mk1();
+    for (k = 0; k < 4u; k++) {
+        uint32_t x, y, comps = 0, lit = 0, dim = 0;
+        static uint8_t seen[60 * 60];
+        static uint16_t stk[60 * 60];
+        cv_begin(60u, 60u, T_BG);
+        sm_px_ring(30, 30, 22, pos[k], 0, 0);
+        memset(seen, 0, sizeof seen);
+        for (y = 0; y < 60u; y++)
+            for (x = 0; x < 60u; x++) {
+                uint32_t sp = 0, n = 0;
+                uint16_t c = cvp(x, y);
+                if (c == BGC || seen[y * 60u + x])
+                    continue;
+                stk[sp++] = (uint16_t)(y * 60u + x);       /* a flood fill of this dot */
+                seen[y * 60u + x] = 1;
+                while (sp) {
+                    uint32_t q = stk[--sp], qx = q % 60u, qy = q / 60u, d;
+                    int32_t dx[4] = {1, -1, 0, 0}, dy[4] = {0, 0, 1, -1};
+                    n++;
+                    for (d = 0; d < 4u; d++) {
+                        int32_t nx = (int32_t)qx + dx[d], ny = (int32_t)qy + dy[d];
+                        if (nx < 0 || ny < 0 || nx >= 60 || ny >= 60 || seen[ny * 60 + nx] || cvp((uint32_t)nx, (uint32_t)ny) == BGC)
+                            continue;
+                        seen[ny * 60 + nx] = 1;
+                        stk[sp++] = (uint16_t)(ny * 60 + nx);
+                    }
+                }
+                comps++;
+                if (n != 9u)
+                    bad += check("RING: every dot is 3 x 3", 0);
+                if (c == INK) lit++; else if (c == DIMC) dim++;
+            }
+        bad += check("RING: exactly 16 dots on the canvas", comps == 16u && lit + dim == 16u);
+        bad += check("RING: the lit ones are the first 1 + pos * 15 / 256", lit == want[k]);
+    }
+    {   /* the centre: empty, a lock dot, a filled disc */
+        cv_begin(60u, 60u, T_BG);
+        sm_px_ring(30, 30, 22, 100, 0, 0);
+        bad += check("RING: the centre is empty", cvp(30, 30) == BGC);
+        cv_begin(60u, 60u, T_BG);
+        sm_px_ring(30, 30, 22, 100, 0, 1);
+        bad += check("RING: a lock dot in the centre (3 x 3)", cvp(30, 30) == INK && cvp(29, 29) == INK && cvp(31, 31) == INK && cvp(32, 30) == BGC);
+        cv_begin(60u, 60u, T_BG);
+        sm_px_ring(30, 30, 22, 100, 1, 0);
+        bad += check("RING: filled: a solid disc", cvp(30, 30) == INK && cvp(30, 20) == INK && cvp(40, 30) == INK && cvp(22, 22) == INK);
+    }
+    return bad;
+}
+
+static int test_lock_find(void)
+{
+    int bad = 0;
+    sm_pattern_t *pt;
+    draw_setup();
+    pt = &smp.pat[smp.cur];
+    pt->nlock = 3;
+    pt->lock[0].ts = (1u << 5) | 4u; pt->lock[0].param = 0xFFu; pt->lock[0].val = 5;           /* a removed one */
+    pt->lock[1].ts = (1u << 5) | 4u; pt->lock[1].param = P_FCUT; pt->lock[1].val = 60;
+    pt->lock[2].ts = (0u << 5) | 4u; pt->lock[2].param = P_FCUT; pt->lock[2].val = 70;
+    pt->lock[3].ts = 0; pt->lock[3].param = P_FRES; pt->lock[3].val = 1;                       /* past nlock */
+    bad += check("LOCK: finds (track, step, param)", sm_lock_find(pt, 1, 4, P_FCUT) == 1 && sm_lock_find(pt, 0, 4, P_FCUT) == 2);
+    bad += check("LOCK: another step, track or param: -1", sm_lock_find(pt, 1, 5, P_FCUT) < 0 && sm_lock_find(pt, 2, 4, P_FCUT) < 0 &&
+                                                         sm_lock_find(pt, 1, 4, P_FRES) < 0);
+    bad += check("LOCK: a removed entry (0xFF) never matches; entries past nlock are not read", sm_lock_find(pt, 1, 4, 0xFFu) < 0 &&
+                                                                                          sm_lock_find(pt, 0, 0, P_FRES) < 0);
+    pt->nlock = 0;
+    return bad;
+}
+
+static int test_ring_lock_fill(void)
+{
+    int bad = 0, k;
+    uint32_t pg = page_by_name("FILTER");
+    sm_pattern_t *pt;
+    draw_setup();
+    pt = &smp.pat[smp.cur];
+    sm_ui.page = (uint8_t)pg;
+    sm_ui.held_step = 4;
+    pt->nlock = 1;
+    pt->lock[0].ts = (0u << 5) | 4u; pt->lock[0].param = P_FCUT; pt->lock[0].val = 99;
+    draw_full();
+    for (k = 0; k < 4; k++) {
+        uint16_t c = host_screen[94u * 240u + (uint32_t)(60 * k + 30)];
+        bad += check(k == 1 ? "RING: CUT, locked on the held step, is a filled disc" : "RING: the others are not filled",
+                     (k == 1 && c == INK) || (k != 1 && c == BGC));
+    }
+    sm_ui.held_step = 5;                                    /* another step held: nothing filled */
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("RING: another step held: CUT is not filled", host_screen[94u * 240u + 90u] == BGC);
+    sm_ui.held_step = 0xFFu;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("RING: no step held: nothing filled", host_screen[94u * 240u + 90u] == BGC);
+    pt->nlock = 0;
+    return bad;
+}
+
+static int test_header_rec(void)
+{
+    int bad = 0;
+    uint32_t x, y, ink0 = 0, ink1 = 0;
+    draw_setup();
+    draw_full();
+    for (y = 0; y < 18u; y++)
+        for (x = 204; x < 240u; x++)
+            ink0 += host_screen[y * 240u + x] == INK;
+    bad += check("HEADER: no REC: the right corner is not an ink box", ink0 < 36u * 18u / 3u);
+    sm_rec = 1;
+    sm_dirty = 1;
+    sm_draw();
+    for (y = 0; y < 18u; y++)
+        for (x = 204; x < 240u; x++)
+            ink1 += host_screen[y * 240u + x] == INK;
+    bad += check("HEADER: REC: the corner is inverted - an ink box", ink1 > 36u * 18u / 2u && host_screen[0 * 240u + 202] == INK &&
+                                                                   host_screen[17u * 240u + 239u] == INK);
+    bad += check("HEADER: REC: the R's stem is the ground, the space beside it and after the glyph ink",
+                 host_screen[4u * 240u + 204u] == BGC && host_screen[2u * 240u + 214u] == INK && host_screen[4u * 240u + 207u] == INK);
+    bad += check("HEADER: REC off again: the corner is plain", (sm_rec = 0, sm_dirty = 1, sm_draw(), host_screen[0 * 240u + 239u] == BGC));
+    return bad;
+}
+
+static int test_no_grime(void)
+{
+    uint32_t pg, x, y, bad_px = 0, k;
+    int bad = 0;
+    for (pg = 0; pg < sm_page_count(); pg++) {
+        draw_setup();
+        for (k = 0; k < 16u; k += 3u)
+            smp.pat[smp.cur].step[0][k].n = 1;
+        sm_ui.page = (uint8_t)pg;
+        sm_ui.held_step = 6;
+        sm_playing = 1;
+        sm_pos[0] = 9;
+        sm_rec = (uint8_t)(pg & 1u);
+        smp.pat[smp.cur].nlock = 1;
+        smp.pat[smp.cur].lock[0].ts = 6; smp.pat[smp.cur].lock[0].param = SM_PAGES[pg].id[0]; smp.pat[smp.cur].lock[0].val = 50;
+        draw_full();
+        for (y = 0; y < 240u; y++)
+            for (x = 0; x < 240u; x++) {
+                uint16_t c = host_screen[y * 240u + x];
+                bad_px += c != INK && c != DIMC && c != BGC;
+            }
+        smp.pat[smp.cur].nlock = 0;
+    }
+    bad += check("NOGRIME: every pixel of every page is white, dim or black", bad_px == 0);
+    bad += check("NOGRIME: the grain is off", ux.grime == 0 && ux.bg == 0 && ux.text == 0xFFFFu && ux.dim == 0x4208u);
+    return bad;
+}
+
+typedef struct { int32_t x0, y0, x1, y1; const char *name; } zone_t;
+/* where a text may stand, by the screen (independent of the firmware's own layout constants): the header, the page line,
+ * the four knob columns (label, ring, value), the SELECT row; the step strip carries no text */
 static const zone_t ZONES[] = {
-    {0, 0, 240, 20, 2, "header"}, {0, 24, 240, 48, 2, "page"},
-    {0, 48, 120, 112, 4, "cell0"}, {120, 48, 240, 112, 4, "cell1"},
-    {0, 112, 120, 176, 4, "cell2"}, {120, 112, 240, 176, 4, "cell3"},
-    {0, 178, 240, 198, 2, "select"},
+    {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "page"},
+    {0, 48, 60, 160, "knob0"}, {60, 48, 120, 160, "knob1"}, {120, 48, 180, 160, "knob2"}, {180, 48, 240, 160, "knob3"},
+    {0, 160, 240, 200, "select"},
 };
 static uint32_t lint_shown;
 static int lint_frame(const char *what)
 {
     uint32_t i, j, bad = 0;
-    if (lint_n < 4u) {                                       /* a header, a page name, a label and a value at least */
+    if (lint_n < 4u) {                                       /* a header, a page line, a label and a value at least */
         printf("  lint %s: only %u texts drawn\n", what, lint_n);
         return 1;
     }
@@ -1084,14 +1278,14 @@ static int lint_frame(const char *what)
         for (j = 0; j < sizeof ZONES / sizeof ZONES[0]; j++)
             if (b->x0 >= ZONES[j].x0 && b->x0 < ZONES[j].x1 && b->y0 >= ZONES[j].y0 && b->y0 < ZONES[j].y1)
                 z = &ZONES[j];
-        if (!z || (b->flags & 3u) || b->x0 < z->x0 + z->inset || b->x1 > z->x1 - z->inset || b->y1 > z->y1) {
+        if (!z || (b->flags & 3u) || b->x0 < z->x0 || b->x1 > z->x1 || b->y1 > z->y1) {
             if (lint_shown++ < 15u) printf("  lint %s: '%s' box %d,%d..%d,%d flags %u zone %s\n", what, b->s, b->x0, b->y0, b->x1, b->y1, b->flags,
                    z ? z->name : "none");
             bad++;
         }
-        for (j = i + 1u; j < lint_n && j < 256u; j++) {   /* two texts of a zone never overlap (the page name's shadow aside) */
+        for (j = i + 1u; j < lint_n && j < 256u; j++) {   /* two texts never overlap */
             const lint_box_t *c = &lint_box[j];
-            if (z && z->name[0] != 'p' && c->x1 > c->x0 && b->x0 < c->x1 && c->x0 < b->x1 && b->y0 < c->y1 && c->y0 < b->y1) {
+            if (c->x1 > c->x0 && b->x0 < c->x1 && c->x0 < b->x1 && b->y0 < c->y1 && c->y0 < b->y1) {
                 printf("  lint %s: '%s' overlaps '%s'\n", what, b->s, c->s);
                 bad++;
             }
@@ -1101,9 +1295,7 @@ static int lint_frame(const char *what)
 }
 static int test_draw_lint(void)
 {
-    uint32_t pg, m, v, bad = 0, frames = 0, grained = 0;
-    static uint16_t shot[240 * 240];
-    static lint_box_t keep[256];
+    uint32_t pg, m, v, bad = 0, frames = 0;
     for (m = 0; m < SM_NMACHINE; m++) {
         for (pg = 0; pg < sm_page_count(); pg++) {
             const sm_page_t *P = &SM_PAGES[pg];
@@ -1125,36 +1317,20 @@ static int test_draw_lint(void)
                     s = ksnd(0);
                     sm_sound_from_preset(s, m, 0);
                     s->p[id] = (int8_t)clamp(vals[v], -64, 127);
-                    smp.bpm10 = 3000;                       /* the widest header: 300.0, REC, T1, the longest name */
+                    smp.bpm10 = 3000;                       /* the widest header: 300.0, the longest names */
                     smp.cur = 15;
-                    sm_rec = 1;
+                    sm_rec = (uint8_t)(v & 1u);
                     sm_ui.page = (uint8_t)pg;
                     sm_ui.bank = 1;
                     draw_full();
                     snprintf(what, sizeof what, "machine %u page %s id %u val %d", m, P->name, id, (int)vals[v]);
                     bad += lint_frame(what);
-                    {   /* no grain, dust or blood inside any ink box: the same frame without the grime, box by box */
-                        uint32_t n = lint_n < 256u ? lint_n : 256u, b, x, y;
-                        memcpy(keep, lint_box, n * sizeof keep[0]);
-                        memcpy(shot, host_screen, sizeof shot);
-                        ux.grime = 0;
-                        draw_full();
-                        ux.grime = 1;
-                        for (b = 0; b < n; b++)
-                            for (y = (uint32_t)keep[b].y0; y < (uint32_t)keep[b].y1 && y < 240u; y++)
-                                for (x = (uint32_t)keep[b].x0; x < (uint32_t)keep[b].x1 && x < 240u; x++)
-                                    if (shot[y * 240u + x] != host_screen[y * 240u + x]) {
-                                        if (grained++ < 8u)
-                                            printf("  grain in '%s' at %u,%u (%s)\n", keep[b].s, x, y, what);
-                                    }
-                    }
                     frames++;
                 }
             }
         }
     }
     printf("  lint: %u frames\n", frames);
-    bad += check("draw lint: no grain or blood inside any text's ink box", grained == 0);
     return check("draw lint: every text inside its cell, none cut, none overlapping", bad == 0 && frames > 500u);
 }
 static uint32_t px_bad;
@@ -1173,13 +1349,13 @@ static int test_draw_budget(void)
     px_bad = 0;
     draw_setup();
     px = frame_px();
-    bad += check("budget: the first frame draws the screen", px >= 240u * 200u && px <= 240u * 240u);
+    bad += check("budget: the first frame draws the screen", px == 240u * 240u);
     px = frame_px();
     bad += check("budget: nothing changed, nothing drawn", px == 0);
     sm_playing = 1;                                           /* the transport started: the header's glyph */
     sm_dirty = 1;
     px = frame_px();
-    bad += check("budget: play -> header and strip only", px > 0 && px <= 240u * 70u);
+    bad += check("budget: play -> header and strip only", px > 0 && px <= 240u * 60u);
     sm_pos[0] = 3;                                            /* the playing step moved (no flag: the sequencer does not set it) */
     px = frame_px();
     bad += check("budget: the playing step moved -> <= 240 x 40", px > 0 && px <= 240u * 40u);
@@ -1193,52 +1369,18 @@ static int test_draw_budget(void)
     sm_dirty = 1;
     px = frame_px();
     bad += check("budget: a track change <= a full frame", px > 0 && px <= 240u * 240u);
-    {   /* a knob turned: its row of cells only (and the SELECT row never) */
+    {   /* a knob turned: its column only */
         sm_sound_t *s = ksnd(sm_ui.trk);
         uint32_t id = sm_cur_page()->id[0];
         s->p[id] = (int8_t)(s->p[id] + 1);
         sm_dirty = 1;
         px = frame_px();
-        bad += check("budget: one value -> one row of cells <= 240 x 64", px > 0 && px <= 240u * 64u);
+        bad += check("budget: one value -> one knob column <= 60 x 112", px > 0 && px <= 60u * 112u);
     }
     sm_redraw_all();
     px = frame_px();
-    bad += check("budget: redraw_all repaints the screen", px >= 240u * 200u && px <= 240u * 240u);
+    bad += check("budget: redraw_all repaints the screen", px == 240u * 240u);
     bad += check("budget: sm_draw_px is what the display got, frame by frame", px_bad == 0);
-    return bad;
-}
-static int test_draw_grain(void)
-{
-    const uint16_t TEXT = swap16(0xEF5Bu), DIM = swap16(0x4100u), BG = swap16(0x0000u), CLEAN = swap16(SMT_CLEAN);
-    const uint16_t BLOOD = swap16(0xB800u);
-    uint32_t x, y, s, grain = 0, tot = 0, dirty_in = 0, blood_in_strip = 0;
-    int bad = 0;
-    draw_setup();
-    smp.pat[smp.cur].step[0][2].n = 1;                         /* a trig on step 2, none on step 3 */
-    smp.pat[smp.cur].step[0][3].n = 0;
-    draw_full();
-    bad += check("grain: a trig is bone all through", host_screen[220 * 240 + 2 * 15 + 7] == TEXT && host_screen[208 * 240 + 2 * 15 + 3] == TEXT);
-    bad += check("grain: an empty step has its dim frame", host_screen[206 * 240 + 3 * 15 + 6] == DIM);
-    for (s = 0; s < 16u; s++)                                  /* the inside of every empty step: clean, all of it */
-        if (s != 2u)
-            for (y = 207; y < 235; y++)
-                for (x = s * 15u + 1u; x < s * 15u + 13u; x++)
-                    dirty_in += host_screen[y * 240u + x] != CLEAN;
-    bad += check("grain: the inside of an empty step is clean (no grain, no blood)", dirty_in == 0);
-    for (y = 202; y < 240; y++)
-        for (x = 0; x < 240; x++) {
-            uint16_t c = host_screen[y * 240u + x];
-            if (y < 206 || y >= 236) { tot++; grain += c != BG; blood_in_strip += c == BLOOD; }
-        }
-    bad += check("grain: the ground around the strip wears the photocopy, sparsely", grain > tot / 50 && grain < tot / 3);
-    bad += check("grain: no blood run reaches the step strip", blood_in_strip == 0);
-    {   /* blood runs are there (the look), somewhere above the strip */
-        uint32_t n = 0;
-        for (y = 0; y < 202; y++)
-            for (x = 0; x < 240; x++)
-                n += host_screen[y * 240u + x] == BLOOD;
-        bad += check("grain: the blood runs are drawn", n > 40u);
-    }
     return bad;
 }
 /* the audio stream moves the playhead between the frame's signatures and its drawing: the strip must show the step its
@@ -1246,7 +1388,6 @@ static int test_draw_grain(void)
 static void hook_move_pos(void) { sm_pos[0] = 9; }
 static int test_draw_playhead_snapshot(void)
 {
-    const uint16_t BLOOD = swap16(0xB800u);
     int bad = 0;
     uint32_t px;
     draw_setup();
@@ -1256,10 +1397,42 @@ static int test_draw_playhead_snapshot(void)
     begin_hook = hook_move_pos;                               /* the first cv_begin of the frame: after the signatures */
     px = frame_px();
     bad += check("playhead: the strip shows the step the frame read (3), not the one the audio stream moved to (9)",
-                 host_screen[206 * 240 + 3 * 15 + 5] == BLOOD && host_screen[206 * 240 + 9 * 15 + 5] != BLOOD && begin_hook == 0);
+                 host_screen[216 * 240 + 3 * 15 + 7] == DIMC && host_screen[216 * 240 + 9 * 15 + 7] != DIMC && begin_hook == 0);
     px = frame_px();
     bad += check("playhead: the next frame sees the move and draws step 9",
-                 px > 0 && px <= 240u * 40u && host_screen[206 * 240 + 9 * 15 + 5] == BLOOD && host_screen[206 * 240 + 3 * 15 + 5] != BLOOD);
+                 px > 0 && px <= 240u * 40u && host_screen[216 * 240 + 9 * 15 + 7] == DIMC && host_screen[216 * 240 + 3 * 15 + 7] != DIMC);
+    return bad;
+}
+static int test_strip_cells(void)
+{
+    int bad = 0;
+    draw_setup();
+    smp.pat[smp.cur].step[0][1].n = 1;                        /* a trig on 1, a held trig on 2, a held empty on 3 */
+    smp.pat[smp.cur].step[0][2].n = 1;
+    draw_full();
+    bad += check("strip: a trig is solid", host_screen[216 * 240 + 15 + 7] == INK && host_screen[203 * 240 + 15 + 1] == INK);
+    bad += check("strip: an empty step is a 1 px frame", host_screen[216 * 240 + 7] == BGC && host_screen[216 * 240 + 0] == DIMC &&
+                                                       host_screen[202 * 240 + 7] == DIMC);
+    sm_ui.held_step = 3;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("strip: held: a 3 px frame, the inside clear", host_screen[216 * 240 + 3 * 15 + 2] == INK && host_screen[216 * 240 + 3 * 15 + 7] == BGC);
+    sm_ui.held_step = 2;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("strip: a held trig: the 3 px frame, a gap, the trig inside", host_screen[216 * 240 + 2 * 15 + 2] == INK &&
+                                                                              host_screen[216 * 240 + 2 * 15 + 3] == BGC && host_screen[216 * 240 + 2 * 15 + 7] == INK);
+    sm_ui.held_step = 0xFFu;
+    sm_playing = 1;
+    sm_pos[0] = 1;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("strip: a playing trig is inverted (the ground inside an ink frame)", host_screen[216 * 240 + 15 + 7] == BGC && host_screen[216 * 240 + 15] == INK);
+    bad += check("strip: the bank bar under the first half", host_screen[236 * 240 + 5] == INK && host_screen[236 * 240 + 200] == BGC);
+    sm_ui.bank = 1;
+    sm_dirty = 1;
+    sm_draw();
+    bad += check("strip: ... and under the second", host_screen[236 * 240 + 5] == BGC && host_screen[236 * 240 + 200] == INK);
     return bad;
 }
 static void write_ppm(const char *dir, const char *name)
@@ -1295,12 +1468,16 @@ static int test_draw_shots(void)
         sm_playing = 1;
         sm_pos[sm_ui.trk] = 5;
         sm_ui.held_step = 9;
+        sm_rec = (uint8_t)(pg % 2u);
+        smp.pat[smp.cur].nlock = 1;
+        smp.pat[smp.cur].lock[0].ts = 9; smp.pat[smp.cur].lock[0].param = SM_PAGES[pg].id[1]; smp.pat[smp.cur].lock[0].val = 90;
         draw_full();
         snprintf(n, sizeof n, "swamp_%s", SM_PAGES[pg].name);
         for (c = n; *c; c++)
             if (*c == ' ' || *c == '.')
                 *c = '_';
         write_ppm(dir, n);
+        smp.pat[smp.cur].nlock = 0;
     }
     return 0;
 }
@@ -1334,9 +1511,15 @@ int main(void)
     bad += test_input_backpressure();
     bad += test_cmd_e8_guard();
     bad += test_held_step_bank_key();
+    bad += test_px_font_widths();
+    bad += test_ring_dots();
+    bad += test_lock_find();
+    bad += test_ring_lock_fill();
+    bad += test_header_rec();
+    bad += test_no_grime();
+    bad += test_strip_cells();
     bad += test_draw_lint();
     bad += test_draw_budget();
-    bad += test_draw_grain();
     bad += test_draw_playhead_snapshot();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);

@@ -116,7 +116,7 @@ static void fm1_main(void)
     if (flash_ok)
         ota_boot_cleanup();                             /* staging area left by an update */
     settings_init();
-    sm_theme_pizdaks();                                 /* PIZDAKS over whatever palette the settings picked */
+    sm_ux_mk1();                                        /* white on black over whatever palette the settings picked */
     lcd_init();
     lcd_fill(0, 0, 240, 240, T_BG);
     draw_text_box(0, 100, 240, &AF_L, "SWAMP", T_THEME, 1);
