@@ -1,5 +1,7 @@
-# Sound-module build and the STRANGE build (STRANGE.md): host tests, then both firmware packages (.fwsc) with JieLi's
-# toolchain and the AC79 SDK. The packages are uploaded as the run's artifacts "felucca-module" and "felucca-strange";
+# Sound-module build, the STRANGE build (STRANGE.md), the MONOFM build and SWAMP MACHINE (firmware/src/swamp.c, its own
+# entry on the MONOFM sound core): host tests, then the firmware packages (.fwsc) with JieLi's toolchain and the AC79
+# SDK. The packages are uploaded as the run's artifacts "felucca-module", "felucca-strange", "felucca-monofm" and
+# "felucca-swamp";
 # install one with the web installer's "install a file" option (or tools/fm1_install.py). A tag v* also attaches both
 # to a GitHub release.
 name: firmware
@@ -50,6 +52,11 @@ jobs:
           cc -O2 -w -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/monofm_test tests/monofm_test.c -lm
           build/host/monofm_test | tail -n 30
 
+      - name: Host tests (SWAMP)
+        run: |
+          cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/swamp_test tests/swamp_test.c -lm
+          build/host/swamp_test | tail -n 30
+
       - name: JieLi toolchain
         run: tools/get_toolchain.sh
 
@@ -74,12 +81,18 @@ jobs:
         run: |
           set -o pipefail
           FELUCCA_MONOFM=1 FELUCCA_MODULE=0 ./build.sh --release 1.5.1-monofm 2>&1 | tee build-monofm.log
-          cp -r /tmp/mod/felucca-1.5.1-mod.fwsc /tmp/mod/release-1.5.1-mod /tmp/strange/* build/
+          mkdir -p /tmp/monofm && cp -r build/felucca-1.5.1-monofm.fwsc build/release-1.5.1-monofm /tmp/monofm/
+
+      - name: Build (SWAMP)
+        run: |
+          set -o pipefail
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 ./build.sh --release 1.5.1-swamp 2>&1 | tee build-swamp.log
+          cp -r /tmp/mod/felucca-1.5.1-mod.fwsc /tmp/mod/release-1.5.1-mod /tmp/strange/* /tmp/monofm/* build/
 
       - name: "Build logs to the ci-logs branch (on a failure, for a clone without the Actions UI)"
         if: failure()
         run: |
-          mkdir -p /tmp/logs && cp build.log build-strange.log build-monofm.log /tmp/logs/ 2>/dev/null || true
+          mkdir -p /tmp/logs && cp build.log build-strange.log build-monofm.log build-swamp.log /tmp/logs/ 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan ci-logs && git rm -rfq . && git clean -fdxq
@@ -109,15 +122,24 @@ jobs:
             build/release-1.5.1-monofm/
             build-monofm.log
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: felucca-swamp
+          path: |
+            build/felucca-1.5.1-swamp.fwsc
+            build/release-1.5.1-swamp/
+            build-swamp.log
+
       - name: Publish to the firmware-builds branch (the package, its checksum and the build log)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/monofm'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/monofm' || github.ref == 'refs/heads/swamp'
         run: |
           sha=$(git rev-parse --short HEAD)
-          mkdir -p /tmp/out && cp build/felucca-1.5.1-mod.fwsc build/felucca-1.5.1-strange.fwsc build/felucca-1.5.1-monofm.fwsc build.log build-strange.log build-monofm.log /tmp/out/
+          mkdir -p /tmp/out && cp build/felucca-1.5.1-mod.fwsc build/felucca-1.5.1-strange.fwsc build/felucca-1.5.1-monofm.fwsc build/felucca-1.5.1-swamp.fwsc build.log build-strange.log build-monofm.log build-swamp.log /tmp/out/
           python3 web/make_module_installer.py build/felucca-1.5.1-mod.fwsc 1.5.1-mod /tmp/out/fm1-sound-module-installer.html
           python3 web/make_module_installer.py build/felucca-1.5.1-strange.fwsc 1.5.1-strange /tmp/out/fm1-strange-installer.html
           python3 web/make_module_installer.py build/felucca-1.5.1-monofm.fwsc 1.5.1-monofm /tmp/out/fm1-monofm-installer.html
-          (cd /tmp/out && sha256sum felucca-1.5.1-mod.fwsc felucca-1.5.1-strange.fwsc felucca-1.5.1-monofm.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
+          python3 web/make_module_installer.py build/felucca-1.5.1-swamp.fwsc 1.5.1-swamp /tmp/out/fm1-swamp-installer.html
+          (cd /tmp/out && sha256sum felucca-1.5.1-mod.fwsc felucca-1.5.1-strange.fwsc felucca-1.5.1-monofm.fwsc felucca-1.5.1-swamp.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan firmware-builds
