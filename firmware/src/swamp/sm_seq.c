@@ -14,7 +14,9 @@
  * Timing: a block (n = CTL samples) is the unit; an event (a step's start, a nudged fire, a ratchet part) whose time
  * falls inside a block plays at the block's start (0 .. CTL-1 samples early). The step is FS x 60 / (BPM x 4) =
  * FS x 150 / bpm10 samples, kept in q8 (1/256 sample): every pending time is a q8 count from this block's start, added
- * to, never restarted, so steps do not drift; the q8 floor loses < 1/256 sample a step (< 4 samples in 64 bars). */
+ * to, never restarted, so steps do not drift; the q8 floor loses < 1/256 sample a step (< 4 samples in 64 bars). The
+ * product FS x 150 x 256 = 1693440000 fits 32 bits; a step is at most 5644800 q8 (bpm10 300, 30 BPM), so a pending time
+ * (< 2 steps) and PSLIDE's elapsed x 32 (< 2^28) fit too. */
 /* (sm_playing: sm_cmd.c defines it, volatile uint8_t: the transport; this file's alone to write) */
 static volatile uint8_t sm_solo;                          /* bit per track soloed (the GLO layer's held keys; the main loop writes) */
 static volatile uint8_t sm_fill;                          /* FILL held (Task 6: GLO + G5); COND FILL / !FILL read it */
@@ -125,7 +127,10 @@ static void sm_seq_unlock(uint32_t t)
             sm_seq_pset(t, p, pt->kit.snd[t].p[p], 0, 0);
     memset(sm_lk_on[t], 0, SM_LKB);
     sm_lk_step[t] = 0xFFu;
+    sm_ps[t].n = 0;                                       /* (a glide must not write over the base again) */
 }
+/* PSLIDE of track t stopped where it is (SMC_LOAD: the sound's values stay the sound's) */
+static void sm_ps_stop(uint32_t t) { sm_ps[t % SM_NTRK].n = 0; }
 static void sm_seq_unlock_all(void)
 {
     uint32_t t;
@@ -206,8 +211,8 @@ static void sm_seq_stop(void)
 static uint32_t sm_rand(void)
 {
     uint32_t x = sm_lfsr ? sm_lfsr : 1u;
-    x = (x >> 1) ^ (-(x & 1u) & 0xA3000000u);              /* (x^32 + x^31 + x^29 + x^25 + 1: maximal) */
-    sm_lfsr = x;
+    x = (x >> 1) ^ (-(x & 1u) & 0xA3000000u);              /* (mask bits 31 29 25 24: x^32 + x^30 + x^26 + x^25 + 1, */
+    sm_lfsr = x;                                          /* period 2^32 - 1, checked by brute force) */
     return x;
 }
 static uint32_t sm_cond_ab_of(uint32_t c, uint32_t *b)    /* condition c (>= SM_COND_AB0): its A, *b its B */
@@ -478,10 +483,16 @@ static void events_block(uint32_t n)
     {
         uint32_t step_q8 = sm_step_q8(), nq8 = n << 8, mute = sm_mute_eff();   /* (the mask: once per block) */
         for (t = 0; t < SM_NTRK; t++)                     /* LEN run out at this block's start; a muted track lets go (a LEN INF */
+            {
             if (sm_nheld[t] && (((mute >> t) & 1u) || (sm_gate[t] != SM_GATE_INF && sm_gate[t] <= 0))) {   /* note would ring on) */
                 sm_seq_release(t);
                 sm_slid[t] = 0;
             }
+            if ((mute >> t) & 1u) {                       /* (a ratchet's parts stop with the mute) */
+                sm_rat_left[t] = 0;
+                sm_rat_q8[t] = SM_Q8_NONE;
+            }
+        }
         for (;;) {                                        /* the earliest event before the block's end (a step's start first) */
             uint32_t best = sm_next_q8 < nq8 ? sm_next_q8 : nq8, kind = sm_next_q8 < nq8, bt = 0;
             for (t = 0; t < SM_NTRK; t++) {
@@ -506,7 +517,12 @@ static void events_block(uint32_t n)
                     sm_seq_fire(bt, sm_early_st[bt], best, step_q8, sm_early_st[bt] == 0u);
                 }
             } else {
-                sm_seq_part(bt);
+                if ((mute >> bt) & 1u) {
+                    sm_rat_left[bt] = 0;
+                    sm_rat_q8[bt] = SM_Q8_NONE;
+                } else {
+                    sm_seq_part(bt);
+                }
             }
         }
         sm_next_q8 -= nq8;

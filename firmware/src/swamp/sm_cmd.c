@@ -132,6 +132,7 @@ static uint8_t sm_lk_step[SM_NTRK];                       /* the step whose trig
 static uint8_t sm_gen[SM_NTRK];                           /* the track's trig fires (sm_seq_fire bumps it; the main loop reads) */
 static volatile uint8_t sm_playing;                       /* the transport (sm_seq.c writes it) */
 static void sm_seq_unlock(uint32_t t);                    /* sm_seq.c: the locked values of track t back to the base */
+static void sm_ps_stop(uint32_t t);                       /* sm_seq.c: the PSLIDE of track t ends where it is */
 static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock);
 static int sm_lk_is(uint32_t t, uint32_t p) { return p < P_COUNT && ((sm_lk_on[t % SM_NTRK][p >> 3] >> (p & 7u)) & 1u); }
 
@@ -169,6 +170,7 @@ static void sm_cmd_apply(const sm_cmd_t *c)
         if (t < SM_NTRK) {
             sm_track_load(t, &pt->kit.snd[t]);
             memset(sm_lk_on[t], 0, SM_LKB);               /* (every value the sound's base now) */
+            sm_ps_stop(t);                                /* (no glide over the sound just loaded) */
             sm_lk_step[t] = 0xFFu;
         }
         break;

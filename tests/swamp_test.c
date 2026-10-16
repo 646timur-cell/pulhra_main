@@ -3175,6 +3175,69 @@ static int test_step_slide(void)
     return bad;
 }
 
+/* fix round 1: a ratchet stops when its track is muted; a removed PSLIDE trig leaves the base; STOP -> PLAY counts from 0;
+ * a ratchet cut by the next step's early trig (the later trig wins) */
+static int test_step_fix1(void)
+{
+    int bad = 0;
+    int32_t v;
+    seq_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->flags = (uint8_t)(3u << 4);                /* x4 */
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(0.1 * S120));
+    smp.mute = 1u;
+    seq_run((uint32_t)(1.5 * S120));
+    smp.mute = 0;
+    bad += check("FIX5: x4 ratchet, muted after the first part: no more note-ons", on_n[0] == 1u && !sm_rat_left[0]);
+    /* PSLIDE trig taken off mid-glide: the base comes back and stays */
+    in_reset();
+    host_ticks = 1000u;
+    set_param(0, P_FCUT, 60);
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
+    stp(0, 0)->flags = SMF_PSLIDE;
+    sm_lock_set(0, 0, P_FCUT, 20);
+    sm_lock_set(0, 4, P_FCUT, 100);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(0.3 * S120));
+    v = trk[0].p[P_FCUT];
+    sm_step_toggle(0, 0);                                 /* off mid-glide */
+    seq_run((uint32_t)(0.1 * S120));
+    bad += check("FIX5: a PSLIDE trig taken off mid-glide: the base (60) at once", v > 20 && v < 100 && trk[0].p[P_FCUT] == 60);
+    seq_run((uint32_t)(0.5 * S120));
+    bad += check("FIX5: ... and it stays (no glide writes it again)", trk[0].p[P_FCUT] == 60);
+    /* STOP -> PLAY: A:B counts passes from 0 again; PRE from 0 */
+    seq_reset();
+    ksnd(0)->len = 1;
+    sm_step_toggle(0, 0);
+    stp(0, 0)->cond = (uint8_t)sm_cond_ab(1, 2);
+    ksnd(1)->len = 2;
+    sm_step_toggle(1, 0);
+    sm_step_toggle(1, 1);
+    stp(1, 0)->cond = SM_COND_PRE;
+    stp(1, 1)->cond = SM_COND_1ST;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(1.5 * S120));                      /* T1 pass 0 (plays), 1; T2 step 1 plays: PRE 1 */
+    push(SMC_STOP, 0, 0, 0, 0);
+    seq_run(CTL);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(0.5 * S120));
+    bad += check("FIX5: STOP -> PLAY: A:B 1:2 plays on the first pass again", on_n[0] == 2u);
+    bad += check("FIX5: STOP -> PLAY: PRE starts at 0 (step 0 PRE does not play)", on_n[1] == 1u);
+    /* a x4 ratchet on step 0, step 1 nudged -6 (fires at 0.625): the later trig wins, the 4th part never comes */
+    seq_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->flags = (uint8_t)(3u << 4);
+    sm_step_toggle(0, 1);
+    stp(0, 1)->nudge = -6;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(1.5 * S120));
+    bad += check("FIX5: x4 cut by the next step's early trig: parts at 0, 1/4, 1/2, then the trig at 0.625, nothing more",
+                 on_n[0] == 4u && near_d(on_at[0][2], 0.5 * S120) && near_d(on_at[0][3], 0.625 * S120));
+    return bad;
+}
+
 /* carried from the review of Task 4: a preview while stopped; a stale SMC_UNLOCK (retried) against a re-trigged lock */
 static int test_step_carried(void)
 {
@@ -3547,6 +3610,7 @@ int main(void)
     bad += test_step_nudge();
     bad += test_step_slide();
     bad += test_step_carried();
+    bad += test_step_fix1();
     bad += test_step_page();
     bad += test_step_draw();
     bad += test_draw_shots();
