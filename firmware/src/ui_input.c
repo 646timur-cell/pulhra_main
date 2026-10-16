@@ -436,6 +436,19 @@ static void ui_leds(void)
     led_put(nb, panel.btn[B_OCTUP], (int)(k & OCT_BREATH));
     led_put(nb, panel.btn[B_OCTDN], (k & OCT_BREATH_DN) != 0u);
     c = key_leds(&br);
+#if FELUCCA_MONOFM
+    if (grid_on() && !ui.layer && !name_on() && !ui.menu && !drum_track(TSEL)) {   /* v4: a ratchet trig breathes */
+        const track_t *t = TSEL;                        /* (lit: a trig; dark: none; breathing: a trig that repeats) */
+        uint32_t len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
+        for (k = 0; k < 27u; k++) {
+            uint32_t i = ui.bank * 16u + key_place(k);
+            if (!key_black(k) && i < len && ((c >> k) & 1u) && step_on(&seq_steps(t)[i]) && step_ratchet(&seq_steps(t)[i]) > 1u) {
+                br |= 1u << k;
+                c &= ~(1u << k);
+            }
+        }
+    }
+#endif
     g = !keys_map ? 0u : grid_on() && !ui.layer && !name_on() ? grid_glow() : 0u;   /* (key_leds: the grid's map) */
     beat = g ? grid_beats() & ~c : 0u;                  /* (the grid's empty beat starts: brighter than the glow) */
     sc = keys_map ? 0u : scale_leds(&sr);               /* SCALE LEDS: the scale's keys glow, the root's brighter */
@@ -849,10 +862,8 @@ static void mf_trig_edit(uint32_t f, int32_t s, uint64_t mask)
             for (j = 0; j < st->n; j++)
                 st->note[j] = (uint8_t)clamp(st->note[j] + s, 1, 127);
             last_note = st->note[0];
-        } else if (f == 0u) {
-            uint32_t fl = (st->flags & SF_ACCENT ? 1u : 0u) | (st->flags & SF_SLIDE ? 2u : 0u);
-            fl = (uint32_t)clamp((int32_t)fl + d, 0, 3);
-            st->flags = (uint8_t)((st->flags & ~(SF_ACCENT | SF_SLIDE)) | (fl & 1u ? SF_ACCENT : 0u) | (fl & 2u ? SF_SLIDE : 0u));
+        } else if (f == 0u) {                           /* FLAG: - ACC SLD A+S X2 X3 X4 AX2 AX3 AX4 (ui.c mf_flag_set) */
+            mf_flag_set(st, (uint32_t)clamp((int32_t)mf_flag_of(st) + d, 0, (int32_t)MF_NFLAG - 1));
         } else if (f == 1u) {
             ev_sput(st, EVK_VEL, clamp(ev_sval(st, EVK_VEL) + accel(EN_K2, s, 126), 1, 127));
         } else if (f == 2u) {
@@ -930,13 +941,74 @@ static void nudge_turn(uint64_t held, int32_t steps)
             step_set_nudge(&TSEL->step[i], v);
         }
     motion_undo_done(TSEL);
-    if (TSEL->p[P_SQNT]) {
+    if (!FELUCCA_MONOFM && TSEL->p[P_SQNT]) {           /* (MONOFM: a nudge always plays, seq.c seq_nudge) */
         ui_message("QUANTIZE IS ON");
         return;
     }
     ev_nudge_fmt(b + 6, v);
     ui_message(b);
 }
+
+#if FELUCCA_MONOFM
+/* MONOFM v4, the SELECT knob (no layer held): HOME (and its MIXER, CLOCK) the tempo; a trig held on any page, or the
+ * trig picked on STEP, its NUDGE; ARP > XY the axis; elsewhere the page's fifth value (ui.c mf_sel_id: params.c
+ * page_t.sel, EDIT the machine's most used), recorded and learned as a knob's; a page without one: nothing */
+static void mf_sel_turn(int32_t s)
+{
+    const page_t *pg = cur_page();
+    const param_desc_t *d;
+    uint64_t held;
+    uint32_t id;
+    int16_t *vp;
+    char b[24], val[12];
+    const char *unit = "";
+    if (ui.menu || ui.confirm || name_on())
+        return;
+    if (ui.home || pg->fam == FAM_TRK) {                /* HOME: the tempo (only here) */
+        song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_SELECT, s, 200), GP[G_BPM].min, GP[G_BPM].max);
+        ui.bpm_t = 40;
+        return;
+    }
+    if ((held = lock_held()) != 0u && !drum_track(TSEL)) {   /* a trig held: its NUDGE */
+        nudge_turn(held, s);
+        return;
+    }
+    if (pg->graph == GR_ROLL && grid_on() && !drum_track(TSEL)) {   /* STEP: the trig picked */
+        if (!step_on(&TSEL->step[ui.cursor % NSTEP]) || !TSEL->step[ui.cursor % NSTEP].n) {
+            ui_message("NO TRIG");
+            return;
+        }
+        nudge_turn((uint64_t)1 << (ui.cursor % NSTEP), s);
+        ui.force = 1;
+        return;
+    }
+    if (pg->graph == GR_XY) {                           /* XY: X / Y */
+        mf_xy_axis = s > 0;
+        ui_message(mf_xy_axis ? "XY: Y ROUTES" : "XY: X ROUTES");
+        ui.force = 1;
+        return;
+    }
+    if ((id = mf_sel_id(pg)) == 0xFFu)
+        return;
+    vp = &TSEL->p[id];
+    d = track_desc(TSEL, id);
+    if (!d || d->max == d->min)
+        return;
+    *vp = (int16_t)param_turn(d, *vp, accel(EN_SELECT, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
+    motion_capture(TSEL, id, *vp);
+    ml_knob(TSEL, id);
+    param_format(d, *vp, val, &unit);
+    str_cpy(b, d->label, sizeof b);
+    str_cpy(b + str_len(b), " ", 4);
+    str_cpy(b + str_len(b), val, 12);
+    if (unit && unit[0]) {
+        str_cpy(b + str_len(b), " ", 4);
+        str_cpy(b + str_len(b), unit, 8);
+    }
+    ui_message(b);
+    ui.force = 1;
+}
+#endif
 
 /* SEQ > DETAIL (1.5.1, Discussion #199; ui.c detail_on): KNOB 1 CHANCE (0..100 %), 2 RATCH (x1..x4), 3 NUDGE (-8..+7
  * sixteenths), 4 VEL (1..127) of the cursor step, the fields SEQ > AUTOMATION lists as rows (ui_events.c ev_sval,
@@ -1716,8 +1788,18 @@ static void ui_input(void)
 #else
         panel_enc(EN_ALGO);                             /* (another track: OCT- puts back the layer's track only) */
 #endif
+#if FELUCCA_MONOFM
+        if ((s = panel_enc(EN_SELECT)) != 0) {          /* v4: FX + SELECT the sends' deep pages, SEQ + SELECT EUCLID */
+            if (ui.ly == LAYER_FX)                      /* on / off; in the other layers nothing (the tempo: HOME's) */
+                mf_fx_deep(s);
+            else if (ui.ly == LAYER_SEQ)
+                mf_euclid_set(s > 0);
+            combo = 1;
+        }
+#else
         if (glo && (sel = panel_enc(EN_SELECT)) != 0)   /* GLO + SELECT: the tempo, a combo (OCT- puts it back) */
             combo = 1;
+#endif
     } else if ((kq = (uint32_t)layer_knobs_quiet()) != 0) {   /* a layer letting go: KNOB 1..4 are nobody's (#39) */
         for (k = 0; k < 4u; k++)
             if (panel_enc(EN_K1 + k) != 0)
@@ -1978,6 +2060,12 @@ static void ui_input(void)
 #endif
     if (!lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
         track_select((uint32_t)clamp((int32_t)song.sel + (s > 0 ? 1 : -1), 0, NLIVE - 1));
+#if FELUCCA_MONOFM
+    if (!lay && (s = panel_enc(EN_SELECT)) != 0)        /* SELECT (v4): the page's fifth knob (mf_sel_turn) */
+        mf_sel_turn(s);
+    (void)sel;
+    if (0)
+#endif
     if ((s = glo ? sel : crank_select() ? 0 : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = global tempo; */
         if (glo || !(ui_prefs & PREF_BPM_LOCK)) {
             song.g[G_BPM] = (int16_t)clamp(song.g[G_BPM] + accel(EN_SELECT, s, 200), GP[G_BPM].min, GP[G_BPM].max);

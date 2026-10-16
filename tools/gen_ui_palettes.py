@@ -52,6 +52,9 @@ PALETTES = [
     # STRANGE (darkmachine, the build's default): a crypt by candlelight: black stone, parchment text, blood-red values,
     # torch gold for the hot thing
     ("DARK",   (5, 5, 4),       (17, 16, 14),    (206, 200, 184), (160, 152, 134), (234, 54, 44)),
+    # MONOFM v4 (its only palette): a cellar after dark, black with a red cast, bone text, values in old blood, the one
+    # hot thing a ghost's cold green
+    ("CRYPT",  (6, 2, 3),       (22, 9, 10),     (216, 206, 188), (246, 104, 86),  (160, 255, 186)),
 ]
 BW = "MONO"
 BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE
@@ -190,6 +193,7 @@ def main():
         out += ["};", f"#define UI_NPALETTES {len(PALETTES)}u", "#define UI_GREY_INDEX 0u",
                 f"#define UI_BW_INDEX {names.index(BW)}u          /* MONO: black and white (src/gfx.c palette_set) */",
                 f"#define UI_DARK_INDEX {names.index('DARK')}u          /* DARK: STRANGE's default (panel.c) */",
+                f"#define UI_CRYPT_INDEX {names.index('CRYPT')}u          /* CRYPT: MONOFM's only (src/gfx.c palette_set) */",
                 f"#define UI_BW_GREY 0x{to565(BW_GREY):04x}u          /* MONO's one grey: DIM LINE RAISE LANE */",
                 f"#define UI_PAL_TAG {PAL_TAG}u          /* stored id = UI_PAL_TAG + index; below 20: an old id */"]
         out += [f"#define UI_{k}_PCT {v}" for k, v in PCT.items()] + [f"#define UI_RAISE_PCT {RAISE_PCT}   /* SURF -> TEXT */"]

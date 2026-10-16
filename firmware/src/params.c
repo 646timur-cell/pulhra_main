@@ -60,7 +60,8 @@ static const char *const N_XYLINK[] = {"OFF", "ON", "INV", "CROSS"};   /* XY LIN
 #endif
 #if FELUCCA_MONOFM
 static const char *const N_MSCALE[] = {"2X", "3/2X", "1X", "3/4X", "1/2X", "1/4X", "1/8X"};   /* MONOFM's track SCALE */
-static const char *const N_MFILT[] = {"OFF", "LP", "BP", "HP", "NOTCH"};      /* MONOFM's track FILTER (P_FLT, voice.c) */
+static const char *const N_MFILT[] = {"OFF", "LP", "BP", "HP", "NOTCH", "HYB"};   /* (HYB: the HYBRID pair, voice.c) */
+static const char *const N_DTYPE[] = {"SOFT", "HARD", "FOLD", "FUZZ"};          /* MONOFM: DIST's TYPE (fx.c track_dist) */      /* MONOFM's track FILTER (P_FLT, voice.c) */
 #endif
 static const char *const N_SLCR[] = {"OFF", "GATE", "STUT"};             /* SL_OFF .. SL_STUT (slicer.c) */
 static const char *const N_SLDIV[] = {"1/8", "1/16", "1/32", "8T", "16T", "32T"};   /* SL_DEN */
@@ -124,8 +125,9 @@ static void micro_fix(int16_t *p)
     if (p[P_FM4_LEVEL] >= 0 && p[P_FM4_LEVEL] < MT_N)
         return;
     p[P_FM4_LEVEL] = MT_OFF;
-#if FELUCCA_MONOFM                                       /* (MONOFM: those ids are its FILTER's; AMT its own) */
-    p[P_MAMT] = 100;
+#if FELUCCA_MONOFM                                       /* (MONOFM: those ids are its FILTER's; AMT its own; no */
+    p[P_MAMT] = 100;                                     /* degrees of its own: their ids F.ENV's and DIST's) */
+    return;
 #else
     p[P_FM3_DEC] = 100;
     p[P_FM3_SUS] = 0;
@@ -150,7 +152,7 @@ static int32_t micro_cents(const int16_t *p, uint32_t deg)
         base = MT_CENTS[ty - MT_JUST][deg];
     }
 #if FELUCCA_MONOFM
-    return base * clamp(p[P_MAMT], 0, 100) / 100 + p[MDEG_P(deg)];
+    return base * clamp(p[P_MAMT], 0, 100) / 100;          /* (v4: the tables only) */
 #else
     return base * clamp(p[P_FM3_DEC], 0, 100) / 100 + p[MDEG_P(deg)];
 #endif
@@ -181,7 +183,7 @@ static const param_desc_t TP[P_COUNT] = {
     [P_DEC] = PD("DEC", F_TIME, 0, 127, 70),
     [P_SUS] = PD("SUS", F_PCT, 0, 127, 90),
     [P_REL] = PD("REL", F_TIME, 0, 127, 60),
-    [P_ED_FLT] = PD("FLT", F_BIPCT, -64, 63, 0),
+    [P_ED_FLT] = PD(FELUCCA_MONOFM ? "ENV" : "FLT", F_BIPCT, -64, 63, 0),   /* (MONOFM: FILTER's ENV, F.ENV's amount) */
     [P_ED_PIT] = PD("PIT", F_BIPCT, -64, 63, 0),
     [P_ED_SHP] = PD("SHP", F_BIPCT, -64, 63, 0),
     [P_ED_FX] = PD("FX", F_BIPCT, -64, 63, 0),
@@ -269,10 +271,20 @@ static const param_desc_t TP[P_COUNT] = {
     LANE(0, "KICK"), LANE(1, "SNARE"), LANE(2, "CLAP"), LANE(3, "HATCL"),
     LANE(4, "HATOP"), LANE(5, "TOM"), LANE(6, "RIM"), LANE(7, "BELL"),
 #undef LANE
-#if FELUCCA_DARK                 /* (the lanes are MICRO's degrees 1 .. 7 here) */
+#if FELUCCA_DARK && !FELUCCA_MONOFM   /* (the lanes are MICRO's degrees 1 .. 7 here) */
     MDEG(0u, "1"), MDEG(1u, "b2"), MDEG(2u, "2"), MDEG(3u, "b3"), MDEG(4u, "3"), MDEG(5u, "4"), MDEG(6u, "#4"),
     MDEG(7u, "5"),
+#endif
 #undef MDEG
+#if FELUCCA_MONOFM               /* (MONOFM v4: the lanes are F.ENV's and DIST's, core.h P_FATK ..) */
+    [P_FATK] = PD("ATK", F_TIME, 0, 127, 0),
+    [P_FDEC] = PD("DEC", F_TIME, 0, 127, 64),
+    [P_DTYPE] = PE("TYPE", N_DTYPE, 0),
+    [P_DTONE] = PD("TONE", F_BIPCT, -64, 63, 0),
+    [P_DLCUT] = PD("LCUT", F_PCT, 0, 127, 0),
+    [P_DOUT] = PD("OUT", F_BIPCT, -64, 63, 0),
+    [P_LN6] = PD("-", F_INT, 0, 0, 0),
+    [P_LN7] = PD("-", F_INT, 0, 0, 0),
 #endif
     [P_LSYNC] = PE("SYNC", N_LSYNC, 0),
     [P_LTRIG] = PE("TRIG", N_LTRIG, 0),
@@ -589,15 +601,67 @@ enum { FAM_HOME, FAM_ENV, FAM_LFO, FAM_FX, FAM_SCL, FAM_EDIT, FAM_GLO, FAM_SAVE,
 enum { SC_TRACK, SC_GLOBAL, SC_ENGINE, SC_STEP, SC_TRK };   /* SC_TRK: the TRACKS page (ui_input.c tracks_edit) */
 enum { GR_NONE, GR_ADSR, GR_LFO, GR_STEPS, GR_ARP, GR_SCALE, GR_FX, GR_ROLL, GR_BROWSE, GR_SLOTS, GR_USER, GR_TRK,
        GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHORD, GR_SLICES, GR_EVENTS,
-       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS, GR_EUCLID, GR_XY, GR_MICRO, GR_MPROJ };   /* (GR_MPROJ: MONOFM's PROJECT) */   /* (GR_XY: STRANGE's ARP > X, Y) */   /* (GR_EUCLID: STRANGE's EUCLID pages, the pattern) */   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
+       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS, GR_EUCLID, GR_XY, GR_MICRO, GR_MPROJ, GR_FENV };   /* (GR_FENV: MONOFM's F.ENV) */   /* (GR_MPROJ: MONOFM's PROJECT) */   /* (GR_XY: STRANGE's ARP > X, Y) */   /* (GR_EUCLID: STRANGE's EUCLID pages, the pattern) */   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
 
 typedef struct {
     const char *title;
     uint8_t fam, scope, graph;
     uint8_t id[4];               /* param ids; 0xFF = empty slot */
+    uint8_t sel;                 /* MONOFM: the SELECT knob's parameter + 1 (SELP), 0 = none (ui_input.c sel_turn) */
+    uint8_t hide;                /* MONOFM: not in the family's round (FX's deep pages: FX + SELECT, ui_layer.c) */
 } page_t;
+#define SELP(id) ((uint8_t)((id) + 1u))
 
 static const page_t PAGES[] = {
+#if FELUCCA_MONOFM
+/* MONOFM v4: every family two pages, three at most (MONOFM.md "Страницы"); SELECT the fifth knob where a page has one.
+ * The order is a family's round (ui.c open_family) */
+    /* ENV: the track's FILTER and its own envelope (F.ENV: ATK DEC, to the cutoff by FILTER's ENV, to the pitch and the
+     * shape by its PIT SHP); FILT HYB: the HYBRID pair (BASE RES, SELECT its WIDTH), the twin shown for it (ui.c) */
+    {"FILTER", FAM_ENV, SC_TRACK, GR_NONE, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}, 0, 0},
+    {"FILTER", FAM_ENV, SC_TRACK, GR_NONE, {P_FLT, P_HBASE, P_HRES, P_ED_FLT}, SELP(P_HWIDTH), 0},
+    {"F.ENV", FAM_ENV, SC_TRACK, GR_FENV, {P_FATK, P_FDEC, P_ED_PIT, P_ED_SHP}, 0, 0},
+    /* LFO: the LFO (SELECT its PHASE), where it goes (SELECT its FADE), the matrix (SELECT the LFO's POL) */
+    {"LFO", FAM_LFO, SC_TRACK, GR_LFO, {P_LRATE, P_LWAVE, P_LSYNC, P_LTRIG}, SELP(P_LPHASE), 0},
+    {"LFO DEST", FAM_LFO, SC_TRACK, GR_NONE, {P_LD_PIT, P_LD_FLT, P_LD_SHP, P_LD_AMP}, SELP(P_LFADE), 0},
+    {"MOD", FAM_LFO, SC_TRACK, GR_MOD, {0xFF, P_M1SRC, P_M1DST, P_M1AMT}, SELP(P_LPOL), 0},   /* KNOB 1: the slot */
+    /* FX: the sends, DIST's own (SELECT its drive), the INSERT (SELECT its dry / wet), the SLICER; FX + SELECT the
+     * sends' deep pages (the global CHORUS DLY REVERB: hidden, shown one at a time) */
+    {"FX", FAM_FX, SC_TRACK, GR_FX, {P_DIST, P_CHOR, P_DLY, P_REV}, 0, 0},
+    {"DIST", FAM_FX, SC_TRACK, GR_NONE, {P_DTYPE, P_DTONE, P_DLCUT, P_DOUT}, SELP(P_DIST), 0},
+    {"INSERT", FAM_FX, SC_TRACK, GR_INS, {P_ITYPE, P_IA, P_IB, P_IC}, SELP(P_IMIX), 0},
+    {"SLICER", FAM_FX, SC_TRACK, GR_SLCR, {P_SLCR, P_SLPAT, P_SLRATE, P_SLDEPTH}, 0, 0},
+    {"CHORUS", FAM_FX, SC_GLOBAL, GR_NONE, {G_CRATE, G_CDEPTH, 0xFF, 0xFF}, 0, 1},
+    {"DLY", FAM_FX, SC_GLOBAL, GR_NONE, {G_DTIME, G_DFDBK, G_DCOLOR, G_DMIX}, 0, 1},
+    {"REVERB", FAM_FX, SC_GLOBAL, GR_NONE, {G_RTYPE, G_RSIZE, G_RDAMP, 0xFF}, 0, 1},
+    /* SCL: the scale, the chord keys, the tuning (MICRO: one of the tables, how much of it) */
+    {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}, 0, 0},
+    {"CHORD", FAM_SCL, SC_TRACK, GR_CHORD, {P_CHRD, P_VOIC, 0xFF, 0xFF}, 0, 0},
+    {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_MAMT, P_ROOT, 0xFF}, 0, 0},
+    /* EDIT: the machine's two pages (SELECT its most used value: engines.c MF_SEL_E), then the voice (the kit machines:
+     * KIT with it) */
+    {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}, 0, 0},
+    {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}, 0, 0},
+    {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, P_VOICE, P_DETUNE, P_SPRD}, SELP(P_PRIO), 0},
+    {"VOICE", FAM_EDIT, SC_TRACK, GR_NONE, {P_VOICE, P_GLIDE, P_DETUNE, P_SPRD}, SELP(P_PRIO), 0},
+    /* GLO (Elektron's AMP): the amplitude envelope (SELECT: ENV SYNC, its times as note values), the track's mix */
+    {"AMP", FAM_GLO, SC_TRACK, GR_ADSR, {P_ATK, P_DEC, P_SUS, P_REL}, SELP(P_ESYNC), 0},
+    {"MIX", FAM_GLO, SC_TRACK, GR_NONE, {P_LEVEL, P_PAN, P_DIST, P_SPRD}, 0, 0},
+    /* SAVE: the sound's slots (the quick save), the presets, the project of 16 patterns (mf_pat.c) */
+    {"USER", FAM_SAVE, SC_GLOBAL, GR_USER, {0xFF, 0xFF, 0xFF, 0xFF}, 0, 0},
+    {"PRESETS", FAM_SAVE, SC_GLOBAL, GR_BROWSE, {0xFF, 0xFF, 0xFF, 0xFF}, 0, 0},
+    {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_MPROJ, {0xFF, G_LOAD, G_CLRSEQ, G_SAVE}, 0, 0},
+    /* ARP: the arpeggiator (SELECT its ORDER), then X / Y's routes (SELECT: route 1 / 2, ui.c mf_xy_route) */
+    {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}, SELP(P_AORDER), 0},
+    {"ARP 2", FAM_ARP, SC_TRACK, GR_NONE, {P_ASWING, P_APROB, P_AHOLD, 0xFF}, 0, 0},
+    {"XY", FAM_ARP, SC_TRACK, GR_XY, {P_FM1_ATK, P_FM1_DEC, P_FM2_ATK, P_FM2_DEC}, 0, 0},
+    /* SEQ: the trig (SELECT its NUDGE), EUCLID (SEQ + SELECT: on / off) */
+    {"STEP", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}, 0, 0},
+    {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_EUC, P_SLEN, P_EHITS, P_EROT}, 0, 0},
+    /* HOME's pages (HOME tapped on HOME): the MIXER, CLOCK (HOME's SELECT: the tempo) */
+    {"MIXER", FAM_TRK, SC_TRK, GR_TRK, {0, 1, 2, 3}, 0, 0},
+    {"CLOCK", FAM_TRK, SC_GLOBAL, GR_NONE, {G_BPM, G_SWING, G_CLOCK, 0xFF}, 0, 0},
+#else
     {"ENV", FAM_ENV, SC_TRACK, GR_ADSR, {P_ATK, P_DEC, P_SUS, P_REL}},
     {"ENV DEST", FAM_ENV, SC_TRACK, GR_NONE, {P_ED_FLT, P_ED_PIT, P_ED_SHP, P_ESYNC}},   /* (P_ED_FX: nothing reads it);
                                                                              * 1.5: ESYNC, ENV's times as note values */
@@ -706,9 +770,15 @@ static const page_t PAGES[] = {
      * GLO > GLOBAL; its TUNE is MENU > AUDIO's now), again HOME (ui.c home_tap) */
     {"MIXER", FAM_TRK, SC_TRK, GR_TRK, {0, 1, 2, 3}},
     {"CLOCK", FAM_TRK, SC_GLOBAL, GR_NONE, {G_BPM, G_SWING, G_CLOCK, 0xFF}},
+#endif
 };
 #define NPAGES (sizeof(PAGES) / sizeof(PAGES[0]))
 static uint8_t mod_ui_slot;      /* the MOD page: the matrix slot (0..3) KNOB 2..4 edit */
+#if FELUCCA_MONOFM
+static uint8_t mf_xy_axis;       /* ARP > XY: the axis shown, 0 X, 1 Y (SELECT): Y's routes are X's ids + 5 (OP2's) */
+#else
+#define mf_xy_axis 0u
+#endif
 
 static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **valp)
 {
@@ -727,6 +797,10 @@ static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **
     }
     if (pg->graph == GR_MOD)                          /* SRC DST AMT of the slot shown */
         id += 3u * mod_ui_slot;
+#if FELUCCA_MONOFM
+    if (pg->graph == GR_XY && mf_xy_axis)
+        id += 5u;
+#endif
     *valp = &TSEL->p[id];
     return track_desc(TSEL, id);
 }

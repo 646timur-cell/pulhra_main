@@ -14,6 +14,13 @@ static const char H_EDIT[] = "[K1-4]SOUND[EDIT]HOLD: ENGINES";
 static const char H_LANES[] = "[K1-4]LANE LEVELS[EDIT]HOLD: MUTES";
 static const char H_FMOP[] = "[K1]OPERATOR[SAVE]HOLD: UNDO";
 static const struct { const char *title, *hint; } HELP_PAGE[] = {
+#if FELUCCA_MONOFM   /* (v4: the pages that are no trig grid; the first match is taken) */
+    {"EUCLID", "[SEQ]+SELECT: ON OFF[K3]HITS[K4]ROT"},
+    {"ARP", "[K1]MODE[SELECT]ORDER[ARP]ARP 2"},
+    {"ARP 2", "[K1]SWING[K3]LATCH[ARP]XY"},
+    {"XY", "[K1]TO[K2]AMOUNT[SELECT]X / Y"},
+    {"PROJECT", "[K1]LENGTH[OCT+]DO[SAVE]USER"},
+#endif
     {"ENV", "[K1-4]A D S R[ENV]ENV DEST"},
     {"ENV DEST", "[K1-4]ENV AMOUNTS[ENV]ENV"},
     {"LFO", "[K1-4]SHAPE[LFO]HOLD: MOMENTARY"},
@@ -113,8 +120,19 @@ static const char *help_page(void)
     if (ui.home)
         return FELUCCA_MONOFM && ui.home == 3u ? "[K1-2]X Y[K3-4]HPF LPF[HOME]BACK" : ui.home == HOME_TRANSPOSE ? H_TRANS
                : home_levels() ? H_LEVELS : H_HOME;
-    if (FELUCCA_MONOFM && grid_on() && !detail_on() && !drum_track(TSEL))
-        return "[KEYS]TRIGS HOLD+KNOB LOCK[SEQ+ARP]NOTES";
+#if FELUCCA_MONOFM
+    if (grid_on() && !drum_track(TSEL)) {               /* the trig pages: the keys, and what SELECT does here */
+        static char hb[48];
+        uint32_t id = mf_sel_id(cur_page());
+        if (cur_page()->graph == GR_ROLL)
+            return "[K1]FLAG[PRESETS]NOTE[SELECT]NUDGE";
+        if (id == 0xFFu)
+            return "[KEYS]TRIGS[K1-4]+TRIG: LOCK";
+        str_cpy(hb, "[KEYS]TRIGS[SELECT]", sizeof hb);
+        str_cpy(hb + str_len(hb), track_desc(TSEL, id)->label, sizeof hb - str_len(hb));
+        return hb;
+    }
+#endif
     if (FELUCCA_MONOFM && mf_kbd && cur_page()->graph == GR_ROLL)
         return "[KEYS]NOTES INTO THE STEP[SEQ+ARP]TRIGS";
     if (grid_on() && !detail_on())

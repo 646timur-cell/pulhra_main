@@ -54,7 +54,11 @@ static uint32_t up_gen;                      /* bumped on every user bank change
 #define PREF_ANIM_OFF 2u                       /* MENU > ANIM OFF (#46): values snap (no rolling digits, no glide) */
 #define PREF_ACCEL 4u                          /* MENU > KNOB ACCEL ON (#52): fast turns of wide values x2..x8 */
 #define PREF_USB_FIXED 8u                      /* MENU > USB LEVEL FIXED: USB audio at the full level, MASTER after */
+#if FELUCCA_MONOFM
+#define PREF_BPM_LOCK 0u                       /* (MONOFM v4: no BPM LOCK, the tempo is HOME's SELECT) */
+#else
 #define PREF_BPM_LOCK 16u                      /* MENU > BPM LOCK ON (#58): SELECT sets the tempo only with GLO held */
+#endif
 #define PREF_LARGE 32u                         /* MENU > LARGE ON (#15, Discussion #80): big knob labels and values
                                                 * (ui_draw.c large_kind); clear in every older setting = OFF */
 #define PREF_SERIAL_OFF 64u                    /* MENU > USB SERIAL OFF (#67): no serial console, the device enumerates as
@@ -80,7 +84,7 @@ static uint32_t up_gen;                      /* bumped on every user bank change
 #define PREF_PREVIEW (0x02u << 16)
 #define PREF_CHORD_ADD (0x04u << 16)
 #define PREF_HELP (0x08u << 16)
-#define PREF_ROLL (0x10u << 16)                /* MONOFM: MENU > CONTROL > STEP EDIT ROLL: SEQ > STEP as Felucca's roll */
+#define PREF_ROLL 0u                           /* (MONOFM v4: the roll is gone, STEP is the trig's page) */
 /* 1.3 (Discussions #112, #134): MENU > DISPLAY > HOME, what the HOME page shows under its four cards: 0 SCOPE (the
  * oscilloscope, as before), 1 TRACKS (the four tracks as rows: ui_graph.c draw_home_tracks), 2 LEVELS (1.5, #134: the
  * rows of TRACKS, and KNOB 1..4 the LEVEL of T1..T4 in place of the engine's four: home_param). A byte of its own no
@@ -405,8 +409,38 @@ static uint32_t layer_btn(void);
 /* FM operator pages belong to DIGITAL; they never appear on other instruments (without FELUCCA_FM4: never). SLICES:
  * a SLICE track's (ui_slice.c); LANES / LANES 2 a DRUM track's (its lane levels); FILTER an ANALOG track's; OPERATOR, OP ENV, OPERATOR 2 an FM6
  * track's (its patch's operators, ui_fm6op.c) */
+#if FELUCCA_MONOFM
+static int mf_kit_engine(void)   /* the kit machines (KIT instead of VOICE): the slice machines, BBOX */
+{
+    uint32_t e = TSEL->eng_req % NENGINES;
+    return e == ENGI_GLITCH || e == ENGI_RITUAL || e == ENGI_MECH || e == ENGI_BIO || e == ENGI_ERROR || e == ENGI_MBBOX;
+}
+#endif
+#if FELUCCA_MONOFM
+/* the SELECT knob's parameter on page pg (params.c page_t.sel; EDIT: the machine's, engines.c mf_sel_e), 0xFF none */
+static uint32_t mf_sel_id(const page_t *pg)
+{
+    uint32_t e;
+    if (pg->sel)
+        return pg->sel - 1u;
+    if (pg->scope != SC_ENGINE)
+        return 0xFFu;
+    e = mf_sel_e(TSEL->eng_req);
+    return e < 8u ? P_E0 + e : 0xFFu;
+}
+#endif
 static int page_visible(uint32_t i)
 {
+#if FELUCCA_MONOFM   /* MONOFM v4 (params.c): its own table; FX's deep pages only while shown, FILTER's twin by FILT */
+    const page_t *pg = &PAGES[i];
+    if (pg->hide)
+        return i == ui.page;
+    if (pg->fam == FAM_ENV && pg->graph == GR_NONE && pg->id[0] == P_FLT)
+        return (pg->sel != 0) == (TSEL->p[P_FLT] == 5);
+    if (pg->fam == FAM_EDIT && (pg->id[0] == P_FM3_REL || pg->id[0] == P_VOICE))
+        return (pg->id[0] == P_FM3_REL) == mf_kit_engine();
+    return 1;
+#endif
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SEQ)
         return PAGES[i].graph == GR_EUCLID;           /* (STRANGE: SEQ is EUCLID) */
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_ARP)
@@ -541,6 +575,29 @@ static void page_entered(void)
 }
 
 static int step_on(const step_t *st) { return st->time == ST_NOTE && (st->n || st->hit); }
+#if FELUCCA_MONOFM
+/* MONOFM v4, a trig's FLAG (STEP's KNOB 1): accent, slide, and the ratchet with or without the accent (a slide does not
+ * go with a ratchet: one glues the note on, the other cuts it up) */
+#define MF_NFLAG 10u
+static const char *const MF_FLAG_N[MF_NFLAG] = {"-", "ACC", "SLD", "A+S", "X2", "X3", "X4", "AX2", "AX3", "AX4"};
+static uint32_t mf_flag_of(const step_t *st)
+{
+    uint32_t r = step_ratchet(st), a = (st->flags & SF_ACCENT) != 0u;
+    if (r > 1u)
+        return (a ? 7u : 4u) + r - 2u;
+    return a | ((st->flags & SF_SLIDE) ? 2u : 0u);
+}
+static void mf_flag_set(step_t *st, uint32_t f)
+{
+    f = f < MF_NFLAG ? f : MF_NFLAG - 1u;
+    st->flags = (uint8_t)(st->flags & ~(SF_ACCENT | SF_SLIDE));
+    step_set_ratchet(st, f >= 4u ? (f >= 7u ? f - 5u : f - 2u) : 1u);
+    if (f == 1u || f == 3u || f >= 7u)
+        st->flags |= SF_ACCENT;
+    if (f == 2u || f == 3u)
+        st->flags |= SF_SLIDE;
+}
+#endif
 /* 1.5.1 (#199): a step whose CHANCE, RATCH or NUDGE is off its default: marked on the roll and the grid (ui_graph.c).
  * Not VEL: every recorded step has one */
 static int step_detailed(const step_t *st)
@@ -648,6 +705,8 @@ static int grid_on(void)
  * its panel their lanes (ui_graph.c graph_detail). No state of its own: the page is what says so */
 static int detail_on(void)
 {
+    if (FELUCCA_MONOFM)
+        return 0;                                       /* (MONOFM v4: no DETAIL; RATCH is a FLAG, NUDGE SELECT's) */
     return !ui.home && !ui.menu && !ui.confirm && cur_page()->scope == SC_STEP && str_eq(cur_page()->title, "DETAIL");
 }
 /* GLO > SONG (1.2): the white keys A B C D (A3 B3 C4 D4, white places 2..5: seq.c song_key) set the selected cell's slot;
@@ -809,11 +868,11 @@ static void go_home(void)
 }
 
 #if FELUCCA_MONOFM
-/* SEQ tapped twice (ui_layer.c layer_tick): the selected track's EUCLID on / off, and its page shown */
-static void mf_euclid_toggle(void)
+/* SEQ + SELECT (v4; ui_input.c): the selected track's EUCLID on (right) / off (left), and its page shown */
+static void mf_euclid_set(int on)
 {
     uint32_t i;
-    TSEL->p[P_EUC] = (int16_t)!TSEL->p[P_EUC];
+    TSEL->p[P_EUC] = (int16_t)(on != 0);
     for (i = 0; i < NPAGES; i++)
         if (PAGES[i].graph == GR_EUCLID)
             break;
@@ -824,6 +883,29 @@ static void mf_euclid_toggle(void)
         page_entered();
     }
     ui_message(TSEL->p[P_EUC] ? "EUCLID ON" : "EUCLID OFF");
+    ui.force = 1;
+}
+/* FX + SELECT (v4; ui_input.c): the sends' deep pages in FX's order, DIST CHORUS DLY REVERB (DIST's in the round, the
+ * others hidden: shown while picked, FX tapped goes on to FX's first). The page stays when FX is let go */
+static void mf_fx_deep(int32_t s)
+{
+    static const char *const DEEP[4] = {"DIST", "CHORUS", "DLY", "REVERB"};
+    uint32_t i, k = 0;
+    const page_t *pg = cur_page();
+    if (!ui.home && pg->fam == FAM_FX)
+        for (k = 0; k < 4u && !str_eq(pg->title, DEEP[k]); k++)
+            ;
+    k = k < 4u ? (uint32_t)clamp((int32_t)k + (s > 0 ? 1 : -1), 0, 3) : 0u;
+    for (i = 0; i < NPAGES; i++)
+        if (PAGES[i].fam == FAM_FX && str_eq(PAGES[i].title, DEEP[k]))
+            break;
+    if (i >= NPAGES)
+        return;
+    ui.page = (uint8_t)i;
+    ui.home = 0;
+    if (!PAGES[i].hide)
+        ui.fam_last[FAM_FX] = (uint8_t)i;
+    page_entered();
     ui.force = 1;
 }
 /* SEQ + ARP (ui_input.c): the keyboard on (the keys play; on STEP they write the trig picked, mf_kbd_keys) / off (the
@@ -1313,8 +1395,8 @@ static int param_kept(uint32_t i)
 #if FELUCCA_MONOFM                                      /* (MONOFM: EUCLID and X / Y are the track's; its FILTER the sound's) */
     if (i == P_EUC || i == P_EHITS || i == P_EROT || i == P_XV || i == P_YV)
         return 1;
-    if (i == P_FLT || i == P_FCUT || i == P_FRES)
-        return 0;
+    if (i == P_FLT || i == P_FCUT || i == P_FRES || MF_FENV_ID(i) || i == P_HBASE || i == P_HWIDTH || i == P_HRES)
+        return 0;                                       /* (F.ENV, DIST's own, HYBRID: the sound's too) */
 #endif
     return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_DARK && (i == P_FM3_ATK ||
            i == P_FM3_DEC || i == P_FM3_SUS || i == P_FM3_REL || i == P_FM1_LEVEL || (i >= P_FM4_ATK && i <= P_FM4_LEVEL) || (i >= P_LN0 && i <= P_LN7))) ||
@@ -1421,6 +1503,12 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     t->p[P_SUS] = e->presets[pi].env[2];
     t->p[P_REL] = e->presets[pi].env[3];
     t->p[P_ED_FLT] = e->presets[pi].fenv;
+#if FELUCCA_MONOFM
+    if (e->presets[pi].fenv) {                        /* F.ENV (v4): the preset's sweep was its ADSR's attack and */
+        t->p[P_FATK] = e->presets[pi].env[0];         /* decay: its own the same */
+        t->p[P_FDEC] = e->presets[pi].env[1];
+    }
+#endif
     t->p[P_VOICE] = e->presets[pi].mono ? V_LEGATO : V_POLY;   /* mono presets keep the legato feel */
     {   /* the sends */
         static const uint8_t FX_DEF[4] = {0, 24, 28, 36};

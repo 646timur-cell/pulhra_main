@@ -226,6 +226,10 @@ typedef struct {
     uint32_t age;
     uint8_t mvel;                /* mod.c: the note-on velocity (before UNISON scaling) and RAND of the note */
     int16_t mrnd;
+#if FELUCCA_MONOFM
+    uint8_t fstage;              /* F.ENV (voice.c fenv_tick): 0 done, 1 attack, 2 decay */
+    int32_t fenv;                /* .. its level, Q24 */
+#endif
 } voice_t;
 
 typedef struct {                 /* per-voice control-rate modulation, computed in voice.c */
@@ -311,6 +315,16 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
 #define P_FLT P_FM3_DEC          /* the track's FILTER (voice.c): OFF LP BP HP, after the machine, per voice */
 #define P_FCUT P_FM3_SUS         /* .. its CUTOFF, moved by ENV's FLT, the LFO's and the matrix's CUT */
 #define P_FRES P_FM1_LEVEL       /* .. its RESONANCE */
+/* MONOFM v4: MICRO's own degree offsets gone (the tunings only), their first ids the filter envelope and DIST's own:
+ * F.ENV (ENV page 2: ATK DEC, its PIT SHP the ENV DEST ids; FLT AMT on FILTER) and DIST's TYPE TONE LOW CUT OUT. All 0
+ * = the sound as before (an older project's degree offsets read as these: 0 unless someone tuned a degree) */
+#define P_FATK P_LN0             /* F.ENV's attack (ENV_LIN, 0 = instant) */
+#define P_FDEC P_LN1             /* .. its decay (ENV_EXP) to 0 */
+#define P_DTYPE P_LN2            /* DIST's TYPE: SOFT (as before) HARD FOLD FUZZ */
+#define P_DTONE P_LN3            /* .. TONE, -64..63 (0: as before) */
+#define P_DLCUT P_LN4            /* .. LOW CUT, 0..127 (0: ~55 Hz as before) */
+#define P_DOUT P_LN5             /* .. OUT, -64..63 dB-ish trim (0: as before) */
+#define MF_FENV_ID(i) ((i) >= P_LN0 && (i) <= P_LN5)
 /* step i (0..LEN-1) of a euclidean pattern of hits k over n = LEN steps, rotated by r: x..x..x. for 3 of 8 */
 static inline int mf_euc_hit(const int16_t *p, uint32_t i)
 {

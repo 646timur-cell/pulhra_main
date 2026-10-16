@@ -274,6 +274,12 @@ static void voice_start(track_t *t, voice_t *v, uint32_t note, uint32_t vel, int
     v->mrnd = t->m_rnd;
     t->m_vi = (uint8_t)(v - t->v);
     glide_set(t, v, glide);
+#if FELUCCA_MONOFM
+    if (!sounding)
+        v->fenv = 0;
+    if (!sounding || !glide)                            /* F.ENV: again on each note, not on a slide (from where */
+        v->fstage = 1;                                  /* it is, as the amplitude's) */
+#endif
     if (!sounding) {
         v->env = 0;
         v->env_out = 0;
@@ -576,6 +582,30 @@ static int32_t env_tick(track_t *t, voice_t *v)
     return v->env >> 9;
 }
 
+#if FELUCCA_MONOFM
+/* MONOFM v4, F.ENV (ENV page 2): the filter's own envelope, ATK (ENV_LIN) up to full, DEC (ENV_EXP) down to 0, again on
+ * each note (voice_start); Q15. Its amounts: FILTER's ENV to the cutoff, its PIT SHP to the pitch and the shape, and the
+ * matrix's ENV (vmod_t envq15). ATK and DEC 0: a click of it (the step's own: what the old ENV DEST did on a short ADSR) */
+static int32_t fenv_tick(const track_t *t, voice_t *v)
+{
+    const int16_t *p = t->p;
+    if (v->fstage == 1u) {
+        v->fenv += (int32_t)ENV_LIN[p[P_FATK] & 127];
+        if (v->fenv >= (1 << 24)) {
+            v->fenv = 1 << 24;
+            v->fstage = 2;
+        }
+    } else if (v->fstage == 2u) {
+        v->fenv -= mulq16(v->fenv, ENV_EXP[p[P_FDEC] & 127]);
+        if (v->fenv < (1 << 10)) {
+            v->fenv = 0;
+            v->fstage = 0;
+        }
+    }
+    return v->fenv >> 9;
+}
+#endif
+
 /* SPREAD (#148, fx.c mix_spread): while spread_on (mix_part sets it for the part it renders), track_render renders the
  * voices of side 0 into spread_buf and the others into out, then adds spread_buf to out: out is every voice, as always
  * (the engines add into either the same way), spread_buf the left ones. A cost per block, none per voice */
@@ -607,7 +637,7 @@ static int32_t midi_bend_q8[NTRK], midi_bend_target[NTRK];
 static int32_t mf_fst[NPART][NVOICE][6];
 static int mf_filters_on(const int16_t *p)
 {
-    return (p[P_FLT] > 0 && p[P_FLT] <= 4) || p[P_HBASE] > 0 || p[P_HWIDTH] < 127;
+    return p[P_FLT] > 0 && p[P_FLT] <= 5;              /* (v4: HYBRID is FILT's HYB) */
 }
 /* one SVF sample: x in, the stage's state s[0..1]; *bp, *lp out */
 static inline void mf_svf(const tsvf_t *c, int32_t x, int32_t *s, int32_t *bp, int32_t *lp)
@@ -624,7 +654,7 @@ static __attribute__((noinline)) void mf_filter_voice(track_t *t, voice_t *v, co
     const int16_t *p = t->p;
     int32_t buf[CTL], *st = mf_fst[(uint32_t)(t - trk) % NPART][(uint32_t)(v - t->v) % NVOICE];
     int32_t k = 8192 - p[P_FRES] * 7800 / 127, kh = 8192 - p[P_HRES] * 7800 / 127, bp, lp;
-    uint32_t i, ty = (uint32_t)p[P_FLT], hyb = p[P_HBASE] > 0 || p[P_HWIDTH] < 127, sel = ty >= 1u && ty <= 4u;
+    uint32_t i, ty = (uint32_t)p[P_FLT], hyb = ty == 5u, sel = ty >= 1u && ty <= 4u;
     tsvf_t c, ch, cl;
     if (n > CTL)
         n = CTL;
@@ -719,7 +749,11 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
             }
             if (e->amp)                                 /* the engine's own amplitude curve */
                 env = e->amp(t, v, env);
+#if FELUCCA_MONOFM
+            m.envq15 = fenv_tick(t, v);                 /* (MONOFM: the amplitude's is its own, F.ENV the rest's) */
+#else
             m.envq15 = e->ownenv ? 0 : env;
+#endif
             m.amp1 = e->ownenv ? env : mulq15(env, v->vel * 258);
             if (p[P_LD_AMP])
                 m.amp1 = mulq15(m.amp1, 32767 - mulq15(p[P_LPOL] ? lfo : (lfo + 32768) >> 1, p[P_LD_AMP] * 258));

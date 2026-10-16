@@ -544,7 +544,8 @@ static void rec_note(track_t *t, uint32_t note, uint32_t vel)
     uint32_t len = t->p[P_SLEN] > 0 ? (uint32_t)t->p[P_SLEN] : 1u, idx = t->seq_idx % len, k;
     uint32_t period = div_samples(seq_div(t)), cur = step_samples(t, period, t->seq_idx);
     uint32_t next = t->seq_pos > cur / 2u, sounds;
-    int32_t off = rec_nudge(t->seq_pos >= cur ? 0 : next ? -(int32_t)(cur - t->seq_pos) : (int32_t)t->seq_pos, period);
+    int32_t off = FELUCCA_MONOFM ? 0 :              /* (MONOFM: recording on the grid; NUDGE by SELECT, which plays) */
+                  rec_nudge(t->seq_pos >= cur ? 0 : next ? -(int32_t)(cur - t->seq_pos) : (int32_t)t->seq_pos, period);
     step_t *s;
     if (next)
         idx = (idx + 1u) % len;
@@ -1301,7 +1302,7 @@ static __attribute__((noinline)) void seq_ratchet(track_t *t, uint32_t period)
  * a NOTE step that plays something, x1 (a ratcheted step's parts divide the step: on its start); else 0 */
 static int32_t seq_nudge(const track_t *t, const step_t *s)
 {
-    if (t->p[P_SQNT] || s->time != ST_NOTE || (!s->n && !s->hit) || step_ratchet(s) != 1u)
+    if ((!FELUCCA_MONOFM && t->p[P_SQNT]) || s->time != ST_NOTE || (!s->n && !s->hit) || step_ratchet(s) != 1u)
         return 0;
     return step_nudge(s);
 }
@@ -1435,7 +1436,7 @@ static void seq_tick(track_t *t, uint32_t n)
             mfp_loop[trk_index(t)]++;                   /* (the trig conditions' loop count) */
 #endif
         rec_hold(t, t->seq_idx, len);
-        if (t->p[P_SQNT] && !t->nd_fired)
+        if (!FELUCCA_MONOFM && t->p[P_SQNT] && !t->nd_fired)
             seq_play(t, t->seq_idx, period);        /* QUANTIZE ON: every step on its start, as before 1.2 */
         else
             seq_nd_start(t, period, len);

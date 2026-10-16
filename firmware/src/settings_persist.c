@@ -100,7 +100,7 @@ static void monofm_first_start(void)
         return;
     favorites.factory[15][12] = MONOFM_SEEN;
     favorites.factory[15][26] = 2u;                     /* HV_LEVELS */
-    settings.palette = UI_DARK_INDEX;
+    settings.palette = UI_CRYPT_INDEX;
     palette_set(settings.palette);
 }
 #endif

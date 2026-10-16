@@ -257,10 +257,27 @@ static void head_msg(int32_t x, int32_t maxw)
         x = 120 - HALF_UP(iw + (big ? text_w(&AF_M, m + icon) : head_hint_w(m + icon, maxw - lw - iw)) + lw);
     if (icon)
         x += cv_icon_mid(x, H_HEAD / 2, 16, ICON_X_NOFILE, T_ACCENT, T_BG) + KH_GAP;
+#if FELUCCA_MONOFM
+    if (big && ui.msg_t > 34u && ui.msg_t <= 40u && !icon && !(ui_prefs & PREF_ANIM_OFF)) {               /* CRYPT: a new message comes up garbled, its letters falling */
+        static const char GL[] = "X#0KZ8N%7H";          /* into place over its first six frames */
+        char g[32];
+        uint32_t i, left = ui.msg_t - 34u;
+        str_cpy(g, m, sizeof g);
+        for (i = 0; g[i]; i++)
+            if (g[i] != ' ' && gm_hash(i + 1u, ui.msg_t + str_len(g)) % 6u < left)
+                g[i] = GL[gm_hash(i, ui.msg_t) % 10u];
+        if (text_w(&AF_M, g) <= maxw - lw)
+            m = g;
+        x = cv_text(x, HEAD_MY, &AF_M, m, T_TEXT);
+        big = 2;
+    }
+    if (big == 1) {
+#else
     if (big) {
+#endif
         GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
         x = cv_text(x, HEAD_MY, &AF_M, m + icon, T_TEXT);
-    } else {
+    } else if (!big) {
         x = cv_free_hint(x, HEAD_SY, m + icon, T_TEXT, T_BG, maxw - lw - iw);   /* (may start with a keycap) */
     }
     if (lock)
@@ -331,7 +348,7 @@ static void draw_head(void)
                    (ui.msg_t ? str_hash(7u, ui.msg) : ui.layer * 7919u + (uint32_t)layer_locked() * 3u) + (uint32_t)song.g[G_BPM] * 101u + (ui.bpm_t != 0) * 31u +
                    (uint32_t)seq_counting() * 7u + (ui_prefs & PREF_BPM_LOCK) * 4099u +
                    (uint32_t)batt_shown() * 7777u + (chain.running ? (chain.row + 1u) * 104729u : 0u) +
-                   (slot ? str_hash(11u, sl) : 0u);
+                   (slot ? str_hash(11u, sl) : 0u) + (FELUCCA_MONOFM && ui.msg_t > 34u && ui.msg_t <= 40u ? ui.msg_t * 7919u : 0u);
     int msg = ui.msg_t || ui.layer;
     int centre = !msg || ui.bpm_t || ui.layer == LAYER_GLO;   /* the BPM being changed: it stays, the message right */
     int32_t rx = HEAD_REC_X;
@@ -777,6 +794,10 @@ static void draw_foot(void)
     }
     if (grid_on())
         sig += 0x51EDu + (uint32_t)black_held(GK_ACC) * 977u;
+#if FELUCCA_MONOFM
+    if (!ui.home && mf_sel_id(pg) != 0xFFu)             /* (the SELECT knob's value, footer row 1) */
+        sig += (uint32_t)(TSEL->p[mf_sel_id(pg)] + 300) * 2731u + mf_sel_id(pg) * 7u;
+#endif
     help = ui.help_t && !ui.ml.on ? help_page() : 0;   /* 1.5, HELP ON: the page's hint for ~2 s after it was entered
                                                        * (not while MIDI LEARN shows its line) */
     if (help)
@@ -818,6 +839,20 @@ static void draw_foot(void)
         str_cpy(b + str_len(b), "/", 4);
         fmt_int(b + str_len(b), (int32_t)((len + 15u) / 16u));
         cv_text(8, 2, &AF_S, b, T_THEME);
+#if FELUCCA_MONOFM
+        if (!black_held(GK_ACC) && mf_sel_id(pg) != 0xFFu) {   /* the SELECT knob's value: "SEL CUT 64" */
+            uint32_t id = mf_sel_id(pg);
+            const param_desc_t *d = track_desc(TSEL, id);
+            const char *u = "";
+            char v[12], l[28];
+            param_format(d, TSEL->p[id], v, &u);
+            str_cpy(l, d->label, sizeof l);
+            str_cpy(l + str_len(l), " ", 4);
+            str_cpy(l + str_len(l), v, 12);
+            x = cv_text_r(232, 2, &AF_S, l, T_TEXT, T_BG);
+            cv_text_r(x - 6, 2, &AF_S, "SEL", T_DIM, T_BG);
+        } else
+#endif
         if (black_held(GK_ACC))
             cv_text_r(232, 2, &AF_S, "ACCENT", T_ACCENT, T_BG);
         else
@@ -1213,12 +1248,10 @@ static void draw_columns(void)
 #if FELUCCA_MONOFM
     if (cur_page()->scope == SC_STEP && !detail_on() && !(ui_prefs2 & (PREF_ROLL >> 16))) {   /* KEYS: the trig picked:
                                                                                           * FLAG VEL LEN COND (NOTE: PRESETS) */
-        static const char *const FLAG_N[4] = {"-", "ACC", "SLD", "A+S"};
         const step_t *st = &seq_steps(TSEL)[ui.cursor];
         uint32_t on = (uint32_t)step_on(st) && st->n;
         char sn[8];
-        draw_column(0, "FLAG", on ? FLAG_N[(st->flags & SF_ACCENT ? 1u : 0u) | (st->flags & SF_SLIDE ? 2u : 0u)] : "--", "",
-                    on ? VAL(0u) : T_DIM, -1, ICON_AUTO);
+        draw_column(0, "FLAG", on ? MF_FLAG_N[mf_flag_of(st)] : "--", "", on ? VAL(0u) : T_DIM, -1, ICON_AUTO);
         fmt_int(sn, st->vel ? st->vel : 96);
         draw_column(1, "VEL", on ? sn : "--", "", on ? VAL(1u) : T_DIM, -1, ICON_AUTO);
         draw_column(2, "LEN", on ? MF_LEN_N[st->hit ? 0u : st->acc % MF_NLEN] : "--", "", on ? VAL(2u) : T_DIM, -1, ICON_AUTO);
@@ -1381,11 +1414,12 @@ static void splash_drips(int32_t y)
     static const uint8_t DX[11] = {80, 88, 97, 104, 116, 121, 131, 140, 149, 157, 165};
     static const uint8_t DL[11] = {6, 17, 4, 12, 20, 8, 14, 5, 18, 9, 13};
     uint32_t i;
+    uint16_t c = FELUCCA_MONOFM ? T_THEME : T_ACCENT;    /* (MONOFM's CRYPT: blood is THEME, its ACCENT a ghost's) */
     for (i = 0; i < 11u; i++) {
-        lcd_fill(DX[i], (uint32_t)y, 1, 3, T_ACCENT);
-        lcd_fill(DX[i], (uint32_t)(y + 3), 2, DL[i], T_ACCENT);
-        lcd_fill(DX[i] - 1u, (uint32_t)(y + 3 + DL[i]), 4, 2, T_ACCENT);
-        lcd_fill(DX[i], (uint32_t)(y + 5 + DL[i]), 2, 1, T_ACCENT);
+        lcd_fill(DX[i], (uint32_t)y, 1, 3, c);
+        lcd_fill(DX[i], (uint32_t)(y + 3), 2, DL[i], c);
+        lcd_fill(DX[i] - 1u, (uint32_t)(y + 3 + DL[i]), 4, 2, c);
+        lcd_fill(DX[i], (uint32_t)(y + 5 + DL[i]), 2, 1, c);
     }
 }
 static void draw_splash(void)
@@ -1659,10 +1693,45 @@ static void ui_draw_page(uint32_t counting)
         return;
     }
     if (!ui.home && !page_visible(ui.page)) {          /* an OP page of a track that is not DIGITAL (without
-                                                         * FELUCCA_FM4: any track): EDIT 1 */
-        ui.page = (uint8_t)page_first(FAM_EDIT);
-        page_entered();
+                                                         * FELUCCA_FM4: any track): EDIT 1. MONOFM: its twin (FILTER
+                                                         * by FILT, KIT / VOICE by the machine), else the family's first */
+        uint32_t i, f = cur_page()->fam, to = NPAGES;
+        for (i = 0; FELUCCA_MONOFM && i < NPAGES && to == NPAGES; i++)
+            if (PAGES[i].fam == f && str_eq(PAGES[i].title, cur_page()->title) && page_visible(i))
+                to = i;
+        for (i = 0; FELUCCA_MONOFM && i < NPAGES && to == NPAGES; i++)
+            if (PAGES[i].fam == f && (PAGES[i].id[0] == P_VOICE || PAGES[i].id[0] == P_FM3_REL) == (cur_page()->id[0] == P_VOICE ||
+                cur_page()->id[0] == P_FM3_REL) && page_visible(i))
+                to = i;
+        if (to < NPAGES) {
+            ui.page = (uint8_t)to;
+            ui.fam_last[f] = (uint8_t)to;
+            ui.force = 1;
+        } else {
+            ui.page = (uint8_t)page_first(FAM_EDIT);
+            page_entered();
+        }
     }
+#if FELUCCA_MONOFM
+    {   /* CRYPT: now and then (12 .. 42 s apart, MENU > ANIM not OFF) the picture tears for three frames: a band of the
+         * graph pushed sideways (gfx.c cv_tear), then drawn whole again */
+        static uint32_t tear_next;
+        if (!tear_next)
+            tear_next = fm1_ms + 20000u;
+        if (gm_tear) {
+            if (!--gm_tear)
+                ui.graph_sig ^= 0x5EA7u;
+        } else if (ux.grime && !(ui_prefs & PREF_ANIM_OFF) && (int32_t)(fm1_ms - tear_next) >= 0) {
+            uint32_t h = gm_hash(fm1_ms, ui.frame);
+            gm_tear = 3;
+            gm_tear_y0 = (uint16_t)(graph_y() + h % 60u);
+            gm_tear_y1 = (uint16_t)(gm_tear_y0 + 4u + (h >> 8) % 18u);
+            gm_tear_dx = (int8_t)(((h >> 16) & 1u ? 1 : -1) * (int32_t)(3u + (h >> 17) % 10u));
+            tear_next = fm1_ms + 12000u + (h >> 20) % 30000u;
+            ui.graph_sig ^= 0x7EA2u;
+        }
+    }
+#endif
     cursor_fix();
     if (ui.force)
         draw_frame();

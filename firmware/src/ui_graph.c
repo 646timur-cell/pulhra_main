@@ -50,6 +50,28 @@ static void graph_adsr(const track_t *t, uint16_t c)
 #undef EGY
 }
 
+#if FELUCCA_MONOFM
+/* ENV > F.ENV: the filter envelope, ATK (linear) then DEC (exponential to 0), over 0..216 px; its sign by FILTER's ENV
+ * (a negative amount drawn under the line, closing) */
+static void graph_fenv(const track_t *t, uint16_t c)
+{
+    int32_t a = 4 + t->p[P_FATK] * 80 / 127, d = 8 + t->p[P_FDEC] * 120 / 127, neg = t->p[P_ED_FLT] < 0;
+    int32_t top = 8 * graph_ht / 100, bot = 86 * graph_ht / 100, x0 = 12, x1 = x0 + a, i, px = x1, py, e = 32768;
+#define FEY(lvl) (neg ? bot - (bot - top) + (lvl) * (bot - top) / 1000 : bot - (lvl) * (bot - top) / 1000)
+    cv_rect(PANEL_X0, neg ? top - 2 : bot + 2, PANEL_W, 1, T_RAISE);
+    cv_line_t(x0, FEY(0), x1, FEY(1000), c, 2);
+    py = FEY(1000);
+    for (i = 1; i <= d; i++) {
+        e = (e * (32768 - 150733 / d)) >> 15;
+        cv_line_t(px, py, x1 + i, FEY(1000 * e >> 15), c, 2);
+        px = x1 + i;
+        py = FEY(1000 * e >> 15);
+    }
+    cv_line_t(px, py, 228, FEY(0), c, 2);
+#undef FEY
+}
+#endif
+
 static void graph_lfo(const track_t *t, uint16_t c)
 {
     int32_t x, cy = graph_ht / 2, a = 38 * graph_ht / 100, py = cy, uni = t->p[P_LPOL] != 0;
@@ -217,7 +239,7 @@ static void graph_mstep(const track_t *t, uint16_t c)
     if (!on) {
         cv_text_in(0, 44, 240, &AF_M, st->time == ST_TIE ? "TIE" : "NO TRIG", T_DIM, T_SURF);
         cv_text_in(0, 76, 240, &AF_S, mf_kbd ? "PLAY A NOTE: IT GOES HERE" : "TAP A KEY: A TRIG", T_DIM, T_SURF);
-        cv_text_in(0, 96, 240, &AF_S, "PRESETS: NOTE   K1: ACC / SLD", T_DIM, T_SURF);
+        cv_text_in(0, 96, 240, &AF_S, "PRESETS: NOTE   K1: FLAG   SEL: NUDGE", T_DIM, T_SURF);
         return;
     }
     b[0] = 0;
@@ -232,15 +254,16 @@ static void graph_mstep(const track_t *t, uint16_t c)
     str_cpy(b, n, sizeof b);
     str_cpy(b + str_len(b), "   LEN ", sizeof b - str_len(b));
     str_cpy(b + str_len(b), MF_LEN_N[st->hit ? 0u : st->acc % MF_NLEN], sizeof b - str_len(b));
-    if (st->flags & SF_ACCENT)
-        str_cpy(b + str_len(b), "   ACC", sizeof b - str_len(b));
-    if (st->flags & SF_SLIDE)
-        str_cpy(b + str_len(b), "   SLD", sizeof b - str_len(b));
-    if (step_ratchet(st) > 1u) {
-        str_cpy(b + str_len(b), "   X", sizeof b - str_len(b));
-        fmt_int(b + str_len(b), (int32_t)step_ratchet(st));
+    if (mf_flag_of(st)) {
+        str_cpy(b + str_len(b), "   ", sizeof b - str_len(b));
+        str_cpy(b + str_len(b), MF_FLAG_N[mf_flag_of(st)], sizeof b - str_len(b));
     }
     cv_text_in(0, 80, 240, &AF_S, b, T_MID, T_SURF);
+    if (step_nudge(st)) {                                 /* NUDGE (SELECT): early / late, sixteenths of a step */
+        str_cpy(b, "NUDGE ", sizeof b);
+        ev_nudge_fmt(b + 6, step_nudge(st));
+        cv_text_in(0, 98, 240, &AF_S, b, T_ACCENT, T_SURF);
+    }
 }
 /* MONOFM's SAVE > PROJECT: the pattern playing, the project's state, the change mode */
 static void graph_mproj(void)
@@ -565,7 +588,7 @@ static void graph_slicer(const track_t *t, uint16_t c)
  * (OWN) or, with none set, the engine's (ENGINE, dim); a matrix slot taking the axis overrides both (MOD) */
 static void graph_xy(const track_t *t, uint16_t c)
 {
-    uint32_t ax = cur_page()->title[0] == 'Y', r, n = 0, k, mod = 0;
+    uint32_t ax = FELUCCA_MONOFM ? mf_xy_axis : cur_page()->title[0] == 'Y', r, n = 0, k, mod = 0;   /* (MONOFM: one page, SELECT) */
     const int16_t *q = &t->p[XY_ROUTE(ax)];
     const engine_t *e = ENGINES[t->eng_req % NENGINES];
     int32_t v = xy_of(t, ax);
@@ -638,7 +661,7 @@ static void graph_meuc(const track_t *t, uint16_t c)
             cv_rect(x + w / 2 - 1, y + ch / 2 - 1, 3, 3, i == cur ? T_SURF : T_TEXT);
     }
     if (!on)
-        str_cpy(b, "SEQ TWICE (K1) TO START", sizeof b);
+        str_cpy(b, "SEQ + SELECT (K1) TO START", sizeof b);
     else {
         fmt_int(b, (int32_t)k);
         str_cpy(b + str_len(b), " OF ", sizeof b - str_len(b));
@@ -1361,6 +1384,12 @@ static void page_title(char *ti)
                 k = n;
         }
     str_cpy(ti, pt ? pt : grid_on() && !detail_on() && drum_track(TSEL) ? "GRID" : pg->title, 12);
+#if FELUCCA_MONOFM
+    if (pg->graph == GR_XY)
+        str_cpy(ti, mf_xy_axis ? "Y" : "X", 12);
+    if (pg->hide)                                       /* (FX's deep pages: FX + SELECT, no place in the round) */
+        n = 0;
+#endif
     if (n > 1) {
         str_cpy(ti + str_len(ti), " ", 4);
         fmt_int(ti + str_len(ti), (int32_t)k);
@@ -1429,7 +1458,7 @@ static uint32_t graph_signature(void)
     }
 #if FELUCCA_DARK
     if (pg->graph == GR_XY)                          /* (the axis' value) */
-        h ^= (uint32_t)xy_of(t, pg->title[0] == 'Y') * 40503u;
+        h ^= (uint32_t)xy_of(t, FELUCCA_MONOFM ? mf_xy_axis : pg->title[0] == 'Y') * 40503u + (FELUCCA_MONOFM ? mf_xy_axis * 977u : 0u);
 #endif
     if (pg->graph == GR_EUCLID)                      /* (the step the arp is on; MONOFM: the step playing) */
         h ^= (uint32_t)(FELUCCA_MONOFM ? t->seq_idx * 7u + song.playing : t->euc_pos) * 2654435761u + t->nheld;
@@ -2510,21 +2539,26 @@ static void draw_graph(void)
         case GR_ADSR:
             graph_adsr(t, c);
             break;
+#if FELUCCA_MONOFM
+        case GR_FENV:
+            graph_fenv(t, c);
+            break;
+#endif
         case GR_LFO:
             graph_lfo(t, c);
             break;
         case GR_ROLL:
             cv_oy = 0;
+#if FELUCCA_MONOFM
+            graph_mstep(t, c);                        /* (MONOFM: the trig's page, no roll, no DETAIL, no DRUM grid) */
+#else
             if (detail_on())                          /* 1.5.1 (#199) */
                 graph_detail(t, c);
             else if (drum_track(t))
                 graph_grid(t, c);
-#if FELUCCA_MONOFM
-            else if (!(ui_prefs2 & (PREF_ROLL >> 16)))
-                graph_mstep(t, c);                    /* (KEYS: the step, no roll) */
-#endif
             else
                 graph_roll(t, c);
+#endif
             break;
         case GR_SCALE:
             graph_scale(t, c);
@@ -2565,10 +2599,12 @@ static void draw_graph(void)
             cv_oy = 0;
             graph_browse();
             break;
+#if !FELUCCA_MONOFM
         case GR_SLOTS:
             cv_oy = 0;
             graph_slots();
             break;
+#endif
 #if FELUCCA_MONOFM
         case GR_MPROJ:
             cv_oy = 0;
@@ -2585,6 +2621,7 @@ static void draw_graph(void)
             graph_song();
             break;
 #endif
+#if !FELUCCA_MONOFM                                   /* (MONOFM v4: no PHRASES, AUTOMATION, TOOLS) */
         case GR_PATS:
             cv_oy = 0;
             graph_pats();
@@ -2597,6 +2634,7 @@ static void draw_graph(void)
             cv_oy = 0;
             panel_note("TURN TO PICK", "[OCT+] CONFIRM", 0);
             break;
+#endif
 #if FELUCCA_SLICE
         case GR_SLICES:
             cv_oy = 0;

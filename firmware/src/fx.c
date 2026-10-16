@@ -103,18 +103,61 @@ static struct {                          /* HALL's state (in the pool: no .bss) 
  * (a little bias = even harmonics) -> tone low-pass that closes with drive ->
  * make-up gain (straight into tanh over the full band, it would sound like a
  * broken digital fuzz). State per part (track_t dist_*). */
+#if FELUCCA_MONOFM
+/* MONOFM v4: DIST's own page (FX > DIST): TYPE SOFT (the clip above, as before) / HARD (flat at the rails) / FOLD (the
+ * peaks folded back) / FUZZ (hard, lopsided: a strong bias, the gaps of a dying fuzz); TONE moves the low-pass (0: as
+ * before), LOW CUT the high-pass in front (0: ~55 Hz as before, up to ~1.4 kHz), OUT the level after (0: as before) */
+static inline int32_t dist_shape(uint32_t ty, int32_t u)
+{
+    if (ty == 1u)
+        return clamp(u, -26000, 26000);
+    if (ty == 2u) {                                     /* fold: the triangle of period 4 L through 0 */
+        int32_t L = 24000, p = 4 * L, v = (u + L) % p;
+        v = v < 0 ? v + p : v;
+        return v < 2 * L ? v - L : 3 * L - v;
+    }
+    if (ty == 3u)
+        return clamp(u + 9000, -14000, 30000) - 8000;
+    return softclip(u);
+}
+#endif
 static void track_dist(track_t *t, int32_t *b, uint32_t n)
 {
     int32_t d = t->p[P_DIST], i, g, k, mk, bias = 2400, b0;
+#if FELUCCA_MONOFM
+    uint32_t ty = (uint32_t)clamp(t->p[P_DTYPE], 0, 3);
+    int32_t hc = 256 + t->p[P_DLCUT] * t->p[P_DLCUT] / 2;   /* Q15: >> 7 (as before) .. ~>> 2 */
+#endif
     if (!d)
         return;                                         /* states kept: switching on does not click */
     g = 4096 + d * d * 2;                                /* Q12: 1x .. ~9x, gentle at first */
     k = 32000 - d * 95;                                  /* tone: transparent at low drive .. ~3 kHz, Q15 */
     mk = 30000 - d * 120;                                /* make-up */
+#if FELUCCA_MONOFM
+    k = clamp(k + t->p[P_DTONE] * 300, 1500, 32700);
+    mk = mk * (64 + clamp(t->p[P_DOUT], -64, 63)) / 64;
+    if (ty) {
+        b0 = dist_shape(ty, bias);
+        for (i = 0; i < (int32_t)n; i++) {
+            int32_t x = b[i], y;
+            t->dist_hp += mulq15(clamp(x - t->dist_hp, -250000, 250000), hc);
+            x = clamp(x - t->dist_hp, -230000, 230000);
+            y = dist_shape(ty, (((x >> 2) * g) >> 10) + bias) - b0;
+            t->dist_lp1 += mulq15(y - t->dist_lp1, k);
+            t->dist_lp2 += mulq15(t->dist_lp1 - t->dist_lp2, k);
+            b[i] = mulq15(t->dist_lp2, mk);
+        }
+        return;
+    }
+#endif
     b0 = softclip(bias);
     for (i = 0; i < (int32_t)n; i++) {
         int32_t x = b[i], y;
+#if FELUCCA_MONOFM
+        t->dist_hp += t->p[P_DLCUT] ? mulq15(clamp(x - t->dist_hp, -250000, 250000), hc) : (x - t->dist_hp + 64) >> 7;   /* (LOW CUT) */
+#else
         t->dist_hp += (x - t->dist_hp + 64) >> 7;           /* ~55 Hz low cut: keep the bass out of the clipper */
+#endif
         x = clamp(x - t->dist_hp, -230000, 230000);         /* (x >> 2) * g fits 32 bits; the clip is flat out there */
         y = softclip((((x >> 2) * g) >> 10) + bias) - b0;   /* >> 2 first: no overflow for loud poly */
         t->dist_lp1 += mulq15(y - t->dist_lp1, k);         /* two poles: tames the fizz */

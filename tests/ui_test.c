@@ -105,7 +105,7 @@ static uint32_t host_fl_end(uint32_t y0, uint32_t y1)   /* the rows y0..y1-1: pi
         n += host_fl_n[k] == 2u && host_fl_mid[k] != host_screen[k];
     return n;
 }
-#if FELUCCA_STRANGE
+#if FELUCCA_STRANGE || FELUCCA_MONOFM
 static int gm_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c);   /* gfx.c: DARK's worn fills (as lcd.c) */
 #endif
 static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
@@ -114,7 +114,7 @@ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 #ifdef UI_FILL_HOOK
     UI_FILL_HOOK(x, y, w, h);                     /* (tests/ui_render.c: what a fill covers is gone) */
 #endif
-#if FELUCCA_STRANGE
+#if FELUCCA_STRANGE || FELUCCA_MONOFM
     if (x < 240u && y < 240u && gm_fill(x, y, x + w > 240u ? 240u - x : w, y + h > 240u ? 240u - y : h, c))
         return;
 #endif
@@ -1739,7 +1739,11 @@ static int test_menu_tabs(void)
     song.g[G_TUNE] = 0; song.g[G_ROUTE] = 0;
     bad += check("MENU: OCT+ / OCT- step every value row up / down (COLOR wraps, the rest stop), the menu stays", ok);
     {   /* the ON / OFF rows: up (a knob right, OCT+) is ON, the switch's knob to the right, whichever bit it is */
-        static const uint8_t SW[] = {MI_LARGE, MI_ANIM, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_SERIAL, MI_RESTORE};
+        static const uint8_t SW[] = {MI_LARGE, MI_ANIM, MI_ACCEL, MI_LATCH,
+#if !FELUCCA_MONOFM
+                                     MI_BPMLOCK,
+#endif
+                                     MI_SERIAL, MI_RESTORE};
         ok = 1;
         for (i = 0; i < NELEM(SW); i++) {
             ui.menu_sel = SW[i];

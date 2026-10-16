@@ -423,14 +423,23 @@ static int test_euclid(void)
     t->p[P_EHITS] = 3;
     t->p[P_EUC] = 0;
     frames(600);
-    press(B_SEQ);
-    press(B_SEQ);
+    btn_down(B_SEQ);
+    frame();
+    turn(EN_SELECT, 1);
+    btn_up(B_SEQ);
     frames(200);
     ok = t->p[P_EUC] == 1 && !ui.home && cur_page()->graph == GR_EUCLID && !ui.lock;
+    btn_down(B_SEQ);
+    frame();
+    turn(EN_SELECT, -1);
+    btn_up(B_SEQ);
+    frames(200);
+    ok &= t->p[P_EUC] == 0 && cur_page()->graph == GR_EUCLID;
     press(B_SEQ);
     press(B_SEQ);
     frames(200);
-    bad += check("MONOFM EUCLID: SEQ tapped twice turns it on (its page), again off; no layer lock", ok && t->p[P_EUC] == 0);
+    bad += check("MONOFM EUCLID: SEQ + SELECT right on (its page), left off; SEQ tapped twice only pages (no EUCLID, "
+                 "no lock)", ok && t->p[P_EUC] == 0 && !ui.lock);
     bad += check("MONOFM EUCLID: its parameters stay with a sound load", (apply_preset_to(t, 1), t->p[P_EHITS] == 3 &&
                  t->p[P_SLEN] == 8));
     return bad;
@@ -1122,7 +1131,7 @@ static int test_mfpat(void)
             if (PAGES[i].fam == FAM_SEQ && page_visible(i) && ns < 4u)
                 seq[ns++] = i;
         }
-        ok = n == 4u && kit && sprd && !aut && ns == 3u && PAGES[seq[0]].graph == GR_ROLL && PAGES[seq[1]].graph == GR_EUCLID;
+        ok = n == 3u && kit && sprd && !aut && ns == 2u && PAGES[seq[0]].graph == GR_ROLL && PAGES[seq[1]].graph == GR_EUCLID;
         set_engine_of(&trk[0], ENGI_MSAW);
         frames(50);
         for (n = 0, sprd = 0, i = 0; i < NPAGES; i++)
@@ -1131,8 +1140,8 @@ static int test_mfpat(void)
                 for (k = 0; k < 4u; k++)
                     sprd |= PAGES[i].id[k] == P_SPRD;
             }
-        ok &= n == 4u && sprd;
-        bad += check("MONOFM PAGES: EDIT 4 pages (GLITCH: SPREAD on KIT), no AUTOMATION, SEQ: STEP EUCLID DETAIL", ok);
+        ok &= n == 3u && sprd;
+        bad += check("MONOFM PAGES: EDIT 3 pages (GLITCH: SPREAD on KIT), no AUTOMATION, SEQ: STEP EUCLID", ok);
     }
     /* a project saved by the version before (8-byte steps) loads */
     {
@@ -1421,16 +1430,304 @@ static int test_keys_editor(void)
         frame();
         bad += check("MONOFM TRIG KEYS: on HOME the keys play", ok);
     }
-    ui_prefs2 |= (uint8_t)(PREF_ROLL >> 16);
-    frames(600);
-    ke_step_page();
-    ok = !grid_on();
-    ui.cursor = 3;
-    turn(EN_K1, 1);
-    ok &= ui.cursor == 4u;
-    ui_prefs2 &= (uint8_t)~(PREF_ROLL >> 16);
-    bad += check("MONOFM KEYS: MENU > STEP EDIT ROLL: the roll as before (KNOB 1 the cursor)", ok);
     return bad;
+}
+
+/* MONOFM v4 (MONOFM.md "Страницы", "SELECT"): every family two pages, three at most (FX's deep pages hidden); SELECT the
+ * fifth knob; F.ENV, DIST's own, the FLAG list with the ratchet, NUDGE by SELECT (it plays), EUCLID by SEQ + SELECT */
+static void v4_page(const char *title)
+{
+    uint32_t i;
+    for (i = 0; i < NPAGES; i++)
+        if (str_eq(PAGES[i].title, title) && page_visible(i))
+            break;
+    ui.home = 0;
+    ui.page = (uint8_t)(i % NPAGES);
+    page_entered();
+    frame();
+}
+static double v4_rms(uint32_t blocks, int32_t note)
+{
+    int32_t buf[2 * CTL];
+    uint32_t k, i;
+    double sq = 0;
+    midi_event(0x90, 0, (uint32_t)note, 100);
+    for (k = 0; k < blocks; k++) {
+        mix_block(buf, CTL);
+        for (i = 0; i < CTL; i++)
+            sq += (double)buf[2u * i] * buf[2u * i];
+    }
+    midi_event(0x80, 0, (uint32_t)note, 0);
+    for (k = 0; k < 400u; k++)
+        mix_block(buf, CTL);
+    return sqrt(sq / ((double)blocks * CTL));
+}
+static int test_v4(void)
+{
+    static const uint8_t ENG[3] = {ENGI_MSAW, ENGI_GLITCH, ENGI_STRING};
+    int bad = 0, ok;
+    uint32_t i, f, e, n, worst = 0;
+    track_t *t = &trk[0];
+    char what[200];
+    tp_fresh();
+    ok = 1;
+    for (e = 0; e < 3u; e++) {                          /* the pages a family goes round, by machine */
+        set_engine_of(t, ENG[e]);
+        frames(50);
+        for (f = 0; f < FAM_COUNT; f++) {
+            if (f == FAM_HOME)
+                continue;
+            for (n = 0, i = 0; i < NPAGES; i++)
+                n += PAGES[i].fam == f && page_visible(i) && !PAGES[i].hide;
+            ok &= n <= (f == FAM_FX ? 4u : 3u);         /* (FX: FX DIST INSERT SLICER, as asked) */
+            worst = n > worst && f != FAM_FX ? n : worst;
+        }
+    }
+    for (i = 0; i < NPAGES; i++)                        /* gone: DETAIL, the roll, PHRASES, TOOLS, SONG, AUTOMATION */
+        ok &= !str_eq(PAGES[i].title, "DETAIL") && PAGES[i].graph != GR_PATS && PAGES[i].graph != GR_TOOLS &&
+              PAGES[i].graph != GR_SONG && PAGES[i].graph != GR_EVENTS;
+    snprintf(what, sizeof what, "MONOFM v4 PAGES: every family 3 pages at most (the most %u; FX 4), no DETAIL PHRASES TOOLS SONG "
+             "AUTOMATION", worst);
+    bad += check(what, ok);
+    for (ok = 1, i = 0; i < MI_COUNT; i++)
+        ok &= !str_eq(MI_NAME[i], "BPM LOCK") && !str_eq(MI_NAME[i], "STEP EDIT");
+    bad += check("MONOFM v4 MENU: no BPM LOCK, no STEP EDIT (the roll)", ok);
+
+    /* SELECT: HOME the tempo, nowhere else */
+    set_engine_of(t, ENGI_MSAW);
+    go_home();
+    frame();
+    song.g[G_BPM] = 120;
+    turn(EN_SELECT, 3);
+    ok = song.g[G_BPM] > 120;
+    song.g[G_BPM] = 120;
+    v4_page("LFO DEST");
+    turn(EN_SELECT, 3);
+    ok &= song.g[G_BPM] == 120 && t->p[P_LFADE] > 0;
+    bad += check("MONOFM v4 SELECT: HOME the tempo; LFO DEST its FADE, the tempo stays", ok);
+    btn_down(B_GLO);
+    frames(100);
+    turn(EN_SELECT, 3);
+    btn_up(B_GLO);
+    frames(400);
+    bad += check("MONOFM v4 SELECT: GLO + SELECT is no tempo", song.g[G_BPM] == 120);
+
+    /* FILTER: FILT HYB shows the HYBRID twin (BASE RES, SELECT its WIDTH) */
+    t->p[P_FLT] = 0;
+    v4_page("FILTER");
+    ok = cur_page()->id[1] == P_FCUT;
+    turn(EN_K1, 5);
+    frames(50);
+    ok &= t->p[P_FLT] == 5 && str_eq(cur_page()->title, "FILTER") && cur_page()->id[1] == P_HBASE;
+    i = (uint32_t)t->p[P_HWIDTH];
+    turn(EN_SELECT, -4);
+    ok &= t->p[P_HWIDTH] < (int16_t)i;
+    turn(EN_K1, -2);
+    frames(50);
+    ok &= t->p[P_FLT] == 3 && cur_page()->id[1] == P_FCUT;
+    bad += check("MONOFM v4 FILTER: HYB is a FILT type (its twin page: BASE RES, SELECT WIDTH), back to HP: CUT", ok);
+
+    /* EDIT: the machine's most used value; INSERT: its dry / wet; AMP: ENV SYNC */
+    v4_page("EDIT 1");
+    i = (uint32_t)t->p[P_E0 + mf_sel_e(ENGI_MSAW)];
+    turn(EN_SELECT, 4);
+    ok = t->p[P_E0 + mf_sel_e(ENGI_MSAW)] != (int16_t)i && mf_sel_id(cur_page()) == P_E0 + mf_sel_e(ENGI_MSAW);
+    v4_page("INSERT");
+    t->p[P_IMIX] = 127;
+    turn(EN_SELECT, -5);
+    ok &= t->p[P_IMIX] < 127;
+    v4_page("AMP");
+    t->p[P_ESYNC] = 0;
+    turn(EN_SELECT, 1);
+    ok &= t->p[P_ESYNC] == 1;
+    t->p[P_ESYNC] = 0;
+    for (e = 0, i = 0; i < NENGINES; i++)
+        e += ENGINES[i]->name && mf_sel_e(i) != 0xFFu && eng_rank(i) < NENG_SHOWN;
+    ok &= e == NENG_SHOWN;
+    bad += check("MONOFM v4 SELECT: EDIT the machine's own (every machine has one), INSERT dry / wet, AMP ENV SYNC", ok);
+
+    /* XY: SELECT the axis */
+    v4_page("XY");
+    turn(EN_SELECT, 1);
+    {
+        int16_t *vp;
+        ok = mf_xy_axis == 1 && page_desc(cur_page(), 0, &vp) && vp == &t->p[P_FM2_ATK];
+        turn(EN_SELECT, -1);
+        ok &= mf_xy_axis == 0 && page_desc(cur_page(), 0, &vp) && vp == &t->p[P_FM1_ATK];
+    }
+    bad += check("MONOFM v4 ARP > XY: one page, SELECT X / Y routes", ok);
+
+    /* FX + SELECT: the deep pages DIST CHORUS DLY REVERB, the page stays; FX tapped: its first */
+    v4_page("FX");
+    btn_down(B_FX);
+    frames(100);
+    turn(EN_SELECT, 1);
+    ok = str_eq(cur_page()->title, "DIST");
+    turn(EN_SELECT, 1);
+    turn(EN_SELECT, 1);
+    ok &= str_eq(cur_page()->title, "DLY");
+    btn_up(B_FX);
+    frames(300);
+    ok &= str_eq(cur_page()->title, "DLY") && !ui.layer && cur_page()->scope == SC_GLOBAL;
+    i = (uint32_t)song.g[G_DFDBK];
+    turn(EN_K2, 3);
+    ok &= song.g[G_DFDBK] != (int16_t)i;
+    press(B_FX);
+    frames(50);
+    ok &= str_eq(cur_page()->title, "FX");
+    bad += check("MONOFM v4 FX + SELECT: DIST, CHORUS, DLY (its knobs; stays when FX is let go), FX tapped: FX", ok);
+
+    /* STEP: KNOB 1 FLAG (- ACC SLD A+S X2 X3 X4 AX2 AX3 AX4), SELECT NUDGE (plays with QNTZ as it is) */
+    track_defaults_steps(t);
+    t->step[2].note[0] = 60;
+    t->step[2].n = 1;
+    t->step[2].time = ST_NOTE;
+    t->step[2].vel = 100;
+    ke_step_page();
+    ui.cursor = 2;
+    frame();
+    for (i = 0; i < 4u; i++)
+        turn(EN_K1, 1);
+    ok = step_ratchet(&t->step[2]) == 2u && !(t->step[2].flags & (SF_ACCENT | SF_SLIDE)) && mf_flag_of(&t->step[2]) == 4u;
+    for (i = 0; i < 4u; i++)
+        turn(EN_K1, 1);
+    ok &= step_ratchet(&t->step[2]) == 3u && (t->step[2].flags & SF_ACCENT) && mf_flag_of(&t->step[2]) == 8u;
+    for (i = 0; i < 12u; i++)
+        turn(EN_K1, -1);
+    ok &= mf_flag_of(&t->step[2]) == 0u && step_ratchet(&t->step[2]) == 1u;
+    bad += check("MONOFM v4 STEP: KNOB 1 FLAG goes - ACC SLD A+S X2 X3 X4 AX2 AX3 AX4 (the ratchet)", ok);
+    turn(EN_SELECT, 1);
+    turn(EN_SELECT, 1);
+    ok = step_nudge(&t->step[2]) == 2 && seq_nudge(t, &t->step[2]) == 2;
+    for (i = 0; i < 3u; i++)
+        turn(EN_SELECT, -1);
+    ok &= step_nudge(&t->step[2]) == -1;
+    v4_page("EDIT 1");
+    key_down(key_at(0, 2));
+    frame();
+    turn(EN_SELECT, 1);
+    key_up(key_at(0, 2));
+    frames(100);
+    ok &= step_nudge(&t->step[2]) == 0 && step_on(&t->step[2]);
+    bad += check("MONOFM v4 NUDGE: SELECT on STEP (the trig picked), a trig held on EDIT; it plays (QNTZ ignored)", ok);
+
+    /* F.ENV: LP at a low CUT opened by FILTER's ENV with a slow decay: louder than without */
+    {
+        double flat, env, dist[4];
+        ui_power_on();
+        song.master_q12 = 4096;
+        set_engine_of(t, ENGI_MSAW);
+        apply_preset_to(t, 1);
+        t->p[P_DLY] = t->p[P_REV] = t->p[P_CHOR] = 0;
+        t->p[P_LD_FLT] = t->p[P_ED_PIT] = t->p[P_ED_SHP] = 0;
+        t->p[P_FLT] = 1;
+        t->p[P_FCUT] = 10;
+        t->p[P_FRES] = 0;
+        t->p[P_ED_FLT] = 0;
+        flat = v4_rms(300, 45);
+        t->p[P_ED_FLT] = 63;
+        t->p[P_FATK] = 0;
+        t->p[P_FDEC] = 110;
+        env = v4_rms(300, 45);
+        snprintf(what, sizeof what, "MONOFM v4 F.ENV: LP 10 rms %.0f, with ENV +63 (DEC 110) %.0f", flat, env);
+        bad += check(what, env > flat * 1.5);
+        t->p[P_ED_FLT] = 0;
+        t->p[P_FLT] = 0;
+        t->p[P_DIST] = 110;
+        ok = 1;
+        for (i = 0; i < 4u; i++) {
+            t->p[P_DTYPE] = (int16_t)i;
+            dist[i] = v4_rms(300, 45);
+            ok &= dist[i] > 100.0 && dist[i] < 30000.0;
+        }
+        ok &= fabs(dist[1] - dist[0]) > 50.0 && fabs(dist[2] - dist[0]) > 50.0 && fabs(dist[3] - dist[0]) > 50.0;
+        snprintf(what, sizeof what, "MONOFM v4 DIST: SOFT %.0f HARD %.0f FOLD %.0f FUZZ %.0f (each its own, none silent "
+                 "or wild)", dist[0], dist[1], dist[2], dist[3]);
+        bad += check(what, ok);
+        t->p[P_DTYPE] = 0;
+        t->p[P_DOUT] = -64;
+        {
+            double q = v4_rms(200, 45);
+            snprintf(what, sizeof what, "MONOFM v4 DIST: OUT -64 is silence (rms %.1f, the reverb's tail)", q);
+            bad += check(what, q < dist[0] * 0.01);
+        }
+        t->p[P_DOUT] = 0;
+        t->p[P_DIST] = 0;
+    }
+    return bad;
+}
+
+/* SHOTS=dir: the v4 screens as PPMs (240 x 240), for a look (tests/ui_render.py makes PNGs of a ppm/ folder) */
+static void shot(const char *dir, const char *name)
+{
+    char path[256];
+    FILE *f;
+    uint32_t k;
+    ui.force = 1;
+    frame();
+    frame();
+    snprintf(path, sizeof path, "%s/%s.ppm", dir, name);
+    if (!(f = fopen(path, "wb")))
+        return;
+    fprintf(f, "P6\n240 240\n255\n");
+    for (k = 0; k < 240u * 240u; k++) {
+        uint16_t v = (uint16_t)((host_screen[k] >> 8) | (host_screen[k] << 8));
+        uint8_t rgb[3] = {(uint8_t)((v >> 11) * 255 / 31), (uint8_t)(((v >> 5) & 63) * 255 / 63), (uint8_t)((v & 31) * 255 / 31)};
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+}
+static void v4_shots(const char *dir)
+{
+    track_t *t = &trk[0];
+    static const char *const P[] = {"FILTER", "F.ENV", "LFO", "LFO DEST", "MOD", "FX", "DIST", "INSERT", "SLICER", "SCL",
+                                    "CHORD", "MICRO", "EDIT 1", "EDIT 2", "VOICE", "AMP", "MIX", "USER", "PRESETS", "PROJECT",
+                                    "ARP", "ARP 2", "XY", "EUCLID", "MIXER", "CLOCK"};
+    uint32_t i;
+    char n[32];
+    tp_fresh();
+    palette_set(UI_CRYPT_INDEX);
+    track_defaults_steps(t);
+    for (i = 0; i < 16u; i += 3u) {
+        t->step[i].note[0] = (uint8_t)(48 + i);
+        t->step[i].n = 1;
+        t->step[i].time = ST_NOTE;
+        t->step[i].vel = 100;
+    }
+    mf_flag_set(&t->step[3], 5u);
+    step_set_nudge(&t->step[3], 3);
+    t->p[P_ED_FLT] = 40;
+    go_home();
+    shot(dir, "home");
+    ke_step_page();
+    ui.cursor = 3;
+    shot(dir, "step");
+    for (i = 0; i < NELEM(P); i++) {
+        v4_page(P[i]);
+        str_cpy(n, P[i], sizeof n);
+        if (n[1] == '.') n[1] = '_';
+        if (n[4] == ' ') n[4] = '_';
+        if (n[3] == ' ') n[3] = '_';
+        shot(dir, n);
+    }
+    t->p[P_FLT] = 5;
+    v4_page("FILTER");
+    shot(dir, "FILTER_HYB");
+    v4_page("FX");
+    btn_down(B_FX);
+    frames(100);
+    turn(EN_SELECT, 1);
+    turn(EN_SELECT, 1);
+    turn(EN_SELECT, 1);
+    btn_up(B_FX);
+    frames(300);
+    shot(dir, "fx_deep_dly");
+    v4_page("EDIT 1");
+    turn(EN_SELECT, 2);
+    ui.msg_t = 38;
+    ui.force = 1;
+    ui_draw();
+    shot(dir, "msg_glitch");
 }
 
 int main(void)
@@ -1454,6 +1751,12 @@ int main(void)
         return test_keys_editor() != 0;
     if (getenv("MF_PAT_ONLY"))
         return test_mfpat() != 0;
+    if (getenv("SHOTS")) {
+        v4_shots(getenv("SHOTS"));
+        return 0;
+    }
+    if (getenv("MF_V4_ONLY"))
+        return test_v4() != 0;
     if (getenv("MF_STAB_ONLY"))
         return test_stability() != 0;
     if (getenv("BENCH")) {                              /* tests/monofm_cpu.sh: one set for BENCH seconds */
@@ -1474,6 +1777,7 @@ int main(void)
     bad += test_punch();
     bad += test_mfpat();
     bad += test_keys_editor();
+    bad += test_v4();
     bad += test_stability();
     printf(bad ? "monofm: %d FAILED\n" : "monofm: all passed\n", bad);
     return bad != 0;

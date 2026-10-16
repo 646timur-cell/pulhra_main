@@ -217,7 +217,11 @@ typedef struct {
 } layer_t;
 static const layer_t LAYERS[LAYER_N] = {
     {0, 0, 0, "", {{0, 0}, {0, 0}, {0, 0}}},
+#if FELUCCA_MONOFM   /* (v4: FX + SELECT the sends' deep pages) */
+    {B_FX, LK_HOLD, FAM_HOME, "[FX] HOLD", {{KC_KEYS, "EFFECTS"}, {KC_K14, "MACROS"}, {KC_SELECT, "DEEP"}}},
+#else
     {B_FX, LK_HOLD, FAM_HOME, "[FX] HOLD", {{KC_KEYS, "EFFECTS"}, {KC_K14, "MACROS"}, {0, 0}}},   /* (LET GO: the header's HOLD) */
+#endif
     {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
     {B_SCL, LK_SET, FAM_SCL, "[SCL] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
     {B_EDIT, LK_SET, FAM_HOME, "[EDIT] SET", {{KC_KEYS, "ENGINE"}, {KC_OCTDN, "UNDO"}, {KC_EDIT, "DONE"}}},
@@ -491,12 +495,8 @@ static uint32_t layer_gesture(uint32_t now, uint32_t combo)
     }
     l = *t0 & (LY_OPEN | LY_DEAD) || combo ? 0u : l;   /* (a knob turned as it was let go: a combo, no tap) */
 #if FELUCCA_MONOFM
-    if (l == LAYER_SEQ && lys.dtap) {                   /* MONOFM: SEQ tapped twice is the track's EUCLID (no lock) */
-        lys.dtap = 0;
-        layer_let_go(0);
-        mf_euclid_toggle();
-        return 0;
-    }
+    if (l == LAYER_SEQ)                                 /* MONOFM v4: SEQ tapped twice is two taps (its pages; no */
+        lys.dtap = 0;                                   /* lock, EUCLID is SEQ + SELECT) */
 #endif
     if (l && lys.dtap) {                                /* #83: a double tap: locked open (no tap) */
         lys.dtap = 0;

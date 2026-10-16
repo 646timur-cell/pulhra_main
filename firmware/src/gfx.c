@@ -111,10 +111,13 @@ static struct {
 #define T_KEY ux.key             /* a keycap's fill (its label: T_INK; unavailable: a T_DIM fill) */
 #define T_LANE ux.lane           /* the piano roll: an in-scale row (SURF -> THEME 10 %) */
 #define T_GRID ux.grid           /* the piano roll: a step line (SURF -> TEXT 6 %; beats and C rows: RAISE) */
-#if FELUCCA_STRANGE || FELUCCA_MONOFM   /* (before core.h: the -D flags) */
-#define NPALETTES UI_NPALETTES
+#if FELUCCA_MONOFM                       /* (before core.h: the -D flags) */
+#define NPALETTES UI_NPALETTES           /* (MONOFM: CRYPT, the last, its only one; palette_set) */
+#elif FELUCCA_STRANGE
+#define NPALETTES (UI_NPALETTES - 1u)    /* (CRYPT, the last, is MONOFM's) */
 #else
-#define NPALETTES (UI_NPALETTES - 1u)    /* (DARK, the last, is STRANGE's: elsewhere the list is as it was) */
+#define NPALETTES (UI_NPALETTES - 2u)    /* (DARK and CRYPT, the last two, are STRANGE's and MONOFM's: elsewhere the list is
+                                          * as it was) */
 #endif
 
 static inline uint16_t ux_gray(uint32_t x5) { return (uint16_t)((x5 << 11) | (x5 << 6) | x5); }
@@ -148,10 +151,21 @@ static inline uint32_t gm_hash(uint32_t x, uint32_t y)   /* a fixed noise of the
 }
 #define GM_GOUGES 5u
 static int16_t gm_gouge[GM_GOUGES][4];          /* the grime's gouges: y0, y1, x0, slant (/16), palette_set */
+#if FELUCCA_MONOFM
+/* MONOFM v4's CRYPT: blood run down the slabs (fixed: the same pixels every frame), from under the header, the cards
+ * and the panel: x, the top, the length; the run 1 px, then 2, a drop at its end; and now and then the picture tears
+ * (gm_tear: a band of rows pushed sideways for a few frames, ui_draw.c) */
+#define GM_DRIPS 9u
+static int16_t gm_drip[GM_DRIPS][3];
+static uint16_t gm_blood[3];                    /* (swapped) the run over BG, SURF, RAISE */
+static uint8_t gm_tear;                         /* frames left of a tear, 0: none */
+static uint16_t gm_tear_y0, gm_tear_y1;         /* .. its rows on the screen */
+static int8_t gm_tear_dx;
+#endif
 static void palette_set(uint32_t i)
 {
 #if FELUCCA_MONOFM
-    i = UI_DARK_INDEX;                   /* (MONOFM: DARK only) */
+    i = UI_CRYPT_INDEX;                  /* (MONOFM v4: CRYPT only) */
 #endif
     const ui_pal_t *p = &UI_PALETTES[i % NPALETTES];
     i %= NPALETTES;
@@ -174,7 +188,11 @@ static void palette_set(uint32_t i)
         ux.dim = ux.line = ux.raise = ux.lane = UI_BW_GREY;   /* the one grey: inactive, tracks, wells */
         ux.tint = ux.grid = p->bg;
     }
-    ux.grime = NPALETTES == UI_NPALETTES && i == UI_DARK_INDEX;   /* (DARK only in STRANGE) */
+#if FELUCCA_MONOFM
+    ux.grime = i == UI_CRYPT_INDEX;              /* (MONOFM's CRYPT) */
+#else
+    ux.grime = NPALETTES == UI_NPALETTES - 1u && i == UI_DARK_INDEX;   /* (DARK only in STRANGE) */
+#endif
     {                                            /* the wear's colours: per flat colour a dust (lighter) and a stain */
         const uint16_t f[3] = {ux.bg, ux.surf, ux.raise};
         uint32_t k;
@@ -185,6 +203,19 @@ static void palette_set(uint32_t i)
             gm_gouge[k][2] = (int16_t)((g >> 16) % 240u);
             gm_gouge[k][3] = (int16_t)((int32_t)((g >> 24) % 49u) - 24);
         }
+#if FELUCCA_MONOFM
+        {
+            static const int16_t TOPS[3] = {24, 102, 128};   /* (under the header, the cards, at the panel) */
+            for (k = 0; k < GM_DRIPS; k++) {
+                uint32_t g = gm_hash(k + 4099u, 13u);
+                gm_drip[k][0] = (int16_t)(8u + g % 224u);
+                gm_drip[k][1] = TOPS[(g >> 9) % 3u];
+                gm_drip[k][2] = (int16_t)(4u + (g >> 13) % 22u);
+            }
+            for (k = 0; k < 3u; k++)
+                gm_blood[k] = swap16(ux_mix(f[k], p->theme, k ? 38 : 30));
+        }
+#endif
         for (k = 0; k < 3u; k++) {
             ux.gk[k] = swap16(f[k]);
             ux.gd[k][0] = swap16(ux_mix(f[k], p->text, k ? 9 : 6));
@@ -235,6 +266,17 @@ static uint16_t gm_px(uint32_t x, uint32_t y, uint32_t k, uint16_t c)
         if ((int32_t)y >= g[0] && (int32_t)y < g[1] && (int32_t)x == g[2] + g[3] * ((int32_t)y - g[0]) / 16 && (h & 7u) != 0u)
             return k ? ux.gk[0] : ux.gd[0][0];   /* through a slab down to the stone; on the stone a pale score */
     }
+#if FELUCCA_MONOFM
+    for (s = 0; s < GM_DRIPS; s++) {             /* the blood: a run, wider after its first rows, a drop at its end */
+        const int16_t *d = gm_drip[s];
+        int32_t dy = (int32_t)y - d[1], dx = (int32_t)x - d[0];
+        if (dy >= 0 && dy < d[2] + 3 && dx >= -1 && dx <= 2) {
+            if ((dy < 3 && dx == 0) || (dy >= 3 && dy < d[2] && (dx == 0 || dx == 1)) ||
+                (dy >= d[2] && dy < d[2] + 2) || (dy == d[2] + 2 && (dx == 0 || dx == 1)))
+                return gm_blood[k];
+        }
+    }
+#endif
     if (k) {                                     /* a slab (SURF, RAISE): hairline cracks, a cell of 24 in ~1 of 2 */
         uint32_t cx = x / 24u, cy = y / 24u, ch = gm_hash(cx + 501u, cy + 77u);
         if (ch % 2u == 0u) {
@@ -303,11 +345,39 @@ static int gm_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
     }
     return 1;
 }
+#if FELUCCA_MONOFM
+/* a tear (gm_tear): the canvas' rows in the tear's band pushed gm_tear_dx sideways, wrapped (the screen's rows y ..) */
+static __attribute__((noinline)) void cv_tear(uint32_t y)
+{
+    uint32_t j, i, n = (uint32_t)(gm_tear_dx < 0 ? -gm_tear_dx : gm_tear_dx);
+    static uint16_t tmp[16];
+    if (!n || n > 16u || cv_w <= n)
+        return;
+    for (j = 0; j < cv_h; j++) {
+        uint16_t *row = cv_px + j * cv_w;
+        if (y + j < gm_tear_y0 || y + j >= gm_tear_y1)
+            continue;
+        if (gm_tear_dx > 0) {                    /* right: the end comes round to the start */
+            for (i = 0; i < n; i++) tmp[i] = row[cv_w - n + i];
+            for (i = cv_w; i-- > n;) row[i] = row[i - n];
+            for (i = 0; i < n; i++) row[i] = tmp[i];
+        } else {
+            for (i = 0; i < n; i++) tmp[i] = row[i];
+            for (i = 0; i + n < cv_w; i++) row[i] = row[i + n];
+            for (i = 0; i < n; i++) row[cv_w - n + i] = tmp[i];
+        }
+    }
+}
+#endif
 static void cv_blit(uint32_t x, uint32_t y)
 {
     GFX_HOOK_BLIT(x, y, 0u);
     if (ux.grime)
         cv_grime(x, y, 0u);
+#if FELUCCA_MONOFM
+    if (gm_tear && x == 0u && y < gm_tear_y1 && y + cv_h > gm_tear_y0)
+        cv_tear(y);
+#endif
     lcd_blit(x, y, cv_w, cv_h, cv_px);
 }
 

@@ -369,6 +369,10 @@ static int motion_move(track_t *t, uint32_t i, uint32_t step, uint32_t id, int16
 /* an id whose meaning is the engine's own: EDIT's E1..E8, DIGITAL's operators, DRUM's lane levels */
 static int motion_engine_id(uint32_t id)
 {
+#if FELUCCA_MONOFM                                      /* (MONOFM: the lanes are F.ENV's and DIST's, the track's) */
+    if (MF_FENV_ID(id))
+        return 0;
+#endif
     return (id >= P_E0 && id <= P_E7) || (id >= P_FM1_ATK && id <= P_FM4_LEVEL) || (id >= P_LN0 && id <= P_LN7);
 }
 /* a sound load put engine `to` where `from` was: when they differ, track t's records on the engine's own ids go (their

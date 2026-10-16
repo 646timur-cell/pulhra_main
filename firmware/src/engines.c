@@ -220,6 +220,39 @@ static const uint8_t MF_PAGE[4] = {0, MF_PAGE_2, MF_PAGE_3, NENG_SHOWN};
 _Static_assert(sizeof ENGINE_ORDER == NENG_SHOWN && MF_PAGE_2 <= 15u && MF_PAGE_3 - MF_PAGE_2 <= 15u &&
                NENG_SHOWN - MF_PAGE_3 <= 15u, "MONOFM: three pages of at most 15 machines (the white keys)");
 static const char *const MF_PAGE_NAME[3] = {"MONO", "SOMA", "SLICE"};
+/* MONOFM v4: the SELECT knob on EDIT, each machine's most used value (its E index; the machine's own desc names it):
+ * SAW's unison level, PULSE's width, ENS's wave, SID's width, WAVE's morph, DDRAW's mix, the FM machines' first depth,
+ * VO-6's vowel morph, SINE's fold, NOISE's colour, the physical models' brightness or breath, the slice machines'
+ * slice. 0xFF: none */
+static uint8_t mf_sel_e(uint32_t e)
+{
+    switch (e % NENGINES) {
+    case ENGI_MSAW: return 0;
+    case ENGI_MPULSE: return 4;
+    case ENGI_MENS: return 3;
+    case ENGI_MSID: return 1;
+    case ENGI_MWAVE: return 1;
+    case ENGI_MDDRAW: return 2;
+    case ENGI_MBBOX: return 0;
+    case ENGI_MFMST: return 1;
+    case ENGI_MFMPAR: return 1;
+    case ENGI_MFMDYN: return 0;
+    case ENGI_MVO: return 5;
+    case ENGI_MSINE: return 0;
+    case ENGI_MNOISE: return 1;
+    case ENGI_STRING: return 4;
+    case ENGI_MODAL: return 2;
+    case ENGI_BLOW: return 1;
+    case ENGI_RESO: return 1;
+    case ENGI_JUNK: return 1;
+    case ENGI_LYRA: return 2;
+    case ENGI_CHAOS: return 1;
+    case ENGI_DRIFT: return 2;
+    case ENGI_PLANT: return 1;
+    case ENGI_GLITCH: case ENGI_ERROR: case ENGI_RITUAL: case ENGI_MECH: case ENGI_BIO: return 0;
+    default: return 0xFFu;
+    }
+}
 #elif FELUCCA_STRANGE
 static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: the EDIT layer's two pages (ui_layer.c SE_P1), the
                                                          * machines on the keys from F3, four a row */
