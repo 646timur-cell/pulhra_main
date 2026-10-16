@@ -20,7 +20,7 @@
 #define MFP_STEPS 32u
 #define MFP_NONE 0xFFu
 #define MFP_MAGIC 0x3150464Du                             /* "MFP1" */
-#define MFP_VERSION 1u
+#define MFP_VERSION 2u                                    /* (2: a trig's LEN, the tracks' TRN / SHIFT; 1 read) */
 #define MFP_A 0xB4000u
 #define MFP_B 0xBC000u
 #define MFP_W 0xC4000u
@@ -30,9 +30,11 @@ typedef struct {
     uint8_t note[4];
     uint8_t nt;                                           /* n (bits 0..2) | time << 3 */
     uint8_t flags, vel, prob;
+    uint8_t len;                                          /* the trig's LEN (core.h MF_LEN8; 0 the track's GATE) */
 } mfp_step_t;
 typedef struct {
-    uint8_t eng, preset, rsv[2];
+    uint8_t eng, preset;
+    int8_t trn, shift;                                    /* SEQ's TRN / SHIFT on the track so far (semitones, steps) */
     int8_t p[P_COUNT];                                    /* every parameter (-64..127, as user presets keep them) */
     uint8_t pad[(4u - (P_COUNT & 3u)) & 3u];
     mfp_step_t step[MFP_STEPS];
@@ -47,14 +49,25 @@ typedef struct {
     uint32_t magic, version, seq, size, npat, mode, crc, rsv[8], hcrc;
 } mfp_hdr_t;
 _Static_assert(sizeof(mfp_hdr_t) == 64u, "MONOFM project header");
-_Static_assert(sizeof(mfp_pat_t) <= 1920u, "8 patterns fit .noinit (app.ld NOINIT, proj_slot gone in MONOFM)");
+#define MFP_LO 7u                                         /* patterns in .noinit, the rest in .bss */
+_Static_assert(MFP_LO * sizeof(mfp_pat_t) <= 0x3D50u, "7 patterns fit .noinit (app.ld NOINIT, proj_slot gone in MONOFM)");
+/* version 1 (8-byte steps, no LEN): read and brought over */
+typedef struct { uint8_t note[4], nt, flags, vel, prob; } mfp_step1_t;
+typedef struct {
+    uint8_t eng, preset, rsv[2];
+    int8_t p[P_COUNT];
+    uint8_t pad[(4u - (P_COUNT & 3u)) & 3u];
+    mfp_step1_t step[MFP_STEPS];
+} mfp_trk1_t;
+typedef struct { uint8_t mlen, rsv[3]; mfp_trk1_t t[NTRK]; motion_store_t motion; } mfp_pat1_t;
 _Static_assert(64u + MFP_N * sizeof(mfp_pat_t) <= MFP_SPAN, "the project fits its 8 sectors");
 _Static_assert(MFP_W + MFP_SPAN <= 0xDC000u, "the project's copies stay below the user presets");
 
 /* half of the bank in .noinit (proj_slot's room: MONOFM has no project slots), half in .bss */
-static mfp_pat_t mfp_lo[8] __attribute__((section(".noinit")));
-static mfp_pat_t mfp_hi[MFP_N - 8u];
-static mfp_pat_t *mfp_at(uint32_t i) { i %= MFP_N; return i < 8u ? &mfp_lo[i] : &mfp_hi[i - 8u]; }
+static mfp_pat_t mfp_lo[MFP_LO] __attribute__((section(".noinit")));
+static mfp_pat_t mfp_hi[MFP_N - MFP_LO];
+static mfp_pat_t *mfp_at(uint32_t i) { i %= MFP_N; return i < MFP_LO ? &mfp_lo[i] : &mfp_hi[i - MFP_LO]; }
+static int8_t mfp_trn[NTRK], mfp_shift[NTRK];             /* the pattern playing's tracks' TRN / SHIFT so far */
 static mfp_pat_t mfp_clip;                                /* COPY / PASTE (a track: its t[0]) */
 static uint8_t mfp_clip_kind;                             /* 0 empty, 1 a track, 2 a pattern */
 
@@ -91,6 +104,7 @@ static void mfp_pack_step(mfp_step_t *d, const step_t *s)
     d->flags = s->flags;
     d->vel = s->vel;
     d->prob = s->probability;
+    d->len = s->hit ? 0u : s->acc;
 }
 static void mfp_unpack_step(step_t *s, const mfp_step_t *d)
 {
@@ -101,7 +115,8 @@ static void mfp_unpack_step(step_t *s, const mfp_step_t *d)
     if (s->time > ST_REST) s->time = ST_REST;
     s->flags = d->flags;
     s->vel = (uint8_t)(d->vel & 127u);
-    s->hit = s->acc = 0;
+    s->hit = 0;
+    s->acc = (uint8_t)(d->len < MF_NLEN ? d->len : 0u);
     s->probability = d->prob;
 }
 static void mfp_pack_track(mfp_trk_t *d, const track_t *t)
@@ -119,8 +134,11 @@ static void mfp_pack(uint32_t i)
 {
     mfp_pat_t *p = mfp_at(i);
     uint32_t k, e, n = 0;
-    for (k = 0; k < NTRK; k++)
+    for (k = 0; k < NTRK; k++) {
         mfp_pack_track(&p->t[k], &trk[k]);
+        p->t[k].trn = mfp_trn[k];
+        p->t[k].shift = mfp_shift[k];
+    }
     p->motion.on = motion.on;
     for (e = 0; e < motion.count && e < MOTION_MAX; e++)
         if ((motion.event[e].place & 63u) < MFP_STEPS)       /* (steps past 32: none in MONOFM) */
@@ -156,6 +174,8 @@ static void mfp_unpack(uint32_t i, uint32_t restart, uint32_t carry)
         track_t *t = &trk[k];
         seq_release(t);
         mfp_unpack_track(t, &p->t[k], k);
+        mfp_trn[k] = p->t[k].trn;
+        mfp_shift[k] = p->t[k].shift;
         if (restart || t->seq_idx >= (uint32_t)t->p[P_SLEN]) {
             t->seq_idx = (uint16_t)(t->p[P_SLEN] - 1);
             t->seq_pos = 0x7FFFFFFFu;
@@ -295,10 +315,12 @@ static uint32_t mfp_bank_crc(void)
 static int mfp_head(uint32_t base, mfp_hdr_t *h)
 {
     uint8_t buf[256];
-    uint32_t off, c = 0xFFFFFFFFu, n = MFP_N * (uint32_t)sizeof(mfp_pat_t);
-    if (mfp_read(base, h, sizeof *h) || h->magic != MFP_MAGIC || h->version != MFP_VERSION ||
-        h->size != sizeof(mfp_pat_t) || h->npat != MFP_N || ~mfp_crc_add(0xFFFFFFFFu, h, sizeof *h - 4u) != h->hcrc)
+    uint32_t off, c = 0xFFFFFFFFu, n;
+    if (mfp_read(base, h, sizeof *h) || h->magic != MFP_MAGIC ||
+        !((h->version == MFP_VERSION && h->size == sizeof(mfp_pat_t)) || (h->version == 1u && h->size == sizeof(mfp_pat1_t))) ||
+        h->npat != MFP_N || ~mfp_crc_add(0xFFFFFFFFu, h, sizeof *h - 4u) != h->hcrc)
         return 0;
+    n = MFP_N * h->size;
     for (off = 0; off < n; off += sizeof buf) {
         uint32_t k = n - off < sizeof buf ? n - off : (uint32_t)sizeof buf;
         if (mfp_read(base + 64u + off, buf, k))
@@ -353,6 +375,29 @@ static int mfp_write(uint32_t base, uint32_t seq)
 }
 /* the copy at base -> the bank (each value back in its range); 0 none valid */
 static void mfp_fit(void);
+/* pattern i of the copy at base (its header h) -> d: version 1 brought over (its trigs' LEN the track's GATE) */
+static int mfp_read_pat(uint32_t base, const mfp_hdr_t *h, uint32_t i, mfp_pat_t *d)
+{
+    uint32_t k, j;
+    if (h->version == MFP_VERSION)
+        return mfp_read(base + 64u + i * h->size, d, sizeof *d);
+    {
+        static mfp_pat1_t o;                              /* (main loop only) */
+        if (mfp_read(base + 64u + i * h->size, &o, sizeof o))
+            return 1;
+        memset(d, 0, sizeof *d);
+        d->mlen = o.mlen;
+        d->motion = o.motion;
+        for (k = 0; k < NTRK; k++) {
+            d->t[k].eng = o.t[k].eng;
+            d->t[k].preset = o.t[k].preset;
+            memcpy(d->t[k].p, o.t[k].p, sizeof d->t[k].p);
+            for (j = 0; j < MFP_STEPS; j++)
+                memcpy(&d->t[k].step[j], &o.t[k].step[j], sizeof o.t[k].step[j]);
+        }
+    }
+    return 0;
+}
 static int mfp_load(uint32_t base)
 {
     mfp_hdr_t h;
@@ -360,7 +405,7 @@ static int mfp_load(uint32_t base)
     if (!mfp_head(base, &h))
         return 0;
     for (i = 0; i < MFP_N; i++)
-        if (mfp_read(base + 64u + i * (uint32_t)sizeof(mfp_pat_t), mfp_at(i), sizeof(mfp_pat_t)))
+        if (mfp_read_pat(base, &h, i, mfp_at(i)))
             return 0;
     mfp.mode = (uint8_t)(h.mode <= MFP_JUMP ? h.mode : MFP_SEQ);
     mfp_fit();
@@ -498,7 +543,7 @@ static void mf_pat_reload(uint32_t one)
         mfp_hdr_t h;
         mfp_pat_t *p = &mfp_clip;                         /* (read into the clipboard's room first, then in) */
         uint8_t kind = mfp_clip_kind;
-        if (!mfp_head(base, &h) || mfp_read(base + 64u + (one % MFP_N) * (uint32_t)sizeof(mfp_pat_t), p, sizeof *p)) {
+        if (!mfp_head(base, &h) || mfp_read_pat(base, &h, one % MFP_N, p)) {
             ui_message("LOAD ERROR");
             return;
         }
@@ -529,6 +574,8 @@ static void mf_pat_boot(void)
     mfp.next = MFP_NONE;
     if (!base || !mfp_load(base)) {
         memset(&mfp_clip, 0, sizeof mfp_clip);
+        memset(mfp_trn, 0, sizeof mfp_trn);
+        memset(mfp_shift, 0, sizeof mfp_shift);
         mfp_pack(0);
         for (k = 0; k < NTRK; k++)
             for (i = 0; i < MFP_STEPS; i++) {
@@ -656,6 +703,18 @@ static int mfp_has_trigs(uint32_t i)
     return 0;
 }
 
+/* "TRN +3": the track's total so far */
+static void mf_tool_say(const char *what, int32_t v)
+{
+    char b[12];
+    b[0] = v > 0 ? '+' : v < 0 ? '-' : ' ';
+    fmt_int(b + (v != 0), v < 0 ? -v : v);
+    if (!v)
+        str_cpy(b, "0", sizeof b);
+    ui_say(what, b);
+}
+static int32_t mf_pat_trn(uint32_t k) { return mfp_trn[k % NTRK]; }
+static int32_t mf_pat_shift(uint32_t k) { return mfp_shift[k % NTRK]; }
 /* SEQ + white keys: CLEAR the track, SHIFT < >, TRN - +, COPY / PASTE the track, COPY / PASTE the pattern */
 static void mf_pat_action(uint32_t a)
 {
@@ -665,12 +724,16 @@ static void mf_pat_action(uint32_t a)
     case MA_CLEAR:                                        /* (SEQ TOOLS' own: one undo, SAVE held) */
         tl_do(t, TL_CLEAR, 0);
         motion_clear(t);
+        mfp_trn[k] = mfp_shift[k] = 0;
         ui_message("TRACK CLEARED");
         break;
     case MA_LEFT:
     case MA_RIGHT:                                        /* (the locks move with their steps) */
         tl_do(t, a == MA_LEFT ? TL_LEFT : TL_RIGHT, 0);
-        ui_message(a == MA_LEFT ? "SHIFTED <" : "SHIFTED >");
+        mfp_shift[k] = (int8_t)(((int32_t)mfp_shift[k] + (a == MA_LEFT ? -1 : 1) + (int32_t)len * 64) % (int32_t)len);
+        if (mfp_shift[k] > (int8_t)(len / 2u))
+            mfp_shift[k] = (int8_t)(mfp_shift[k] - (int32_t)len);   /* (shown -LEN/2 .. +LEN/2: where step 1 went) */
+        mf_tool_say("SHIFT ", mfp_shift[k]);
         break;
     case MA_TDN:
     case MA_TUP:
@@ -679,7 +742,8 @@ static void mf_pat_action(uint32_t a)
             for (uint32_t j = 0; j < t->step[i].n && j < 4u; j++)
                 t->step[i].note[j] = (uint8_t)clamp(t->step[i].note[j] + (a == MA_TUP ? 1 : -1), 1, 127);
         motion_undo_done(t);
-        ui_message(a == MA_TUP ? "TRANSPOSE +1" : "TRANSPOSE -1");
+        mfp_trn[k] = (int8_t)clamp(mfp_trn[k] + (a == MA_TUP ? 1 : -1), -99, 99);
+        mf_tool_say("TRN ", mfp_trn[k]);
         break;
     case MA_CTRK:
         mfp_pack_track(&mfp_clip.t[0], t);

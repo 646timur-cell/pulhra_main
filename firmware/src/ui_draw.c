@@ -1211,20 +1211,17 @@ static void draw_columns(void)
         return;
     }
 #if FELUCCA_MONOFM
-    if (cur_page()->scope == SC_STEP && !detail_on() && !(ui_prefs2 & (PREF_ROLL >> 16))) {   /* KEYS: the cursor step's
-                                                                                          * NOTE VEL LEN CHANCE */
+    if (cur_page()->scope == SC_STEP && !detail_on() && !(ui_prefs2 & (PREF_ROLL >> 16))) {   /* KEYS: the trig picked:
+                                                                                          * FLAG VEL LEN COND (NOTE: PRESETS) */
+        static const char *const FLAG_N[4] = {"-", "ACC", "SLD", "A+S"};
         const step_t *st = &seq_steps(TSEL)[ui.cursor];
         uint32_t on = (uint32_t)step_on(st) && st->n;
-        char sn[8], u[8];
-        fmt_int(sn, (int32_t)ui.cursor + 1);
-        str_cpy(u, "STEP", 8);
-        if (on) note_name(val, st->note[0]); else str_cpy(val, "--", 12);
-        if (on && st->n > 1u) { str_cpy(u, "+", 8); fmt_int(u + 1, (int32_t)st->n - 1); }
-        draw_column(0, "NOTE", val, on ? u : sn, on ? VAL(0u) : T_DIM, -1, ICON_AUTO);
+        char sn[8];
+        draw_column(0, "FLAG", on ? FLAG_N[(st->flags & SF_ACCENT ? 1u : 0u) | (st->flags & SF_SLIDE ? 2u : 0u)] : "--", "",
+                    on ? VAL(0u) : T_DIM, -1, ICON_AUTO);
         fmt_int(sn, st->vel ? st->vel : 96);
         draw_column(1, "VEL", on ? sn : "--", "", on ? VAL(1u) : T_DIM, -1, ICON_AUTO);
-        fmt_int(sn, (int32_t)note_len(TSEL, ui.cursor));
-        draw_column(2, "LEN", on ? sn : "--", "", on ? VAL(2u) : T_DIM, -1, ICON_AUTO);
+        draw_column(2, "LEN", on ? MF_LEN_N[st->hit ? 0u : st->acc % MF_NLEN] : "--", "", on ? VAL(2u) : T_DIM, -1, ICON_AUTO);
         mf_cond_name(st->probability, sn);
         draw_column(3, "COND", sn, "", on ? VAL(3u) : T_DIM, -1, ICON_AUTO);
         return;

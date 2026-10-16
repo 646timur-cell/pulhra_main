@@ -320,6 +320,13 @@ static inline int mf_euc_hit(const int16_t *p, uint32_t i)
     return k && (((i + r) % n) * k) % n < k;
 }
 #define MF_EUC_ON(t) ((t)->p[P_EUC] != 0)   /* the track's EUCLID on */
+/* a trig's LEN (Elektron's): step_t.acc of a note step (no lane hits in MONOFM), 0 the track's GATE (as Felucca), then
+ * 1/8 .. 16 steps, INF (held to the next trig); MF_LEN8: in 1/8 steps */
+#define MF_NLEN 14u
+#define MF_LEN_INF 13u
+static const uint8_t MF_LEN8[MF_NLEN] = {0, 1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 128, 0};
+static const char *const MF_LEN_N[MF_NLEN] = {"TRK", "1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3", "4", "6", "8",
+                                              "16", "INF"};
 /* the track's step length as a DIV (fx.c div_samples): MONOFM's SCALE (P_SDIV) 2X 3/2X 1X 3/4X 1/2X 1/4X 1/8X */
 static const uint8_t MF_SCALE_DIV[7] = {3, 5, 2, 4, 1, 0, 6};
 #define seq_div(t) ((uint32_t)MF_SCALE_DIV[clamp((t)->p[P_SDIV], 0, 6)])

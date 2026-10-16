@@ -1047,6 +1047,120 @@ static int test_mfpat(void)
         song.sel = 0;
         bad += check("MONOFM ACTIONS: TRN +, SHIFT >, COPY / PASTE a track, COPY / PASTE a pattern (A01 -> A06)", ok);
     }
+    /* a trig's LEN: 4 steps sounds over the empty steps after it; 1/2 ends inside its step; TRK as the track's GATE */
+    {
+        int32_t buf[2 * CTL];
+        uint32_t on_at[16], j;
+        track_t *t = &trk[0];
+        tp_fresh();
+        set_engine_of(t, ENGI_MSINE);
+        tp_blocks(16);
+        for (j = 0; j < NSTEP; j++) { t->step[j].time = ST_REST; t->step[j].n = 0; t->step[j].acc = 0; }
+        t->p[P_SLEN] = 16;
+        t->p[P_REL] = 0;
+        t->step[0].time = ST_NOTE; t->step[0].n = 1; t->step[0].note[0] = 60; t->step[0].acc = 9;   /* LEN 4 */
+        t->step[8].time = ST_NOTE; t->step[8].n = 1; t->step[8].note[0] = 60; t->step[8].acc = 3;   /* LEN 1/2 */
+        memset(on_at, 0, sizeof on_at);
+        seq_start();
+        for (k = 0; k < 4000u; k++) {
+            uint32_t idx = t->seq_idx % 16u, half = t->seq_pos < div_samples(seq_div(t)) / 2u;
+            mix_block(buf, CTL);
+            for (i = 0; i < NVOICE; i++)
+                if (t->v[i].active && t->v[i].gate)
+                    on_at[idx] |= half ? 1u : 2u;
+            if (k > 10u && t->seq_idx == 15u)
+                break;
+        }
+        seq_stop();
+        stop_transport();
+        ok = on_at[0] && on_at[1] && on_at[2] && on_at[3] && !(on_at[4] & 2u) && !on_at[5] && (on_at[8] & 1u) && !(on_at[8] & 2u) && !on_at[9];
+        bad += check("MONOFM LEN: a trig of LEN 4 sounds over the empty steps after it, LEN 1/2 half its step", ok);
+    }
+    /* REC never starts the transport */
+    tp_fresh();
+    frames(600);
+    song.rec = 0;
+    press(B_REC);
+    frames(100);
+    bad += check("MONOFM REC: a tap arms the track, the transport stays stopped", (song.rec & 1u) && !song.playing && transport_req != 1u);
+    press(B_REC);
+    frames(100);
+    /* TRN / SHIFT so far, kept with the pattern */
+    {
+        track_t *t = &trk[0];
+        song.sel = 0;
+        sc_pattern(t, 60, 16);
+        mf_pat_action(MA_TUP);
+        mf_pat_action(MA_TUP);
+        mf_pat_action(MA_TUP);
+        mf_pat_action(MA_TDN);
+        mf_pat_action(MA_RIGHT);
+        mf_pat_action(MA_RIGHT);
+        ok = mf_pat_trn(0) == 2 && mf_pat_shift(0) == 2 && msg_is("SHIFT +2");
+        mf_pat_ask(3);
+        ok &= mf_pat_trn(0) == 0;
+        mf_pat_ask(0);
+        ok &= mf_pat_trn(0) == 2 && mf_pat_shift(0) == 2;
+        mf_pat_action(MA_CLEAR);
+        ok &= mf_pat_trn(0) == 0 && mf_pat_shift(0) == 0;
+        bad += check("MONOFM ACTIONS: TRN / SHIFT counted (+2, +2), said, kept with the pattern, CLEAR zeroes them", ok);
+    }
+    /* fewer pages: a kit machine's EDIT is EDIT 1, EDIT 2, KIT (SPREAD there), VOICE; others EDIT 1 2, VOICE, VOICE 2 (SPREAD);
+     * no AUTOMATION; SEQ: STEP, EUCLID, DETAIL */
+    {
+        uint32_t n = 0, kit = 0, sprd = 0, aut = 0, seq[4], ns = 0;
+        set_engine_of(&trk[0], ENGI_GLITCH);
+        frames(50);
+        for (i = 0; i < NPAGES; i++) {
+            if (PAGES[i].fam == FAM_EDIT && page_visible(i)) {
+                n++;
+                kit |= str_eq(PAGES[i].title, "KIT");
+                for (k = 0; k < 4u; k++)
+                    sprd |= PAGES[i].id[k] == P_SPRD && str_eq(PAGES[i].title, "KIT");
+            }
+            aut |= PAGES[i].graph == GR_EVENTS && page_visible(i);
+            if (PAGES[i].fam == FAM_SEQ && page_visible(i) && ns < 4u)
+                seq[ns++] = i;
+        }
+        ok = n == 4u && kit && sprd && !aut && ns == 3u && PAGES[seq[0]].graph == GR_ROLL && PAGES[seq[1]].graph == GR_EUCLID;
+        set_engine_of(&trk[0], ENGI_MSAW);
+        frames(50);
+        for (n = 0, sprd = 0, i = 0; i < NPAGES; i++)
+            if (PAGES[i].fam == FAM_EDIT && page_visible(i)) {
+                n++;
+                for (k = 0; k < 4u; k++)
+                    sprd |= PAGES[i].id[k] == P_SPRD;
+            }
+        ok &= n == 4u && sprd;
+        bad += check("MONOFM PAGES: EDIT 4 pages (GLITCH: SPREAD on KIT), no AUTOMATION, SEQ: STEP EUCLID DETAIL", ok);
+    }
+    /* a project saved by the version before (8-byte steps) loads */
+    {
+        static mfp_pat1_t o;
+        mfp_hdr_t h;
+        uint32_t c = 0xFFFFFFFFu, j;
+        tp_fresh();
+        memset(&o, 0, sizeof o);
+        o.t[0].eng = ENGI_MSINE;
+        for (j = 0; j < MFP_STEPS; j++)
+            o.t[0].step[j].nt = (uint8_t)(ST_REST << 3);
+        o.t[0].step[0].nt = 1u;                         /* (n 1, NOTE) */
+        o.t[0].step[0].note[0] = 66;
+        o.t[0].p[P_SLEN] = 16;
+        memset(mfp_nor, 0xFF, sizeof mfp_nor);
+        for (j = 0; j < MFP_N; j++) {
+            memcpy(mfp_nor_at(MFP_A + 64u + j * sizeof o), &o, sizeof o);
+            c = mfp_crc_add(c, &o, sizeof o);
+        }
+        memset(&h, 0, sizeof h);
+        h.magic = MFP_MAGIC; h.version = 1; h.seq = 5; h.size = sizeof o; h.npat = MFP_N; h.crc = ~c;
+        h.hcrc = ~mfp_crc_add(0xFFFFFFFFu, &h, sizeof h - 4u);
+        memcpy(mfp_nor_at(MFP_A), &h, sizeof h);
+        ui_power_on();
+        mf_pat_boot();
+        bad += check("MONOFM PATTERNS: a project of the version before loads (its trigs, LEN as the track's GATE)",
+                     trk[0].eng_req == ENGI_MSINE && trk[0].step[0].note[0] == 66u && step_on(&trk[0].step[0]) && !trk[0].step[0].acc);
+    }
     /* FILL: GLO held + F5 held */
     frames(600);
     btn_down(B_GLO);
@@ -1116,25 +1230,21 @@ static int test_keys_editor(void)
         uint32_t n0 = t->step[4].note[0];
         key_down(key_at(0, 4));
         frame();
-        turn(EN_K1, 3);
+        turn(EN_PRESET, 1);
+        turn(EN_PRESET, 1);
+        turn(EN_PRESET, 1);
+        turn(EN_K1, 1);
+        turn(EN_K3, 1);
         turn(EN_K3, 1);
         key_up(key_at(0, 4));
         frame();
-        bad += check("MONOFM KEYS: a trig held + KNOB 1: its NOTE (+3), KNOB 3 its LEN; the trig stays, no lock",
-                     t->step[4].note[0] == n0 + 3u && note_len(t, 4) == 2u && step_on(&t->step[4]) && motion_lock_count(t) == 0u);
-        turn(EN_K3, -1);
+        bad += check("MONOFM KEYS: a trig held + PRESETS its NOTE (+3), KNOB 1 ACC, KNOB 3 its LEN (1/4); the trig stays, no lock",
+                     t->step[4].note[0] == n0 + 3u && t->step[4].acc == 2u && (t->step[4].flags & SF_ACCENT) &&
+                     step_on(&t->step[4]) && motion_lock_count(t) == 0u);
         t->step[4].note[0] = (uint8_t)n0;
+        t->step[4].acc = 0;
+        t->step[4].flags = 0;
     }
-    key_down(key_at(0, 4));
-    frame();
-    turn(EN_PRESET, 1);                                 /* (PRESETS: the page the knobs lock) */
-    ok = mf_plk && ui.plk_src;
-    turn(EN_K1, 3);
-    key_up(key_at(0, 4));
-    frame();
-    frame();
-    ok &= motion_lock_count(t) >= 1u && step_on(&t->step[4]) && !mf_plk;
-    bad += check("MONOFM KEYS: a trig held + PRESETS: KNOB 1..4 lock a sound page's parameters (a lock), back after", ok);
     key_down(key_at(0, 4));
     frame();
     press(B_ENV);
@@ -1147,15 +1257,20 @@ static int test_keys_editor(void)
     ui.cursor = 4;
     frames(600);
     k4 = t->step[4].note[0];
-    turn(EN_K1, 2);
+    turn(EN_PRESET, 1);
+    turn(EN_PRESET, 1);
     ok = t->step[4].note[0] == k4 + 2u;
+    turn(EN_K1, 1);
+    turn(EN_K1, 1);
+    ok &= (t->step[4].flags & SF_SLIDE) && !(t->step[4].flags & SF_ACCENT);
     turn(EN_K2, -10);
     ok &= t->step[4].vel && t->step[4].vel < 96u;
-    turn(EN_K3, 1);
-    ok &= note_len(t, 4) == 2u;
+    for (k = 0; k < 5u; k++)
+        turn(EN_K3, 1);
+    ok &= t->step[4].acc == 5u;                         /* (TRK 1/8 1/4 1/2 3/4 1) */
     turn(EN_K4, -5);
     ok &= step_chance(&t->step[4]) < 100u;
-    bad += check("MONOFM KEYS: KNOB 1..4 the cursor step's NOTE (+2) VEL LEN (2) CHANCE", ok);
+    bad += check("MONOFM KEYS: the trig picked: PRESETS NOTE (+2), KNOB 1 FLAG (SLD), 2 VEL, 3 LEN (1), 4 COND", ok);
     /* SEQ + ARP: the keyboard */
     btn_down(B_SEQ);
     frame();

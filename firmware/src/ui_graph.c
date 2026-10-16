@@ -217,6 +217,7 @@ static void graph_mstep(const track_t *t, uint16_t c)
     if (!on) {
         cv_text_in(0, 44, 240, &AF_M, st->time == ST_TIE ? "TIE" : "NO TRIG", T_DIM, T_SURF);
         cv_text_in(0, 76, 240, &AF_S, mf_kbd ? "PLAY A NOTE: IT GOES HERE" : "TAP A KEY: A TRIG", T_DIM, T_SURF);
+        cv_text_in(0, 96, 240, &AF_S, "PRESETS: NOTE   K1: ACC / SLD", T_DIM, T_SURF);
         return;
     }
     b[0] = 0;
@@ -230,7 +231,7 @@ static void graph_mstep(const track_t *t, uint16_t c)
     mf_cond_name(st->probability, n);
     str_cpy(b, n, sizeof b);
     str_cpy(b + str_len(b), "   LEN ", sizeof b - str_len(b));
-    fmt_int(b + str_len(b), (int32_t)note_len(t, ui.cursor % NSTEP));
+    str_cpy(b + str_len(b), MF_LEN_N[st->hit ? 0u : st->acc % MF_NLEN], sizeof b - str_len(b));
     if (st->flags & SF_ACCENT)
         str_cpy(b + str_len(b), "   ACC", sizeof b - str_len(b));
     if (st->flags & SF_SLIDE)

@@ -631,8 +631,9 @@ static const page_t PAGES[] = {
     {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
     {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
 #if FELUCCA_MONOFM
-    {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, 0xFF, 0xFF, 0xFF}},   /* the slice machines' samples (a user slot of
-                                                                            * one zone: 16 cuts; CUTS' id is RES's) */
+    {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, P_ALLOC, P_DETUNE, P_SPRD}},   /* the slice machines' samples (a user
+                                                                            * slot of one zone: 16 cuts; CUTS' id is RES's);
+                                                                            * then VOICE 2's (no VOICE 2 / 3 there) */
 #elif FELUCCA_DARK
     {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, P_FM1_LEVEL, 0xFF, 0xFF}},   /* GLITCH only: its samples */
 #endif
@@ -649,8 +650,12 @@ static const page_t PAGES[] = {
     {"OP4 ENV", FAM_EDIT, SC_TRACK, GR_ADSR, {P_FM4_ATK, P_FM4_DEC, P_FM4_SUS, P_FM4_REL}},
     {"OP LEVEL", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM1_LEVEL, P_FM2_LEVEL, P_FM3_LEVEL, P_FM4_LEVEL}},
     {"VOICE", FAM_EDIT, SC_TRACK, GR_NONE, {P_VOICE, P_GLIDE, P_GLMODE, P_PRIO}},
+#if FELUCCA_MONOFM   /* (fewer pages: PAN and MUTE are GLO's, SPREAD here; the kit machines have these on KIT) */
+    {"VOICE 2", FAM_EDIT, SC_TRACK, GR_NONE, {P_ALLOC, P_DETUNE, P_SPRD, 0xFF}},
+#else
     {"VOICE 2", FAM_EDIT, SC_TRACK, GR_NONE, {P_ALLOC, P_DETUNE, P_PAN, P_MUTE}},
     {"VOICE 3", FAM_EDIT, SC_TRACK, GR_NONE, {P_SPRD, FELUCCA_MODULE ? P_AHOLD : 0xFF, 0xFF, 0xFF}},   /* (module: LATCH) */   /* #148: SPREAD */
+#endif
     /* 1.2 (Discussion #153): a family's pages go round in this order, a tap of its button each (ui.c open_family) */
 #if FELUCCA_MONOFM   /* GLO (Elektron's AMP): the amplitude envelope (ENV's, the same one) and the track's mix, then SONG: the
                      * chain of patterns (slots A..D a section) */
@@ -690,13 +695,13 @@ static const page_t PAGES[] = {
     {"EUCLID 3", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_APROB, P_ASWING, P_AORDER, P_AOCT}},
 #endif
     {"STEP", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},
+#if FELUCCA_MONOFM   /* SEQ tapped twice: EUCLID on / off (ui_layer.c); its page (the one after STEP): ON, LEN, HITS, ROT */
+    {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_EUC, P_SLEN, P_EHITS, P_EROT}},
+#endif
     {"DETAIL", FAM_SEQ, SC_STEP, GR_ROLL, {0, 1, 2, 3}},   /* 1.5.1 (#199): the cursor step's CHANCE RATCH NUDGE VEL
                                                              * (ui.c detail_on, ui_input.c sd_turn) */
     {"AUTOMATION", FAM_SEQ, SC_TRACK, GR_EVENTS, {0xFF, 0xFF, 0xFF, 0xFF}},  /* the locks, events, CHANCE and RATCH as a
                                                                              * list, PLAY and CLEAR (ui_events.c) */
-#if FELUCCA_MONOFM   /* SEQ tapped twice: EUCLID on / off (ui_layer.c); its page: ON, LEN, HITS, ROT, the pattern drawn */
-    {"EUCLID", FAM_SEQ, SC_TRACK, GR_EUCLID, {P_EUC, P_SLEN, P_EHITS, P_EROT}},
-#endif
     /* HOME's pages (1.2): HOME tapped on HOME the MIXER (up to 1.1.5 GLO's; LEVEL PAN REV MUTE), again CLOCK (up to 1.1.5
      * GLO > GLOBAL; its TUNE is MENU > AUDIO's now), again HOME (ui.c home_tap) */
     {"MIXER", FAM_TRK, SC_TRK, GR_TRK, {0, 1, 2, 3}},

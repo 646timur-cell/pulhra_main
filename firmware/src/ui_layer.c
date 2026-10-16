@@ -1529,27 +1529,37 @@ static void layer_seq(void)
                 p[P_SLEN] == EU_PAT[i][0] && p[P_SSWING] == EU_PAT[i][1]);
 }
 #elif FELUCCA_MONOFM
-/* MONOFM's SEQ held: the 16 patterns, 4 a row (playing: selected; picked with ALGORITHM: the accent; asked for, or in
- * the chain: its place in it; empty: dim), then the mode and the chain, and what the white keys do */
+/* MONOFM's SEQ held: the 16 patterns compact, 8 a row (playing: selected; picked with ALGORITHM: the accent; asked
+ * for: waiting; in the chain being built: its place; empty: dim), the mode and the chain, then what the white keys do
+ * with the selected track's TRN and SHIFT so far, and F#5's SAVE */
+static void mf_val(char *b, const char *what, int32_t v)   /* "TRN +3" */
+{
+    str_cpy(b, what, 12);
+    b[str_len(b) + 1u] = 0;
+    b[str_len(b)] = v > 0 ? '+' : v < 0 ? '-' : 0;
+    fmt_int(b + str_len(b), v < 0 ? -v : v);
+}
 static void layer_seq(void)
 {
     static const char *const MODE_N[3] = {"SEQUENTIAL", "DIRECT START", "DIRECT JUMP"};
-    uint32_t i, j;
+    uint32_t i, j, st = chain_busy() ? LS_DIM : LS_OFF;
     char b[24], n[8];
     for (i = 0; i < 16u; i++) {
-        uint32_t st = i == mf_pat_cur() ? LS_SEL : i == msq.pick && msq.picked ? LS_HELD :
-                      i == mf_pat_next() ? LS_WAIT : mfp_has_trigs(i) ? LS_OFF : LS_DIM;
-        char ord[4] = {0, 0, 0, 0};
+        uint32_t s = i == mf_pat_cur() ? LS_SEL : i == msq.pick && msq.picked ? LS_HELD :
+                     i == mf_pat_next() ? LS_WAIT : mfp_has_trigs(i) ? LS_OFF : LS_DIM;
+        int32_t x = 6 + (int32_t)(i % 8u) * 29, y = 4 + (int32_t)(i / 8u) * 17;
+        uint16_t ink, fill = lc_box(x, y, 26, 14, lc_fill(s, &ink));
+        mf_pat_label(i, n);
         for (j = 0; j < msq.n; j++)                       /* (its place in the chain being built: 1..) */
             if (msq.chain[j] == i) {
-                fmt_int(ord, (int32_t)j + 1);
+                n[0] = (char)('0' + (j + 1u) % 10u);
                 break;
             }
-        mf_pat_label(i, n);
-        lcell(LC_X(i % 4u), 4 + 19 * (int32_t)(i / 4u), 16, n, ICON_COUNT, 0, ord[0] ? ord : "", st, 0);
+        GFX_HOOK_ALIGN(x, y, x + 26, y + 14, AL_HV, "pattern cell centred");
+        cv_text_in(x, y + CAP_IN(S, 14), 26, &AF_S, n, ink, fill);
     }
     str_cpy(b, MODE_N[mf_pat_mode() % 3u], sizeof b);
-    cv_text(8, 82, &AF_S, b, T_THEME);
+    cv_text(8, 40, &AF_S, b, T_THEME);
     if (msq.n || mf_pat_nchain()) {                      /* the chain: being built, else the one playing */
         uint32_t c = msq.n ? msq.n : mf_pat_nchain();
         str_cpy(b, "CHAIN ", sizeof b);
@@ -1559,12 +1569,18 @@ static void layer_seq(void)
             if (j + 1u < c)
                 str_cpy(b + str_len(b), ">", sizeof b - str_len(b));
         }
-        cv_text_r(232, 82, &AF_S, b, T_ACCENT, T_SURF);
+        cv_text_r(232, 40, &AF_S, b, T_ACCENT, T_SURF);
     }
-    for (i = 0; i < MA_N; i++) {                          /* the white keys' actions, 5 then 4 */
-        int32_t x = 6 + (int32_t)(i % 5u) * 46, y = 96 + (int32_t)(i / 5u) * 13;
-        cv_text(x, y, &AF_S, MA_NAME[i], chain_busy() ? T_DIM : T_MID);
-    }
+    lcell(LC_X(0), 56, 28, "F3", ICON_CLEAR, 0, "CLEAR", st, 0);
+    mf_val(b, "SHIFT ", mf_pat_shift(song.sel));
+    lcell(LC_X(1), 56, 28, "G A", ICON_X_RIGHT, 0, b, mf_pat_shift(song.sel) ? LS_SEL : st, 0);
+    mf_val(b, "TRN ", mf_pat_trn(song.sel));
+    lcell(LC_X(2), 56, 28, "B C", ICON_PITCH, 0, b, mf_pat_trn(song.sel) ? LS_SEL : st, 0);
+    lcell(LC_X(3), 56, 28, "F#5", ICON_SAVE, 0, "SAVE", mf_pat_unsaved() ? LS_OFF : LS_DIM, 1);
+    lcell(LC_X(0), 88, 28, "D4", ICON_STEPS, 0, "COPY T", st, 0);
+    lcell(LC_X(1), 88, 28, "E4", ICON_STEPS, 0, "PASTE T", st, 0);
+    lcell(LC_X(2), 88, 28, "F4", ICON_STEPS, 0, "COPY P", st, 0);
+    lcell(LC_X(3), 88, 28, "G4", ICON_STEPS, 0, "PASTE P", st, 0);
 }
 #else
 static void layer_seq(void)
@@ -1710,7 +1726,9 @@ static void draw_layer(void)
                (uint32_t)drum_track(TSEL) * 31u + ui.lane * 5u + (uint32_t)chain_busy() * 3u + (uint32_t)TSEL->p[P_E0] * 131u + song.sel * 977u
 #if FELUCCA_MONOFM
                + mf_pat_cur() * 7u + mf_pat_next() * 131u + mf_pat_mode() * 977u + mf_pat_nchain() * 4099u +
-               msq.pick * 31u + msq.picked * 17u + msq.n * 65537u + msq.chain[0] * 13u + msq.chain[1] * 19u
+               msq.pick * 31u + msq.picked * 17u + msq.n * 65537u + msq.chain[0] * 13u + msq.chain[1] * 19u +
+               (uint32_t)(mf_pat_trn(song.sel) + 128) * 8191u + (uint32_t)(mf_pat_shift(song.sel) + 128) * 131071u +
+               (uint32_t)mf_pat_unsaved() * 524287u
 #endif
                ;
     else

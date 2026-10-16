@@ -611,9 +611,11 @@ static int rec_tap(void)                                /* 1: the arming changed
                                                          * stopped, at the cursor (CHORD ENTRY ADD: adding) */
         return 1;
     }
-    if ((song.rec & bit) && !song.playing && !seq_counting())
-        transport_req = 1;
-    if ((song.rec & bit) && grid_on())
+    if ((song.rec & bit) && !song.playing && !seq_counting() && !FELUCCA_MONOFM)
+        transport_req = 1;                            /* (MONOFM: REC only arms, as Elektron's; PLAY starts) */
+    if (FELUCCA_MONOFM && (song.rec & bit) && !song.playing)
+        ui_message("REC ARMED: PLAY");
+    else if ((song.rec & bit) && grid_on())
         ui_message("LANE KEYS RECORD");               /* (the white keys stay the steps) */
     else if ((song.rec & bit) && !ui.home && cur_page()->graph == GR_ROLL)
         ui_message("KEYS RECORD LIVE");               /* (seq_entry pauses while armed and playing) */
@@ -818,37 +820,51 @@ static void lock_turn(uint32_t k, int32_t s, uint64_t held)
 }
 
 #if FELUCCA_MONOFM
-/* KEYS (a melodic track, MONOFM): trigs held, KNOB 1..4 their NOTE VEL LEN CHANCE (mf_plk 0) */
+/* KEYS (a melodic track, MONOFM): the trigs held (else the trig picked) edited: field 0 FLAG (- ACC SLD A+S), 1 VEL,
+ * 2 LEN (core.h MF_LEN_N), 3 COND, 4 NOTE (PRESETS) */
 static int mf_held_fields(void) { return cur_page()->graph == GR_ROLL && grid_on() && !drum_track(TSEL) && !detail_on() && !mf_plk; }
-static void mf_held_turn(uint32_t k, int32_t s, uint64_t held)
+static void mf_trig_edit(uint32_t f, int32_t s, uint64_t mask)
 {
     track_t *t = TSEL;
-    uint32_t i, len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
+    uint32_t i, n = 0, len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
+    int32_t d = s > 0 ? 1 : -1;
     if (chain_busy()) {
         ui_message("STOP TO EDIT");
         return;
     }
-    ui.plk_rm &= ~held;                                 /* (held for an edit: the trig stays) */
-    step_undo_take(t, 0x6800u | k << 7);
+    for (i = 0; i < len; i++)
+        n += ((mask >> i) & 1u) && step_on(&t->step[i]) && t->step[i].n;
+    if (!n) {
+        ui_message("NO TRIG");
+        return;
+    }
+    ui.plk_rm &= ~mask;                                 /* (held for an edit: the trig stays) */
+    step_undo_take(t, 0x6800u | f << 7);
     for (i = 0; i < len; i++) {
         step_t *st = &t->step[i];
         uint32_t j;
-        if (!((held >> i) & 1u) || !step_on(st) || !st->n)
+        if (!((mask >> i) & 1u) || !step_on(st) || !st->n)
             continue;
-        if (k == 0u) {
+        if (f == 4u) {
             for (j = 0; j < st->n; j++)
                 st->note[j] = (uint8_t)clamp(st->note[j] + s, 1, 127);
             last_note = st->note[0];
-        } else if (k == 1u) {
+        } else if (f == 0u) {
+            uint32_t fl = (st->flags & SF_ACCENT ? 1u : 0u) | (st->flags & SF_SLIDE ? 2u : 0u);
+            fl = (uint32_t)clamp((int32_t)fl + d, 0, 3);
+            st->flags = (uint8_t)((st->flags & ~(SF_ACCENT | SF_SLIDE)) | (fl & 1u ? SF_ACCENT : 0u) | (fl & 2u ? SF_SLIDE : 0u));
+        } else if (f == 1u) {
             ev_sput(st, EVK_VEL, clamp(ev_sval(st, EVK_VEL) + accel(EN_K2, s, 126), 1, 127));
-        } else if (k == 2u) {
-            note_set_len(t, i, (uint32_t)clamp((int32_t)note_len(t, i) + s, 1, NSTEP));
+        } else if (f == 2u) {
+            st->hit = 0;
+            st->acc = (uint8_t)clamp((int32_t)st->acc + d, 0, (int32_t)MF_NLEN - 1);
         } else {
             st->probability = (uint8_t)mf_cond_step(st->probability, s);   /* COND: 1% .. 100%, then the conditions */
         }
     }
     motion_undo_done(t);
 }
+static void mf_held_turn(uint32_t k, int32_t s, uint64_t held) { mf_trig_edit(k, s, held); }
 /* a trig held: PRESETS (dir s) steps the page KNOB 1..4 lock through the sound's pages (NOTE.. first), a page button
  * (ENV LFO ARP) jumps to its family's; 1 = taken */
 static int mf_lock_pick(int32_t s, uint32_t fam)
@@ -1052,23 +1068,9 @@ static void step_edit(uint32_t slot, int32_t steps)
         return;
     }
 #if FELUCCA_MONOFM
-    if (!(ui_prefs2 & (PREF_ROLL >> 16))) {               /* KEYS: KNOB 1 NOTE, 2 VEL, 3 LEN, 4 COND of the cursor step */
-        if (slot == 1u) {                                 /* (VEL: DETAIL's, sd_turn: VEL its KNOB 4) */
-            sd_turn(3u, steps);
-            return;
-        }
-        if (slot == 3u) {                                 /* COND: 1% .. 100%, then Elektron's conditions */
-            step_t *cs = &TSEL->step[ui.cursor % NSTEP];
-            if (!step_on(cs)) {
-                ui_message("NO TRIG");
-                return;
-            }
-            step_undo_take(TSEL, 0x6900u | ui.cursor);
-            cs->probability = (uint8_t)mf_cond_step(cs->probability, steps);
-            motion_undo_done(TSEL);
-            return;
-        }
-        slot = slot == 0u ? 1u : 2u;                      /* (NOTE, LEN: the roll's below) */
+    if (!(ui_prefs2 & (PREF_ROLL >> 16))) {               /* KEYS: KNOB 1 FLAG, 2 VEL, 3 LEN, 4 COND of the trig picked */
+        mf_trig_edit(slot & 3u, steps, (uint64_t)1 << (ui.cursor % NSTEP));   /* (its NOTE: PRESETS) */
+        return;
     }
 #endif
     switch (slot) {
@@ -1960,11 +1962,16 @@ static void ui_input(void)
      * pass runs, so one landing after the layer's read went to the page as well: KNOB 1..4 edited the layer's control
      * and the page under it (HOME's sound, motion recorded), PRESETS could load a sound. They stay for the next pass */
     kq |= lay;
-    if (!lay && (s = panel_enc(EN_PRESET)) != 0)
+    if (!lay && (s = panel_enc(EN_PRESET)) != 0) {
 #if FELUCCA_MONOFM
-        if (!mf_lock_pick(s, FAM_COUNT))                /* (KEYS, a trig held: the page its knobs lock) */
+        if (cur_page()->graph == GR_ROLL && grid_on() && !drum_track(TSEL) && !detail_on() && !ui.home) {
+            uint64_t h = lock_held();                   /* STEP (KEYS): PRESETS the NOTE of the trigs held, else the */
+            mf_trig_edit(4u, s, h ? h : (uint64_t)1 << (ui.cursor % NSTEP));   /* one picked */
+            ui.force = 1;
+        } else if (!(mf_grid_page() && lock_held()))    /* (a trig held on a sound page: no preset load) */
 #endif
         presets_turn(s);
+    }
 #if FELUCCA_MONOFM
     if (mf_plk && !lock_held())
         mf_plk = 0;                                     /* (the trigs let go: their own four again) */

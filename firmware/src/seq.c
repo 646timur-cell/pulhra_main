@@ -1203,9 +1203,14 @@ static __attribute__((noinline)) void seq_step(track_t *t, const step_t *s, uint
         return;
     }
     if (s->time == ST_REST || (!s->n && !s->hit)) {
-        seq_release(t);
+        if (!FELUCCA_MONOFM || t->seq_hold)
+            seq_release(t);                         /* (MONOFM: an empty step cuts nothing, the trig's LEN runs out) */
         return;
     }
+#if FELUCCA_MONOFM
+    if (!s->hit && s->acc && hits == 1u)            /* the trig's own LEN (core.h MF_LEN8): INF holds to the next trig */
+        gate = s->acc >= MF_LEN_INF ? 0x3FFFFFFFu : period * MF_LEN8[s->acc % MF_NLEN] / 8u;
+#endif
     if (hits > 1u) {                                /* RATCH: the gate of a part, no slide or tie out */
         gate = step_samples(t, period, idx) / hits * (uint32_t)t->p[P_SGATE] / 128u;
         if (!(skip & SEQ_REP))

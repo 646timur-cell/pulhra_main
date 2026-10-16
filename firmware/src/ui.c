@@ -413,6 +413,11 @@ static int page_visible(uint32_t i)
         return PAGES[i].graph == GR_XY || PAGES[i].scope == SC_GLOBAL;   /* (STRANGE: ARP is X, Y, XY LINK) */
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SAVE && PAGES[i].graph == GR_BROWSE && PAGES[i].title[0] == 'F')
         return i == ui.page;                          /* (FAV: SAVE three times, never in SAVE's round) */
+    if (FELUCCA_MONOFM && (PAGES[i].graph == GR_EVENTS || (PAGES[i].fam == FAM_EDIT && PAGES[i].id[0] == P_ALLOC)))
+        return PAGES[i].graph != GR_EVENTS && !(TSEL->eng_req % NENGINES == ENGI_GLITCH || TSEL->eng_req % NENGINES == ENGI_RITUAL ||
+               TSEL->eng_req % NENGINES == ENGI_MECH || TSEL->eng_req % NENGINES == ENGI_BIO ||
+               TSEL->eng_req % NENGINES == ENGI_ERROR || TSEL->eng_req % NENGINES == 35u);   /* (MONOFM: no AUTOMATION
+                                                         * page; VOICE 2 not on the kit machines: their KIT has it) */
     if (FELUCCA_DARK && PAGES[i].id[0] == P_FM3_REL)
         return TSEL->eng_req % NENGINES == ENGI_GLITCH || TSEL->eng_req % NENGINES == ENGI_RITUAL ||
                TSEL->eng_req % NENGINES == ENGI_MECH || TSEL->eng_req % NENGINES == ENGI_BIO ||
@@ -607,6 +612,8 @@ static void mf_pat_action(uint32_t a);
 static void mf_pat_save(void);
 static void mf_pat_reload(uint32_t one);
 static void mf_chain_stop(void);
+static int32_t mf_pat_trn(uint32_t k);
+static int32_t mf_pat_shift(uint32_t k);
 /* SEQ + the white keys F3 ..: CLEAR the track, SHIFT < >, TRN - +, COPY / PASTE the track, COPY / PASTE the pattern */
 enum { MA_CLEAR, MA_LEFT, MA_RIGHT, MA_TDN, MA_TUP, MA_CTRK, MA_PTRK, MA_CPAT, MA_PPAT, MA_N };
 static const char *const MA_NAME[MA_N] = {"CLEAR", "SHIFT<", "SHIFT>", "TRN -", "TRN +", "COPY T", "PASTE T", "COPY P",
