@@ -42,8 +42,7 @@ static uint32_t cur_fam(void) { return ui.home ? FAM_HOME : cur_page()->fam; }
 
 static int layer_set_open(void);                       /* (ui_layer.c) */
 #if FELUCCA_MONOFM
-static void mf_scene_turn(int32_t s);                  /* (scene_mf.c) */
-static void mf_scene_pick(uint32_t n, int chain);
+static void msq_turn(int32_t s);                       /* (ui_layer.c: SEQ held, the pattern picked) */
 #endif
 /* the OCT LEDs, bit 0 OCT- lit, bit 1 OCT+ lit, OCT_BREATH OCT+ breathing (can be pressed: dark .. ~60 %,
  * hal/fm1_input.h fm1_led_breath, #119). In the dialogs and on action pages OCT- (back) is lit and OCT+ breathes
@@ -668,6 +667,12 @@ static void grid_edit(uint32_t slot, int32_t steps)
 }
 
 #if FELUCCA_MONOFM
+#define MF_GK_LOCK 7u                                   /* KEYS: A#4 held + a white key: a lock trig (no note) */
+/* a step's COND byte turned s: 1% .. 100%, then the conditions (seq.c mf_cond_place) */
+static uint32_t mf_cond_step(uint32_t v, int32_t s)
+{
+    return mf_cond_of_place((uint32_t)clamp((int32_t)mf_cond_place(v) + s, 0, (int32_t)MF_COND_PLACES - 1));
+}
 #define MF_PICK_MS 350u                                 /* KEYS: a trig's key held this long only picks the step */
 static uint32_t mf_rm_ms;
 #endif
@@ -693,6 +698,10 @@ static void grid_keys(uint32_t pressed)
             if (!drum_track(TSEL)) {                    /* KEYS: a trig on at once; on, it goes when let go (unless held
                                                          * for a lock: lock_keys); ACC held: the accent */
                 uint64_t b = (uint64_t)1 << i;
+                if (black_held(MF_GK_LOCK)) {           /* A#4 held: a lock trig (the step held for its locks, no note) */
+                    cursor_set((int32_t)i);
+                    continue;
+                }
                 if (step_on(&TSEL->step[i]) && !(black_held(GK_ACC) && !(TSEL->step[i].flags & SF_ACCENT))) {
                     mf_rm_ms = fm1_ms;                  /* (held past MF_PICK_MS: only picked, it stays) */
                     ui.plk_rm |= b;
@@ -830,7 +839,7 @@ static void mf_held_turn(uint32_t k, int32_t s, uint64_t held)
         } else if (k == 2u) {
             note_set_len(t, i, (uint32_t)clamp((int32_t)note_len(t, i) + s, 1, NSTEP));
         } else {
-            ev_sput(st, EVK_CHANCE, clamp(ev_sval(st, EVK_CHANCE) + accel(EN_K4, s, 100), 0, 100));
+            st->probability = (uint8_t)mf_cond_step(st->probability, s);   /* COND: 1% .. 100%, then the conditions */
         }
     }
     motion_undo_done(t);
@@ -1038,9 +1047,20 @@ static void step_edit(uint32_t slot, int32_t steps)
         return;
     }
 #if FELUCCA_MONOFM
-    if (!(ui_prefs2 & (PREF_ROLL >> 16))) {               /* KEYS: KNOB 1 NOTE, 2 VEL, 3 LEN, 4 CHANCE of the cursor step */
-        if (slot == 1u || slot == 3u) {                   /* (VEL, CHANCE: DETAIL's, sd_turn: VEL its KNOB 4, CHANCE 1) */
-            sd_turn(slot == 1u ? 3u : 0u, steps);
+    if (!(ui_prefs2 & (PREF_ROLL >> 16))) {               /* KEYS: KNOB 1 NOTE, 2 VEL, 3 LEN, 4 COND of the cursor step */
+        if (slot == 1u) {                                 /* (VEL: DETAIL's, sd_turn: VEL its KNOB 4) */
+            sd_turn(3u, steps);
+            return;
+        }
+        if (slot == 3u) {                                 /* COND: 1% .. 100%, then Elektron's conditions */
+            step_t *cs = &TSEL->step[ui.cursor % NSTEP];
+            if (!step_on(cs)) {
+                ui_message("NO TRIG");
+                return;
+            }
+            step_undo_take(TSEL, 0x6900u | ui.cursor);
+            cs->probability = (uint8_t)mf_cond_step(cs->probability, steps);
+            motion_undo_done(TSEL);
             return;
         }
         slot = slot == 0u ? 1u : 2u;                      /* (NOTE, LEN: the roll's below) */
@@ -1124,6 +1144,13 @@ static void edit_param(uint32_t slot, int32_t steps)
         step_edit(slot, steps);
         return;
     }
+#if FELUCCA_MONOFM
+    if (pg->graph == GR_MPROJ && slot == 0u) {            /* PROJECT: KNOB 1 the master length (0 AUTO .. 128) */
+        mf_pat_mlen_turn(steps);
+        ui.force = 1;
+        return;
+    }
+#endif
     if (pg->scope == SC_TRK) {
         tracks_edit(slot, steps);
         return;
@@ -1197,6 +1224,18 @@ static void act_do(void)
         ev_oct();
         return;
     }
+#if FELUCCA_MONOFM
+    if (cur_page()->graph == GR_MPROJ) {                  /* PROJECT: RELOAD the pattern, RELOAD all, SAVE */
+        ui.act = 0;
+        if (c == 1u)
+            mf_pat_reload(mf_pat_cur());
+        else if (c == 2u)
+            mf_pat_reload(0xFFu);
+        else if (c == 3u)
+            mf_pat_save();
+        return;
+    }
+#endif
     if (cur_page()->graph == GR_TOOLS) {
         if (chain_busy()) { ui_message("STOP TO EDIT"); return; }
         if (!act_ready()) {                               /* nothing there to clear or delete */
@@ -1259,11 +1298,7 @@ static void act_do(void)
         ui.act = 0;
     switch (id) {
     case G_LOAD:
-#if FELUCCA_MONOFM
-        mf_scene_pick(k, 0);                              /* (playing: at the pattern's end, scene_mf.c) */
-#else
         project_load(k);
-#endif
         break;
     case G_SAVE:                                          /* the NAME screen writes it */
         if (transport_busy())
@@ -1667,8 +1702,8 @@ static void ui_input(void)
             mf_kbd_toggle();
             combo = 1;
         }
-        if ((s = panel_enc(EN_ALGO)) != 0 && ui.ly == LAYER_SEQ) {   /* SEQ + ALGORITHM: the next / previous scene */
-            mf_scene_turn(s);
+        if ((s = panel_enc(EN_ALGO)) != 0 && ui.ly == LAYER_SEQ) {   /* SEQ + ALGORITHM: the pattern picked */
+            msq_turn(s);
             combo = 1;
         }
 #else
@@ -1750,7 +1785,7 @@ static void ui_input(void)
             ui.confirm = 0;
             ui.force = 1;
             if (kind == CF_OVR_PROJ) {                  /* overwrite: the NAME screen writes it */
-                name_open(NK_PROJ_SAVE, ui.confirm_trk % (FELUCCA_MONOFM ? 16u : 4u));   /* (MONOFM: scenes A..P) */
+                name_open(NK_PROJ_SAVE, ui.confirm_trk & 3u);
             } else if (kind == CF_OVR_USER) {
                 name_open(NK_USER_SAVE, ui.confirm_trk);
             } else if (kind == CF_ERASE_USER) {

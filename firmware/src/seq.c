@@ -542,7 +542,7 @@ static __attribute__((noinline)) int32_t rec_nudge(int32_t off, uint32_t period)
 static void rec_note(track_t *t, uint32_t note, uint32_t vel)
 {
     uint32_t len = t->p[P_SLEN] > 0 ? (uint32_t)t->p[P_SLEN] : 1u, idx = t->seq_idx % len, k;
-    uint32_t period = div_samples((uint32_t)t->p[P_SDIV]), cur = step_samples(t, period, t->seq_idx);
+    uint32_t period = div_samples(seq_div(t)), cur = step_samples(t, period, t->seq_idx);
     uint32_t next = t->seq_pos > cur / 2u, sounds;
     int32_t off = rec_nudge(t->seq_pos >= cur ? 0 : next ? -(int32_t)(cur - t->seq_pos) : (int32_t)t->seq_pos, period);
     step_t *s;
@@ -661,7 +661,7 @@ static void rec_release(track_t *t, uint32_t note)
     if (k == t->rh_n || (t->rh_n = (uint8_t)k))
         return;                                     /* not one of them, or others still held */
     if (t->rh_ties && t->seq_idx == t->rh_last &&
-        t->seq_pos < step_samples(t, div_samples((uint32_t)t->p[P_SDIV]), t->seq_idx) / 2u)
+        t->seq_pos < step_samples(t, div_samples(seq_div(t)), t->seq_idx) / 2u)
         t->step[t->rh_last] = t->rh_bak;            /* released early in it: not held into this step */
 }
 
@@ -1005,6 +1005,95 @@ static void keyboard_block(void)
     kb_prev = cur;
 }
 
+#if FELUCCA_MONOFM
+/* MONOFM's patterns (mf_pat.c): a pattern came in this block (its tracks from step 1, this many samples into it); the
+ * trig conditions' state: each track's loops since the pattern started (1 in its first), the last condition's result
+ * (PRE; NEI: the track before's), FILL held */
+static uint32_t mf_pat_carry;
+static uint16_t mfp_loop[NTRK];
+static uint8_t mfp_pre[NTRK];
+static volatile uint8_t mfp_fill;
+static void mf_pat_tick(uint32_t n);
+static void mf_pat_start(void);
+/* the trig conditions after the percentages (step_t.probability 102 ..: MF_COND0 + their index) */
+#define MF_COND0 102u
+enum { MC_1ST, MC_N1ST, MC_PRE, MC_NPRE, MC_NEI, MC_NNEI, MC_FILL, MC_NFILL, MC_AB };   /* MC_AB ..: 1:2 2:2 1:3 .. 8:8 */
+#define MF_NCOND (MC_AB + 35u)
+static uint32_t mf_cond_ab(uint32_t c, uint32_t *b)     /* condition c (>= MC_AB): its A, *b its B */
+{
+    uint32_t i = c - MC_AB, bb = 2u;
+    while (i >= bb) {
+        i -= bb;
+        bb++;
+    }
+    *b = bb;
+    return i + 1u;
+}
+static const char *const MC_NAME[MC_AB] = {"1ST", "!1ST", "PRE", "!PRE", "NEI", "!NEI", "FILL", "!FILL"};
+/* a step's probability byte as shown: "100%" .. "1%", "0%", the conditions (b: 8 bytes) */
+static void mf_cond_name(uint32_t v, char *b)
+{
+    uint32_t c, a, bb;
+    if (v < MF_COND0) {
+        fmt_int(b, (int32_t)(!v ? 100u : v <= 100u ? v : 0u));
+        str_cpy(b + str_len(b), "%", 2);
+        return;
+    }
+    c = v - MF_COND0;
+    if (c < MC_AB) {
+        str_cpy(b, MC_NAME[c], 8);
+        return;
+    }
+    a = mf_cond_ab(c < MF_NCOND ? c : MC_AB, &bb);
+    b[0] = (char)('0' + a);
+    b[1] = ':';
+    b[2] = (char)('0' + bb);
+    b[3] = 0;
+}
+/* the knob's walk over them: 1% .. 100% (place 99), then the conditions; the byte of place q, the place of byte v */
+#define MF_COND_PLACES (100u + MF_NCOND)
+static uint32_t mf_cond_of_place(uint32_t q) { return q < 99u ? q + 1u : q == 99u ? 0u : MF_COND0 + (q - 100u); }
+static uint32_t mf_cond_place(uint32_t v) { return !v ? 99u : v <= 100u ? v - 1u : v == 101u ? 0u : 100u + (v - MF_COND0); }
+/* does step s (its probability byte) play on track k now: a percentage rolls, a condition is checked; PRE / NEI read the
+ * last result (and keep it), the others set it */
+static int mf_trig_plays(uint32_t k, uint32_t v)
+{
+    uint32_t c, r, b, loop = mfp_loop[k % NTRK] ? mfp_loop[k % NTRK] - 1u : 0u;
+    if (v < MF_COND0) {
+        uint32_t ch = !v ? 100u : v <= 100u ? v : 0u;
+        if (ch >= 100u)
+            return 1;                                   /* (no condition: PRE stays) */
+        r = rng() % 100u < ch;
+        mfp_pre[k % NTRK] = (uint8_t)r;
+        return (int)r;
+    }
+    c = v - MF_COND0;
+    switch (c) {
+    case MC_PRE: return mfp_pre[k % NTRK];
+    case MC_NPRE: return !mfp_pre[k % NTRK];
+    case MC_NEI: return k ? mfp_pre[k - 1u] : 0;
+    case MC_NNEI: return k ? !mfp_pre[k - 1u] : 1;
+    case MC_1ST: r = loop == 0u; break;
+    case MC_N1ST: r = loop != 0u; break;
+    case MC_FILL: r = mfp_fill != 0u; break;
+    case MC_NFILL: r = !mfp_fill; break;
+    default:
+        if (c >= MF_NCOND)
+            return 1;
+        {
+            uint32_t a = mf_cond_ab(c, &b);
+            r = loop % b == a - 1u;                     /* A:B: the A-th of every B loops */
+        }
+        break;
+    }
+    mfp_pre[k % NTRK] = (uint8_t)r;
+    return (int)r;
+}
+#else
+#define mf_pat_carry 0u
+#define mfp_fill 0u
+#endif
+
 /* -------------------------------------------------------- sequencer --- */
 static void seq_start(void)
 {
@@ -1024,6 +1113,9 @@ static void seq_start(void)
             t->lfo_ph = (uint32_t)t->p[P_LPHASE] << 25;
     }
     song.tick = 0;
+#if FELUCCA_MONOFM
+    mf_pat_start();                                /* (the pattern's clock, the conditions' loops) */
+#endif
     euc_clk = 0;                                   /* EUCLID's timeline: the arps from their first step, together */
     for (i = 0; i < NPART; i++)
         if (FELUCCA_STRANGE && trk[i].p[P_AMODE] && trk[i].nheld) {
@@ -1224,8 +1316,13 @@ static __attribute__((noinline)) void seq_play(track_t *t, uint32_t idx, uint32_
     const step_t *s = &seq_steps(t)[idx];
     const motion_store_t *m = chain_motion(t);
     uint32_t skip = SEQ_ROLLED, i, k;
+#if FELUCCA_MONOFM
+    if (!mf_trig_plays(trk_index(t), s->probability))   /* (a percentage or an Elektron condition) */
+        skip = SEQ_MISS;
+#else
     if (step_chance(s) < 100u && rng() % 100u >= step_chance(s))
         skip = SEQ_MISS;
+#endif
     if (m)
         motion_step(t, idx, m, skip == SEQ_ROLLED);
     if (t->rskip_n && t->rskip_idx == idx) {
@@ -1305,12 +1402,6 @@ static __attribute__((noinline)) void seq_nd_start(track_t *t, uint32_t period, 
     }
 }
 
-#if FELUCCA_MONOFM
-static uint32_t mf_sc_carry;                 /* MONOFM: a scene came in this block (scene_mf.c): samples into step 1 */
-static void mf_scene_tick(uint32_t n);
-#else
-#define mf_sc_carry 0u
-#endif
 static void seq_tick(track_t *t, uint32_t n)
 {
     uint32_t period, len;
@@ -1322,7 +1413,7 @@ static void seq_tick(track_t *t, uint32_t n)
     }
     if (!song.playing || FELUCCA_MODULE)            /* (sound module: the transport runs for the tempo, no steps) */
         return;
-    period = div_samples((uint32_t)t->p[P_SDIV]);
+    period = div_samples(seq_div(t));
     len = (uint32_t)t->p[P_SLEN];
     len = len ? len : 1u;
     t->seq_pos += n;
@@ -1332,8 +1423,12 @@ static void seq_tick(track_t *t, uint32_t n)
             seq_nd_due(t, period, len, cur_len, n);
         if (t->seq_pos < cur_len && t->seq_pos != 0x7FFFFFFFu + n)
             break;
-        t->seq_pos = t->seq_pos >= 0x7FFFFFFFu ? (chain.running ? chain.carry : mf_sc_carry) : t->seq_pos - cur_len;
+        t->seq_pos = t->seq_pos >= 0x7FFFFFFFu ? (chain.running ? chain.carry : mf_pat_carry) : t->seq_pos - cur_len;
         t->seq_idx = (uint16_t)((t->seq_idx + 1u) % len);
+#if FELUCCA_MONOFM
+        if (!t->seq_idx)
+            mfp_loop[trk_index(t)]++;                   /* (the trig conditions' loop count) */
+#endif
         rec_hold(t, t->seq_idx, len);
         if (t->p[P_SQNT] && !t->nd_fired)
             seq_play(t, t->seq_idx, period);        /* QUANTIZE ON: every step on its start, as before 1.2 */
@@ -1585,12 +1680,12 @@ static void events_block(uint32_t n)
         seq_audition();                               /* (STEP PREVIEW: a step sounds, stopped) */
     chain_tick(seq_n);
 #if FELUCCA_MONOFM
-    mf_scene_tick(seq_n);                             /* (a scene at the pattern's end: scene_mf.c) */
+    mf_pat_tick(seq_n);                               /* (the pattern's end: the next one, mf_pat.c) */
 #endif
     for (i = 0; i < NTRK; i++)
         seq_tick(&trk[i], seq_n);
 #if FELUCCA_MONOFM
-    mf_sc_carry = 0;
+    mf_pat_carry = 0;
 #endif
     if (cin_flush)
         cin_record();

@@ -33,15 +33,7 @@ enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_FM6BANK 
 #if FELUCCA_STRANGE
        OBJ_SCENES,                             /* STRANGE: the scenes (scene.c), USR3's last two sectors 0xDA000 / 0xDB000 */
 #endif
-#if FELUCCA_MONOFM
-       OBJ_MSC0,                               /* MONOFM: scenes E..P (A..D are the projects' objects), two sectors each */
-       OBJ_MSC_END = OBJ_MSC0 + 12,            /* from 0xB4000 (USR2 and the start of USR3: those sample slots are off) */
-#endif
        OBJ_COUNT };
-#if FELUCCA_MONOFM
-#define MSC_BASE 0xB4000u
-_Static_assert(MSC_BASE + 12u * 2u * 4096u <= 0xDC000u, "MONOFM's scenes stay below the user presets");
-#endif
 #define OBJ_FM6VB 32u                          /* the voice bank's commit records (fm6_vbank.c; >= OBJ_COUNT: st_load
                                                 * never takes one, no object here takes its sectors) */
 
@@ -84,10 +76,6 @@ static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy 
 #if FELUCCA_STRANGE
     if (obj == OBJ_SCENES)
         return 0xDA000u + copy * ST_SECTOR;       /* (USR3 0xC8000 + 72 KiB: eng_sample.c SMP_SLOT_SIZE(2)) */
-#endif
-#if FELUCCA_MONOFM
-    if (obj >= OBJ_MSC0)
-        return MSC_BASE + (obj - OBJ_MSC0) * 2u * ST_SECTOR + copy * ST_SECTOR;
 #endif
     if (obj >= OBJ_UPRESET0)
         return 0xDC000u + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;

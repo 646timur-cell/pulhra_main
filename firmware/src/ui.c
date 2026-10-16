@@ -419,7 +419,7 @@ static int page_visible(uint32_t i)
                TSEL->eng_req % NENGINES == ENGI_ERROR || (FELUCCA_MONOFM && TSEL->eng_req % NENGINES == 35u);   /* (KIT:
                                                                                   * the slice machines', MONOFM's BBOX) */
     if (FELUCCA_MONOFM && PAGES[i].graph == GR_SONG)
-        return 0;                                     /* (MONOFM: no SONG, the scenes chain: scene_mf.c) */
+        return 0;                                     /* (MONOFM: no SONG, the patterns chain: mf_pat.c) */
     if (FELUCCA_DARK && PAGES[i].graph == GR_MICRO)
         return 1;                                     /* (STRANGE: SCL > MICRO, the lanes and OP4 its degrees) */
     if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
@@ -589,6 +589,28 @@ static uint32_t note_set_len(track_t *t, uint32_t i, uint32_t want)
  * cursor step's NOTE VEL LEN CHANCE, black keys 10 / 11 the pages. SEQ + ARP (mf_kbd): the keys play again and write the
  * cursor step's notes (ui_input.c mf_kbd_keys), until SEQ + ARP again or another page */
 #if FELUCCA_MONOFM
+/* (mf_pat.c, included by project.c after the pages) the patterns */
+static uint32_t mf_pat_cur(void);
+static uint32_t mf_pat_next(void);
+static uint32_t mf_pat_mode(void);
+static uint32_t mf_pat_nchain(void);
+static uint32_t mf_pat_chain_at(uint32_t i);
+static void mf_pat_label(uint32_t i, char *b);
+static int mf_pat_unsaved(void);
+static uint32_t mf_pat_mlen(void);
+static void mf_pat_mlen_turn(int32_t s);
+static int mfp_has_trigs(uint32_t i);
+static void mf_pat_ask(uint32_t n);
+static void mf_pat_chain(const uint8_t *n, uint32_t c);
+static void mf_pat_mode_step(void);
+static void mf_pat_action(uint32_t a);
+static void mf_pat_save(void);
+static void mf_pat_reload(uint32_t one);
+static void mf_chain_stop(void);
+/* SEQ + the white keys F3 ..: CLEAR the track, SHIFT < >, TRN - +, COPY / PASTE the track, COPY / PASTE the pattern */
+enum { MA_CLEAR, MA_LEFT, MA_RIGHT, MA_TDN, MA_TUP, MA_CTRK, MA_PTRK, MA_CPAT, MA_PPAT, MA_N };
+static const char *const MA_NAME[MA_N] = {"CLEAR", "SHIFT<", "SHIFT>", "TRN -", "TRN +", "COPY T", "PASTE T", "COPY P",
+                                          "PASTE P"};
 static uint8_t mf_kbd;
 static int mf_trigs(void) { return !(ui_prefs2 & (PREF_ROLL >> 16)) && !mf_kbd; }
 static uint8_t mf_plk;           /* a trig held: 0 KNOB 1..4 its NOTE VEL LEN CHANCE; 1 locks of ui.plk_src's page (picked
@@ -1871,6 +1893,10 @@ static int act_ready(void)
 #if FELUCCA_SLICE
     if (cur_page()->graph == GR_SLICES)
         return slice_act_ready(c);
+#endif
+#if FELUCCA_MONOFM
+    if (cur_page()->graph == GR_MPROJ)
+        return 1;                                         /* (RELOAD, SAVE: always; SAVE while playing: at STOP) */
 #endif
     id = cur_page()->id[c & 3u];
     if (id == G_LOAD)

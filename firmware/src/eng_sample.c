@@ -48,7 +48,7 @@ static uint32_t pow2_q16(int32_t d16)
 #include "../hal/fm1_xip.h"   /* relative: hostsim includes this file too */
 #define SMP_USER_SLOTS 3
 #define SMP_USER_LIVE (FELUCCA_MONOFM ? 1u : SMP_USER_SLOTS)   /* MONOFM: USR1 only; USR2 / USR3's flash holds the scenes
-                                                            * E..P (storage.c OBJ_MSC0): never scanned, never written */
+                                                            * (mf_pat.c, the project's copies): never scanned, never written */
 #define SMP_USER_BASE 0xA0000u
 #define SMP_USER_SIZE 0x14000u
 #define SMP_USER_DATA 512u

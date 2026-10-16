@@ -206,7 +206,14 @@ typedef struct {                               /* format 1 (until 0.5 beta), rea
 } project_v1_t;
 _Static_assert(sizeof(project_v2_t) == 2552u && sizeof(project_v1_t) == 688u && sizeof(project_v3_t) == 2584u &&
                sizeof(project_v4_t) == 2680u, "formats 1 / 2 / 3 / 4 as they were stored");
+#if FELUCCA_MONOFM
+project_store_t proj_slot[0];                    /* (MONOFM: no project slots, its patterns have their room: mf_pat.c;
+                                                  * every path to them returns at once there: MF_NO_SLOTS) */
+#define MF_NO_SLOTS(r) return r
+#else
 project_store_t proj_slot[4] __attribute__((section(".noinit")));
+#define MF_NO_SLOTS(r) (void)0
+#endif
 
 static uint32_t proj_hash(const void *p, uint32_t n)   /* FNV-1a over n bytes */
 {
@@ -767,53 +774,6 @@ static union {                               /* serialized main-loop work; no re
 #define proj_wire (proj_wire_u.s)
 static uint8_t proj_wire_gen;                /* +1 whenever proj_wire is rewritten (a backup's runtime copy lives there) */
 
-/* the slots: A..D (proj_slot, RAM copies of OBJ_PROJECT0..3); MONOFM: and the scenes E..P (storage.c OBJ_MSC0..: read
- * from flash when asked, into proj_wire; a host build without flash keeps them in RAM) */
-#define PROJ_NSLOT (FELUCCA_MONOFM ? 16u : 4u)
-#if FELUCCA_MONOFM
-#if FELUCCA_FLASH
-static uint32_t proj_obj(uint32_t s) { s %= PROJ_NSLOT; return s < 4u ? OBJ_PROJECT0 + s : OBJ_MSC0 + (s - 4u); }
-#endif
-#if !FELUCCA_FLASH
-static project_store_t mf_sc_ram[12];
-#endif
-static uint8_t mf_wire_slot = 0xFFu, mf_wire_gen;   /* the scene proj_wire holds (while proj_wire_gen is mf_wire_gen) */
-static const project_store_t *proj_store(uint32_t slot)
-{
-    slot %= PROJ_NSLOT;
-    if (slot < 4u)
-        return &proj_slot[slot];
-#if FELUCCA_FLASH
-    if (mf_wire_slot != slot || mf_wire_gen != proj_wire_gen) {
-        int n = -1;
-        proj_wire_gen++;
-        if (flash_ok)
-            n = st_load(proj_obj(slot), &proj_wire, sizeof proj_wire);
-        if (n != (int)sizeof proj_wire)
-            memset(proj_wire_u.raw, 0, 4);
-        mf_wire_slot = (uint8_t)slot;
-        mf_wire_gen = proj_wire_gen;
-    }
-    return &proj_wire;
-#else
-    return &mf_sc_ram[slot - 4u];
-#endif
-}
-/* what the scene list shows (name, used), kept: reading 16 scenes from flash each frame would be slow */
-static uint16_t mf_sc_known, mf_sc_used;
-static char mf_sc_name[16][PROJ_NAME_LEN + 1u];
-static uint32_t mf_sc_gen;                    /* + 1 when a scene's name or use changes (the pages' signatures) */
-static void mf_sc_forget(uint32_t s) { mf_sc_known &= (uint16_t)~(1u << (s % 16u)); mf_sc_gen++; }
-static void mf_scene_saved(uint32_t n);      /* (scene_mf.c: n is the scene playing now) */
-#else
-#define mf_scene_saved(n) ((void)0)
-#if FELUCCA_FLASH
-#define proj_obj(s) (OBJ_PROJECT0 + ((s) & 3u))
-#endif
-#define proj_store(s) ((const project_store_t *)&proj_slot[(s) & 3u])
-#define mf_sc_forget(s) ((void)0)
-#endif
-
 static void proj_steps(step_t *s)            /* a loaded sequence stays inside its fixed fields */
 {
     uint32_t i, j;
@@ -849,6 +809,7 @@ static void proj_bound(project_t *q)
 /* slot from flash into RAM (format 7, or format 6 / 5 / 4 / 3 / 2 / 1 converted) */
 static void proj_fetch(uint32_t slot)
 {
+    MF_NO_SLOTS();
     project_store_t *q = &proj_slot[slot & 3u];
     int n;
     proj_wire_gen++;
@@ -862,21 +823,6 @@ static void proj_fetch(uint32_t slot)
     }
 }
 #endif
-
-/* proj_wire was just stored as slot: its RAM copy (A..D; MONOFM's host build: every scene); MONOFM: proj_wire is it */
-static void proj_saved_to(uint32_t slot)
-{
-    if (slot < 4u)
-        memcpy(&proj_slot[slot], &proj_wire, sizeof proj_wire);
-#if FELUCCA_MONOFM
-#if !FELUCCA_FLASH
-    else
-        memcpy(&mf_sc_ram[slot - 4u], &proj_wire, sizeof proj_wire);
-#endif
-    mf_wire_slot = (uint8_t)slot;
-    mf_wire_gen = proj_wire_gen;
-#endif
-}
 
 static void project_capture(project_t *p)
 {
@@ -908,6 +854,7 @@ static void project_capture(project_t *p)
  * The current name becomes the saved one */
 static int project_save_as(uint32_t slot, const char *name)
 {
+    MF_NO_SLOTS(1);
     project_t *p = &proj_scratch;
     if (transport_busy()) {                            /* a flash erase silences the audio and stalls the */
         ui_message("STOP TO SAVE");                     /* sequencer (storage_hw.c): only while stopped */
@@ -921,32 +868,24 @@ static int project_save_as(uint32_t slot, const char *name)
     proj_wire_gen++;
     if (!proj_pack(&proj_wire, p)) { ui_message("SAVE FORMAT ERROR"); return 2; }
 
-    slot %= PROJ_NSLOT;
-    mf_sc_forget(slot);
 #if FELUCCA_FLASH
     if (flash_ok) {
-        if (st_save(proj_obj(slot), &proj_wire, sizeof proj_wire)) {
+        if (st_save(OBJ_PROJECT0 + (slot & 3u), &proj_wire, sizeof proj_wire)) {
             ui_message("SAVE ERROR");
             return 2;
         }
-        proj_saved_to(slot);
+        memcpy(&proj_slot[slot & 3u], &proj_wire, sizeof proj_wire);
         proj_name_get(proj_name, (const uint8_t *)p->name);
-        proj_cur = (uint8_t)slot;
-        pat_from_set(slot + 1u);
-        mf_scene_saved(slot);
+        proj_cur = (uint8_t)(slot & 3u);
+        pat_from_set((slot & 3u) + 1u);
         ui_message("SAVED");
         return 0;
     }
-    if (slot >= 4u) {                                  /* (MONOFM: scenes E..P live in flash only) */
-        ui_message("SAVE ERROR");
-        return 2;
-    }
 #endif
-    proj_saved_to(slot);
+    memcpy(&proj_slot[slot & 3u], &proj_wire, sizeof proj_wire);
     proj_name_get(proj_name, (const uint8_t *)p->name);
-    proj_cur = (uint8_t)slot;
-    pat_from_set(slot + 1u);
-    mf_scene_saved(slot);
+    proj_cur = (uint8_t)(slot & 3u);
+    pat_from_set((slot & 3u) + 1u);
     ui_message("SAVED (RAM)");
     return 0;
 }
@@ -987,6 +926,11 @@ static uint32_t proj_density(const proj_trk_t *t, uint8_t *n)
 /* .. and, den not 0, each track's picture (proj_density: den[k], its cells n[k]; 0 for an empty slot) */
 static int project_info(uint32_t slot, char *b, uint16_t *len48, uint32_t *den, uint8_t *n)
 {
+#if FELUCCA_MONOFM
+    b[0] = 0;
+    (void)slot; (void)len48; (void)den; (void)n;
+    return 0;
+#endif
     uint32_t k;
     b[0] = 0;
     if (len48)
@@ -995,7 +939,7 @@ static int project_info(uint32_t slot, char *b, uint16_t *len48, uint32_t *den, 
         memset(den, 0, NTRK * sizeof *den);
         memset(n, 0, NTRK);
     }
-    if (!proj_import(&proj_scratch, proj_store(slot), sizeof(project_store_t)))
+    if (!proj_import(&proj_scratch, &proj_slot[slot & 3u], sizeof(project_store_t)))
         return 0;
     proj_name_get(b, (const uint8_t *)proj_scratch.name);
     for (k = 0; len48 && k < NTRK; k++)
@@ -1010,29 +954,28 @@ static int project_info(uint32_t slot, char *b, uint16_t *len48, uint32_t *den, 
  * an empty slot), 2 failed (the slot as it was) */
 static int project_rename(uint32_t slot, const char *name)
 {
+    MF_NO_SLOTS(1);
     project_t *p = &proj_scratch;
     if (transport_busy()) {
         ui_message("STOP TO SAVE");
         return 1;
     }
-    slot %= PROJ_NSLOT;
-    if (!proj_import(p, proj_store(slot), sizeof(project_store_t))) {
+    if (!proj_import(p, &proj_slot[slot & 3u], sizeof(project_store_t))) {
         ui_message("EMPTY SLOT");
         return 1;
     }
-    mf_sc_forget(slot);
     memset(p->name, 0, sizeof p->name);
     memcpy(p->name, name, str_len(name) < PROJ_NAME_LEN ? str_len(name) : PROJ_NAME_LEN);
     proj_wire_gen++;
     if (!proj_pack(&proj_wire, p)) { ui_message("SAVE FORMAT ERROR"); return 2; }
 #if FELUCCA_FLASH
-    if (flash_ok && st_save(proj_obj(slot), &proj_wire, sizeof proj_wire)) {
+    if (flash_ok && st_save(OBJ_PROJECT0 + (slot & 3u), &proj_wire, sizeof proj_wire)) {
         ui_message("SAVE ERROR");
         return 2;
     }
 #endif
-    proj_saved_to(slot);
-    if (proj_cur == slot)
+    memcpy(&proj_slot[slot & 3u], &proj_wire, sizeof proj_wire);
+    if (proj_cur == (slot & 3u))
         proj_name_get(proj_name, (const uint8_t *)p->name);
 #if FELUCCA_FLASH
     if (flash_ok) { ui_message("RENAMED"); return 0; }
@@ -1119,15 +1062,15 @@ static int project_restore_runtime(const project_t *input)
 }
 static void project_load(uint32_t slot)
 {
-    slot %= PROJ_NSLOT;
+    MF_NO_SLOTS();
 #if FELUCCA_FLASH
-    if (slot < 4u && flash_ok && !proj_import(&proj_scratch, &proj_slot[slot], sizeof(project_store_t))) proj_fetch(slot);
+    if (flash_ok && !proj_import(&proj_scratch, &proj_slot[slot & 3u], sizeof(project_store_t))) proj_fetch(slot);
 #endif
-    if (!proj_import(&proj_scratch, proj_store(slot), sizeof(project_store_t))) { ui_message("EMPTY SLOT"); return; }
+    if (!proj_import(&proj_scratch, &proj_slot[slot & 3u], sizeof(project_store_t))) { ui_message("EMPTY SLOT"); return; }
     proj_bound(&proj_scratch);                          /* a retained RAM slot of an older format: as from flash */
     if (!project_restore_runtime(&proj_scratch)) {
-        proj_cur = (uint8_t)slot;
-        pat_from_set(slot + 1u);
+        proj_cur = (uint8_t)(slot & 3u);
+        pat_from_set((slot & 3u) + 1u);
     }
 }
 
@@ -1170,11 +1113,10 @@ static void persist_boot(void)                    /* before settings_init / pane
 #if FELUCCA_MONOFM && defined(FELUCCA_FAVORITES)
     monofm_first_start();
 #endif
-    {   /* projects: fill empty RAM slots from flash, so the slot list is right after power-on */
-        uint32_t i;
-        for (i = 0; i < 4u; i++)
-            if (!proj_import(&proj_scratch, &proj_slot[i], sizeof(project_store_t)))
-                proj_fetch(i);
+    for (int i = 0; !FELUCCA_MONOFM && i < 4; i++) {   /* projects: fill empty RAM slots from flash, so the slot list is
+                                                     * right after power-on (MONOFM: none, mf_pat.c) */
+        if (!proj_import(&proj_scratch, &proj_slot[i], sizeof(project_store_t)))
+            proj_fetch((uint32_t)i);
     }
     up_boot();                                     /* user presets */
 #if FELUCCA_STRANGE
@@ -1183,30 +1125,16 @@ static void persist_boot(void)                    /* before settings_init / pane
 #endif
 }
 
-#if FELUCCA_MONOFM
-/* scene s stored (and its name: *name, "" none), from the list kept (mf_sc_*) */
-static int mf_scene_info(uint32_t s, const char **name)
+static int project_used(uint32_t slot)
 {
-    s %= 16u;
-    if (!((mf_sc_known >> s) & 1u)) {
-        if (project_info(s, mf_sc_name[s], 0, 0, 0))
-            mf_sc_used |= (uint16_t)(1u << s);
-        else
-            mf_sc_used &= (uint16_t)~(1u << s);
-        mf_sc_known |= (uint16_t)(1u << s);
-    }
-    if (name)
-        *name = mf_sc_name[s];
-    return (mf_sc_used >> s) & 1u;
+    MF_NO_SLOTS(0);
+    return proj_import(&proj_scratch, &proj_slot[slot & 3u], sizeof(project_store_t));
 }
-static int project_used(uint32_t slot) { return mf_scene_info(slot, 0); }
-#else
-static int project_used(uint32_t slot) { return proj_import(&proj_scratch, &proj_slot[slot & 3u], sizeof(project_store_t)); }
-#endif
 
 /* Main loop only: no flash access or copies when the ISR changes rows. */
 static uint32_t chain_prepare(void)
 {
+    MF_NO_SLOTS(1);
     uint32_t i, k, j, used = 0;
     if (transport_busy())
         return 2;
@@ -1362,8 +1290,14 @@ static int autosave_quiet(void)
 static void autosave_hold(void) { as.t = fm1_ms; }   /* the editor's transfers: their staging RAM is proj_wire */
 
 /* main loop, every pass (after settings_poll) */
+static void mf_pat_poll(void);
+static void mf_pat_boot(void);
 static void autosave_poll(void)
 {
+#if FELUCCA_MONOFM
+    mf_pat_poll();                                   /* (MONOFM: its project's autosave, mf_pat.c) */
+    return;
+#endif
 #if FELUCCA_FLASH
     uint32_t sig;
     if (!flash_ok || fm1_ms - as.poll < AS_POLL_MS)
@@ -1396,6 +1330,11 @@ static void autosave_poll(void)
 static int autosave_boot(int allowed)
 {
     int rc = 0;
+#if FELUCCA_MONOFM
+    (void)allowed;
+    mf_pat_boot();                                   /* (MONOFM: its project, mf_pat.c) */
+    return 0;
+#endif
 #if FELUCCA_FLASH
     if (flash_ok && allowed && !(ui_prefs & PREF_RESTORE_OFF)) {
         int n;
@@ -1422,6 +1361,6 @@ _Static_assert(sizeof(project_store_t) <= ST_PAYLOAD_MAX, "project does not fit 
 _Static_assert(sizeof(persist_t) <= ST_PAYLOAD_MAX, "settings do not fit one flash sector");
 #endif
 #if FELUCCA_MONOFM
-#include "scene_mf.c"              /* the scenes A..P (SEQ held + the white keys) */
+#include "mf_pat.c"                /* the 16 patterns, their switching and storage */
 #endif
 #endif /* PROJ_HOST */

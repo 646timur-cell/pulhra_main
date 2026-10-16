@@ -749,10 +749,6 @@ static int test_stability(void)
 }
 
 
-/* SCENES (scene_mf.c): A and E stored (stopped: SEQ held + a white key held), each its own engine, sound and pattern.
- * Stopped, a tap loads at once; playing, the next comes in exactly where T1's pattern ends (its last step to step 1),
- * the tempo kept; two taps in one SEQ hold chain them (A E A E ..); ALGORITHM steps through the stored ones; the
- * SCENES page's list and LOAD; the scene keys lit */
 static void sc_pattern(track_t *t, uint8_t note, uint32_t len)
 {
     uint32_t i;
@@ -767,192 +763,304 @@ static void sc_pattern(track_t *t, uint8_t note, uint32_t len)
     }
     t->p[P_SLEN] = (int16_t)len;
 }
-static void sc_seq_tap(uint32_t p)                   /* SEQ held, white key p tapped */
-{
-    tap_k(key_at(0, p));
-}
-static uint32_t sc_play_until_switch(uint32_t max_blocks, int *on_wrap)
+
+/* THE PATTERNS (mf_pat.c, Elektron's model): 16 in RAM, an edit kept when another one plays; the three change modes
+ * (SEQUENTIAL at the master length's end, DIRECT START, DIRECT JUMP), chains, SEQ + ALGORITHM (asked when SEQ is let
+ * go) and OCT+ chaining; SAVE / RELOAD and a power cut in a SAVE; the autosave's working copy; the trig conditions; the
+ * track SCALE; the actions (COPY / PASTE, TRN, SHIFT); the mutes the project's; FILL on GLO + F5 */
+static void tp_blocks(uint32_t n) { int32_t buf[2 * CTL]; while (n--) mix_block(buf, CTL); }
+static int tp_wait_switch(uint32_t max, uint32_t want, int *at_wrap)   /* play until pattern `want` is in; *at_wrap: T1 at 0 */
 {
     int32_t buf[2 * CTL];
-    uint32_t k, before = msc.cur;
-    *on_wrap = 0;
-    for (k = 0; k < max_blocks; k++) {
-        uint32_t idx = trk[0].seq_idx, len = (uint32_t)trk[0].p[P_SLEN];
-        mf_scene_poll();
+    uint32_t k;
+    for (k = 0; k < max; k++) {
         mix_block(buf, CTL);
-        if (msc.fired || msc.cur != before) {
-            *on_wrap = idx + 1u == len && trk[0].seq_idx == 0u;
-            mf_scene_poll();
-            return k;
+        if (mfp.cur == want) {
+            mf_pat_poll();
+            if (at_wrap)
+                *at_wrap = trk[0].seq_idx == 0u;
+            return 1;
         }
     }
-    return max_blocks;
+    return 0;
 }
-static int test_scenes(void)
+static void tp_fresh(void)
+{
+    ui_power_on();
+    memset(mfp_nor, 0xFF, sizeof mfp_nor);
+    mfp_nor_cut = 0xFFFFFFFFu;
+    mf_pat_boot();
+    mfp.mode = MFP_SEQ;
+    mfp.nchain = 0;
+}
+static int test_mfpat(void)
 {
     int bad = 0, ok, wrap;
-    uint32_t k;
-    int16_t bpm;
-    ui_power_on();
-    memset(mf_sc_ram, 0, sizeof mf_sc_ram);
-    memset(proj_slot, 0, sizeof proj_slot);
-    mf_sc_known = 0;
-    msc.cur = msc.next = MSC_NONE;
-    msc.nchain = 0;
-    /* scene A: SAW, notes 48, LEN 16 */
+    uint32_t k, i;
+    tp_fresh();
+    ok = mfp.cur == 0u && mfp.next == MFP_NONE && !mfp_has_trigs(0) && !mfp_has_trigs(15);
+    bad += check("MONOFM PATTERNS: power-on with nothing saved: A01, 16 empty patterns", ok);
+    /* A01: SAW, notes 48 every other step; A02: SINE, 60, LEN 8 */
     set_engine_of(&trk[0], ENGI_MSAW);
     trk[0].engine = trk[0].eng_req;
     sc_pattern(&trk[0], 48, 16);
     trk[0].p[P_E0] = 11;
-    frames(100);
-    btn_down(B_SEQ);
-    key_down(key_at(0, 0));
-    frames(1000);                                     /* (held: stored) */
-    key_up(key_at(0, 0));
-    frame();
-    btn_up(B_SEQ);
-    frames(200);
-    ok = mf_scene_info(0, 0) && msc.cur == 0u;
-    /* scene E: SINE, notes 60, LEN 8 */
+    mf_pat_ask(1);
+    ok = mfp.cur == 1u && !step_on(&trk[0].step[0]);
     set_engine_of(&trk[0], ENGI_MSINE);
-    frames(50);
     sc_pattern(&trk[0], 60, 8);
     trk[0].p[P_E0] = 22;
-    btn_down(B_SEQ);
-    key_down(key_at(0, 4));
-    frames(1000);
-    key_up(key_at(0, 4));
-    frame();
-    btn_up(B_SEQ);
-    frames(200);
-    ok &= mf_scene_info(4, 0) && msc.cur == 4u && !mf_scene_info(5, 0);
-    bad += check("MONOFM SCENES: SEQ + a white key held saves there (A, E), stopped", ok);
-    btn_down(B_SEQ);
-    sc_seq_tap(0);
-    btn_up(B_SEQ);
-    frames(100);
-    mf_scene_poll();
-    ok = trk[0].eng_req == ENGI_MSAW && trk[0].p[P_E0] == 11 && trk[0].step[0].note[0] == 48 && trk[0].p[P_SLEN] == 16 &&
-         msc.cur == 0u;
-    bad += check("MONOFM SCENES: stopped, SEQ + A loads scene A at once (engine, sound, pattern)", ok);
-    /* playing: E picked, it comes at the end of A's 16 steps */
-    bpm = song.g[G_BPM];
+    mf_pat_ask(0);
+    ok &= mfp.cur == 0u && trk[0].eng_req == ENGI_MSAW && trk[0].p[P_E0] == 11 && trk[0].step[0].note[0] == 48u &&
+          trk[0].p[P_SLEN] == 16;
+    mf_pat_ask(1);
+    ok &= trk[0].eng_req == ENGI_MSINE && trk[0].step[0].note[0] == 60u && trk[0].p[P_SLEN] == 8;
+    bad += check("MONOFM PATTERNS: stopped, a pattern comes at once; each keeps its edits (sound, trigs, LEN) unsaved", ok);
+    /* SEQUENTIAL: A02 playing (AUTO length: T1's 8 steps), A01 asked: in at the end, every track from step 1 */
+    mf_pat_ask(1);
+    trk[1].p[P_MUTE] = 1;
     seq_start();
-    {
-        int32_t buf[2 * CTL];
-        for (k = 0; k < 40u; k++)
-            mix_block(buf, CTL);
-    }
-    btn_down(B_SEQ);
-    sc_seq_tap(4);
-    btn_up(B_SEQ);
-    frames(100);
-    ok = msc.next == 4u && trk[0].eng_req == ENGI_MSAW;
-    k = sc_play_until_switch(20000u, &wrap);
-    ok &= k < 20000u && wrap && trk[0].eng_req == ENGI_MSINE && trk[0].p[P_E0] == 22 && trk[0].step[0].note[0] == 60 &&
-          trk[0].p[P_SLEN] == 8 && msc.cur == 4u && song.playing && song.g[G_BPM] == bpm;
-    bad += check("MONOFM SCENES: playing, SEQ + E comes in where A's pattern ends (step 16 -> 1), tempo kept", ok);
-    {   /* the new pattern plays from its step 1 at once */
-        int32_t buf[2 * CTL];
+    tp_blocks(30);
+    mf_pat_ask(0);
+    ok = mfp.next == 0u && mfp.cur == 1u;
+    ok &= tp_wait_switch(20000u, 0u, &wrap) && wrap && trk[0].eng_req == ENGI_MSAW && trk[1].p[P_MUTE] == 1 && song.playing;
+    bad += check("MONOFM PATTERNS: SEQUENTIAL: asked while playing, it comes at the pattern's end, from step 1; MUTE kept", ok);
+    {   /* its notes play */
         uint32_t seen = 0;
-        for (k = 0; k < 400u; k++) {
+        int32_t buf[2 * CTL];
+        for (k = 0; k < 600u; k++) {
             mix_block(buf, CTL);
-            for (uint32_t j = 0; j < NVOICE; j++)
-                seen |= trk[0].v[j].active && trk[0].v[j].note == 60u;
+            for (i = 0; i < NVOICE; i++)
+                seen |= trk[0].v[i].active && trk[0].v[i].note == 48u;
         }
-        bad += check("MONOFM SCENES: .. and E's notes sound", seen != 0u);
+        bad += check("MONOFM PATTERNS: .. and its trigs sound", seen != 0u);
     }
-    /* chain: A then E in one hold: A E A E */
-    btn_down(B_SEQ);
-    sc_seq_tap(0);
-    sc_seq_tap(4);
-    btn_up(B_SEQ);
-    frames(50);
-    ok = msc.nchain == 2u && msc.chain[0] == 0u && msc.chain[1] == 4u && msc.next == 0u;
-    k = sc_play_until_switch(40000u, &wrap);
-    ok &= msc.cur == 0u && wrap && msc.next == 4u;
-    k = sc_play_until_switch(40000u, &wrap);
-    ok &= msc.cur == 4u && wrap && msc.next == 0u;
-    k = sc_play_until_switch(40000u, &wrap);
-    ok &= msc.cur == 0u && msc.next == 4u;
-    bad += check("MONOFM SCENES: two taps in one SEQ hold chain A and E: A E A, each at its pattern's end", ok);
-    /* a single tap ends the chain */
-    btn_down(B_SEQ);
-    sc_seq_tap(4);
-    btn_up(B_SEQ);
-    frames(50);
-    k = sc_play_until_switch(40000u, &wrap);
-    k = sc_play_until_switch(4000u, &wrap);
-    bad += check("MONOFM SCENES: one tap ends the chain (E stays)", msc.cur == 4u && msc.nchain == 0u && msc.next == MSC_NONE);
-    /* ALGORITHM with SEQ held: the stored scene after E is A (wrapping, empty ones skipped) */
+    /* DIRECT START / JUMP */
+    tp_blocks(37);
+    mfp.mode = MFP_START;
+    mf_pat_ask(1);
+    tp_blocks(1);
+    ok = mfp.cur == 1u;
+    tp_blocks(1);
+    ok &= trk[0].seq_idx == 0u;
+    bad += check("MONOFM PATTERNS: DIRECT START: at once, from step 1", ok);
+    tp_blocks(300);
+    {
+        uint32_t idx;
+        mfp.mode = MFP_JUMP;
+        idx = trk[0].seq_idx;
+        mf_pat_ask(0);
+        tp_blocks(1);
+        ok = mfp.cur == 0u && trk[0].seq_idx >= idx && trk[0].seq_idx <= idx + 1u;
+        bad += check("MONOFM PATTERNS: DIRECT JUMP: at once, the tracks where they were", ok);
+    }
+    /* a chain A01 > A02 > A03 (A03 empty): in turn, at each end */
+    mfp.mode = MFP_SEQ;
+    {
+        static const uint8_t C[3] = {0, 1, 2};
+        mf_pat_chain(C, 3);
+        ok = tp_wait_switch(40000u, 1u, &wrap) && wrap;
+        ok &= tp_wait_switch(40000u, 2u, 0);
+        ok &= tp_wait_switch(40000u, 0u, 0);
+        ok &= tp_wait_switch(40000u, 1u, 0);
+        bad += check("MONOFM PATTERNS: a chain of three plays them in turn, each at its pattern's end, round", ok);
+        mf_chain_stop();
+    }
+    /* SEQ held + ALGORITHM: picked, asked when SEQ is let go; OCT+ builds a chain */
+    seq_stop();
+    stop_transport();
+    tp_blocks(4);
+    mf_pat_ask(0);
+    frames(600);
     btn_down(B_SEQ);
     frames(50);
     turn(EN_ALGO, 1);
-    btn_up(B_SEQ);
-    frames(50);
-    ok = msc.next == 0u;
-    k = sc_play_until_switch(40000u, &wrap);
-    ok &= msc.cur == 0u;
-    bad += check("MONOFM SCENES: SEQ + ALGORITHM steps to the next stored scene (E -> A, past the empty ones)", ok);
-    /* saving while playing is refused */
-    btn_down(B_SEQ);
-    key_down(key_at(0, 9));
-    frames(1000);
-    key_up(key_at(0, 9));
-    frame();
-    btn_up(B_SEQ);
-    bad += check("MONOFM SCENES: no save while playing (STOP TO SAVE)", !mf_scene_info(9, 0));
-    /* an empty scene picked: nothing queued */
-    btn_down(B_SEQ);
-    sc_seq_tap(12);
+    turn(EN_ALGO, 1);
+    ok = mfp.cur == 0u;                                 /* (not yet: SEQ still held) */
     btn_up(B_SEQ);
     frames(100);
-    bad += check("MONOFM SCENES: an empty scene is not picked", msc.next != 12u);
-    /* stopped with one picked: it loads at once */
+    ok &= mfp.cur == 2u;
+    bad += check("MONOFM PATTERNS: SEQ + ALGORITHM picks (A03), it comes when SEQ is let go", ok);
     btn_down(B_SEQ);
-    sc_seq_tap(4);
+    frames(50);
+    turn(EN_ALGO, -1);
+    turn(EN_ALGO, -1);                                  /* A01 (one pattern a turn) */
+    press(B_OCTUP);
+    turn(EN_ALGO, 1);                                   /* A02 */
+    press(B_OCTUP);
     btn_up(B_SEQ);
+    frames(100);
+    ok = mfp.cur == 0u && mfp.nchain == 2u && mfp.chain[0] == 0u && mfp.chain[1] == 1u;
+    bad += check("MONOFM PATTERNS: SEQ + ALGORITHM + OCT+ twice: a chain A01 > A02", ok);
+    mf_chain_stop();
+    /* SAVE, an edit, RELOAD; a SAVE cut by a power loss keeps the copy before; power-on loads the newest */
+    mf_pat_ask(0);
+    ok = mf_pat_unsaved();
+    mf_pat_save();
+    ok &= !mf_pat_unsaved() && mfp_best(0) != 0u;
+    trk[0].step[0].note[0] = 70;
+    ok &= mf_pat_unsaved();
+    mf_pat_reload(0);
+    ok &= trk[0].step[0].note[0] == 48u;
+    trk[0].step[0].note[0] = 71;
+    mf_pat_reload(MFP_NONE);
+    ok &= trk[0].step[0].note[0] == 48u && mfp.cur == 0u;
+    bad += check("MONOFM PATTERNS: SAVE (stopped), RELOAD the pattern, RELOAD all: as saved", ok);
+    trk[0].step[0].note[0] = 72;
+    mfp_nor_cut = 3000u;                                /* (the power goes 3000 bytes into the next SAVE) */
+    mf_pat_save();
+    mfp_nor_cut = 0xFFFFFFFFu;
+    mf_pat_reload(MFP_NONE);
+    ok = trk[0].step[0].note[0] == 48u;
+    trk[0].step[0].note[0] = 73;
+    mf_pat_save();
+    ui_power_on();
+    mf_pat_boot();
+    ok &= trk[0].step[0].note[0] == 73u && trk[0].eng_req == ENGI_MSAW && mfp_at(1)->t[0].eng == ENGI_MSINE;
+    bad += check("MONOFM PATTERNS: a SAVE cut off keeps the one before; power-on loads the newest (every pattern)", ok);
+    /* SAVE while playing: at STOP */
+    seq_start();
+    trk[0].step[0].note[0] = 74;
+    mf_pat_save();
+    ok = mfp.save_wait == 1u && mf_pat_unsaved();
     seq_stop();
     stop_transport();
-    mf_scene_poll();
-    bad += check("MONOFM SCENES: picked, then stopped before the pattern's end: it loads", msc.cur == 4u && trk[0].eng_req == ENGI_MSINE);
-    /* LEDs in the SEQ layer: E lit, A breathing; the SCENES page's LOAD */
+    mf_pat_poll();
+    ok &= !mfp.save_wait && !mf_pat_unsaved();
+    bad += check("MONOFM PATTERNS: SAVE while playing: written at STOP", ok);
+    /* the autosave: stopped, quiet, a while after a change: the working copy (W), loaded at power-on */
+    trk[0].step[0].note[0] = 75;
+    for (k = 0; k < 3000u && mfp_best(1) != MFP_W; k++) {
+        fm1_ms += 16u;
+        mf_pat_poll();
+    }
+    ui_power_on();
+    mf_pat_boot();
+    bad += check("MONOFM PATTERNS: the autosave (stopped, idle) keeps an unsaved edit over a power-off; SAVE still sees it",
+                 trk[0].step[0].note[0] == 75u && mf_pat_unsaved());
+    /* the conditions */
     {
-        uint32_t br = 0, on;
-        btn_down(B_SEQ);
-        frames(700);
-        on = layer_leds(&br);
-        ok = ((on >> key_at(0, 4)) & 1u) && ((br >> key_at(0, 0)) & 1u) && !((br >> key_at(0, 7)) & 1u);
-        btn_up(B_SEQ);
-        frames(100);
-        bad += check("MONOFM SCENES: SEQ held: the scene playing lit, the stored ones breathe, empty dark", ok);
-    }
-    {   /* SAVE > SCENES over a stored E: the OVERWRITE? dialog, OCT+, the NAME screen's OCT+: E is written (not A) */
-        uint32_t i;
-        for (i = 0; i < NPAGES; i++)
-            if (PAGES[i].graph == GR_SLOTS) break;
-        ui.home = 0; ui.page = (uint8_t)i; page_entered(); frame();
-        song.g[G_SLOT] = 5;
-        trk[0].p[P_E0] = 33;
-        ui.act = 4; act_do();                                   /* (SAVE: the dialog, E is used) */
-        frame();
-        press(B_OCTUP);                                         /* (the dialog: OCT+, the NAME screen) */
-        press(B_OCTUP);                                         /* (NAME: OCT+ writes) */
-        frames(100);
-        {
-            project_t q;
-            int ok_e = proj_import(&q, proj_store(4), sizeof(project_store_t)) && q.t[0].p[P_E0] == 33;
-            int ok_a = proj_import(&q, proj_store(0), sizeof(project_store_t)) && q.t[0].p[P_E0] == 11;
-            bad += check("MONOFM SCENES: SAVE > SCENES over E (dialog, NAME): E written, A untouched", ok_e && ok_a);
+        uint32_t r[8], j;
+        memset(mfp_loop, 0, sizeof mfp_loop);
+        for (j = 0; j < 8u; j++) {
+            mfp_loop[0] = (uint16_t)(j + 1u);
+            r[j] = (uint32_t)mf_trig_plays(0, MF_COND0 + MC_AB + 0u);   /* 1:2 */
         }
+        ok = r[0] && !r[1] && r[2] && !r[3];
+        for (j = 0; j < 8u; j++) {
+            mfp_loop[0] = (uint16_t)(j + 1u);
+            r[j] = (uint32_t)mf_trig_plays(0, MF_COND0 + MC_AB + 4u);   /* 3:3 (1:2 2:2 1:3 2:3 3:3) */
+        }
+        ok &= !r[0] && !r[1] && r[2] && !r[3] && !r[4] && r[5];
+        mfp_loop[0] = 1;
+        ok &= mf_trig_plays(0, MF_COND0 + MC_1ST) && !mf_trig_plays(0, MF_COND0 + MC_N1ST);
+        mfp_loop[0] = 2;
+        ok &= !mf_trig_plays(0, MF_COND0 + MC_1ST);
+        mfp_fill = 1;
+        ok &= mf_trig_plays(0, MF_COND0 + MC_FILL) && !mf_trig_plays(0, MF_COND0 + MC_NFILL);
+        mfp_fill = 0;
+        ok &= !mf_trig_plays(0, MF_COND0 + MC_FILL) && mf_trig_plays(0, MF_COND0 + MC_NFILL);
+        mfp_pre[0] = 1;                                  /* (the last one played) */
+        ok &= mf_trig_plays(0, MF_COND0 + MC_PRE) && !mf_trig_plays(0, MF_COND0 + MC_NPRE) && mf_trig_plays(1, MF_COND0 + MC_NEI);
+        ok &= mf_trig_plays(0, 0) && !mf_trig_plays(0, 101u);
+        {
+            char nb[8];
+            mf_cond_name(MF_COND0 + MC_AB + 4u, nb);
+            ok &= str_eq(nb, "3:3");
+            mf_cond_name(50u, nb);
+            ok &= str_eq(nb, "50%");
+        }
+        bad += check("MONOFM CONDITIONS: A:B (1:2, 3:3), 1ST, FILL / !FILL, PRE / !PRE, NEI, 100% / 0%, their names", ok);
     }
-    song.g[G_SLOT] = 1;
-    mf_scene_pick((uint32_t)song.g[G_SLOT] - 1u, 0);
-    bad += check("MONOFM SCENES: SAVE > SCENES: G_SLOT A..P, LOAD loads", msc.cur == 0u && trk[0].eng_req == ENGI_MSAW &&
-                 GP[G_SLOT].max == 16 && str_eq(GP[G_SLOT].names[5], "E"));
+    {   /* the knob's walk: 100% then the conditions, back */
+        uint32_t v = 0;
+        v = mf_cond_step(v, 1);
+        ok = v == MF_COND0;
+        v = mf_cond_step(v, -1);
+        ok &= v == 0u;
+        v = mf_cond_step(v, -50);
+        ok &= v == 50u;
+        bad += check("MONOFM CONDITIONS: KNOB 4's walk: 50% .. 100%, then 1ST !1ST PRE .. A:B", ok);
+    }
+    /* a 1:2 trig plays on every other loop of its track, while playing */
+    {
+        uint32_t plays = 0, loops = 0, last = 0;
+        int32_t buf[2 * CTL];
+        tp_fresh();
+        set_engine_of(&trk[0], ENGI_MSINE);
+        tp_blocks(16);
+        sc_pattern(&trk[0], 60, 4);                     /* (steps 0 and 2) */
+        trk[0].step[2].time = ST_REST;
+        trk[0].step[2].n = 0;
+        trk[0].step[0].probability = (uint8_t)(MF_COND0 + MC_AB + 0u);   /* 1:2 */
+        trk[0].p[P_REL] = 0;
+        seq_start();
+        for (k = 0; k < 6000u && loops < 8u; k++) {
+            mix_block(buf, CTL);
+            if (trk[0].seq_idx == 0u && last != 0u) {
+                loops++;
+                tp_blocks(4);
+                for (i = 0; i < NVOICE; i++)
+                    if (trk[0].v[i].active && trk[0].v[i].gate) {
+                        plays++;
+                        break;
+                    }
+            }
+            last = trk[0].seq_idx;
+        }
+        seq_stop();
+        stop_transport();
+        bad += check("MONOFM CONDITIONS: a 1:2 trig sounds on half of its track's loops", loops >= 8u && plays >= 3u && plays <= 5u);
+    }
+    /* the SCALE: 2X twice as fast as 1X */
+    {
+        track_t *t = &trk[0];
+        uint32_t a, b;
+        t->p[P_SDIV] = 2;
+        a = div_samples(seq_div(t));
+        t->p[P_SDIV] = 0;
+        b = div_samples(seq_div(t));
+        t->p[P_SDIV] = 6;
+        ok = a == 2u * b && div_samples(seq_div(t)) / 8u >= a - 1u && div_samples(seq_div(t)) / 8u <= a + 1u && str_eq(TP[P_SDIV].names[0], "2X") && TP[P_SLEN].max == 32;
+        t->p[P_SDIV] = 2;
+        bad += check("MONOFM SCALE: 2X a step of 1/32, 1X 1/16, 1/8X 1/2; LEN up to 32", ok);
+    }
+    /* the actions: TRN +, SHIFT >, COPY / PASTE the track, COPY / PASTE the pattern */
+    {
+        track_t *t = &trk[0];
+        tp_fresh();
+        song.sel = 0;
+        sc_pattern(t, 60, 16);
+        mf_pat_action(MA_TUP);
+        ok = t->step[0].note[0] == 61u;
+        mf_pat_action(MA_RIGHT);
+        ok &= !step_on(&t->step[0]) && t->step[1].note[0] == 61u;
+        mf_pat_action(MA_CTRK);
+        song.sel = 2;
+        mf_pat_action(MA_PTRK);
+        ok &= trk[2].step[1].note[0] == 61u;
+        mf_pat_action(MA_CPAT);
+        mf_pat_ask(5);
+        ok &= !step_on(&trk[0].step[1]);
+        mf_pat_action(MA_PPAT);
+        ok &= trk[0].step[1].note[0] == 61u && trk[2].step[1].note[0] == 61u && mfp.cur == 5u;
+        song.sel = 0;
+        bad += check("MONOFM ACTIONS: TRN +, SHIFT >, COPY / PASTE a track, COPY / PASTE a pattern (A01 -> A06)", ok);
+    }
+    /* FILL: GLO held + F5 held */
+    frames(600);
+    btn_down(B_GLO);
+    frames(50);
+    key_down(key_at(0, 14));
+    frames(50);
+    ok = mfp_fill == 1u;
+    key_up(key_at(0, 14));
+    frames(50);
+    btn_up(B_GLO);
+    frames(100);
+    bad += check("MONOFM FILL: on while GLO + F5 are held, off after", ok && mfp_fill == 0u);
     return bad;
 }
-
 
 /* SEQ > STEP's KEYS editor (the default): the white keys the page's steps (a tap a trig on / off in the last note, held
  * past MF_PICK_MS only picked, held + a knob a lock), silent; KNOB 1..4 the cursor step's NOTE VEL LEN CHANCE;
@@ -1166,8 +1274,8 @@ int main(void)
     }
     if (getenv("MF_KEYS_ONLY"))
         return test_keys_editor() != 0;
-    if (getenv("MF_SCENES_ONLY"))
-        return test_scenes() != 0;
+    if (getenv("MF_PAT_ONLY"))
+        return test_mfpat() != 0;
     if (getenv("MF_STAB_ONLY"))
         return test_stability() != 0;
     if (getenv("BENCH")) {                              /* tests/monofm_cpu.sh: one set for BENCH seconds */
@@ -1186,7 +1294,7 @@ int main(void)
     bad += test_xy();
     bad += test_filter();
     bad += test_punch();
-    bad += test_scenes();
+    bad += test_mfpat();
     bad += test_keys_editor();
     bad += test_stability();
     printf(bad ? "monofm: %d FAILED\n" : "monofm: all passed\n", bad);

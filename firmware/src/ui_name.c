@@ -100,7 +100,7 @@ static void name_open(uint32_t kind, uint32_t slot)
         nm.cat = (uint8_t)(kind == NK_USER_RENAME ? up_cat(slot) : track_cat(TSEL));
     } else {
         str_cpy(nm.ph, "PROJECT A", sizeof nm.ph);
-        nm.ph[8] = (char)('A' + slot % (FELUCCA_MONOFM ? 16u : 4u));
+        nm.ph[8] = (char)('A' + (slot & 3u));
         if (kind == NK_PROJ_RENAME)
             project_name(slot, b);
         else

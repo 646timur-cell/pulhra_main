@@ -37,6 +37,8 @@ static const uint8_t *ed_bk_object(uint32_t id, uint32_t *len)
     if (id == 0u) { *len = sizeof(project_store_t); return ED_BK_RAW; }
     if (id == 1u) { *len = sizeof ed_bk_settings; return (const uint8_t *)&ed_bk_settings; }
     if (id >= 2u && id <= 5u) {
+        if (FELUCCA_MONOFM)
+            return ED_BK_RAW;                       /* (MONOFM: no project slots; its patterns: mf_pat.c) */
         if (project_used(id - 2u)) *len = sizeof proj_slot[0];
         return (const uint8_t *)&proj_slot[id - 2u];
     }
@@ -104,6 +106,8 @@ static uint32_t ed_bk_commit(void)
             if (!ed_bk_len) return 2;
             return project_restore_runtime(&proj_scratch) ? 2u : 0u;
         }
+        if (FELUCCA_MONOFM)
+            return 0;                               /* (MONOFM: no project slots to restore into, mf_pat.c) */
         obj = OBJ_PROJECT0 + ed_bk_id - 2u;
     } else if (ed_bk_id == 1u) {
         const persist_t *p = (const persist_t *)raw;
@@ -136,7 +140,6 @@ static uint32_t ed_bk_commit(void)
 #endif
     if (ed_bk_id >= 2u && ed_bk_id <= 5u) {
         memset(&proj_slot[ed_bk_id - 2u], 0, sizeof proj_slot[0]);
-        mf_sc_forget(ed_bk_id - 2u);
         if (proj_cur == ed_bk_id - 2u)
             proj_cur = PROJ_NO_SLOT;                     /* (another project there now: the music keeps its name) */
         if (ed_bk_len) memcpy(&proj_slot[ed_bk_id - 2u], raw, ed_bk_len);

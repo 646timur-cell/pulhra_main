@@ -59,7 +59,7 @@ static const char *const N_GO[] = {"--", "GO"};
 static const char *const N_XYLINK[] = {"OFF", "ON", "INV", "CROSS"};   /* XY LINK (G_XYLINK) */
 #endif
 #if FELUCCA_MONOFM
-static const char *const N_SCENE[] = {"-", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"};
+static const char *const N_MSCALE[] = {"2X", "3/2X", "1X", "3/4X", "1/2X", "1/4X", "1/8X"};   /* MONOFM's track SCALE */
 static const char *const N_MFILT[] = {"OFF", "LP", "BP", "HP", "NOTCH"};      /* MONOFM's track FILTER (P_FLT, voice.c) */
 #endif
 static const char *const N_SLCR[] = {"OFF", "GATE", "STUT"};             /* SL_OFF .. SL_STUT (slicer.c) */
@@ -289,6 +289,8 @@ static const param_desc_t TP[P_COUNT] = {
     [P_FTYPE] = PE("TYPE", N_FTYPE, 0),           /* 1.5 (#104): ANALOG's filter, LP = as before (eng_analog.c) */
     [P_ESYNC] = PE("ESYNC", N_ONOFF, 0),          /* 1.5 (#175): OFF = ATK DEC REL in ms, as before (voice.c esync) */
 #if FELUCCA_MONOFM   /* MONOFM's own (core.h P_EUC ..): EUCLID, X / Y, the track FILTER on ids no MONOFM sound uses */
+    [P_SLEN] = PD("LEN", F_STEPS, 1, 32, 16),           /* (MONOFM's patterns: 32 steps, mf_pat.c) */
+    [P_SDIV] = PE("SCALE", N_MSCALE, 2),                /* (Elektron's track scale, core.h seq_div) */
     [P_EUC] = PE("EUCL", N_ONOFF, 0),
     [P_EHITS] = PD("HITS", F_INT, 0, 64, 4),
     [P_EROT] = PD("ROT", F_INT, 0, 63, 0),
@@ -342,11 +344,7 @@ static const param_desc_t GP[G_COUNT] = {
      * stored with the project as before. (was "--": stored 0 = CH1-4, as MIDI IN always was) */
     [G_ROUTE] = PE("ROUT", N_ROUTE, 0),
     [G_INFO] = PD("CPU", F_INT, 0, 0, 0),
-#if FELUCCA_MONOFM
-    [G_SLOT] = {"SCENE", F_ENUM, 1, 16, 1, N_SCENE, 0},   /* (MONOFM: the scenes A..P, scene_mf.c) */
-#else
     [G_SLOT] = PD("SLOT", F_INT, 1, 4, 1),
-#endif
     [G_NAME] = PE("NAME", N_DASH, 0),
     [G_LOAD] = PE("LOAD", N_GO, 0),
     [G_SAVE] = PE("SAVE", N_GO, 0),
@@ -591,7 +589,7 @@ enum { FAM_HOME, FAM_ENV, FAM_LFO, FAM_FX, FAM_SCL, FAM_EDIT, FAM_GLO, FAM_SAVE,
 enum { SC_TRACK, SC_GLOBAL, SC_ENGINE, SC_STEP, SC_TRK };   /* SC_TRK: the TRACKS page (ui_input.c tracks_edit) */
 enum { GR_NONE, GR_ADSR, GR_LFO, GR_STEPS, GR_ARP, GR_SCALE, GR_FX, GR_ROLL, GR_BROWSE, GR_SLOTS, GR_USER, GR_TRK,
        GR_SLCR, GR_MOD, GR_PATS, GR_SONG, GR_TOOLS, GR_CHORD, GR_SLICES, GR_EVENTS,
-       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS, GR_EUCLID, GR_XY, GR_MICRO };   /* (GR_XY: STRANGE's ARP > X, Y) */   /* (GR_EUCLID: STRANGE's EUCLID pages, the pattern) */   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
+       GR_FMOP, GR_FMOP2, GR_FMENV, GR_INS, GR_EUCLID, GR_XY, GR_MICRO, GR_MPROJ };   /* (GR_MPROJ: MONOFM's PROJECT) */   /* (GR_XY: STRANGE's ARP > X, Y) */   /* (GR_EUCLID: STRANGE's EUCLID pages, the pattern) */   /* (GR_STEPS: SEQ TOOLS' knobs; GR_FMOP..: FM6's operator pages, ui_fm6op.c) */
 
 typedef struct {
     const char *title;
@@ -667,7 +665,11 @@ static const page_t PAGES[] = {
     {"PRESETS", FAM_SAVE, SC_GLOBAL, GR_BROWSE, {0xFF, 0xFF, 0xFF, 0xFF}},   /* browser: PRESETS knob / KNOB 1 */
     {"PHRASES", FAM_SAVE, SC_GLOBAL, GR_PATS, {0xFF, 0xFF, 0xFF, 0xFF}},    /* pattern loader: PAT LOAD (ui.c pat_load);
                                                                              * the tap after PRESETS (up to 1.1.5 SEQ's) */
-    {FELUCCA_MONOFM ? "SCENES" : "PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
+#if FELUCCA_MONOFM   /* (MONOFM: the project of 16 patterns, mf_pat.c: RELOAD the pattern, RELOAD all, SAVE) */
+    {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_MPROJ, {0xFF, G_LOAD, G_CLRSEQ, G_SAVE}},
+#else
+    {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
+#endif
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_TOOLS, {G_CLRSEQ, G_INITSND, 0xFF, 0xFF}},
 #if FELUCCA_STRANGE   /* FAV (the favourite sounds, PRESETS' browser on its FAV list): SAVE tapped three times (ui_input.c);
                        * ARP: X / Y's routes, then XY LINK (HOME's X / Y on both parts) */

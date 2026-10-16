@@ -192,6 +192,69 @@ static void pr_bars(const step_t *st, int32_t x, int32_t w, uint16_t c, int acc_
             pr_split(x, y + 1, w, PR_RH - 2, c, hits);
     }
 }
+#if FELUCCA_MONOFM
+/* MONOFM's SEQ > STEP (Elektron: no picture of the pattern, the keys show it): the step picked (the trig held, else the
+ * cursor) and what it holds: its notes big (a chord: all of them), its condition, LEN, accent / slide, ratchet; the
+ * pages of the track as boxes (the one shown filled, the one playing marked under it) */
+static void graph_mstep(const track_t *t, uint16_t c)
+{
+    const step_t *st = &seq_steps(t)[ui.cursor % NSTEP];
+    uint32_t len = (uint32_t)clamp(t->p[P_SLEN], 1, 32), pages = (len + 15u) / 16u, i, on = step_on(st) && st->n;
+    char b[32], n[8];
+    (void)c;
+    str_cpy(b, "STEP ", sizeof b);
+    fmt_int(b + 5, (int32_t)ui.cursor + 1);
+    str_cpy(b + str_len(b), " / ", sizeof b - str_len(b));
+    fmt_int(b + str_len(b), (int32_t)len);
+    cv_text(10, 8, &AF_S, b, T_MID);
+    for (i = 0; i < pages; i++) {                         /* the pages: right, 14 px boxes */
+        int32_t x = 226 - (int32_t)(pages - i) * 18;
+        uint32_t shown = i == ui.bank % 2u, play = song.playing && t->seq_idx / 16u == i;
+        cv_rrect(x, 6, 14, 10, 2, shown ? T_THEME : T_RAISE, T_SURF);
+        if (play)
+            cv_rect(x + 3, 19, 8, 2, T_ACCENT);
+    }
+    if (!on) {
+        cv_text_in(0, 44, 240, &AF_M, st->time == ST_TIE ? "TIE" : "NO TRIG", T_DIM, T_SURF);
+        cv_text_in(0, 76, 240, &AF_S, mf_kbd ? "PLAY A NOTE: IT GOES HERE" : "TAP A KEY: A TRIG", T_DIM, T_SURF);
+        return;
+    }
+    b[0] = 0;
+    for (i = 0; i < st->n && i < 4u; i++) {               /* the notes, "C3 E3 G3" */
+        note_name(n, st->note[i]);
+        if (i)
+            str_cpy(b + str_len(b), " ", sizeof b - str_len(b));
+        str_cpy(b + str_len(b), n, sizeof b - str_len(b));
+    }
+    cv_text_in(0, 34, 240, large_face_has(b) && st->n <= 2u ? &AF_L : &AF_M, b, T_TEXT, T_SURF);
+    mf_cond_name(st->probability, n);
+    str_cpy(b, n, sizeof b);
+    str_cpy(b + str_len(b), "   LEN ", sizeof b - str_len(b));
+    fmt_int(b + str_len(b), (int32_t)note_len(t, ui.cursor % NSTEP));
+    if (st->flags & SF_ACCENT)
+        str_cpy(b + str_len(b), "   ACC", sizeof b - str_len(b));
+    if (st->flags & SF_SLIDE)
+        str_cpy(b + str_len(b), "   SLD", sizeof b - str_len(b));
+    if (step_ratchet(st) > 1u) {
+        str_cpy(b + str_len(b), "   X", sizeof b - str_len(b));
+        fmt_int(b + str_len(b), (int32_t)step_ratchet(st));
+    }
+    cv_text_in(0, 80, 240, &AF_S, b, T_MID, T_SURF);
+}
+/* MONOFM's SAVE > PROJECT: the pattern playing, the project's state, the change mode */
+static void graph_mproj(void)
+{
+    static const char *const MODE_N[3] = {"SEQUENTIAL", "DIRECT START", "DIRECT JUMP"};
+    char b[24], n[8];
+    mf_pat_label(mf_pat_cur(), n);
+    str_cpy(b, "PATTERN ", sizeof b);
+    str_cpy(b + 8, n, sizeof b - 8u);
+    cv_text_in(0, 22, 240, &AF_M, b, T_TEXT, T_SURF);
+    cv_text_in(0, 52, 240, &AF_S, mf_pat_unsaved() ? "CHANGED SINCE SAVE" : "SAVED", mf_pat_unsaved() ? T_ACCENT : T_MID,
+               T_SURF);
+    cv_text_in(0, 74, 240, &AF_S, MODE_N[mf_pat_mode() % 3u], T_DIM, T_SURF);
+}
+#endif
 static void graph_roll(const track_t *t, uint16_t c)
 {
     uint32_t i, len = (uint32_t)t->p[P_SLEN], base = ui.bank * 16u, ncol, mask = scale_mask(t), held = pr_held();
@@ -1106,18 +1169,6 @@ static uint16_t graph_plen[4][NTRK];                  /* .. each track's pattern
 static uint32_t graph_pden[4][NTRK];                  /* .. and its picture for SONG (project.c proj_density: 2 bits a cell) */
 static uint8_t graph_pcell[4][NTRK];                  /* .. in this many cells (min(LEN, 16)) */
 static uint32_t graph_pname_sig;
-#if FELUCCA_MONOFM                                    /* (the scenes A..P: their list is kept, scene_mf.c / project.c) */
-static int mf_scene_info(uint32_t s, const char **name);
-static uint32_t mf_scene_sig(void);
-static int mf_scene_is(uint32_t n);
-static int graph_project_used(uint32_t slot) { return mf_scene_info(slot, 0); }
-static const char *graph_project_name(uint32_t slot)
-{
-    const char *n = "";
-    mf_scene_info(slot, &n);
-    return n;
-}
-#else
 static int graph_project_used(uint32_t slot)
 {
     static uint32_t ms, frame;
@@ -1136,7 +1187,6 @@ static const char *graph_project_name(uint32_t slot)  /* (after graph_project_us
 {
     return graph_pname[slot & 3u];
 }
-#endif
 
 /* SONG's timeline (graph_song): the sections left to right, each as wide as it plays: REPS x its clock track's pattern
  * (song_chain.c chain_clock: the first track not silent there; project_info: that track's LEN x DIV in its slot, what
@@ -1387,13 +1437,9 @@ static uint32_t graph_signature(void)
     if (pg->graph == GR_SLCR && t->p[P_SLCR])        /* the SLICER's step playing */
         h ^= (sl[song.sel].idx + 1u) * 2654435761u;
     if (pg->graph == GR_SLOTS) {                     /* (a checksum over each slot) */
-#if FELUCCA_MONOFM
-        h += mf_scene_sig();
-#else
         for (i = 0; i < 4u; i++)
             h ^= (uint32_t)graph_project_used(i) << (20u + i);
         h += graph_pname_sig;
-#endif
     }
     if (pg->graph == GR_EVENTS)                      /* AUTOMATION: the rows, the one selected, + ADD's place, PLAY,
                                                       * QUANTIZE */
@@ -1749,17 +1795,6 @@ static void graph_events(void)
 static void graph_slots(void)
 {
     uint32_t i;
-#if FELUCCA_MONOFM                                    /* the scenes, 4 at a time (the selected one's four): A..P, the */
-    uint32_t i0 = ((uint32_t)song.g[G_SLOT] - 1u) & ~3u;   /* one playing marked ">" */
-    for (i = i0; i < i0 + 4u; i++) {
-        int32_t y = 12 + (int32_t)(i - i0) * 26;
-        char b[4] = {(char)('A' + i), mf_scene_is(i) ? '>' : 0, 0, 0};
-        int sel = (int32_t)i + 1 == song.g[G_SLOT], used = graph_project_used(i);
-        const char *n = graph_project_name(i);
-        list_row(y, sel, b, T_MID, !used ? "--" : n[0] ? n : "USED", used ? T_TEXT : T_DIM, 232);
-    }
-    return;
-#endif
     for (i = 0; i < 4u; i++) {
         int32_t y = 12 + (int32_t)i * 26;
         char b[4];
@@ -2483,6 +2518,10 @@ static void draw_graph(void)
                 graph_detail(t, c);
             else if (drum_track(t))
                 graph_grid(t, c);
+#if FELUCCA_MONOFM
+            else if (!(ui_prefs2 & (PREF_ROLL >> 16)))
+                graph_mstep(t, c);                    /* (KEYS: the step, no roll) */
+#endif
             else
                 graph_roll(t, c);
             break;
@@ -2529,6 +2568,12 @@ static void draw_graph(void)
             cv_oy = 0;
             graph_slots();
             break;
+#if FELUCCA_MONOFM
+        case GR_MPROJ:
+            cv_oy = 0;
+            graph_mproj();
+            break;
+#endif
         case GR_USER:
             cv_oy = 0;
             graph_user();

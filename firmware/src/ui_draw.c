@@ -280,7 +280,18 @@ static int head_slot(char *b)
         b[0] = s < 4u ? (char)('A' + s) : '-';
         return 1;
     }
-    if (!pat_from[k] || pat_from[k] > (FELUCCA_MONOFM ? 16u : 4u))   /* (MONOFM: the scenes A..P) */
+#if FELUCCA_MONOFM                                    /* the pattern playing ("A03", "*": not SAVEd as it is); the */
+    if (mf_pat_next() < 16u && ((fm1_ms >> 8) & 1u)) {   /* one asked for blinks in its place */
+        mf_pat_label(mf_pat_next(), b);
+        b[4] = 1;
+    } else {
+        mf_pat_label(mf_pat_cur(), b);
+        b[3] = mf_pat_unsaved() ? '*' : 0;
+        b[4] = 0;
+    }
+    return 1;
+#endif
+    if (!pat_from[k] || pat_from[k] > 4u)
         return 0;
     b[0] = (char)('A' + pat_from[k] - 1u);
     if (pat_from_sig(TSEL) != pat_from_h[k])
@@ -314,7 +325,7 @@ static void draw_head(void)
     head_geo_t g;
     int32_t beat = -1;                                 /* the metronome stands still (its swing removed in 1.1.5) */
     uint32_t rec = (song.rec >> song.sel) & 1u ? 2u : song.rec != 0u;   /* 2 the selected track armed, 1 another */
-    char sl[3];
+    char sl[8] = {0};
     int slot = head_slot(sl);
     uint32_t sig = (uint32_t)song.playing * 3u + rec * 5u + (uint32_t)(song.octave + 8) * 11u + song.sel * 13131u +
                    (ui.msg_t ? str_hash(7u, ui.msg) : ui.layer * 7919u + (uint32_t)layer_locked() * 3u) + (uint32_t)song.g[G_BPM] * 101u + (ui.bpm_t != 0) * 31u +
@@ -356,6 +367,17 @@ static void draw_head(void)
     metro_x = -1;
     cv_begin(240, H_HEAD, T_BG);
     cv_icon_mid(HEAD_TRK_X, H_HEAD / 2, 16, trk_icon(song.sel, 1), T_ACCENT, T_BG);
+#if FELUCCA_MONOFM
+    if (slot && (centre || !msg)) {                    /* the pattern: "A03" (the next one blinking in the accent) */
+        char l[4] = {sl[0], sl[1], sl[2], 0};
+        GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
+        rx = cv_text(HEAD_SLOT_X, HEAD_MY, &AF_M, l, sl[4] ? T_ACCENT : T_THEME);
+        if (sl[3])
+            rx = cv_text(rx, HEAD_MY, &AF_M, "*", T_MID);
+        rx += 1;
+    }
+    if (0)
+#endif
     if (slot && (centre || !msg)) {                    /* the slot letter (not under a message centred: its room) */
         char l[2] = {sl[0], 0};
         GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
@@ -1202,8 +1224,8 @@ static void draw_columns(void)
         draw_column(1, "VEL", on ? sn : "--", "", on ? VAL(1u) : T_DIM, -1, ICON_AUTO);
         fmt_int(sn, (int32_t)note_len(TSEL, ui.cursor));
         draw_column(2, "LEN", on ? sn : "--", "", on ? VAL(2u) : T_DIM, -1, ICON_AUTO);
-        fmt_int(sn, (int32_t)step_chance(st));
-        draw_column(3, "CHNC", on ? sn : "--", on ? "%" : "", on ? VAL(3u) : T_DIM, -1, ICON_AUTO);
+        mf_cond_name(st->probability, sn);
+        draw_column(3, "COND", sn, "", on ? VAL(3u) : T_DIM, -1, ICON_AUTO);
         return;
     }
 #endif
@@ -1251,11 +1273,28 @@ static void draw_columns(void)
     for (c = 0; c < 4u; c++) {
         int16_t *vp;
         const param_desc_t *d = page_desc(cur_page(), c, &vp);
+#if FELUCCA_MONOFM
+        if (cur_page()->graph == GR_MPROJ && c == 0u) {   /* PROJECT's KNOB 1: the pattern's master length */
+            if (mf_pat_mlen())
+                fmt_int(val, (int32_t)mf_pat_mlen());
+            else
+                str_cpy(val, "AUTO", 12);
+            draw_column(0, "M.LEN", val, mf_pat_mlen() ? "STP" : "", VAL(0u), -1, ICON_AUTO);
+            continue;
+        }
+#endif
         if (!d || !d->label || d->label[0] == '-') {
             draw_column(c, "", "", "", T_THEME, -1, ICON_AUTO);
             continue;
         }
         if ((act_cols() >> c) & 1u) {
+#if FELUCCA_MONOFM
+            if (cur_page()->graph == GR_MPROJ) {          /* PROJECT: RELOAD the pattern, RELOAD all, SAVE */
+                static const char *const L[4] = {"", "RLD PAT", "RLD ALL", "SAVE"};
+                draw_act_column(c, L[c & 3u], T_THEME, ICON_AUTO);
+                continue;
+            }
+#endif
             draw_act_column(c, d->label, T_THEME, ICON_AUTO);
             continue;
         }
@@ -1470,8 +1509,8 @@ static void confirm_text(char *a, char *b)
         break;
     case CF_OVR_PROJ:
         str_cpy(a, "OVERWRITE PROJECT A?", 24);
-        a[18] = (char)('A' + k % (FELUCCA_MONOFM ? 16u : 4u));
-        if (!project_name(k % (FELUCCA_MONOFM ? 16u : 4u), b) || !b[0])          /* the project's name, else what SONG plays from it */
+        a[18] = (char)('A' + (k & 3u));
+        if (!project_name(k & 3u, b) || !b[0])          /* the project's name, else what SONG plays from it */
             str_cpy(b, "SONG PATTERN CHANGES", 24);
         break;
     case CF_DEL_ROW:

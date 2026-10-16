@@ -320,8 +320,12 @@ static inline int mf_euc_hit(const int16_t *p, uint32_t i)
     return k && (((i + r) % n) * k) % n < k;
 }
 #define MF_EUC_ON(t) ((t)->p[P_EUC] != 0)   /* the track's EUCLID on */
+/* the track's step length as a DIV (fx.c div_samples): MONOFM's SCALE (P_SDIV) 2X 3/2X 1X 3/4X 1/2X 1/4X 1/8X */
+static const uint8_t MF_SCALE_DIV[7] = {3, 5, 2, 4, 1, 0, 6};
+#define seq_div(t) ((uint32_t)MF_SCALE_DIV[clamp((t)->p[P_SDIV], 0, 6)])
 #else
 #define MF_EUC_ON(t) 0
+#define seq_div(t) ((uint32_t)(t)->p[P_SDIV])
 #endif
 
 /* ------------------------------------------------- tracks, the song --- */
@@ -347,7 +351,11 @@ typedef struct {                 /* a step as formats 1..4 (projects to FUN4) st
 } step8_t;
 
 /* Probability keeps zero-initialized and legacy patterns at 100%. */
-static uint32_t step_chance(const step_t *s) { return !s->probability ? 100u : s->probability <= 100u ? s->probability : 0u; }
+static uint32_t step_chance(const step_t *s)
+{
+    return !s->probability ? 100u : s->probability <= 100u ? s->probability :
+           FELUCCA_MONOFM && s->probability > 101u ? 100u : 0u;   /* (MONOFM: an Elektron condition, seq.c mf_trig_plays) */
+}
 static void step_set_chance(step_t *s, uint32_t chance) { s->probability = (uint8_t)(chance >= 100u ? 0u : chance ? chance : 101u); }
 /* RATCH: a NOTE step plays its notes and hits this many times (1..4), in equal parts of the step; every older
  * pattern holds 0 there, x1 */

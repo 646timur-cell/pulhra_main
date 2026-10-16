@@ -49,14 +49,56 @@
  * a double tap leaves the page as it was. A first tap that acted instead of opening a page (EDIT on STEP: clear the
  * step; on USER / PROJECT: rename) arms no double tap: two quick taps there still act twice. */
 #include "ui_tools.c"                                   /* SEQ TOOLS' actions */
-#if FELUCCA_MONOFM                                      /* the scenes (scene_mf.c): SEQ held, the white keys A .. P */
-static void mf_scene_key(uint32_t k, uint32_t p);
-static void mf_scene_keys(uint64_t held_keys);
-static void mf_scene_layer_open(void);
-static int mf_scene_is(uint32_t n);
-static int mf_scene_coming(uint32_t n);
-static uint32_t mf_scene_sig(void);
-static int mf_scene_info(uint32_t s, const char **name);
+#if FELUCCA_MONOFM
+/* MONOFM's SEQ held (mf_pat.c): ALGORITHM picks a pattern (msq.pick), OCT+ adds it to a chain, OCT- forgets both; let go
+ * of SEQ, the pick (or the chain) is asked for. White keys F3 .. G4 the actions (MA_*); black keys: F#3 the change
+ * mode, G#3 the chain off, F#5 held MSQ_SAVE_MS: SAVE the project */
+#define MSQ_SAVE_MS 800u
+#define MSQ_KEY_SAVE 10u                                /* (F#5: the black key place) */
+static struct {
+    uint8_t pick, picked, n, chain[16];
+    uint8_t save_k;                                     /* the SAVE key down (+ 1), since save_t */
+    uint32_t save_t;
+} msq;
+static void msq_open(void)
+{
+    msq.pick = (uint8_t)mf_pat_cur();
+    msq.picked = 0;
+    msq.n = 0;
+}
+static void msq_turn(int32_t s)                         /* (ui_input.c: ALGORITHM with SEQ held) */
+{
+    char b[16] = "PICK ";
+    msq.pick = (uint8_t)((msq.pick + 16u + (s > 0 ? 1u : 15u)) % 16u);
+    msq.picked = 1;
+    mf_pat_label(msq.pick, b + 5);
+    ui_message(b);
+    ui.force = 1;
+}
+static void msq_oct(uint32_t oct)                       /* (ui_input.c: OCT+ / OCT- with SEQ held) */
+{
+    if (oct & 2u) {
+        char b[16] = "CHAIN + ";
+        if (msq.n < 16u)
+            msq.chain[msq.n++] = msq.pick;
+        mf_pat_label(msq.pick, b + 8);
+        ui_message(b);
+    } else if (oct & 1u) {
+        msq_open();
+        ui_message("PICK CANCELLED");
+    }
+    ui.force = 1;
+}
+static void msq_commit(void)                            /* SEQ let go: the pick or the chain is asked for */
+{
+    if (msq.n >= 2u)
+        mf_pat_chain(msq.chain, msq.n);
+    else if (msq.n == 1u)
+        mf_pat_ask(msq.chain[0]);
+    else if (msq.picked)
+        mf_pat_ask(msq.pick);
+    msq_open();
+}
 #endif
 #if FELUCCA_STRANGE                                     /* the scenes (scene.c): GLO's white keys G4 .. G5 */
 #define SC_SIG ((uint32_t)sc_last * 7919u + (uint32_t)sc_used(0) + sc_used(1) * 2u + sc_used(2) * 4u + sc_used(3) * 8u + \
@@ -297,6 +339,10 @@ static void layer_arm(uint32_t pressed, uint32_t now)
             ui.ly = (uint8_t)l;                         /* (sound module: no SEQ TOOLS, no REC layer) */
             ui.ly_t0 = (now & ~15u) | 1u | (layer_allowed() ? 0u : LY_DEAD);
 #if FELUCCA_MONOFM
+            if (l == LAYER_SEQ)
+                msq_open();                             /* (SEQ down: the pattern playing picked, no chain yet) */
+#endif
+#if FELUCCA_MONOFM
             if (l == LAYER_SEQ && ((fm1_in.buttons >> panel.btn[B_ARP]) & 1u)) {   /* ARP held, then SEQ: the keyboard */
                 ui.ly_t0 |= LY_DEAD;                    /* for the step (SEQ: no layer, no tap) */
                 lys.dtap = 0;
@@ -314,6 +360,10 @@ static void layer_arm(uint32_t pressed, uint32_t now)
  * opened, or a combo: KNOB 1..4 quiet for a while (#39: the knob still turning is not the page's) */
 static void layer_let_go(uint32_t quiet)
 {
+#if FELUCCA_MONOFM
+    if (ui.ly == LAYER_SEQ)
+        msq_commit();                                   /* (SEQ let go: the pattern picked, or the chain) */
+#endif
     if (ui.ly == LAYER_FX && !perf_latch_on)
         perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
     if (lys.rp_dirty) {                                 /* REC: its settings kept, as MENU does when it closes (FX: the map) */
@@ -391,10 +441,6 @@ static void layer_opened(uint32_t l)
     ly_epage = (uint8_t)ly_pg_of(eng_rank(TSEL->eng_req % NENGINES));   /* (EDIT: the engine's page) */
 #if FELUCCA_STRANGE
     se_page = eng_rank(TSEL->eng_req % NENGINES) >= SE_P1;   /* (EDIT: the machine's page) */
-#endif
-#if FELUCCA_MONOFM
-    if (l == LAYER_SEQ)
-        mf_scene_layer_open();                          /* (two taps from here on chain two scenes) */
 #endif
     if (l == LAYER_SEQ || l == LAYER_REC) {             /* the track as it is now (OCT-) */
         memcpy(tl_open.step, TSEL->step, sizeof tl_open.step);
@@ -894,13 +940,22 @@ static void layer_key(uint32_t l, uint32_t k)
         eu_key(k);
 #endif
 #if FELUCCA_MONOFM
-    } else if (l == LAYER_SEQ) {                        /* the white keys the scenes, the black ones the tools */
+    } else if (l == LAYER_SEQ) {                        /* the white keys the actions, the black ones the modes */
         if ((fm1_in.buttons >> panel.btn[B_ARP]) & 1u)
-            ;                                           /* (SEQ + ARP: the keyboard's toggle, no scene, no tool) */
-        else if (!key_black(k))
-            mf_scene_key(k, p);
-        else
-            tools_key(p);
+            ;                                           /* (SEQ + ARP: the keyboard's toggle, nothing else) */
+        else if (chain_busy())
+            ui_message("STOP TO EDIT");
+        else if (!key_black(k) && p < MA_N)
+            mf_pat_action(p);
+        else if (key_black(k) && p == 0u)
+            mf_pat_mode_step();
+        else if (key_black(k) && p == 1u)
+            mf_chain_stop();
+        else if (key_black(k) && p == MSQ_KEY_SAVE) {
+            msq.save_k = (uint8_t)(k + 1u);              /* (held: SAVE, msq_keys) */
+            msq.save_t = fm1_ms;
+            ui_message("HOLD: SAVE PROJECT");
+        }
 #endif
     } else if (l == LAYER_SEQ) {
         if (!key_black(k))
@@ -919,7 +974,22 @@ static void layer_keys(uint32_t keys)
     if (lys.eqh)
         eqa_release();
 #if FELUCCA_MONOFM
-    mf_scene_keys(kb_layer);                            /* (a scene key let go: picked; held on: stored) */
+    {   /* GLO held + F5 (white place 14) held: FILL (the trig conditions FILL / !FILL, seq.c) */
+        uint32_t f = 0;
+        for (k = 0; l == LAYER_GLO && k < 27u; k++)
+            f |= ((kb_layer >> k) & 1u) && !key_black(k) && key_place(k) == 14u;
+        mfp_fill = (uint8_t)f;
+    }
+#endif
+#if FELUCCA_MONOFM
+    if (msq.save_k) {                                   /* F#5 held MSQ_SAVE_MS: SAVE */
+        if (!((kb_layer >> (msq.save_k - 1u)) & 1u))
+            msq.save_k = 0;
+        else if (fm1_ms - msq.save_t >= MSQ_SAVE_MS) {
+            msq.save_k = 0;
+            mf_pat_save();
+        }
+    }
 #endif
 #if FELUCCA_STRANGE
     if (sc_k != 0xFFu) {                                /* the scene key: still held (to store), let go (to call) */
@@ -1015,7 +1085,15 @@ static uint32_t layer_oct(uint32_t pressed, uint32_t oct)
         ly_epage = (uint8_t)((ly_epage + 1u) % LY_PAGES);
         ui.force = 1;
     }
+#if FELUCCA_MONOFM
+    if (mine && lys.l == LAYER_SEQ) {                   /* MONOFM's SEQ: OCT+ the pick into the chain, OCT- cancels */
+        msq_oct(mine);
+        mine |= 0x80u;
+    }
+    if ((mine & 1u) && !(mine & 0x80u)) {
+#else
     if (mine & 1u) {                                    /* OCT-: back to when it opened */
+#endif
         if (lys.l == LAYER_FX) {                        /* (FX LATCH) every effect and macro off */
             perf_latched = 0;
             perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
@@ -1066,7 +1144,7 @@ static uint32_t layer_oct(uint32_t pressed, uint32_t oct)
         }
     }
     lys.oct &= (uint8_t)(((fm1_in.buttons >> dn) & 1u) | ((fm1_in.buttons >> up) & 1u) << 1);
-    return oct & ~mine;
+    return oct & ~(mine & 3u);
 }
 
 /* --------------------------------------------------------- the LEDs --- */
@@ -1087,7 +1165,7 @@ static uint32_t layer_leds(uint32_t *br)
             on = can && ((held >> e) & 1u);
         } else if (l == LAYER_GLO) {                    /* sounding lit; SOLO held lit, the others, C4, F4 breathe */
             on = b ? p < NTRK && glo_sounding(p) : (p < NTRK && ((lys.solo >> k) & 1u)) || (p == 5u && ui.ml.on);
-            can = !b && (p < NTRK || p == 4u || p == 5u || (p == 7u && !song.g[G_CLOCK]));
+            can = !b && (p < NTRK || p == 4u || p == 5u || (p == 7u && !song.g[G_CLOCK]) || (FELUCCA_MONOFM && p == 14u));
 #if FELUCCA_STRANGE
             if (!b && p >= SC_KEY0 && p < SC_KEY0 + 8u) {   /* scenes: the last one lit, the stored ones breathe */
                 on = p - SC_KEY0 == sc_last;
@@ -1122,13 +1200,12 @@ static uint32_t layer_leds(uint32_t *br)
             on = a->on(TSEL, a->arg) != 0u;             /* a HOLD one off breathes, none dark */
             can = a->kind == LK_HOLD;
 #if FELUCCA_MONOFM
-        } else if (l == LAYER_SEQ) {                    /* the scene playing lit, the one coming blinks, the stored ones
-                                                         * breathe; the tools breathe */
-            if (b)
-                can = tl_cell(TSEL, p) && !chain_busy();
-            else {
-                on = mf_scene_is(p) || (mf_scene_coming(p) && ((fm1_ms >> 7) & 1u));
-                can = (uint32_t)mf_scene_info(p, 0);
+        } else if (l == LAYER_SEQ) {                    /* the actions and the modes breathe; the chain on lit */
+            if (b) {
+                on = p == 1u && mf_pat_nchain();
+                can = p == 0u || p == 1u || p == MSQ_KEY_SAVE;
+            } else {
+                can = p < MA_N && !chain_busy();
             }
 #endif
         } else if (l == LAYER_SEQ) {                    /* the tools breathe (not while a song plays); DRUM: the lane */
@@ -1321,6 +1398,10 @@ static void layer_glo(void)
     lcell(LC_X(1), 50, LC_H, n, ICON_MIDI, 0, "LEARN", ui.ml.on ? LS_SEL : LS_OFF, 0);   /* (MIDI LEARN, 1.5) */
     n[0] = 'F';
     lcell(LC_X(3), 50, LC_H, n, ICON_TEMPO, 0, "TAP", song.g[G_CLOCK] ? LS_DIM : LS_OFF, 0);
+#if FELUCCA_MONOFM
+    n[0] = 'F';                                         /* F5 held: FILL (the trig conditions, seq.c) */
+    lcell(LC_X(2), 50, LC_H, n, ICON_PROB, 0, "FILL", mfp_fill ? LS_HELD : LS_OFF, 1);
+#endif
     for (e = 0; e < NTRK; e++) {                        /* the black keys 1..4: MUTE, latched */
         bnote(n, e);
         lcell(LC_X(e), LM_Y, LM_H, n, ICON_MUTE, trk_icon(e, 0), 0, trk[e].p[P_MUTE] ? LS_MUTE : LS_OFF, 0);
@@ -1439,25 +1520,41 @@ static void layer_seq(void)
                 p[P_SLEN] == EU_PAT[i][0] && p[P_SSWING] == EU_PAT[i][1]);
 }
 #elif FELUCCA_MONOFM
-/* MONOFM's SEQ held: the scenes A..P on the white keys (4 a row: the letter, the name), the one playing selected, the
- * one coming (a chain: both) in the accent, empty ones dim; the tools on the black keys under them */
+/* MONOFM's SEQ held: the 16 patterns, 4 a row (playing: selected; picked with ALGORITHM: the accent; asked for, or in
+ * the chain: its place in it; empty: dim), then the mode and the chain, and what the white keys do */
 static void layer_seq(void)
 {
-    static const char *const TN[6] = {"CLR", "REV", "<<", ">>", "RND", "COOK"};
-    uint32_t p, st = chain_busy() ? LS_DIM : LS_OFF;
-    for (p = 0; p < 16u; p++) {
-        const char *nm = "";
-        char n[2] = {(char)('A' + p), 0}, b[8];
-        int used = mf_scene_info(p, &nm);
-        str_cpy(b, used ? (nm[0] ? nm : "SAVED") : "--", 7);
-        lcell(LC_X(p % 4u), 4 + 22 * (int32_t)(p / 4u), 18, n, ICON_COUNT, 0, b,
-              mf_scene_is(p) ? LS_SEL : mf_scene_coming(p) ? LS_HELD : used ? LS_OFF : LS_DIM, 0);
+    static const char *const MODE_N[3] = {"SEQUENTIAL", "DIRECT START", "DIRECT JUMP"};
+    uint32_t i, j;
+    char b[24], n[8];
+    for (i = 0; i < 16u; i++) {
+        uint32_t st = i == mf_pat_cur() ? LS_SEL : i == msq.pick && msq.picked ? LS_HELD :
+                      i == mf_pat_next() ? LS_WAIT : mfp_has_trigs(i) ? LS_OFF : LS_DIM;
+        char ord[4] = {0, 0, 0, 0};
+        for (j = 0; j < msq.n; j++)                       /* (its place in the chain being built: 1..) */
+            if (msq.chain[j] == i) {
+                fmt_int(ord, (int32_t)j + 1);
+                break;
+            }
+        mf_pat_label(i, n);
+        lcell(LC_X(i % 4u), 4 + 19 * (int32_t)(i / 4u), 16, n, ICON_COUNT, 0, ord[0] ? ord : "", st, 0);
     }
-    for (p = 0; p < 6u; p++) {                          /* black keys 1..6: CLEAR REVERSE SHIFT < > RANDOM COOK */
-        int32_t x = 6 + 38 * (int32_t)p;
-        uint16_t ink, fill = lc_box(x, LM_Y, 35, LM_H, lc_fill(st, &ink));
-        GFX_HOOK_ALIGN(x, LM_Y, x + 35, LM_Y + LM_H, AL_HV, "seq tool cell name centred");
-        cv_text_in(x, LM_Y + CAP_IN(S, LM_H), 35, &AF_S, TN[p], ink, fill);
+    str_cpy(b, MODE_N[mf_pat_mode() % 3u], sizeof b);
+    cv_text(8, 82, &AF_S, b, T_THEME);
+    if (msq.n || mf_pat_nchain()) {                      /* the chain: being built, else the one playing */
+        uint32_t c = msq.n ? msq.n : mf_pat_nchain();
+        str_cpy(b, "CHAIN ", sizeof b);
+        for (j = 0; j < c && str_len(b) < 20u; j++) {
+            mf_pat_label(msq.n ? msq.chain[j] : mf_pat_chain_at(j), n);
+            str_cpy(b + str_len(b), n + 1, sizeof b - str_len(b));
+            if (j + 1u < c)
+                str_cpy(b + str_len(b), ">", sizeof b - str_len(b));
+        }
+        cv_text_r(232, 82, &AF_S, b, T_ACCENT, T_SURF);
+    }
+    for (i = 0; i < MA_N; i++) {                          /* the white keys' actions, 5 then 4 */
+        int32_t x = 6 + (int32_t)(i % 5u) * 46, y = 96 + (int32_t)(i / 5u) * 13;
+        cv_text(x, y, &AF_S, MA_NAME[i], chain_busy() ? T_DIM : T_MID);
     }
 }
 #else
@@ -1593,7 +1690,7 @@ static void draw_layer(void)
             sig = sig * 33u + perf_map[p];
     }
     else if (l == LAYER_GLO)
-        sig += perf_solo * 31u + (uint32_t)song.g[G_CLOCK] * 5u + ui.ml.on * 7u + SC_SIG +
+        sig += perf_solo * 31u + (uint32_t)song.g[G_CLOCK] * 5u + ui.ml.on * 7u + SC_SIG + (FELUCCA_MONOFM ? mfp_fill * 4099u : 0u) +
                (uint32_t)(trk[0].p[P_MUTE] | trk[1].p[P_MUTE] << 1 | trk[2].p[P_MUTE] << 2 | trk[3].p[P_MUTE] << 3) * 131u;
     else if (l == LAYER_SCL)
         sig += (uint32_t)TSEL->p[P_SCALE] * 31u;
@@ -1603,7 +1700,8 @@ static void draw_layer(void)
         sig += (uint32_t)TSEL->p[P_AMODE] * 7919u + (uint32_t)TSEL->p[P_SLEN] * 104729u + (uint32_t)TSEL->p[P_SSWING] * 31337u +
                (uint32_t)drum_track(TSEL) * 31u + ui.lane * 5u + (uint32_t)chain_busy() * 3u + (uint32_t)TSEL->p[P_E0] * 131u + song.sel * 977u
 #if FELUCCA_MONOFM
-               + mf_scene_sig()
+               + mf_pat_cur() * 7u + mf_pat_next() * 131u + mf_pat_mode() * 977u + mf_pat_nchain() * 4099u +
+               msq.pick * 31u + msq.picked * 17u + msq.n * 65537u + msq.chain[0] * 13u + msq.chain[1] * 19u
 #endif
                ;
     else
