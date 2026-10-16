@@ -3,6 +3,8 @@
  *   CORE   the sound core alone (no seq.c, no ui*.c), from sm_core_init (the firmware's power-on): silent tracks mix to silence
  *   KIT    the kit reaches the core: every track sounds its machine, releases to silence; a machine change mid-note fades without a click
  *   SETTINGS  the settings record in the flash (the learned panel table, HOLD, palette) reaches SWAMP: sm_settings_load
+ *   SEQ    the step sequencer (sm_seq.c): timing at 30 / 120 / 300 BPM, track lengths 1 and 32, trigs while playing, STOP
+ *   CMD    the command queue (sm_cmd.c): full ring, coalesced values, a drain in the middle of a push; LOAD before engine_block; PANIC
  *   cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/swamp_test tests/swamp_test.c -lm */
 #include "swamp_host.h"
 /* the settings record as the firmware reads it (swamp.c: gfx, panel, settings_persist, storage on a simulated NOR) */
@@ -29,7 +31,25 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
     return 0;
 }
 #include "../firmware/src/storage.c"
+/* the sequencer's note-ons (swamp/sm_seq.c) through a counter: per track how many, at which sample (seq_clock: the samples
+ * the test has mixed or run through events_block before this block) */
+static uint32_t seq_clock, on_n[NTRK], on_at[NTRK][4], on_last[NTRK];
+static void seq_note_on(track_t *t, uint32_t note, uint32_t vel)
+{
+    uint32_t k = (uint32_t)(t - trk);
+    if (on_n[k] < 4u)
+        on_at[k][on_n[k]] = seq_clock;
+    on_n[k]++;
+    on_last[k] = seq_clock;
+    trk_note_on(t, note, vel);
+}
+/* the audio stream preempting the main loop inside sm_cmd_push, between finding a pending command and storing into it */
+static int preempt_armed;
+static void sm_cmd_drain(void);
+#define SM_CMD_PREEMPT() do { if (preempt_armed) { preempt_armed = 0; sm_cmd_drain(); } } while (0)
+#define trk_note_on seq_note_on
 #include "../firmware/src/swamp/sm_app.c"
+#undef trk_note_on
 
 static int check(const char *what, int ok)
 {
@@ -319,6 +339,279 @@ static int test_sound_from_preset(void)
     return check("MODEL: every machine's every preset reaches the sound", ok);
 }
 
+/* ------------------------------------------------- the queue, the sequencer --- */
+static void seq_log_clear(void)
+{
+    seq_clock = 0;
+    memset(on_n, 0, sizeof on_n);
+    memset(on_at, 0, sizeof on_at);
+    memset(on_last, 0, sizeof on_last);
+}
+
+/* power-on, the kit dry in the model and on the tracks (an SMC_LOAD copies the model's sends) */
+static void seq_reset(void)
+{
+    uint32_t t, i, pp;
+    sm_core_init();
+    for (pp = 0; pp < SM_NPAT; pp++)
+        for (t = 0; t < SM_NTRK; t++)
+            for (i = 0; i < 4u; i++)
+                smp.pat[pp].kit.snd[t].p[P_DIST + i] = 0;
+    kit_dry();
+    seq_log_clear();
+}
+
+static int push(uint32_t kind, uint32_t t, uint32_t step, uint32_t param, int32_t val)
+{
+    sm_cmd_t c;
+    c.kind = (uint8_t)kind;
+    c.trk = (uint8_t)t;
+    c.step = (uint8_t)step;
+    c.param = (uint8_t)param;
+    c.val = (int16_t)val;
+    return sm_cmd_push(c);
+}
+
+static void run_block(void)
+{
+    block_peak(0, 0);
+    seq_clock += CTL;
+}
+
+static int near(uint32_t a, uint32_t b) { return (a > b ? a - b : b - a) <= CTL; }
+
+/* 120 BPM, T1 trigs on steps 0 and 4, PLAY: note-ons at sample 0 and 4 x FS / 8 (a 1/16 is FS / 8 at 120) */
+static int test_seq_timing(void)
+{
+    uint32_t b;
+    int bad = 0;
+    seq_reset();
+    push(SMC_TRIG, 0, 0, 0, 0);
+    push(SMC_TRIG, 0, 4, 0, 0);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    for (b = 0; b < 1000u; b++)                          /* 32000 samples: steps 0 .. 5 */
+        run_block();
+    printf("swamp: seq 120 BPM: %u note-ons at %u, %u (want 0, %u)\n", on_n[0], on_at[0][0], on_at[0][1], 4u * FS / 8u);
+    bad += check("SEQ: 120 BPM, trigs on 0 and 4: note-ons at 0 and 4 x FS/8 (+-CTL), nothing else",
+                 on_n[0] == 2u && near(on_at[0][0], 0) && near(on_at[0][1], 4u * FS / 8u) &&
+                 !on_n[1] && !on_n[2] && !on_n[3]);
+    bad += check("SEQ: sm_playing, sm_seq_pos on step 5 of T1", sm_playing && sm_seq_pos(0) == 5u);
+    return bad;
+}
+
+/* 30 and 300 BPM (and 133.7: a step of no whole number of samples), T1 len 1 with a trig on step 0, T2 len 32 with 4
+ * trigs, 64 bars: exactly 64 x 16 / len x hits note-ons, the last one on step 1023's sample (+-CTL): no drift, no skip */
+static int test_seq_tempo_edges(void)
+{
+    static const uint16_t BPM[3] = {300, 3000, 1337};
+    static const uint8_t HIT[4] = {0, 5, 17, 31};
+    uint32_t k, i;
+    int bad = 0;
+    for (k = 0; k < 3u; k++) {
+        double S = (double)FS * 150.0 / BPM[k];              /* samples per 1/16 */
+        uint32_t last = (uint32_t)(1023.0 * S + 0.5), end = (uint32_t)(1023.5 * S);
+        char what[120];
+        seq_reset();
+        smp.bpm10 = BPM[k];
+        smp.pat[smp.cur].kit.snd[0].len = 1;
+        smp.pat[smp.cur].kit.snd[1].len = 32;
+        push(SMC_TRIG, 0, 0, 0, 0);
+        for (i = 0; i < 4u; i++)
+            push(SMC_TRIG, 1, HIT[i], 0, 0);
+        push(SMC_PLAY, 0, 0, 0, 0);
+        while (seq_clock <= end) {                           /* (the sequencer alone: nothing to hear) */
+            events_block(CTL);
+            seq_clock += CTL;
+        }
+        printf("swamp: seq %u.%u BPM: T1 %u note-ons, last at %u; T2 %u, last at %u (want 1024 / 128 at %u)\n",
+               BPM[k] / 10u, BPM[k] % 10u, on_n[0], on_last[0], on_n[1], on_last[1], last);
+        snprintf(what, sizeof what, "SEQ: %u.%u BPM, 64 bars: T1 len 1 1024, T2 len 32 4 hits 128, last on step 1023",
+                 BPM[k] / 10u, BPM[k] % 10u);
+        bad += check(what, on_n[0] == 1024u && on_n[1] == 128u && !on_n[2] && !on_n[3] &&
+                           near(on_last[0], last) && near(on_last[1], last));
+    }
+    return bad;
+}
+
+/* the queue full (64 trig toggles, nothing drained), then 200 values of one parameter: the last one arrives, every
+ * trig too; a trig more is refused (and so is anything but a value while values wait past the full ring) */
+static int test_cmd_coalesce(void)
+{
+    uint32_t i;
+    int ok = 1, bad = 0;
+    seq_reset();
+    for (i = 0; i < 64u; i++)
+        ok &= push(SMC_TRIG, i >> 5, i & 31u, 0, 0);
+    bad += check("CMD: 64 commands fit the ring", ok);
+    bad += check("CMD: the 65th trig is refused (full)", !push(SMC_TRIG, 2, 0, 0, 0));
+    for (i = 0, ok = 1; i < 200u; i++)
+        ok &= push(SMC_PARAM, 0, 0, P_FCUT, (int32_t)i);
+    bad += check("CMD: 200 values of T1 CUT on the full ring are taken (coalesced)", ok);
+    bad += check("CMD: ... and then a trig, a STOP are refused (they would overtake the values)",
+                 !push(SMC_TRIG, 2, 1, 0, 0) && !push(SMC_STOP, 0, 0, 0, 0));
+    sm_cmd_drain();
+    for (i = 0, ok = 1; i < 64u; i++)
+        ok &= smp.pat[smp.cur].step[i >> 5][i & 31u].n == 1u;
+    bad += check("CMD: after the drain T1 CUT == 199", trk[0].p[P_FCUT] == 199);
+    bad += check("CMD: all 64 trigs applied, the refused ones not",
+                 ok && !smp.pat[smp.cur].step[2][0].n && !smp.pat[smp.cur].step[2][1].n);
+    bad += check("CMD: the ring takes commands again after the drain", push(SMC_TRIG, 2, 0, 0, 0));
+    sm_cmd_drain();
+    bad += check("CMD: a trig sets the step: C3 + ROOT, vel 100, len 0 (the track's GATE)",
+                 smp.pat[smp.cur].step[2][0].note[0] == 48u + (uint32_t)trk[2].p[P_ROOT] &&
+                 smp.pat[smp.cur].step[2][0].vel == 100u && smp.pat[smp.cur].step[2][0].len == 0u);
+    return bad;
+}
+
+/* the audio stream drains in the middle of a coalescing push (after the push found the pending value, before it stored
+ * the new one): the new value still arrives, nothing is applied twice */
+static int test_cmd_coalesce_race(void)
+{
+    uint32_t i;
+    int ok = 1, bad = 0;
+    seq_reset();                                          /* the ring: 63 trigs and CUT 5, full */
+    for (i = 0; i < 63u; i++)
+        push(SMC_TRIG, i >> 5, i & 31u, 0, 0);
+    push(SMC_PARAM, 0, 0, P_FCUT, 5);
+    preempt_armed = 1;
+    ok &= push(SMC_PARAM, 0, 0, P_FCUT, 7);
+    ok &= !preempt_armed && trk[0].p[P_FCUT] == 5;        /* (the drain in the middle took CUT 5) */
+    sm_cmd_drain();
+    for (i = 0; i < 63u; i++)
+        ok &= smp.pat[smp.cur].step[i >> 5][i & 31u].n == 1u;
+    bad += check("CMD: drained while coalescing into the ring: CUT 7 arrives, trigs once", ok && trk[0].p[P_FCUT] == 7);
+    seq_reset();                                          /* the ring full of trigs, CUT 5 past it */
+    for (i = 0; i < 64u; i++)
+        push(SMC_TRIG, i >> 5, i & 31u, 0, 0);
+    push(SMC_PARAM, 0, 0, P_FCUT, 5);
+    preempt_armed = 1;
+    ok = push(SMC_PARAM, 0, 0, P_FCUT, 7);
+    ok &= !preempt_armed && trk[0].p[P_FCUT] == 5;
+    sm_cmd_drain();
+    for (i = 0; i < 64u; i++)
+        ok &= smp.pat[smp.cur].step[i >> 5][i & 31u].n == 1u;
+    bad += check("CMD: drained while coalescing past the full ring: CUT 7 arrives, trigs once", ok && trk[0].p[P_FCUT] == 7);
+    return bad;
+}
+
+/* a trig toggled while playing changes that step only */
+static int test_trig_while_playing(void)
+{
+    static sm_step_t before[SM_NTRK][SM_NSTEP], after[SM_NTRK][SM_NSTEP];
+    uint32_t b;
+    int bad = 0;
+    seq_reset();
+    push(SMC_TRIG, 0, 0, 0, 0);
+    push(SMC_TRIG, 1, 3, 0, 0);
+    push(SMC_TRIG, 3, 8, 0, 0);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    for (b = 0; b < 300u; b++)
+        run_block();
+    memcpy(before, smp.pat[smp.cur].step, sizeof before);
+    push(SMC_TRIG, 1, 7, 0, 0);
+    run_block();
+    memcpy(after, smp.pat[smp.cur].step, sizeof after);
+    bad += check("SEQ: a trig while playing sets step 7 of T2",
+                 !before[1][7].n && after[1][7].n == 1u && after[1][7].note[0] == 48u + (uint32_t)trk[1].p[P_ROOT]);
+    after[1][7] = before[1][7];
+    bad += check("SEQ: ... and no other step changes", !memcmp(before, after, sizeof before) && sm_playing);
+    return bad;
+}
+
+/* notes held with LEN INF on every track; STOP: one block later nothing sounds but the one-block fade, 400 later silence */
+static int test_stop_releases(void)
+{
+    uint32_t t, i, b, busy0, peak = 0;
+    int fading = 1, gated = 1, bad = 0;
+    seq_reset();
+    for (t = 0; t < SM_NTRK; t++)
+        push(SMC_TRIG, t, 0, 0, 0);
+    run_block();                                          /* (the trigs into the model) */
+    for (t = 0; t < SM_NTRK; t++)
+        smp.pat[smp.cur].step[t][0].len = 255u;           /* INF (stage 1 has no command for LEN yet) */
+    push(SMC_PLAY, 0, 0, 0, 0);
+    for (b = 0; b < 2000u; b++)                           /* past step 0 (172 blocks): the notes ring on into step 11 */
+        run_block();
+    busy0 = voices_busy();
+    for (t = 0; t < SM_NTRK; t++) {                       /* (a key still down on every track, not a release tail) */
+        int g = 0;
+        for (i = 0; i < NVOICE; i++)
+            g |= trk[t].v[i].active && trk[t].v[i].gate;
+        gated &= g;
+    }
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    for (t = 0; t < SM_NTRK; t++)
+        for (i = 0; i < NVOICE; i++)
+            fading &= !trk[t].v[i].active || trk[t].v[i].stage == 4u;
+    printf("swamp: stop: %u voices before, %u after one block\n", busy0, voices_busy());
+    bad += check("SEQ: LEN INF holds the notes past their step (gate on, every track)", gated && busy0 >= SM_NTRK);
+    bad += check("SEQ: STOP: one block later only fading voices (stage 4) or none, voices_busy == 0",
+                 fading && voices_busy() == 0u && !sm_playing && sm_seq_pos(0) == 0u);
+    for (b = 0; b < 400u; b++) {
+        uint32_t a = block_peak(0, 0);
+        if (b >= 390u)
+            peak = a > peak ? a : peak;
+    }
+    bad += check("SEQ: ... 400 blocks later silence (|x| <= 2)", peak <= 2u);
+    return bad;
+}
+
+/* SMC_LOAD of another machine through the queue, a note sounding: the queue is drained before engine_block, so the very
+ * first block already fades the old engine with its own values (xf_on, pe_old), never the old one with the new values */
+static int test_load_order(void)
+{
+    int16_t pe_saw[8];
+    uint32_t i, b;
+    sm_sound_t *s = &smp.pat[0].kit.snd[0];
+    int bad = 0;
+    seq_reset();
+    trk_note_on(&trk[0], 60, 100);
+    for (b = 0; b < 20u; b++)
+        run_block();
+    for (i = 0; i < 8u; i++)
+        pe_saw[i] = trk[0].p[P_E0 + i];
+    sm_sound_from_preset(s, eng_rank(ENGI_STRING), 0);    /* the main loop: the model first, then the command */
+    for (i = 0; i < 4u; i++)
+        s->p[P_DIST + i] = 0;
+    for (i = 0; i < 8u && s->p[P_E0 + i] == pe_saw[i]; i++)
+        ;
+    bad += check("LOAD: (STRING's values differ from SAW's)", i < 8u);
+    push(SMC_LOAD, 0, 0, 0, 0);
+    run_block();
+    bad += check("LOAD: the first block after a queued machine change fades the old engine (xf_on, xf 3)",
+                 trk[0].engine == ENGI_MSAW && trk[0].eng_req == ENGI_STRING && trk[0].xf_on &&
+                 trk[0].xf == XF_BLOCKS - 1u);
+    bad += check("LOAD: ... with its own values (pe_old == SAW's), the new ones in p[]",
+                 !memcmp(trk[0].pe_old, pe_saw, sizeof pe_saw) && trk[0].p[P_E0] == s->p[P_E0]);
+    for (b = 0; b < 8u; b++)
+        run_block();
+    bad += check("LOAD: then STRING", trk[0].engine == ENGI_STRING && !trk[0].xf_on);
+    trk_all_off(&trk[0]);
+    return bad;
+}
+
+/* panic_req (M-UPGRADE before it takes the flash): the flagged tracks let go of every note in the next block */
+static int test_panic(void)
+{
+    uint32_t b, i;
+    int held0 = 0, held1 = 0, bad = 0;
+    seq_reset();
+    trk_note_on(&trk[0], 60, 100);
+    trk_note_on(&trk[1], 60, 100);
+    for (b = 0; b < 10u; b++)
+        run_block();
+    panic_req = 1u;                                       /* T1 only */
+    run_block();
+    for (i = 0; i < NVOICE; i++) {
+        held0 |= trk[0].v[i].gate;
+        held1 |= trk[1].v[i].gate;
+    }
+    bad += check("PANIC: T1 released in one block, T2 still held, panic_req cleared", !held0 && held1 && !panic_req);
+    trk_all_off(&trk[1]);
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -329,6 +622,14 @@ int main(void)
     bad += test_settings();
     bad += test_model_init();
     bad += test_sound_from_preset();
+    bad += test_seq_timing();
+    bad += test_seq_tempo_edges();
+    bad += test_cmd_coalesce();
+    bad += test_cmd_coalesce_race();
+    bad += test_trig_while_playing();
+    bad += test_stop_releases();
+    bad += test_load_order();
+    bad += test_panic();
     printf("swamp: %d failed\n", bad);
     return bad != 0;
 }

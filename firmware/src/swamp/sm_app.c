@@ -1,25 +1,17 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* SWAMP MACHINE app: the part of the build that the host test (tests/swamp_test.c) shares with the firmware
  * (swamp.c includes it after the sound core and audio.c, before master.c and sm_main.c). No build-flag conditionals, nothing
- * from ui*.c, seq.c, project.c, mf_pat.c, song_chain.c. The next tasks add the model, the sequencer and the screen. */
+ * from ui*.c, seq.c, project.c, mf_pat.c, song_chain.c. The next tasks add the input and the screen. */
 
 #include "sm_model.h"
 #include "sm_model.c"
 #include "sm_kit.c"
 
-/* the sequencer's side of the audio block (fx.c mix_block calls it first); it plays nothing yet (Task 4 replaces it: the
- * audio stream is the only writer of trk[]), but a machine change (sm_track_load) is served: engine_block at each block
- * start, as seq.c events_block does for every track */
-static void events_block(uint32_t n)
-{
-    uint32_t t;
-    (void)n;
-    for (t = 0; t < NTRK; t++)
-        engine_block(&trk[t]);
-}
-
-/* bit per track: release every sounding note (M-UPGRADE sets it before it takes the flash; events_block, Task 4, serves it) */
+/* bit per track: release every sounding note (M-UPGRADE sets it before it takes the flash; events_block serves it) */
 static volatile uint8_t panic_req;
+
+#include "sm_cmd.c"                                       /* the command queue: the main loop -> the audio stream */
+#include "sm_seq.c"                                       /* events_block: the commands, the engines, the steps */
 
 /* the main loop's two halves, 15 ms apart (sm_main.c): the knobs and keys into the model, the model onto the screen
  * (Tasks 5 and 6 replace them) */
@@ -27,7 +19,7 @@ static void sm_input_poll(void) {}
 static void sm_draw(void) {}
 
 /* power-on, before audio_init: every track with its parameter defaults and empty steps, the master level, then the kit
- * of the current pattern onto the tracks (T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX) */
+ * of the current pattern onto the tracks (T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX), the sequencer stopped, the queue empty */
 static void sm_core_init(void)
 {
     uint32_t i, k;
@@ -41,6 +33,7 @@ static void sm_core_init(void)
     }
     sm_project_init();
     sm_kit_boot(&smp.pat[smp.cur].kit);
+    sm_seq_init();
     song.master_q12 = 2048;                   /* (master_boot replaces it with the pot's level before the audio starts) */
 }
 

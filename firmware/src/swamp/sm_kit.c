@@ -2,7 +2,9 @@
 /* SWAMP MACHINE kit -> the sound core: a kit sound onto a track (trk[]). */
 
 /* A kit sound onto track t. ISR ONLY (the command queue calls it from events_block): the audio stream is the only
- * writer of trk[]. The sound's machine becomes eng_req and its preset and every parameter go into trk[t].p[] (the
+ * writer of trk[]. Within a block it must come BEFORE engine_block (events_block drains the queue first): applied after
+ * it, xf_on is still 0 and track_render plays the old engine with the new engine's P_E0..P_E7 for that block (voice.c
+ * pe_old is taken only by engine_block), values that index the old engine's tables out of range. The sound's machine becomes eng_req and its preset and every parameter go into trk[t].p[] (the
  * model's p[] is int8_t, trk[].p int16_t: the copy sign-extends). Nothing else of the track is touched.
  *
  * A machine change is the core's own fade, no crossfade of ours: engine_block (voice.c, at each block start, before
