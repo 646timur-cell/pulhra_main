@@ -172,7 +172,7 @@ static const menu_flag_t *menu_flag(uint32_t row)
 /* a row's value as 0..menu_n(row) - 1 in the order the menu steps it (LEDS: OFF DIM LO DIM HI INV, LEDS_MENU) */
 static uint32_t menu_n(uint32_t row)
 {
-    return row == MI_COLOR ? NPALETTES : row == MI_LOWCUT || (row >= MI_CLICK && row <= MI_COUNTIN) ? 3u :
+    return row == MI_COLOR ? (FELUCCA_MONOFM ? 1u : NPALETTES) : row == MI_LOWCUT || (row >= MI_CLICK && row <= MI_COUNTIN) ? 3u :
            row == MI_HOLD ? 4u : row == MI_LEDS ? LEDS_COUNT : row == MI_SCROFF ? NELEM(SCROFF_N) :
            row == MI_TUNE ? TUNE_N : row == MI_MIDIIN ? NELEM(N_ROUTE) : MI_CHROW(row) ? 16u : row == MI_ANIM ? 3u : row == MI_HOME ? HOME_NV : 2u;
 }
@@ -183,7 +183,7 @@ static uint32_t menu_get(uint32_t row)
     if (f)
         return ((ui_prefs | (uint32_t)ui_rec_prefs << 8 | (uint32_t)ui_prefs2 << 16) & f->bit) != 0;
     switch (row) {
-    case MI_COLOR: return settings.palette % NPALETTES;
+    case MI_COLOR: return FELUCCA_MONOFM ? 0u : settings.palette % NPALETTES;   /* (MONOFM: DARK, the only one) */
     case MI_STYLE: return ui_style == ST_LINE;
     case MI_LOWCUT: return settings.lowcut % 3u;
     case MI_HOLD: return settings_hold % 4u;
@@ -209,7 +209,7 @@ static const char *menu_vname(uint32_t row, uint32_t v)
     if (f)
         return f->name[v & 1u];
     switch (row) {
-    case MI_COLOR: return UI_PALETTES[v % NPALETTES].name;
+    case MI_COLOR: return UI_PALETTES[FELUCCA_MONOFM ? UI_DARK_INDEX : v % NPALETTES].name;
     case MI_STYLE: return STYLE_N[v & 1u];
     case MI_LOWCUT: return SPK_EQ[v % 3u];
     case MI_HOLD: return HOLD_N[v & 3u];
@@ -259,7 +259,7 @@ static void menu_put(uint32_t row, uint32_t v)
     }
     switch (row) {
     case MI_COLOR:
-        settings.palette = v;
+        settings.palette = FELUCCA_MONOFM ? UI_DARK_INDEX : v;
         palette_set(v);                                /* (the menu signature redraws) */
         ui.force = 1;
         break;

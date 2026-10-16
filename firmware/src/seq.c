@@ -691,7 +691,8 @@ static __attribute__((noinline)) void cin_keep(track_t *t, uint32_t note, uint32
  * ISR, sc_latch_wait blocks after the call (the engines switched by then), one bit a part in sc_latch_req */
 static volatile uint8_t sc_latch_req, sc_latch_wait;
 static uint8_t sc_latch_note[2][16], sc_latch_n[2];
-static int latch_on(const track_t *t) { return FELUCCA_MODULE && t->p[P_AHOLD] && !t->p[P_AMODE]; }
+static int latch_on(const track_t *t) { return (FELUCCA_MODULE || FELUCCA_MONOFM) && t->p[P_AHOLD] && !t->p[P_AMODE]; }   /* (MONOFM:
+                                                     * EDIT + F5) */
 static __attribute__((noinline)) void latch_release(track_t *t)
 {
     uint32_t i;
@@ -776,10 +777,15 @@ static void input_on(track_t *t, uint32_t note, uint32_t vel)
     last_note = (uint8_t)note;
     if (cin_left)
         cin_keep(t, note, vel);
-    if (rec_on(t) && !t->p[P_AMODE])               /* (ARP on: arp_tick records its notes) */
+    if (rec_on(t) && !t->p[P_AMODE] && !(FELUCCA_MONOFM && t->p[P_EUC]))   /* (ARP on: arp_tick records its notes;
+                                                     * EUCLID: its keys are not steps) */
         rec_note(t, note, vel);
     if (t->p[P_AMODE])
         arp_add(t, note);
+#if FELUCCA_MONOFM
+    else if (t->p[P_EUC])                           /* EUCLID: the keys (LATCH: kept) are its notes, in turn (seq_play) */
+        arp_add(t, note);
+#endif
     else if (latch_on(t))
         latch_add(t, note, vel);
     else
@@ -799,6 +805,13 @@ static void input_off(track_t *t, uint32_t note)
                 cin_up[i] |= (uint8_t)(1u << k);
     }
     rec_release(t, note);
+#if FELUCCA_MONOFM
+    if (t->p[P_EUC] && !t->p[P_AMODE]) {            /* EUCLID: out of its notes (LATCH: kept, arp_remove) */
+        arp_remove(t, note);
+        trk_note_off(t, note);
+        return;
+    }
+#endif
     if (latch_on(t)) {                              /* (LATCH: a latched note is kept, only the key count goes */
         if (!latch_has(t, note)) {                  /* down; one down from before LATCH ON or tapped off goes) */
             trk_note_off(t, note);
@@ -1228,10 +1241,12 @@ static __attribute__((noinline)) void seq_play(track_t *t, uint32_t idx, uint32_
         step_t es;
         if (!mf_euc_hit(t->p, idx))
             return;
-        if (!s->n && !s->hit) {
+        if (t->nheld || (!s->n && !s->hit)) {       /* the keys held (or LATCHed): one a hit, in turn; else the
+                                                     * step's own note; an empty hit the ROOT */
             es = *s;
             es.n = 1;
-            es.note[0] = (uint8_t)(48 + clamp(t->p[P_ROOT], 0, 11));
+            es.hit = 0;
+            es.note[0] = t->nheld ? t->held[t->euc_pos++ % t->nheld] : (uint8_t)(48 + clamp(t->p[P_ROOT], 0, 11));
             es.time = ST_NOTE;
             es.vel = s->vel ? s->vel : 100u;
             seq_step(t, &es, idx, period, skip);
@@ -1513,7 +1528,7 @@ static void events_block(uint32_t n)
             t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds;
                                                        * STRANGE: the arp is EUCLID's) */
         /* ARP turned off, or HOLD released with no key down: drop the latched chord */
-        if (FELUCCA_MODULE && t->aholdp && !t->p[P_AHOLD]) {
+        if ((FELUCCA_MODULE || FELUCCA_MONOFM) && t->aholdp && !t->p[P_AHOLD] && !(FELUCCA_MONOFM && t->p[P_EUC])) {
             latch_release(t);                         /* LATCH OFF: the latched notes go (keys down sound on) */
             t->arp_phys = 0;
         }

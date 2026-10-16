@@ -30,7 +30,7 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"SCL", "[K2]SCALE[K3]QUANTIZE[SCL]CHORDS"},
 #if FELUCCA_DARK
     {"CHORD", "[K1]CHORD[KEYS]ONE FINGER[SCL]MICRO"},
-    {"MICRO", "[K1]TUNING[K2]AMOUNT[SCL]BY NOTE"},
+    {"MICRO", "[K1]TUNING[K2]AMOUNT[SCL]BY NOTE"},   /* (MONOFM: TUNE AMT ROOT, the same keys) */
     {"MICRO 1", "[K1-4]CENTS 1-b3[SCL]MORE"},
     {"MICRO 2", "[K1-4]CENTS 3-5[SCL]MORE"},
     {"MICRO 3", "[K1-4]CENTS b6-7[SCL]SCL"},
@@ -40,7 +40,8 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"EDIT 1", H_EDIT},
     {"EDIT 2", H_EDIT},
 #if FELUCCA_MONOFM
-    {"FILTER", "[K1]LP BP HP[K2]CUTOFF[K4]ENV"},
+    {"HYBRID", "[K1]HIGH-PASS[K2]WIDTH TO LP[K4]ENV"},
+    {"FILTER", "[K1]LP BP HP NOTCH[K2]CUTOFF[K4]ENV"},
 #else
     {"FILTER", "[K1]LP BP HP[K2]CUTOFF[EDIT]VOICE"},
 #endif

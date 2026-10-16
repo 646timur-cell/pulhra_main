@@ -59,7 +59,7 @@ static const char *const N_GO[] = {"--", "GO"};
 static const char *const N_XYLINK[] = {"OFF", "ON", "INV", "CROSS"};   /* XY LINK (G_XYLINK) */
 #endif
 #if FELUCCA_MONOFM
-static const char *const N_MFILT[] = {"OFF", "LP", "BP", "HP"};      /* MONOFM's track FILTER (P_FLT, voice.c) */
+static const char *const N_MFILT[] = {"OFF", "LP", "BP", "HP", "NOTCH"};      /* MONOFM's track FILTER (P_FLT, voice.c) */
 #endif
 static const char *const N_SLCR[] = {"OFF", "GATE", "STUT"};             /* SL_OFF .. SL_STUT (slicer.c) */
 static const char *const N_SLDIV[] = {"1/8", "1/16", "1/32", "8T", "16T", "32T"};   /* SL_DEN */
@@ -123,7 +123,9 @@ static void micro_fix(int16_t *p)
     if (p[P_FM4_LEVEL] >= 0 && p[P_FM4_LEVEL] < MT_N)
         return;
     p[P_FM4_LEVEL] = MT_OFF;
-#if !FELUCCA_MONOFM                                      /* (MONOFM: those ids are its FILTER's) */
+#if FELUCCA_MONOFM                                       /* (MONOFM: those ids are its FILTER's; AMT its own) */
+    p[P_MAMT] = 100;
+#else
     p[P_FM3_DEC] = 100;
     p[P_FM3_SUS] = 0;
 #endif
@@ -146,7 +148,11 @@ static int32_t micro_cents(const int16_t *p, uint32_t deg)
     } else if (ty >= MT_JUST && ty < MT_RAND) {
         base = MT_CENTS[ty - MT_JUST][deg];
     }
-    return base * (FELUCCA_MONOFM ? 100 : clamp(p[P_FM3_DEC], 0, 100)) / 100 + p[MDEG_P(deg)];
+#if FELUCCA_MONOFM
+    return base * clamp(p[P_MAMT], 0, 100) / 100 + p[MDEG_P(deg)];
+#else
+    return base * clamp(p[P_FM3_DEC], 0, 100) / 100 + p[MDEG_P(deg)];
+#endif
 }
 #endif
 static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN", "PHYS",
@@ -290,6 +296,10 @@ static const param_desc_t TP[P_COUNT] = {
     [P_FLT] = PE("FILT", N_MFILT, 0),
     [P_FCUT] = PD("CUT", F_CUTOFF, 0, 127, 127),
     [P_FRES] = PD("RES", F_PCT, 0, 127, 0),
+    [P_MAMT] = PD("AMT", F_PCT, 0, 100, 100),          /* MICRO: how much of the tuning */
+    [P_HBASE] = PD("BASE", F_CUTOFF, 0, 127, 0),       /* HYBRID: the high-pass, the low-pass WIDTH above it, RES */
+    [P_HWIDTH] = PD("WDTH", F_PCT, 0, 127, 127),
+    [P_HRES] = PD("RES", F_PCT, 0, 127, 0),
 #endif
 };
 
@@ -589,6 +599,7 @@ static const page_t PAGES[] = {
     {"ENV DEST", FAM_ENV, SC_TRACK, GR_NONE, {P_ED_FLT, P_ED_PIT, P_ED_SHP, P_ESYNC}},   /* (P_ED_FX: nothing reads it);
                                                                              * 1.5: ESYNC, ENV's times as note values */
 #if FELUCCA_MONOFM   /* ENV: then the track's FILTER (voice.c), its cutoff moved by ENV DEST's FLT */
+    {"HYBRID", FAM_ENV, SC_TRACK, GR_NONE, {P_HBASE, P_HWIDTH, P_HRES, P_ED_FLT}},
     {"FILTER", FAM_ENV, SC_TRACK, GR_NONE, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}},
 #endif
     {"LFO", FAM_LFO, SC_TRACK, GR_LFO, {P_LRATE, P_LWAVE, P_LPHASE, P_LFADE}},
@@ -606,7 +617,7 @@ static const page_t PAGES[] = {
     {"CHORD", FAM_SCL, SC_TRACK, GR_CHORD, {P_CHRD, P_VOIC, 0xFF, 0xFF}},   /* SCL again: the chord keys (chord.c) */
 #if FELUCCA_DARK   /* SCL: MICRO, the part's tuning, then its 12 degrees' own offsets */
 #if FELUCCA_MONOFM   /* (MONOFM: all of the tuning, one RAND; AMT and SEED's ids are its FILTER's) */
-    {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_ROOT, 0xFF, 0xFF}},
+    {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_MAMT, P_ROOT, 0xFF}},
 #else
     {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_FM3_DEC, P_FM3_SUS, P_ROOT}},
 #endif

@@ -150,6 +150,9 @@ static inline uint32_t gm_hash(uint32_t x, uint32_t y)   /* a fixed noise of the
 static int16_t gm_gouge[GM_GOUGES][4];          /* the grime's gouges: y0, y1, x0, slant (/16), palette_set */
 static void palette_set(uint32_t i)
 {
+#if FELUCCA_MONOFM
+    i = UI_DARK_INDEX;                   /* (MONOFM: DARK only) */
+#endif
     const ui_pal_t *p = &UI_PALETTES[i % NPALETTES];
     i %= NPALETTES;
     ux.mono = i == UI_GREY_INDEX;

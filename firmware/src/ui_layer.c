@@ -198,6 +198,7 @@ typedef char ly_init_fits[LY_INIT < 16u ? 1 : -1];   /* (a white key: F3 .. G5) 
 #if FELUCCA_MONOFM
 /* MONOFM: three pages of a family each (engines.c MF_PAGE: MONO, SOMA, SLICE), OCT+ the next */
 #define LY_PAGES 3u
+#define LY_LATCH 14u                   /* (F5: LATCH, the white key before INIT; no page has 15 machines) */
 static uint32_t ly_pg0(uint32_t pg) { return MF_PAGE[pg % LY_PAGES]; }
 static uint32_t ly_pgn(uint32_t pg) { return (uint32_t)MF_PAGE[pg % LY_PAGES + 1u] - MF_PAGE[pg % LY_PAGES]; }
 static uint32_t ly_pg_of(uint32_t rank) { return rank >= MF_PAGE[2] ? 2u : rank >= MF_PAGE[1] ? 1u : 0u; }
@@ -605,9 +606,17 @@ static void rec_key(uint32_t p)
 
 /* FX: the effects' names (the message; NONE: PF_N) and the map's cells' */
 static const char *const PF_NAME[PF_NFX + 1] = {"REPEAT 1/8", "REPEAT 1/16", "REPEAT 1/32", "REVERSE", "LPF", "HPF",
-    "TAPE STOP", "FREEZE", "OCT UP", "OCT DN", "FLANGER", "PHASER", "REV THROW", "ECHO THROW", "NONE"};
+    "TAPE STOP", "FREEZE", "OCT UP", "OCT DN", "FLANGER", "PHASER", "REV THROW", "ECHO THROW",
+#if FELUCCA_MONOFM
+    "SLICER STUT",
+#endif
+    "NONE"};
 static const char *const PF_CELL[PF_NFX] = {"1/8", "1/16", "1/32", "REV", "LPF", "HPF", "STOP", "FRZ", "OCT+", "OCT-",
-    "FLNG", "PHSR", "VERB", "ECHO"};
+    "FLNG", "PHSR", "VERB", "ECHO",
+#if FELUCCA_MONOFM
+    "STUT",
+#endif
+};
 static const char W_NOTE[16] = {'F', 'G', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'A', 'B', 'C', 'D', 'E', 'F', 'G'};
 /* each pass: the map from the settings to the ISR (a change: seq.c makes a key held take its new effect) */
 static void fx_map_sync(void)
@@ -844,6 +853,12 @@ static void layer_key(uint32_t l, uint32_t k)
     } else if (l == LAYER_EDIT && !key_black(k)) {
         if (ly_eng(p) < NENGINES)
             edit_load(ly_eng(p), 0);
+#if FELUCCA_MONOFM
+        else if (p == LY_LATCH) {                       /* F5: the track's LATCH (EUCLID: its notes kept) */
+            TSEL->p[P_AHOLD] = (int16_t)!TSEL->p[P_AHOLD];
+            ui_message(TSEL->p[P_AHOLD] ? "LATCH ON" : "LATCH OFF");
+        }
+#endif
         else if (p == LY_INIT && chain_busy())
             ui_message("STOP TO EDIT");
         else if (p == LY_INIT)
@@ -1064,6 +1079,12 @@ static uint32_t layer_leds(uint32_t *br)
         } else if (l == LAYER_EDIT && !b) {             /* the engine lit, the others and INIT breathe */
             on = ly_eng(p) < NENGINES && ly_eng(p) == TSEL->eng_req % NENGINES;
             can = ly_eng(p) < NENGINES ? 1u : p == LY_INIT && !chain_busy();
+#if FELUCCA_MONOFM
+            if (p == LY_LATCH) {
+                on = TSEL->p[P_AHOLD] != 0;
+                can = 1u;
+            }
+#endif
         } else if (l == LAYER_EDIT && (a = eqa_of(TSEL, p)) != 0) {   /* the quick actions: on lit (DRUM: sounding), */
             on = a->on(TSEL, a->arg) != 0u;             /* a HOLD one off breathes, none dark */
             can = a->kind == LK_HOLD;
@@ -1331,6 +1352,10 @@ static void layer_edit(void)                            /* the engines from F3, 
         if (i < n)
             lcell(x, y, (int32_t)h, 0, engine_icon(en->name), 0, h > 24u ? en->name : eng_abbr(en->name),
                   eng_vis(ly_pg0(ly_epage) + i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, 0);
+#if FELUCCA_MONOFM
+        else if (i == LY_LATCH)
+            lcell(x, y, (int32_t)h, 0, ICON_HOLD, 0, "LATCH", TSEL->p[P_AHOLD] ? LS_SEL : LS_OFF, 0);
+#endif
         else if (i < cells - 1u)
             continue;                                   /* (a page's keys past its engines: nothing) */
         else
