@@ -107,6 +107,29 @@ static void seq_note_off(track_t *t, uint32_t note)
 static int preempt_armed;
 static void sm_cmd_drain(void);
 #define SM_CMD_PREEMPT() do { if (preempt_armed) { preempt_armed = 0; sm_cmd_drain(); } } while (0)
+/* the MIDI ring of usb.c (a copy of its declarations and midi_enqueue: usb.c is the hardware's), which the audio stream drains
+ * (swamp/sm_midi.c): the USB poll and the TRS UART both put 32-bit event packets in it */
+#define MQ 64u
+static uint32_t midi_in_q[MQ], midi_in_ms[MQ];
+static uint8_t midi_in_source[MQ];
+static volatile uint32_t mi_w, mi_r;
+static volatile uint8_t midi_in_overflow;
+static int midi_enqueue(uint32_t pkt, uint32_t source)
+{
+    uint32_t at = mi_w % MQ;
+    if (midi_in_overflow)
+        return 0;
+    if (mi_w - mi_r >= MQ) {
+        midi_in_overflow = 1;
+        return 0;
+    }
+    midi_in_q[at] = pkt;
+    midi_in_ms[at] = 0;
+    midi_in_source[at] = (uint8_t)source;
+    RING_PUBLISH();
+    mi_w++;
+    return 1;
+}
 /* every note-on of the app code included below (the sequencer's) goes through the counter; the tests' own calls after
  * the #undef go to voice.c's directly */
 #define trk_note_on seq_note_on
@@ -3676,6 +3699,274 @@ static int test_swing_read_once(void)
     return bad;
 }
 
+/* ------------------------------------------------------------------------------------------------ MIDI IN (Task 7) --- */
+/* a channel message into the ring as usb.c / midi_uart.c put it: cin | status << 8 | d1 << 16 | d2 << 24 (source 1 USB, 2 TRS) */
+static int midi_put(uint32_t status, uint32_t d1, uint32_t d2, uint32_t source)
+{
+    return midi_enqueue((status >> 4) | status << 8 | d1 << 16 | d2 << 24, source);
+}
+static int midi_on(uint32_t ch, uint32_t note, uint32_t vel) { return midi_put(0x90u | ch, note, vel, 1); }
+static int midi_off(uint32_t ch, uint32_t note) { return midi_put(0x80u | ch, note, 64, 1); }
+static void midi_reset(void)
+{
+    mi_r = mi_w = 0;
+    midi_in_overflow = 0;
+    seq_reset();
+    host_ticks = 1000u;
+}
+/* n blocks of the mix (every block: events_block, then the engines) */
+static void mix_blocks(uint32_t n)
+{
+    while (n--)
+        run_block();
+}
+static uint32_t peak_of(uint32_t n)
+{
+    uint32_t pk = 0, a;
+    while (n--) {
+        a = block_peak(0, 0);
+        seq_clock += CTL;
+        pk = a > pk ? a : pk;
+    }
+    return pk;
+}
+static uint32_t notes_on_core(uint32_t t)                  /* voices of track t with their gate open */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < NVOICE; i++)
+        n += trk[t].v[i].active && trk[t].v[i].gate;
+    return n;
+}
+
+static int test_midi_note_ch2(void)
+{
+    int bad = 0;
+    uint32_t pk, tail, k;
+    midi_reset();
+    bad += check("MIDI: the ring takes a note-on on channel 2", midi_on(1, 64, 100));
+    pk = peak_of(40);
+    bad += check("MIDI: note-on ch 2: T2 sounds (peak > 200), the ring drained", pk > 200u && mi_r == mi_w);
+    bad += check("MIDI: ... T2 only: one note-on, on T2", on_n[1] == 1u && !on_n[0] && !on_n[2] && !on_n[3] &&
+                 ev_nth(1, 1, 0) && ev_nth(1, 1, 0)->note == 64u && ev_nth(1, 1, 0)->vel == 100u);
+    bad += check("MIDI: ... a note on T2's core, none on the others", notes_on_core(1) == 1u && !notes_on_core(0) && !notes_on_core(2) && !notes_on_core(3));
+    midi_off(1, 64);
+    mix_blocks(1);
+    bad += check("MIDI: note-off ch 2: the gate closed, no hung note", notes_on_core(1) == 0u && ev_count(0, 1) == 1u);
+    mix_blocks(400);
+    pk = peak_of(10);
+    for (k = 0, tail = 0; k < NVOICE; k++)
+        tail |= trk[1].v[k].active;
+    printf("swamp: MIDI: after 400 blocks: peak %u, active %u, busy %u\n", pk, tail, voices_busy());
+    bad += check("MIDI: 400 blocks after the note-off: no voice left, the FM tail down to |x| <= 16", pk <= 16u && !tail && voices_busy() == 0);
+    /* velocity 0 is a note-off; the TRS source is the same queue */
+    midi_reset();
+    midi_put(0x93, 60, 90, 2);                            /* channel 4, from the UART */
+    mix_blocks(2);
+    bad += check("MIDI: a note from the TRS UART (source 2): T4 sounds", on_n[3] == 1u && notes_on_core(3) == 1u);
+    midi_on(3, 60, 0);
+    mix_blocks(1);
+    bad += check("MIDI: note-on at velocity 0 is a note-off", notes_on_core(3) == 0u && ev_count(0, 3) == 1u);
+    /* channels 1..4 are T1..T4; the others, CC, program change, bend, clock, SysEx data: nothing */
+    midi_reset();
+    midi_on(0, 50, 100);
+    midi_on(1, 51, 100);
+    midi_on(2, 52, 100);
+    midi_on(3, 53, 100);
+    midi_on(4, 54, 100);                                  /* channel 5 */
+    midi_on(15, 55, 100);
+    midi_put(0xB0, 7, 100, 1);                            /* CC 7 ch 1 */
+    midi_put(0xC1, 5, 0, 1);                              /* program change ch 2 */
+    midi_put(0xE0, 0, 100, 1);                            /* bend */
+    midi_enqueue(0xFu | 0xF8u << 8, 1u);                  /* MIDI clock */
+    midi_enqueue(0xFu | 0xFAu << 8, 1u);                  /* start (a later stage; the sequencer does not follow it) */
+    midi_enqueue(0x4u | 0xF0u << 8 | 0x22u << 16 | 0x24u << 24, 1u);   /* a SysEx packet */
+    mix_blocks(2);
+    bad += check("MIDI: channels 1..4 to T1..T4, one each; ch 5, 16, CC, PC, bend, clock, SysEx: nothing",
+                 on_n[0] == 1u && on_n[1] == 1u && on_n[2] == 1u && on_n[3] == 1u && seq_nev == 4u && mi_r == mi_w);
+    bad += check("MIDI: ... the notes of each on its own track", ev_nth(1, 0, 0)->note == 50u && ev_nth(1, 1, 0)->note == 51u &&
+                 ev_nth(1, 2, 0)->note == 52u && ev_nth(1, 3, 0)->note == 53u && !sm_playing);
+    /* MIDI plays while the sequencer is stopped and while it plays; a chord of eight, every note let go */
+    midi_reset();
+    for (k = 0; k < 8u; k++)
+        midi_on(0, 48u + k, 100);
+    mix_blocks(2);
+    for (k = 0; k < 8u; k++)
+        midi_off(0, 48u + k);
+    mix_blocks(1);
+    bad += check("MIDI: a chord of eight on T1: eight note-ons, eight note-offs", on_n[0] == 8u && ev_count(0, 0) == 8u && !notes_on_core(0));
+    return bad;
+}
+
+/* the sequencer and MIDI on the same note of the same track: neither's note-off ends the other's note */
+static int test_midi_vs_seq_same_note(void)
+{
+    int bad = 0;
+    uint32_t pk, k, hung;
+    /* A: the sequencer's note (LEN INF: it holds to STOP), MIDI's note-on and note-off on the same pitch in the middle */
+    midi_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->note[0] = 60;
+    stp(0, 0)->len = MF_LEN_INF;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks(4);
+    bad += check("MIDI+SEQ: the sequencer's C4 (LEN INF) sounds", ev_count(1, 0) == 1u && notes_on_core(0) == 1u);
+    midi_on(0, 60, 100);
+    mix_blocks(2);
+    midi_off(0, 60);
+    mix_blocks(2);
+    bad += check("MIDI+SEQ: MIDI's note-off of the same note does not end the sequencer's (no note-off, still gated)",
+                 ev_count(0, 0) == 0u && notes_on_core(0) >= 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(400);
+    hung = 0;
+    for (k = 0; k < SM_NTRK; k++)
+        hung += notes_on_core(k);
+    pk = peak_of(10);
+    bad += check("MIDI+SEQ: STOP, 400 blocks: nothing hangs", !hung && voices_busy() == 0 && pk <= 2u);
+    /* B: MIDI holds C4; the sequencer's short C4 (LEN 1/8 of a step) comes and goes: MIDI's note stays */
+    midi_reset();
+    sm_step_toggle(0, 1);
+    stp(0, 1)->note[0] = 60;
+    stp(0, 1)->len = 1;                                   /* 1/8 */
+    midi_on(0, 60, 100);
+    mix_blocks(2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks((uint32_t)(3.0 * S120 / CTL));             /* the step 1 fires at 1 step; its LEN is long gone by 3 steps */
+    bad += check("MIDI+SEQ: the sequencer's C4 came and went (two note-ons in all): MIDI's note still sounds, no note-off yet",
+                 ev_count(1, 0) == 2u && ev_count(0, 0) == 0u && notes_on_core(0) >= 1u);
+    midi_off(0, 60);
+    mix_blocks(2);
+    bad += check("MIDI+SEQ: MIDI's note-off then ends it (the one note-off)", ev_count(0, 0) == 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(400);
+    bad += check("MIDI+SEQ: 400 blocks later: no hung voice", voices_busy() == 0 && !notes_on_core(0));
+    /* C: both let go in the other order on every pass: the sequencer's C4 on every step (LEN TRK), MIDI's C4 held across
+     * 8 steps, then let go while a sequencer note sounds; the last note-off of the two (whoever's) ends the voice */
+    midi_reset();
+    for (k = 0; k < 16u; k++) {
+        sm_step_toggle(0, k);
+        stp(0, k)->note[0] = 60;
+        stp(0, k)->len = (uint8_t)(k & 1u ? MF_LEN_INF : 1u);
+    }
+    midi_on(0, 60, 100);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks((uint32_t)(8.5 * S120 / CTL));
+    midi_off(0, 60);
+    mix_blocks(2);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(400);
+    bad += check("MIDI+SEQ: MIDI held across 8 steps of the same note, STOP: nothing hangs",
+                 voices_busy() == 0 && !notes_on_core(0));
+    /* D: MIDI's note-off for a note MIDI never started (muted) must not end the sequencer's */
+    midi_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->note[0] = 60;
+    stp(0, 0)->len = MF_LEN_INF;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks(4);
+    midi_off(0, 60);
+    mix_blocks(2);
+    bad += check("MIDI+SEQ: a MIDI note-off with no MIDI note-on before it ends nothing of the sequencer's",
+                 ev_count(0, 0) == 0u && notes_on_core(0) >= 1u);
+    return bad;
+}
+
+static int test_midi_mute_stop_panic(void)
+{
+    int bad = 0;
+    uint32_t pk;
+    /* muted (GLO): MIDI's note on T2 is ignored; a note held when the mute comes is let go at the next block */
+    midi_reset();
+    smp.mute = 2;
+    midi_on(1, 64, 100);
+    midi_on(0, 60, 100);
+    mix_blocks(2);
+    bad += check("MIDI: a muted T2 starts no MIDI note (T1 does), stopped too", on_n[1] == 0u && on_n[0] == 1u);
+    midi_off(1, 64);
+    mix_blocks(1);
+    bad += check("MIDI: ... and its note-off does nothing", ev_count(0, 1) == 0u);
+    smp.mute = 1;                                         /* T1 muted now, with MIDI's note held on it */
+    mix_blocks(1);
+    bad += check("MIDI: the mute comes while MIDI holds a note: let go at the next block", notes_on_core(0) == 0u && ev_count(0, 0) == 1u);
+    smp.mute = 0;
+    mix_blocks(2);
+    bad += check("MIDI: ... the unmute does not bring it back", notes_on_core(0) == 0u && on_n[0] == 1u);
+    midi_off(0, 60);
+    mix_blocks(1);
+    bad += check("MIDI: ... its late note-off is dropped (one note-off in all)", ev_count(0, 0) == 1u);
+    /* solo: every track but the soloed one is muted */
+    midi_reset();
+    sm_solo = 1;
+    midi_on(0, 60, 100);
+    midi_on(2, 62, 100);
+    mix_blocks(2);
+    bad += check("MIDI: T1 soloed: T3's MIDI note is ignored, T1's plays", on_n[0] == 1u && on_n[2] == 0u);
+    sm_solo = 0;
+    /* STOP, with the sequencer stopped or playing, releases MIDI's notes; its bookkeeping is clear after it */
+    midi_reset();
+    midi_on(2, 60, 100);
+    midi_on(2, 64, 100);
+    mix_blocks(2);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(1);
+    pk = notes_on_core(2);
+    bad += check("MIDI: STOP lets go of MIDI's notes (the voices killed within the block)", pk == 0u && voices_busy() == 0);
+    sm_step_toggle(2, 0);
+    stp(2, 0)->note[0] = 60;
+    stp(2, 0)->len = 1;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks((uint32_t)(2.0 * S120 / CTL));
+    bad += check("MIDI: after STOP the sequencer's own C4 ends by itself (MIDI's book is clear): its note-off is sent",
+                 ev_nth(0, 2, 0) != 0);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(1);
+    /* the panic: the main loop's panic_req */
+    midi_reset();
+    midi_on(1, 66, 100);
+    mix_blocks(2);
+    panic_req = 2;
+    mix_blocks(1);
+    bad += check("MIDI: the panic lets go of MIDI's notes", notes_on_core(1) == 0u);
+    midi_on(1, 66, 100);
+    mix_blocks(1);
+    midi_off(1, 66);
+    mix_blocks(1);
+    bad += check("MIDI: ... and the book is clear: a later note and its note-off work", ev_count(1, 1) == 2u && ev_count(0, 1) == 1u && notes_on_core(1) == 0u);
+    mix_blocks(400);
+    bad += check("MIDI: nothing hangs after it all", voices_busy() == 0);
+    return bad;
+}
+
+static int test_midi_overflow(void)
+{
+    int bad = 0;
+    uint32_t k, n = 0;
+    midi_reset();
+    midi_on(0, 60, 100);
+    mix_blocks(2);
+    bad += check("MIDI: a note held on T1", notes_on_core(0) == 1u);
+    sm_step_toggle(1, 0);                                 /* the sequencer's own notes are not MIDI's to drop */
+    stp(1, 0)->note[0] = 62;
+    stp(1, 0)->len = MF_LEN_INF;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks(2);
+    for (k = 0; k < MQ + 4u; k++)                         /* the main producer outruns the audio stream: the ring fills */
+        n += (uint32_t)midi_on(2, 40u + k % 8u, 100);
+    bad += check("MIDI: the ring takes 64 packets, then midi_in_overflow", n == MQ && midi_in_overflow == 1u);
+    mix_blocks(1);
+    bad += check("MIDI: the audio stream drops the queue and clears the flag", mi_r == mi_w && midi_in_overflow == 0u);
+    bad += check("MIDI: ... MIDI's note on T1 is let go (a lost note-off must not hang it), the dropped notes never played",
+                 notes_on_core(0) == 0u && on_n[2] == 0u);
+    bad += check("MIDI: ... the sequencer's note on T2 sounds on", notes_on_core(1) == 1u && ev_count(0, 1) == 0u);
+    bad += check("MIDI: the ring takes packets again", midi_on(3, 70, 100) == 1);
+    mix_blocks(1);
+    bad += check("MIDI: ... and T4 plays it", on_n[3] == 1u && notes_on_core(3) == 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(400);
+    bad += check("MIDI: 400 blocks after STOP: nothing hangs", voices_busy() == 0);
+    return bad;
+}
+
 static void write_ppm(const char *dir, const char *name)
 {
     char path[256];
@@ -3893,6 +4184,10 @@ int main(void)
     bad += test_swing();
     bad += test_swing_with_nudge_ratchet();
     bad += test_swing_read_once();
+    bad += test_midi_note_ch2();
+    bad += test_midi_vs_seq_same_note();
+    bad += test_midi_mute_stop_panic();
+    bad += test_midi_overflow();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

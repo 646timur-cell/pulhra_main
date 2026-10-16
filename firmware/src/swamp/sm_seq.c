@@ -66,11 +66,17 @@ static uint32_t sm_step_q8(void)
     return (uint32_t)FS * 150u * 256u / b;
 }
 
+static uint32_t sm_midi_has(uint32_t t, uint32_t note);   /* sm_midi.c: the notes MIDI holds on track t */
+static void sm_midi_forget(uint32_t t);
+static void sm_midi_drain(void);
+
+/* the sequencer lets go of its notes on track t (a note MIDI holds too keeps sounding: it is MIDI's to let go) */
 static void sm_seq_release(uint32_t t)
 {
     uint32_t i;
     for (i = 0; i < sm_nheld[t]; i++)
-        trk_note_off(&trk[t], sm_held[t][i]);
+        if (!sm_midi_has(t, sm_held[t][i]))
+            trk_note_off(&trk[t], sm_held[t][i]);
     sm_nheld[t] = 0;
 }
 
@@ -205,6 +211,7 @@ static void sm_seq_stop(void)
             if (trk[t].v[i].active)
                 voice_kill(&trk[t].v[i]);
         sm_nheld[t] = 0;
+        sm_midi_forget(t);                                /* (MIDI's notes went with them) */
         sm_seq_idle(t);
     }
     sm_seq_unlock_all();
@@ -335,7 +342,7 @@ static void sm_seq_notes(uint32_t t, const sm_step_t *s, uint32_t vel, uint32_t 
     if (slide)
         for (j = 0; j < nold; j++) {
             for (k = 0; k < n && s->note[k] != old[j]; k++) {}
-            if (k == n)
+            if (k == n && !sm_midi_has(t, old[j]))
                 trk_note_off(&trk[t], old[j]);
         }
     sm_nheld[t] = (uint8_t)n;
@@ -470,17 +477,20 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
 
 /* the audio block's events: the commands first (before engine_block: a machine change applied after it would render the
  * old engine with the new engine's values in this block, voice.c track_render), then panic_req, the engines' switches,
- * and the sequencer's events of the block in time order: the steps' starts, the nudged fires, the ratchet parts */
+ * and the sequencer's events of the block in time order: the steps' starts, the nudged fires, the ratchet parts. MIDI IN's
+ * notes (sm_midi.c) go right after the commands, so a note-on struck in a block with a STOP or a LOAD comes after them */
 static void events_block(uint32_t n)
 {
     uint32_t t, pr;
     sm_cmd_drain();
+    sm_midi_drain();                                      /* (MIDI IN notes: sm_midi.c) */
     pr = panic_req;                                       /* (the main loop sets bits; this interrupt is never preempted */
     panic_req = 0;                                        /* by it between the read and the clear) */
     for (t = 0; t < SM_NTRK; t++) {
         if ((pr >> t) & 1u) {
             trk_all_off(&trk[t]);
             sm_nheld[t] = 0;
+            sm_midi_forget(t);
             sm_slid[t] = 0;
             sm_rat_left[t] = 0;
             sm_rat_q8[t] = SM_Q8_NONE;
