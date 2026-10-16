@@ -96,6 +96,10 @@ static volatile int8_t perf_k[4];     /* main: the knob macros, 0 = untouched: F
 static volatile uint32_t kb_layer;    /* ISR: the keys held that are the layer's, a bit per key */
 static volatile uint32_t perf_held;   /* ISR: the effects held (PF_*) */
 static volatile uint8_t perf_latch_on;   /* main: MENU > FX LATCH ON (#40): a key with FX toggles its effect */
+#if FELUCCA_MONOFM
+static volatile uint8_t perf_trk;     /* MONOFM: the punch-in's target, track + 1 (0: the master); FX + black key 5 (D#4)
+                                       * steps it MASTER T1 .. T4 (seq.c perf_key_press; fx.c mix_block) */
+#endif
 static volatile uint32_t perf_latched;   /* ISR: the effects latched (FX LATCH; main clears it: OCT-, the menu) */
 static volatile uint32_t perf_act;    /* ISR: .. running (a 1/16 one from its start on) */
 static uint32_t perf_ord[PF_N], perf_seq;   /* press order: the last pressed buffer effect plays */

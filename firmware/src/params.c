@@ -638,6 +638,11 @@ static const page_t PAGES[] = {
     {"VOICE 2", FAM_EDIT, SC_TRACK, GR_NONE, {P_ALLOC, P_DETUNE, P_PAN, P_MUTE}},
     {"VOICE 3", FAM_EDIT, SC_TRACK, GR_NONE, {P_SPRD, FELUCCA_MODULE ? P_AHOLD : 0xFF, 0xFF, 0xFF}},   /* (module: LATCH) */   /* #148: SPREAD */
     /* 1.2 (Discussion #153): a family's pages go round in this order, a tap of its button each (ui.c open_family) */
+#if FELUCCA_MONOFM   /* GLO (Elektron's AMP): the amplitude envelope (ENV's, the same one) and the track's mix, then SONG: the
+                     * chain of patterns (slots A..D a section) */
+    {"AMP", FAM_GLO, SC_TRACK, GR_ADSR, {P_ATK, P_DEC, P_SUS, P_REL}},
+    {"MIX", FAM_GLO, SC_TRACK, GR_NONE, {P_LEVEL, P_PAN, P_DIST, P_SPRD}},
+#endif
     {"SONG", FAM_GLO, SC_GLOBAL, GR_SONG, {0xFF, 0xFF, 0xFF, 0xFF}},        /* GLO's only page (1.2; up to 1.1.5 SEQ's) */
     /* SAVE's taps (1.5, #173): USER (SAVE from another page: the quick save, SAVE OCT+ OCT+), PRESETS (the engines and
      * sounds one tap on; up to 1.4.1 the last), PHRASES, PROJECT, TOOLS */

@@ -986,6 +986,41 @@ static __attribute__((noinline)) void perf_master(int32_t *out, uint32_t n)
     }
 }
 
+#if FELUCCA_MONOFM
+/* MONOFM's punch-in on track k (perform.c perf_trk): the other tracks and every bus as always; track k's dry sound (its
+ * sends to the buses as always: the echoes are not punched) at the master level, through the FX layer's effects
+ * (perf_block), then added; the master filters and master_out on the sum */
+static int32_t pt_l[CTL], pt_r[CTL];
+static __attribute__((noinline)) void mf_punch_track(int32_t *out, uint32_t n, uint32_t k)
+{
+    uint32_t i;
+    int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;
+    mix_part(&trk[k], n);                               /* (into the zeroed mix: track k alone) */
+    for (i = 0; i < n; i++) {
+        pt_l[i] = ((mix_l[i] >> 2) * mg) >> 10;
+        pt_r[i] = ((mix_r[i] >> 2) * mg) >> 10;
+        mix_l[i] = mix_r[i] = 0;
+    }
+    for (i = 0; i < NLIVE; i++)
+        if (i != k)
+            mix_part(&trk[i], n);
+    perf_pre(mix_l, mix_r, send_d, send_r, n);
+    fx_buses(send_c, send_d, send_r, wet, n);
+    if (hl.side)
+        rev_side_mix(mix_l, mix_r, n);
+    perf_block(pt_l, pt_r, n);
+    for (i = 0; i < n; i++) {
+        int32_t l = ((((mix_l[i] + wet[i]) >> 2) * mg) >> 10) + pt_l[i];
+        int32_t r = ((((mix_r[i] + wet[i]) >> 2) * mg) >> 10) + pt_r[i];
+        MASTER_FILTER(&l, &r);
+        master_out(&l, &r);
+        out[2u * i] = l;
+        out[2u * i + 1u] = r;
+    }
+    if (scope_mix)
+        scope_take_mix(n);
+}
+#endif
 static void mix_block(int32_t *out, uint32_t n)
 {
     uint32_t i;
@@ -998,6 +1033,12 @@ static void mix_block(int32_t *out, uint32_t n)
 #endif
     events_block(n);
     perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
+#if FELUCCA_MONOFM
+    if (perf && perf_trk && perf_trk <= NPART) {        /* the punch-in on one track (FX + D#4): the others to the master */
+        mf_punch_track(out, n, perf_trk - 1u);          /* as they are, that track's dry sound through the effects */
+        return;
+    }
+#endif
     for (i = 0; i < NLIVE; i++)                         /* (STRANGE: T1, T2 only) */
         mix_part(&trk[i], n);
     if (perf)

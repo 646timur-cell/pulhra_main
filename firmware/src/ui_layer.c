@@ -1202,7 +1202,12 @@ static void layer_fx(void)
     }
     for (e = 0; e < NTRK; e++) {                        /* the mutes of the black keys 1..4 */
         bnote(n, e);
+#if FELUCCA_MONOFM                                      /* (MONOFM: the punch-in's target track says FX; D#4 steps it) */
+        lcell(LC_X(e), LM_Y, LM_H, n, ICON_MUTE, trk_icon(e, 0), perf_trk == e + 1u ? "FX" : 0,
+              (held >> (PF_M1 + e)) & 1u ? LS_MUTE : perf_trk == e + 1u ? LS_SEL : LS_OFF, 0);
+#else
         lcell(LC_X(e), LM_Y, LM_H, n, ICON_MUTE, trk_icon(e, 0), 0, (held >> (PF_M1 + e)) & 1u ? LS_MUTE : LS_OFF, 0);
+#endif
     }
 }
 #if FELUCCA_STRANGE

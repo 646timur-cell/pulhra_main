@@ -827,6 +827,13 @@ static uint8_t kb_fx[27];
 static __attribute__((noinline)) void perf_key_press(uint32_t k, int down)
 {
     uint32_t e, j;
+#if FELUCCA_MONOFM
+    if (key_black(k) && key_place(k) == NTRK) {         /* black key 5 (D#4): the punch-in's target, the next one */
+        if (down)
+            perf_trk = (uint8_t)((perf_trk + 1u) % (NTRK + 1u));
+        return;
+    }
+#endif
     if (down) {
         e = perf_key(k);
         kb_fx[k] = (uint8_t)(e + 1u);

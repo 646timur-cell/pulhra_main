@@ -76,6 +76,8 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"ARP 2", "[K3]LATCH[K4]ORDER[ARP]ARP"},
 #if FELUCCA_MONOFM
     {"EUCLID", "[K1]ON[K3]HITS[K4]ROTATE"},
+    {"AMP", "[K1-4]ATK DEC SUS REL[GLO]MIX"},
+    {"MIX", "[K1]LEVEL[K2]PAN[K3]DRIVE[GLO]SONG"},
 #endif
 #if FELUCCA_STRANGE
     {"EUCLID", "[K1]NOTES[K3]HITS[SEQ]RATE"},

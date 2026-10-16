@@ -502,6 +502,82 @@ static int test_filter(void)
     return check(what, lp < off * 0.4 && fabs(lpo / off - 1.0) < 0.25 && hp < off * 0.6 && bp > 50.0 && bp < off);
 }
 
+/* the punch-in's target (FX + D#4: perf_trk): OCT DN held, T1 a saw. Target T2 (silent): T1 untouched, as with no effect;
+ * target T1, or the master: T1 through it (the output changes) */
+static double punch_rms(int target, int fx, double *diff, int32_t *ref)
+{
+    int32_t buf[2 * CTL];
+    uint32_t k, i;
+    double sq = 0, d = 0;
+    ui_power_on();
+    memset(eng_mem, 0, sizeof eng_mem);
+    memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+    rng_state = 0x1234567u;
+    song.master_q12 = 4096;
+    for (i = 0; i < NPART; i++)
+        trk[i].p[P_DLY] = trk[i].p[P_REV] = trk[i].p[P_CHOR] = 0;
+    set_engine_of(&trk[0], ENGI_MSAW);
+    apply_preset_to(&trk[0], 1);
+    trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;
+    for (k = 0; k < 8u; k++)
+        mix_block(buf, CTL);
+    perf_trk = (uint8_t)target;
+    if (fx)
+        perf_press(PF_ODN, 1);
+    midi_event(0x90, 0, 45, 100);
+    for (k = 0; k < 400u; k++) {
+        mix_block(buf, CTL);
+        for (i = 0; i < CTL; i++) {
+            int32_t x = buf[2u * i];
+            if (k > 100u) {
+                sq += (double)x * x;
+                if (ref)
+                    d += fabs((double)x - ref[(k - 101u) * CTL + i]);
+            }
+        }
+    }
+    if (fx)
+        perf_press(PF_ODN, 0);
+    perf_trk = 0;
+    if (diff)
+        *diff = d;
+    return sqrt(sq / (299.0 * CTL));
+}
+static int32_t punch_ref[300 * CTL];
+static int test_punch(void)
+{
+    int32_t buf[2 * CTL];
+    double d2, d1, d0;
+    uint32_t k, i, f = 0;
+    char what[160];
+    /* the reference: no effect */
+    ui_power_on();
+    memset(eng_mem, 0, sizeof eng_mem);
+    memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+    rng_state = 0x1234567u;
+    song.master_q12 = 4096;
+    for (i = 0; i < NPART; i++)
+        trk[i].p[P_DLY] = trk[i].p[P_REV] = trk[i].p[P_CHOR] = 0;
+    set_engine_of(&trk[0], ENGI_MSAW);
+    apply_preset_to(&trk[0], 1);
+    trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;
+    for (k = 0; k < 8u; k++)
+        mix_block(buf, CTL);
+    midi_event(0x90, 0, 45, 100);
+    for (k = 0; k < 400u; k++) {
+        mix_block(buf, CTL);
+        if (k > 100u)
+            for (i = 0; i < CTL; i++)
+                punch_ref[f++] = buf[2u * i];
+    }
+    punch_rms(2, 1, &d2, punch_ref);
+    punch_rms(1, 1, &d1, punch_ref);
+    punch_rms(0, 1, &d0, punch_ref);
+    snprintf(what, sizeof what, "MONOFM punch-in: OCT DN on T2 leaves T1 (diff %.0f), on T1 (%.0f) and the master (%.0f) not",
+             d2 / (299.0 * CTL), d1 / (299.0 * CTL), d0 / (299.0 * CTL));
+    return check(what, d2 / (299.0 * CTL) < 10.0 && d1 / (299.0 * CTL) > 200.0 && d0 / (299.0 * CTL) > 200.0);
+}
+
 int main(void)
 {
     const char *wavs = getenv("WAVS");
@@ -521,6 +597,7 @@ int main(void)
     bad += test_euclid();
     bad += test_xy();
     bad += test_filter();
+    bad += test_punch();
     printf(bad ? "monofm: %d FAILED\n" : "monofm: all passed\n", bad);
     return bad != 0;
 }
