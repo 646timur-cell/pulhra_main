@@ -382,7 +382,7 @@ static int mfp_read_pat(uint32_t base, const mfp_hdr_t *h, uint32_t i, mfp_pat_t
     if (h->version == MFP_VERSION)
         return mfp_read(base + 64u + i * h->size, d, sizeof *d);
     {
-        static mfp_pat1_t o;                              /* (main loop only) */
+        static mfp_pat1_t o __attribute__((section(".pool")));   /* (main loop only; the pool, not .bss) */
         if (mfp_read(base + 64u + i * h->size, &o, sizeof o))
             return 1;
         memset(d, 0, sizeof *d);
