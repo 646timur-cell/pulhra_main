@@ -591,6 +591,8 @@ static uint32_t note_set_len(track_t *t, uint32_t i, uint32_t want)
 #if FELUCCA_MONOFM
 static uint8_t mf_kbd;
 static int mf_trigs(void) { return !(ui_prefs2 & (PREF_ROLL >> 16)) && !mf_kbd; }
+static uint8_t mf_plk;           /* a trig held: 0 KNOB 1..4 its NOTE VEL LEN CHANCE; 1 locks of ui.plk_src's page (picked
+                                  * with PRESETS or ENV / LFO / ARP while it is held: ui_input.c mf_lock_pick) */
 #else
 #define mf_kbd 0
 #define mf_trigs() 0
@@ -661,7 +663,8 @@ static void grid_hit(track_t *t, uint32_t i, uint32_t l, uint32_t on)
 }
 
 #if FELUCCA_MONOFM
-/* MONOFM's KEYS editor (grid_on): step i of a melodic track, its trig on (the note last played: seq.c last_note) or off
+/* MONOFM's KEYS editor (grid_on): step i of a melodic track, its trig on (C3 + the track's ROOT; a note is set with the
+ * trig held + KNOB 1, or SEQ + ARP's keyboard) or off
  * (its TIEs with it: a longer note goes whole); acc: its accent only (on: a trig too) */
 static void mf_trig(track_t *t, uint32_t i, uint32_t on, uint32_t acc)
 {
@@ -671,7 +674,7 @@ static void mf_trig(track_t *t, uint32_t i, uint32_t on, uint32_t acc)
         step_clear(s);
         s->time = ST_NOTE;
         s->n = 1;
-        s->note[0] = last_note;
+        s->note[0] = (uint8_t)(48 + clamp(t->p[P_ROOT], 0, 11));   /* (the track's own: C3 + ROOT, EUCLID's too) */
     }
     if (acc) {
         s->flags = (uint8_t)(on ? s->flags | SF_ACCENT : s->flags & ~SF_ACCENT);
@@ -793,6 +796,7 @@ static void mf_kbd_toggle(void)
     if (mf_kbd && !ui.home && cur_page()->graph == GR_ROLL) {
         mf_kbd = 0;
         ui_message("KEYS: STEPS");
+        ui.pg_down &= (uint16_t)~(1u << panel.btn[B_ARP]);
         ui.force = 1;
         return;
     }
@@ -807,6 +811,7 @@ static void mf_kbd_toggle(void)
     }
     mf_kbd = 1;
     ui_message("KEYS: NOTES > STEP");
+    ui.pg_down &= (uint16_t)~(1u << panel.btn[B_ARP]);   /* (ARP pressed first: its page does not open)*/
     ui.force = 1;
 }
 /* HOME tapped twice (on HOME, the second tap within 0.4 s of the first): XY, HOME's knobs X and Y of every track

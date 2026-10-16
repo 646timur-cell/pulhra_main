@@ -974,8 +974,8 @@ static int test_keys_editor(void)
     last_note = 55;
     tap_k(key_at(0, 2));
     for (k = 0; k < 4u; k++) mix_block(buf, CTL);
-    ok = grid_on() && step_on(&t->step[2]) && t->step[2].note[0] == 55u && ui.cursor == 2u && !ke_voices(t);
-    bad += check("MONOFM KEYS: STEP's white key 3 tapped: a trig on step 3 in the last note, the cursor there, silent", ok);
+    ok = grid_on() && step_on(&t->step[2]) && t->step[2].note[0] == (uint32_t)(48 + t->p[P_ROOT]) && ui.cursor == 2u && !ke_voices(t);
+    bad += check("MONOFM KEYS: STEP's white key 3 tapped: a trig on step 3 in C3 + ROOT (not the last note), the cursor there, silent", ok);
     tap_k(key_at(0, 2));
     bad += check("MONOFM KEYS: tapped again: the trig goes", !step_on(&t->step[2]));
     tap_k(key_at(0, 4));
@@ -985,15 +985,43 @@ static int test_keys_editor(void)
     frame();
     bad += check("MONOFM KEYS: a trig's key held past 350 ms only picks it (it stays, the cursor there)",
                  step_on(&t->step[4]) && ui.cursor == 4u);
+    {
+        uint32_t n0 = t->step[4].note[0];
+        key_down(key_at(0, 4));
+        frame();
+        turn(EN_K1, 3);
+        turn(EN_K3, 1);
+        key_up(key_at(0, 4));
+        frame();
+        bad += check("MONOFM KEYS: a trig held + KNOB 1: its NOTE (+3), KNOB 3 its LEN; the trig stays, no lock",
+                     t->step[4].note[0] == n0 + 3u && note_len(t, 4) == 2u && step_on(&t->step[4]) && motion_lock_count(t) == 0u);
+        turn(EN_K3, -1);
+        t->step[4].note[0] = (uint8_t)n0;
+    }
     key_down(key_at(0, 4));
     frame();
+    turn(EN_PRESET, 1);                                 /* (PRESETS: the page the knobs lock) */
+    ok = mf_plk && ui.plk_src;
     turn(EN_K1, 3);
     key_up(key_at(0, 4));
     frame();
-    bad += check("MONOFM KEYS: held + a knob: a lock on the step, the trig stays", motion_lock_count(t) >= 1u && step_on(&t->step[4]));
+    frame();
+    ok &= motion_lock_count(t) >= 1u && step_on(&t->step[4]) && !mf_plk;
+    bad += check("MONOFM KEYS: a trig held + PRESETS: KNOB 1..4 lock a sound page's parameters (a lock), back after", ok);
+    key_down(key_at(0, 4));
+    frame();
+    press(B_ENV);
+    ok = mf_plk && PAGES[ui.plk_src - 1u].fam == FAM_ENV && cur_page()->graph == GR_ROLL;
+    key_up(key_at(0, 4));
+    frame();
+    frames(200);
+    bad += check("MONOFM KEYS: a trig held + ENV: ENV's page locks, STEP stays, the trig too", ok && cur_page()->graph == GR_ROLL &&
+                 step_on(&t->step[4]));
     ui.cursor = 4;
+    frames(600);
+    k4 = t->step[4].note[0];
     turn(EN_K1, 2);
-    ok = t->step[4].note[0] == 57u;
+    ok = t->step[4].note[0] == k4 + 2u;
     turn(EN_K2, -10);
     ok &= t->step[4].vel && t->step[4].vel < 96u;
     turn(EN_K3, 1);
@@ -1033,6 +1061,22 @@ static int test_keys_editor(void)
     btn_up(B_SEQ);
     frames(100);
     bad += check("MONOFM KEYS: SEQ + ARP again: the keys are the steps", !mf_kbd && grid_on());
+    btn_down(B_ARP);                                    /* ARP first, then SEQ: the same; no ARP page, no SEQ layer */
+    frame();
+    btn_down(B_SEQ);
+    frame();
+    btn_up(B_SEQ);
+    btn_up(B_ARP);
+    frames(100);
+    ok = mf_kbd && cur_page()->graph == GR_ROLL && !ui.layer;
+    btn_down(B_ARP);
+    frame();
+    btn_down(B_SEQ);
+    frame();
+    btn_up(B_SEQ);
+    btn_up(B_ARP);
+    frames(100);
+    bad += check("MONOFM KEYS: ARP held, then SEQ: the keyboard on, and off again (STEP stays)", ok && !mf_kbd && cur_page()->graph == GR_ROLL);
     /* the LEDs: playing on HOME, the trigs and the running light */
     sc_pattern(t, 48, 16);                              /* (trigs on 0 2 4 .. 14) */
     go_home();

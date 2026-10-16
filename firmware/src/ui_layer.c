@@ -296,6 +296,14 @@ static void layer_arm(uint32_t pressed, uint32_t now)
         if ((pressed & ly_bit(l)) && !(FELUCCA_MODULE && ((l == LAYER_SEQ && !FELUCCA_STRANGE) || l == LAYER_REC))) {
             ui.ly = (uint8_t)l;                         /* (sound module: no SEQ TOOLS, no REC layer) */
             ui.ly_t0 = (now & ~15u) | 1u | (layer_allowed() ? 0u : LY_DEAD);
+#if FELUCCA_MONOFM
+            if (l == LAYER_SEQ && ((fm1_in.buttons >> panel.btn[B_ARP]) & 1u)) {   /* ARP held, then SEQ: the keyboard */
+                ui.ly_t0 |= LY_DEAD;                    /* for the step (SEQ: no layer, no tap) */
+                lys.dtap = 0;
+                mf_kbd_toggle();
+                return;
+            }
+#endif
             lys.dtap = lys.dt_l == l && fm1_ms - lys.dt_ms <= LY_DTAP_MS;   /* (#83: the second tap of a double tap?) */
             lys.dt_l = 0;
             return;
@@ -887,7 +895,9 @@ static void layer_key(uint32_t l, uint32_t k)
 #endif
 #if FELUCCA_MONOFM
     } else if (l == LAYER_SEQ) {                        /* the white keys the scenes, the black ones the tools */
-        if (!key_black(k))
+        if ((fm1_in.buttons >> panel.btn[B_ARP]) & 1u)
+            ;                                           /* (SEQ + ARP: the keyboard's toggle, no scene, no tool) */
+        else if (!key_black(k))
             mf_scene_key(k, p);
         else
             tools_key(p);

@@ -803,6 +803,64 @@ static void lock_turn(uint32_t k, int32_t s, uint64_t held)
     motion_undo_done(t);
 }
 
+#if FELUCCA_MONOFM
+/* KEYS (a melodic track, MONOFM): trigs held, KNOB 1..4 their NOTE VEL LEN CHANCE (mf_plk 0) */
+static int mf_held_fields(void) { return grid_on() && !drum_track(TSEL) && !detail_on() && !mf_plk; }
+static void mf_held_turn(uint32_t k, int32_t s, uint64_t held)
+{
+    track_t *t = TSEL;
+    uint32_t i, len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
+    if (chain_busy()) {
+        ui_message("STOP TO EDIT");
+        return;
+    }
+    ui.plk_rm &= ~held;                                 /* (held for an edit: the trig stays) */
+    step_undo_take(t, 0x6800u | k << 7);
+    for (i = 0; i < len; i++) {
+        step_t *st = &t->step[i];
+        uint32_t j;
+        if (!((held >> i) & 1u) || !step_on(st) || !st->n)
+            continue;
+        if (k == 0u) {
+            for (j = 0; j < st->n; j++)
+                st->note[j] = (uint8_t)clamp(st->note[j] + s, 1, 127);
+            last_note = st->note[0];
+        } else if (k == 1u) {
+            ev_sput(st, EVK_VEL, clamp(ev_sval(st, EVK_VEL) + accel(EN_K2, s, 126), 1, 127));
+        } else if (k == 2u) {
+            note_set_len(t, i, (uint32_t)clamp((int32_t)note_len(t, i) + s, 1, NSTEP));
+        } else {
+            ev_sput(st, EVK_CHANCE, clamp(ev_sval(st, EVK_CHANCE) + accel(EN_K4, s, 100), 0, 100));
+        }
+    }
+    motion_undo_done(t);
+}
+/* a trig held: PRESETS (dir s) steps the page KNOB 1..4 lock through the sound's pages (NOTE.. first), a page button
+ * (ENV LFO ARP) jumps to its family's; 1 = taken */
+static int mf_lock_pick(int32_t s, uint32_t fam)
+{
+    uint32_t i, n, cur = mf_plk && ui.plk_src ? ui.plk_src - 1u : NPAGES;
+    if (!grid_on() || drum_track(TSEL) || detail_on() || !lock_held())
+        return 0;
+    for (n = 0, i = cur; n <= NPAGES; n++) {
+        i = s < 0 ? (i + NPAGES) % (NPAGES + 1u) : (i + 1u) % (NPAGES + 1u);   /* (NPAGES: the step's own four) */
+        if (i == NPAGES ? fam == FAM_COUNT : lock_page_ok(i) && page_visible(i) && (fam == FAM_COUNT || PAGES[i].fam == fam))
+            break;
+    }
+    ui.plk_rm &= ~lock_held();                          /* (held for this: the trigs stay) */
+    if (n > NPAGES)
+        return 1;
+    mf_plk = i < NPAGES;
+    if (mf_plk) {
+        ui.plk_src = (uint8_t)(i + 1u);
+        ui_say("LOCK: ", PAGES[i].title);
+    } else {
+        ui_message("STEP: NOTE VEL LEN %");
+    }
+    ui.force = 1;
+    return 1;
+}
+#endif
 /* [EDIT] with the steps `held` held: their locks go */
 static void lock_clear(uint64_t held)
 {
@@ -1793,6 +1851,15 @@ static void ui_input(void)
             break;
         }
         default:                                        /* page buttons (GLO SCL ENV LFO EDIT ARP): when let go */
+#if FELUCCA_MONOFM
+            {   /* KEYS, a trig held: ENV / LFO / ARP pick the page its knobs lock (no page change) */
+                uint32_t f;
+                for (f = 0; f < FAM_COUNT && FAM_BTN[f] != b; f++)
+                    ;
+                if (!lay && f < FAM_COUNT && mf_lock_pick(1, f))
+                    break;
+            }
+#endif
             if (!lay)                                   /* (with FX held: swallowed) */
                 ui.pg_down |= (uint16_t)(1u << id);
             break;
@@ -1847,7 +1914,14 @@ static void ui_input(void)
      * and the page under it (HOME's sound, motion recorded), PRESETS could load a sound. They stay for the next pass */
     kq |= lay;
     if (!lay && (s = panel_enc(EN_PRESET)) != 0)
+#if FELUCCA_MONOFM
+        if (!mf_lock_pick(s, FAM_COUNT))                /* (KEYS, a trig held: the page its knobs lock) */
+#endif
         presets_turn(s);
+#if FELUCCA_MONOFM
+    if (mf_plk && !lock_held())
+        mf_plk = 0;                                     /* (the trigs let go: their own four again) */
+#endif
     if (!lay && (s = panel_enc(EN_ALGO)) != 0)     /* ALGORITHM: the selected track, on every page */
         track_select((uint32_t)clamp((int32_t)song.sel + (s > 0 ? 1 : -1), 0, NLIVE - 1));
     if ((s = glo ? sel : crank_select() ? 0 : panel_enc(EN_SELECT)) != 0) {   /* SELECT knob = global tempo; */
@@ -1870,6 +1944,11 @@ static void ui_input(void)
         if (mom_down())                                 /* (LFO + a knob, MOMENTARY or not: LFO's release opens no page) */
             ui.pg_down &= (uint16_t)~(1u << panel.btn[B_LFO]);
         if ((held = lock_held()) != 0u) {               /* a step held on STEP: KNOB k locks (parameter locks) */
+#if FELUCCA_MONOFM
+            if (mf_held_fields())
+                mf_held_turn(k, s, held);               /* (KEYS: the trigs' own NOTE VEL LEN CHANCE) */
+            else
+#endif
             lock_turn(k, s, held);
             ui.hot_col = (uint8_t)k;
             ui.hot_t = 40;
