@@ -447,6 +447,19 @@ static int test_xy_filter(void)
     turn(EN_K1 + 3, 5);
     frame();
     bad += check("HOME KNOB 3 / 4: T2's X and Y (the selected track)", xy_val[1][0] > 0 && xy_val[1][1] > 0 && !xy_val[0][0]);
+    {   /* XY LINK: ON the other part along, INV the other way, CROSS on the other axis; OFF alone again */
+        int okl;
+        song.g[G_XYLINK] = 1; turn(EN_K1 + 2, 3); frame();
+        okl = xy_val[0][0] == xy_val[1][0] && xy_val[0][0] > 0;
+        song.g[G_XYLINK] = 2; turn(EN_K1 + 3, 3); frame();
+        okl &= xy_val[0][1] == 127 - xy_val[1][1];
+        song.g[G_XYLINK] = 3; xy_val[0][0] = xy_val[0][1] = 0; turn(EN_K1 + 2, 2); frame();
+        okl &= xy_val[0][1] == xy_val[1][0] && !xy_val[0][0];
+        song.g[G_XYLINK] = 0; xy_val[0][0] = xy_val[0][1] = 0; turn(EN_K1 + 2, 2); frame();
+        okl &= !xy_val[0][0] && !xy_val[0][1];
+        bad += check("XY LINK: HOME's X / Y on both parts (ON, INV, CROSS), OFF the selected one's", okl);
+        xy_val[0][0] = xy_val[0][1] = xy_val[1][0] = xy_val[1][1] = 0;
+    }
     frames(200);
     press(B_HOME);
     frame();
@@ -725,13 +738,29 @@ static int test_xy_routes(void)
     bad += check("a factory preset clears the own routes (the engine's play again)", ok);
     go_home(); frame();
     press(B_ARP);
-    ok = !strcmp(cur_page()->title, "FAV") && list_mode() == 1u;
-    press(B_ARP);
-    ok &= !strcmp(cur_page()->title, "X") && list_mode() != 1u;
-    press(B_ARP);
+    ok = !strcmp(cur_page()->title, "X") && list_mode() != 1u;
+    frames(400); press(B_ARP);
     ok &= !strcmp(cur_page()->title, "Y");
+    frames(400); press(B_ARP);
+    ok &= !strcmp(cur_page()->title, "XY LINK") && page_desc(cur_page(), 0, &(int16_t *){0}) != 0;
+    frames(400); press(B_ARP);
+    ok &= !strcmp(cur_page()->title, "X");
     go_home(); frame();
-    bad += check("ARP: FAV (the FAV list), X, Y", ok);
+    bad += check("ARP: X, Y, XY LINK (no FAV)", ok);
+    frames(600);
+    press(B_SAVE);
+    ok = !strcmp(cur_page()->title, "SCENES");
+    frames(600); press(B_SAVE);
+    ok &= !strcmp(cur_page()->title, "PRESETS");   /* (taps apart: SAVE's round, FAV never in it) */
+    frames(600); press(B_SAVE); frames(600); press(B_SAVE); frames(600); press(B_SAVE); frames(600); press(B_SAVE);
+    ok &= strcmp(cur_page()->title, "FAV") != 0;
+    go_home(); frame(); frames(600);
+    press(B_SAVE); frames(100); press(B_SAVE); frames(100); press(B_SAVE); frame();
+    ok &= !strcmp(cur_page()->title, "FAV") && list_mode() == 1u;
+    frames(600); press(B_SAVE);
+    ok &= strcmp(cur_page()->title, "FAV") != 0 && list_mode() != 1u;
+    go_home(); frame();
+    bad += check("SAVE three times: FAV (the FAV list); SAVE again its round", ok);
     return bad;
 }
 

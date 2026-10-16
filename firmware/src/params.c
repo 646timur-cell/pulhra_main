@@ -55,6 +55,9 @@ static const char *const N_NOTE[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", 
 static const char *const N_DASH[] = {"--"};
 static const char *const N_RTYPE[] = {"ROOM", "SPRING", "HALL"};   /* G_RTYPE: the reverb bus's model (fx.c) */
 static const char *const N_GO[] = {"--", "GO"};
+#if FELUCCA_STRANGE
+static const char *const N_XYLINK[] = {"OFF", "ON", "INV", "CROSS"};   /* XY LINK (G_XYLINK) */
+#endif
 static const char *const N_SLCR[] = {"OFF", "GATE", "STUT"};             /* SL_OFF .. SL_STUT (slicer.c) */
 static const char *const N_SLDIV[] = {"1/8", "1/16", "1/32", "8T", "16T", "32T"};   /* SL_DEN */
 /* the INSERT's types (1.5, fx.c IT_*; append-only: stored). Its three values A B C mean what the type says (ins_desc) */
@@ -314,7 +317,11 @@ static const param_desc_t GP[G_COUNT] = {
     [G_LOAD] = PE("LOAD", N_GO, 0),
     [G_SAVE] = PE("SAVE", N_GO, 0),
     [G_ENGSEL] = PE("ENG", N_ENGNAME, 0),
+#if FELUCCA_STRANGE
+    [G_ENGGO] = PE("LINK", N_XYLINK, 0),               /* (G_XYLINK) */
+#else
     [G_ENGGO] = PE("SET", N_GO, 0),
+#endif
     [G_CLRSEQ] = PE("CLRSQ", N_GO, 0),
     [G_INITSND] = PE("INIT", N_GO, 0),
     /* the reverb's model on the REVERB page: the id of the old GM drum channel (G_DRCH, inert since 1.0) */
@@ -612,10 +619,12 @@ static const page_t PAGES[] = {
                                                                              * the tap after PRESETS (up to 1.1.5 SEQ's) */
     {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_TOOLS, {G_CLRSEQ, G_INITSND, 0xFF, 0xFF}},
-#if FELUCCA_STRANGE   /* ARP: FAV (the favourite sounds, PRESETS' browser on its FAV list), then X / Y's routes */
-    {"FAV", FAM_ARP, SC_GLOBAL, GR_BROWSE, {0xFF, 0xFF, 0xFF, 0xFF}},
+#if FELUCCA_STRANGE   /* FAV (the favourite sounds, PRESETS' browser on its FAV list): SAVE tapped three times (ui_input.c);
+                       * ARP: X / Y's routes, then XY LINK (HOME's X / Y on both parts) */
+    {"FAV", FAM_SAVE, SC_GLOBAL, GR_BROWSE, {0xFF, 0xFF, 0xFF, 0xFF}},
     {"X", FAM_ARP, SC_TRACK, GR_XY, {P_FM1_ATK, P_FM1_DEC, P_FM1_SUS, P_FM1_REL}},
     {"Y", FAM_ARP, SC_TRACK, GR_XY, {P_FM2_ATK, P_FM2_DEC, P_FM2_SUS, P_FM2_REL}},
+    {"XY LINK", FAM_ARP, SC_GLOBAL, GR_NONE, {G_XYLINK, 0xFF, 0xFF, 0xFF}},
 #endif
     {"ARP", FAM_ARP, SC_TRACK, GR_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}},
     {"ARP 2", FAM_ARP, SC_TRACK, GR_NONE, {P_ASWING, P_APROB, P_AHOLD, P_AORDER}},

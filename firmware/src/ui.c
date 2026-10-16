@@ -409,7 +409,9 @@ static int page_visible(uint32_t i)
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SEQ)
         return PAGES[i].graph == GR_EUCLID;           /* (STRANGE: SEQ is EUCLID) */
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_ARP)
-        return PAGES[i].graph == GR_XY || PAGES[i].graph == GR_BROWSE;   /* (STRANGE: ARP is FAV, X, Y) */
+        return PAGES[i].graph == GR_XY || PAGES[i].scope == SC_GLOBAL;   /* (STRANGE: ARP is X, Y, XY LINK) */
+    if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SAVE && PAGES[i].graph == GR_BROWSE && PAGES[i].title[0] == 'F')
+        return i == ui.page;                          /* (FAV: SAVE three times, never in SAVE's round) */
     if (FELUCCA_STRANGE && PAGES[i].id[0] == P_FM3_REL)
         return TSEL->eng_req % NENGINES == ENGI_GLITCH || TSEL->eng_req % NENGINES == ENGI_RITUAL ||
                TSEL->eng_req % NENGINES == ENGI_MECH || TSEL->eng_req % NENGINES == ENGI_BIO ||
@@ -1405,7 +1407,22 @@ static uint32_t preset_all_at(uint32_t n, uint32_t *k)
  * editor and backups); the PRESETS knob and page browse that list */
 #define ui_lcat (favorites.factory[15][11])
 #define LIST_N (1u + CAT_N)                              /* ALL FAV BASS LEAD PAD PLUCK KEYS DRUM FX OTHER */
-static int fav_page_on(void) { return FELUCCA_STRANGE && !ui.home && cur_page()->fam == FAM_ARP && cur_page()->graph == GR_BROWSE; }
+#if FELUCCA_STRANGE
+static void fav_open(void)                              /* SAVE three times: FAV, PRESETS' browser on the favourites */
+{
+    uint32_t i;
+    for (i = 0; i < NPAGES; i++)
+        if (PAGES[i].fam == FAM_SAVE && PAGES[i].graph == GR_BROWSE && PAGES[i].title[0] == 'F')
+            break;
+    if (i == NPAGES)
+        return;
+    ui.page = (uint8_t)i;
+    ui.home = 0;
+    page_entered();
+    ui_say("FAVOURITES", "");
+}
+#endif
+static int fav_page_on(void) { return FELUCCA_STRANGE && !ui.home && cur_page()->graph == GR_BROWSE && cur_page()->title[0] == 'F'; }
 static uint32_t list_mode(void)                         /* (STRANGE's ARP > FAV: the FAV list, whatever LIST says) */
 {
     return favorites.filter || fav_page_on() ? 1u : ui_lcat && ui_lcat < CAT_N ? 1u + ui_lcat : 0u;

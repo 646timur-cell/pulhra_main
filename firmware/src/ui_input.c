@@ -1538,8 +1538,21 @@ static void ui_input(void)
         ui_message("STOP TO UNDO");
     else if (save == BT_HOLD)                                /* SAVE held: undo the last sound load */
         undo_swap();
-    else if (save == BT_TAP && !ui.confirm)             /* SAVE acts on release (a hold is the undo) */
+    else if (save == BT_TAP && !ui.confirm) {           /* SAVE acts on release (a hold is the undo) */
+#if FELUCCA_STRANGE
+        static uint32_t sv_ms[2];                       /* STRANGE: three taps (each within 0.4 s): FAV */
+        if (fm1_ms - sv_ms[1] <= 400u && sv_ms[1] - sv_ms[0] <= 400u && sv_ms[0]) {
+            fav_open();
+            sv_ms[0] = sv_ms[1] = 0;
+        } else {
+            open_family(FAM_SAVE);
+            sv_ms[0] = sv_ms[1];
+            sv_ms[1] = fm1_ms | 1u;
+        }
+#else
         open_family(FAM_SAVE);
+#endif
+    }
     if (ui.confirm) {                                   /* OCT- cancels, OCT+ does it; nothing else reacts */
         if (oct & 2u) {
             uint32_t kind = ui.confirm;
@@ -1737,6 +1750,10 @@ static void ui_input(void)
             int16_t *vp;
             const param_desc_t *d = home_param(k, &vp);
             *vp = (int16_t)param_turn(d, *vp, accel(EN_K1 + k, s, d->fmt == F_ENUM ? 0 : d->max - d->min));
+#if FELUCCA_STRANGE
+            if (home_xy(k))
+                xy_link(song.sel % NTRK, (k & 3u) - NLIVE);   /* XY LINK: the other part along */
+#endif
             if (!home_xy(k) && !home_mfilt(k)) {         /* (STRANGE's X / Y, master filters: not a track's) */
                 motion_capture(home_trk(k), (uint32_t)(vp - home_trk(k)->p), *vp);   /* (LEVELS: that track's, as MIXER) */
                 ml_knob(home_trk(k), (uint32_t)(vp - home_trk(k)->p));

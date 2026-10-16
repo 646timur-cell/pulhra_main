@@ -129,6 +129,8 @@ enum {                          /* global parameters */
 };
 #define G_MHPF G_DRLVL           /* STRANGE: the inert globals of the old drum part are the master HPF and LPF (stored */
 #define G_MLPF G_DRREV           /* with the project; 0 = off, so a project of another build loads them off: fx.c) */
+#define G_XYLINK G_ENGGO         /* STRANGE: XY LINK (ARP > XY LINK), the unused SET's id: HOME's X / Y turn both parts
+                                  * (OFF, ON, INV: T2 the other way, CROSS: X turns T2's Y and Y its X); stored, 0 = OFF */
 
 /* stored parameters of an older layout -> today's P_* order. A store keeps np = the P_COUNT it was
  * written with; common parameters are only ever added just before P_E0, so the first np - 8 are

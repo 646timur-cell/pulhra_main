@@ -60,9 +60,10 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"PROJECT", "[K1]SLOT[K4]SAVE[EDIT]NAME"},
     {"TOOLS", "[K1]CLEAR[K2]INIT SOUND[OCT+]DO"},
 #if FELUCCA_STRANGE
-    {"FAV", "[K1]FAVOURITE[K2]ENGINE[ARP]X"},
+    {"FAV", "[K1]FAVOURITE[K2]ENGINE[SAVE]SCENES"},
     {"X", "[K1]X TO[K2]AMOUNT[ARP]Y"},
-    {"Y", "[K1]Y TO[K2]AMOUNT[ARP]FAV"},
+    {"Y", "[K1]Y TO[K2]AMOUNT[ARP]LINK"},
+    {"XY LINK", "[K1]HOME X/Y ON T1+T2[ARP]X"},
 #endif
     {"ARP", "[K1]MODE[KEYS]CHORD[ARP]ARP 2"},
     {"ARP 2", "[K3]LATCH[K4]ORDER[ARP]ARP"},

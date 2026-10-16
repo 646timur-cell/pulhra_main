@@ -55,6 +55,20 @@ _Static_assert(XY_DLY == MD_DLY && XY_REV == MD_REV && XY_E(0) == MD_E1, "core.h
  * and CC16 / CC17 on the track's channel (mod_midi). Performance state, as the mod wheel: not stored. With no matrix
  * slot taking an axis, the engine's own routes for it play (engine_t.xyd / xya: mod_begin) */
 static int16_t xy_val[NTRK][2];
+#if FELUCCA_STRANGE
+/* XY LINK (G_XYLINK): part s's axis ax just turned on HOME; the other parts along: ON the same, INV the other way,
+ * CROSS on the other axis */
+static void xy_link(uint32_t s, uint32_t ax)
+{
+    uint32_t o, m = (uint32_t)clamp(song.g[G_XYLINK], 0, 3);
+    int16_t v = xy_val[s % NTRK][ax & 1u];
+    if (!m)
+        return;
+    for (o = 0; o < NLIVE; o++)
+        if (o != s % NTRK)
+            xy_val[o][m == 3u ? (ax & 1u) ^ 1u : ax & 1u] = (int16_t)(m == 2u ? 127 - v : v);
+}
+#endif
 #define NMSLOT 4u
 #define MS_VOICE(s) ((s) >= MS_ENV && (s) <= MS_RAND)             /* a value per voice */
 #define MS_BIPOLAR(s) ((s) == MS_LFO || (s) == MS_KEY || (s) == MS_RAND || (s) >= MS_SH)
