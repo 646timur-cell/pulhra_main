@@ -619,9 +619,22 @@ static uint8_t mf_plk;           /* a trig held: 0 KNOB 1..4 its NOTE VEL LEN CH
 #define mf_kbd 0
 #define mf_trigs() 0
 #endif
+/* MONOFM (Elektron: the trig keys are the trigs on every page): the sound pages too, not HOME, SEQ > EUCLID and ARP
+ * (their keys are notes), SAVE (PRESETS: the keys audition). STEP with MENU > STEP EDIT ROLL: the roll */
+static int mf_grid_page(void)
+{
+#if FELUCCA_MONOFM
+    const page_t *pg = cur_page();
+    return !mf_kbd && !drum_track(TSEL) && !ui.home && pg->graph != GR_EUCLID && pg->fam != FAM_ARP &&
+           pg->fam != FAM_SAVE && pg->graph != GR_ROLL;
+#else
+    return 0;
+#endif
+}
 static int grid_on(void)
 {
-    return !ui.home && !ui.menu && !ui.confirm && cur_page()->graph == GR_ROLL && (drum_track(TSEL) || mf_trigs());
+    return !ui.home && !ui.menu && !ui.confirm &&
+           ((cur_page()->graph == GR_ROLL && (drum_track(TSEL) || mf_trigs())) || mf_grid_page());
 }
 /* SEQ > DETAIL (1.5.1, Discussion #199; params.c, between STEP and AUTOMATION): a step page as STEP (the cursor, the
  * roll's keys, the grid's lane and page keys), its knobs the cursor step's CHANCE RATCH NUDGE VEL (ui_input.c sd_turn),
@@ -806,34 +819,17 @@ static void mf_euclid_toggle(void)
     ui_message(TSEL->p[P_EUC] ? "EUCLID ON" : "EUCLID OFF");
     ui.force = 1;
 }
-/* SEQ + ARP (ui_input.c): the KEYS editor's keyboard on (SEQ > STEP shown: the keys play and write the cursor step's
- * notes, mf_kbd_keys) / off (the keys the steps again) */
+/* SEQ + ARP (ui_input.c): the keyboard on (the keys play; on STEP they write the trig picked, mf_kbd_keys) / off (the
+ * keys the trigs again) */
 static void mf_kbd_toggle(void)
 {
-    uint32_t i;
     if (drum_track(TSEL)) {
         ui_message("NOT ON A DRUM TRACK");
         return;
     }
-    if (mf_kbd && !ui.home && cur_page()->graph == GR_ROLL) {
-        mf_kbd = 0;
-        ui_message("KEYS: STEPS");
-        ui.pg_down &= (uint16_t)~(1u << panel.btn[B_ARP]);
-        ui.force = 1;
-        return;
-    }
-    for (i = 0; i < NPAGES; i++)
-        if (PAGES[i].graph == GR_ROLL && str_eq(PAGES[i].title, "STEP"))
-            break;
-    if (i < NPAGES && (ui.home || cur_page()->graph != GR_ROLL)) {
-        ui.page = (uint8_t)i;
-        ui.fam_last[FAM_SEQ] = (uint8_t)i;
-        ui.home = 0;
-        page_entered();
-    }
-    mf_kbd = 1;
-    ui_message("KEYS: NOTES > STEP");
-    ui.pg_down &= (uint16_t)~(1u << panel.btn[B_ARP]);   /* (ARP pressed first: its page does not open)*/
+    mf_kbd = (uint8_t)!mf_kbd;                          /* (on every page; on STEP the notes go into the trig picked) */
+    ui_message(mf_kbd ? "KEYS: NOTES" : "KEYS: TRIGS");
+    ui.pg_down &= (uint16_t)~(1u << panel.btn[B_ARP]);   /* (ARP pressed first: its page does not open) */
     ui.force = 1;
 }
 /* HOME tapped twice (on HOME, the second tap within 0.4 s of the first): XY, HOME's knobs X and Y of every track

@@ -343,6 +343,15 @@ static void layer_arm(uint32_t pressed, uint32_t now)
                 msq_open();                             /* (SEQ down: the pattern playing picked, no chain yet) */
 #endif
 #if FELUCCA_MONOFM
+            if (l != LAYER_SEQ && l != LAYER_REC && lock_held() && !drum_track(TSEL)) {   /* a trig held on STEP: EDIT
+                                                         * GLO SCL FX pick their sound pages for its locks (STEP
+                                                         * stays, no layer; again: the family's next page) */
+                static const uint8_t LF[LAYER_N] = {0, FAM_FX, FAM_GLO, FAM_SCL, FAM_EDIT, 0, 0};
+                ui.ly_t0 |= LY_DEAD;
+                lys.dtap = 0;
+                mf_lock_pick(1, LF[l]);
+                return;
+            }
             if (l == LAYER_SEQ && ((fm1_in.buttons >> panel.btn[B_ARP]) & 1u)) {   /* ARP held, then SEQ: the keyboard */
                 ui.ly_t0 |= LY_DEAD;                    /* for the step (SEQ: no layer, no tap) */
                 lys.dtap = 0;

@@ -166,6 +166,8 @@ static uint32_t grid_leds(void)
  * counted, not the time */
 static uint32_t grid_beats(void)
 {
+    if (FELUCCA_MONOFM && !drum_track(TSEL))
+        return 0;                                       /* (MONOFM: no beat marks, the trigs alone lit) */
     const track_t *t = TSEL;
     uint32_t k, m = 0, len = (uint32_t)t->p[P_SLEN], b = detail_on() ? 0xFFu : 1u << ui.lane;
     uint32_t acc = !detail_on() && black_held(GK_ACC);
@@ -184,6 +186,9 @@ static uint32_t grid_beats(void)
 static uint32_t grid_glow(void)
 {
     uint32_t k, m = 0, len = (uint32_t)TSEL->p[P_SLEN];
+    if (FELUCCA_MONOFM && !drum_track(TSEL))           /* (MONOFM: an empty step dark, only the page keys glow: the
+                                                        * trigs stand out) */
+        return len > 16u ? (uint32_t)1 << 22 | (uint32_t)1 << 25 : 0u;   /* (D#5 F#5: the page keys) */
     for (k = 0; k < 27u; k++) {
         uint32_t p = key_place(k);
         m |= (uint32_t)(!key_black(k) ? ui.bank * 16u + p < len : (p < NLANE && drum_track(TSEL)) || p == GK_ACC || len > 16u) << k;
@@ -751,9 +756,9 @@ static uint64_t lock_held(void)
     const track_t *t = TSEL;
     uint32_t k, len = (uint32_t)t->p[P_SLEN], keys = fm1_in.notes & ~kb_layer;
     uint64_t m = 0;
-    if (ui.home || ui.menu || ui.confirm || ui.layer || name_on() || !song.seq_mode || cur_page()->graph != GR_ROLL ||
-        !keys || detail_on())                           /* (DETAIL: its knobs are the step's own fields, sd_turn) */
-        return 0;
+    if (ui.home || ui.menu || ui.confirm || ui.layer || name_on() || !keys || detail_on() ||   /* (DETAIL: its knobs are */
+        ((!song.seq_mode || cur_page()->graph != GR_ROLL) && !mf_grid_page()))   /* the step's own fields, sd_turn; */
+        return 0;                                       /* MONOFM: the trig keys on the sound pages too) */
     if (!grid_on())                                     /* the roll: the step being entered */
         return ui.entry_open && !live_rec_sel() && ui.cursor < len ? (uint64_t)1 << ui.cursor : 0u;
     for (k = 0; k < 27u; k++)
@@ -814,7 +819,7 @@ static void lock_turn(uint32_t k, int32_t s, uint64_t held)
 
 #if FELUCCA_MONOFM
 /* KEYS (a melodic track, MONOFM): trigs held, KNOB 1..4 their NOTE VEL LEN CHANCE (mf_plk 0) */
-static int mf_held_fields(void) { return grid_on() && !drum_track(TSEL) && !detail_on() && !mf_plk; }
+static int mf_held_fields(void) { return cur_page()->graph == GR_ROLL && grid_on() && !drum_track(TSEL) && !detail_on() && !mf_plk; }
 static void mf_held_turn(uint32_t k, int32_t s, uint64_t held)
 {
     track_t *t = TSEL;
@@ -1877,6 +1882,13 @@ static void ui_input(void)
         case B_OCTDN:
         case B_OCTUP: {
             uint32_t both = (1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]);
+#if FELUCCA_MONOFM
+            if (b == B_OCTDN && grid_on() && !drum_track(TSEL) && lock_held()) {   /* a trig held + OCT-: its locks go */
+                lock_clear(lock_held());
+                ui.plk_rm &= ~lock_held();
+                break;
+            }
+#endif
             if (act_cols() || layer_set_open() || ui.ml.on)   /* action pages: enter / back (below); SET layers: OCT-; */
                 break;                                  /* MIDI LEARN: clear / done (below) */
             if ((fm1_in.buttons & both) == both)
@@ -1916,8 +1928,8 @@ static void ui_input(void)
         ml_oct(oct);
     }
 #if FELUCCA_MONOFM
-    if (mf_kbd && (ui.home || cur_page()->graph != GR_ROLL || drum_track(TSEL)))
-        mf_kbd = 0;                                     /* (the keyboard for the step: on STEP only) */
+    if (mf_kbd && drum_track(TSEL))
+        mf_kbd = 0;                                     /* (SEQ + ARP's keyboard: on every page, until again) */
 #endif
     song.grid = (uint8_t)keys_mode();                 /* (seq.c: the keys are the grid's) */
 #if FELUCCA_SLICE

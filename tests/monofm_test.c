@@ -1243,6 +1243,69 @@ static int test_keys_editor(void)
         ok = ((m1 >> key_at(0, 0)) & 1u) && ((m1 >> key_at(0, 2)) & 1u) && !((m1 >> key_at(0, 1)) & 1u) && !((m0 >> key_at(0, 2)) & 1u);
         bad += check("MONOFM LEDS: stopped, REC held: the trigs lit (not without)", ok);
     }
+    {   /* Elektron's trig keys on the sound pages: EDIT 1 shown, a white key a trig (silent), held + KNOB 1 a lock of
+         * EDIT 1's first parameter; the keys show the trigs, an empty step dark; HOME: the keys play */
+        uint32_t i, m, g, id;
+        int32_t buf[2 * CTL];
+        frames(600);
+        for (i = 0; i < NPAGES; i++)
+            if (PAGES[i].fam == FAM_EDIT && PAGES[i].scope == SC_ENGINE)
+                break;
+        ui.home = 0; ui.page = (uint8_t)i; page_entered(); frame();
+        for (k = 0; k < NSTEP; k++) { t->step[k].time = ST_REST; t->step[k].n = 0; }
+        motion.count = 0;
+        ui.bank = 0;
+        tap_k(key_at(0, 5));
+        for (k = 0; k < 4u; k++) mix_block(buf, CTL);
+        ok = grid_on() && step_on(&t->step[5]) && !ke_voices(t);
+        key_down(key_at(0, 5));
+        frame();
+        id = PAGES[i].id[0];
+        turn(EN_K1, 4);
+        key_up(key_at(0, 5));
+        frame();
+        {
+            int16_t v;
+            ok &= motion_lock_get(t, 5, id, &v) && step_on(&t->step[5]) && cur_page() == &PAGES[i];
+        }
+        m = key_leds(0);
+        g = grid_glow();
+        ok &= ((m >> key_at(0, 5)) & 1u) && !((m >> key_at(0, 6)) & 1u) && !((g >> key_at(0, 6)) & 1u) && !grid_beats();
+        bad += check("MONOFM TRIG KEYS: on EDIT a white key is a trig (silent), held + KNOB 1 locks EDIT's first; lit / dark", ok);
+        key_down(key_at(0, 5));
+        frame();
+        press(B_OCTDN);
+        key_up(key_at(0, 5));
+        frame();
+        {
+            int16_t v;
+            bad += check("MONOFM TRIG KEYS: a trig held + OCT-: its locks go, the trig stays",
+                         !motion_lock_get(t, 5, id, &v) && step_on(&t->step[5]));
+        }
+        ke_step_page();
+        frames(600);
+        key_down(key_at(0, 5));
+        frame();
+        btn_down(B_EDIT);
+        frame();
+        btn_up(B_EDIT);
+        frame();
+        ok = mf_plk && PAGES[ui.plk_src - 1u].fam == FAM_EDIT && cur_page()->graph == GR_ROLL && !ui.layer;
+        turn(EN_K2, 3);
+        key_up(key_at(0, 5));
+        frames(100);
+        ok &= motion_lock_count(t) >= 1u && step_on(&t->step[5]);
+        bad += check("MONOFM TRIG KEYS: on STEP a trig held + EDIT: EDIT's page locks (no layer), KNOB 2 a lock", ok);
+        go_home();
+        frame();
+        key_down(key_at(0, 7));
+        frame();
+        for (k = 0; k < 4u; k++) mix_block(buf, CTL);
+        ok = !grid_on() && ke_voices(t) > 0u;
+        key_up(key_at(0, 7));
+        frame();
+        bad += check("MONOFM TRIG KEYS: on HOME the keys play", ok);
+    }
     ui_prefs2 |= (uint8_t)(PREF_ROLL >> 16);
     frames(600);
     ke_step_page();
