@@ -2578,10 +2578,12 @@ static void draw_graph(void)
             cv_oy = 0;
             graph_user();
             break;
+#if !FELUCCA_MONOFM                                   /* (MONOFM: no SONG, no FM6 track) */
         case GR_SONG:
             cv_oy = 0;
             graph_song();
             break;
+#endif
         case GR_PATS:
             cv_oy = 0;
             graph_pats();
@@ -2600,6 +2602,7 @@ static void draw_graph(void)
             graph_slices();
             break;
 #endif
+#if !FELUCCA_MONOFM
         case GR_FMOP:
         case GR_FMOP2:
             if (fop_ok()) graph_fm6(t, c, fop_op % 6u);   /* the chart, the operator picked */
@@ -2607,10 +2610,11 @@ static void draw_graph(void)
         case GR_FMENV:
             if (fop_ok()) graph_fm6env(t, c);
             break;
+#endif
         default:
             if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == FELREF(ENG_WHEEL)) graph_wheel(t, c);
             else if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == FELREF(ENG_SAMPLE) && sample_wave.ready) graph_sample(c);
-            else if (pg->scope == SC_ENGINE && t->eng_req % NENGINES == ENGI_FM6) graph_fm6(t, c, 6u);   /* EDIT 1 and 2 */
+            else if (!FELUCCA_MONOFM && pg->scope == SC_ENGINE && t->eng_req % NENGINES == ENGI_FM6) graph_fm6(t, c, 6u);   /* EDIT 1 and 2 */
 #if FELUCCA_FM4
             else if ((pg->scope == SC_ENGINE || pg->id[0] == P_FM1_LEVEL) && t->eng_req % NENGINES == ENGI_DIGITAL)
                 graph_fm(t, c);                      /* (OP LEVEL too: the levels on the chart) */

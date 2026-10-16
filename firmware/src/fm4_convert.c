@@ -212,6 +212,11 @@ static uint32_t fm4_nearest(const int16_t *e)
  * FM6's (see the top) and the OP ENV values their defaults. -> the FM6 factory preset of PTCH */
 static uint32_t fm4_convert(int16_t *p, uint8_t *v)
 {
+#if FELUCCA_MONOFM                                       /* (MONOFM: no DIGITAL nor FM6 track can be: flash kept for it) */
+    (void)p;
+    memset(v, 0, FP_SIZE + 1u);
+    return 0;
+#endif
     uint32_t alg = (uint32_t)p[P_E0] & 7u, car, k, near = fm4_nearest(&p[P_E0]);
     int32_t idx = clamp(p[P_E4], 0, 127), fenv = clamp(p[P_ED_FLT], -64, 63), sus = clamp(p[P_SUS], 0, 127);
     int32_t ipk = clamp(idx + fenv, 0, 127), isus = clamp(idx / 4 + fenv * sus / 127, 0, 127), fb = FM4_MUTE;
