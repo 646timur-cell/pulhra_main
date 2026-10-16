@@ -133,6 +133,13 @@ static uint32_t oct_leds(void)
 /* the key LEDs on the grid, bit k = key k: the white keys show where the selected lane hits on the page
  * shown (its accents while ACC is held), the step playing inverted (a light walks over them); the black keys
  * the lane selected, ACC while held, the page keys while there is more than one page */
+/* a step lit on the grid: the DRUM lane's hit (or accent); MONOFM's KEYS editor on a melodic track: a trig (an accent) */
+static uint32_t grid_lit(const track_t *t, const step_t *st, uint32_t b, uint32_t acc)
+{
+    if (!drum_track(t))
+        return step_on(st) && (!acc || (st->flags & SF_ACCENT));
+    return ((acc ? step_accents(st) : step_lanes(st)) & b) != 0u;
+}
 static uint32_t grid_leds(void)
 {
     const track_t *t = TSEL;
@@ -143,10 +150,10 @@ static uint32_t grid_leds(void)
         uint32_t p = key_place(k), on;
         if (!key_black(k)) {
             uint32_t i = ui.bank * 16u + p;
-            on = i < len && ((acc ? step_accents(&seq_steps(t)[i]) : step_lanes(&seq_steps(t)[i])) & b) != 0u;
+            on = i < len && grid_lit(t, &seq_steps(t)[i], b, acc);
             on ^= (uint32_t)(p == ph);
         } else {
-            on = p < NLANE ? p == ui.lane : p == GK_ACC ? acc : len > 16u;
+            on = p < NLANE ? p == ui.lane && drum_track(t) : p == GK_ACC ? acc : len > 16u;
         }
         m |= on << k;
     }
@@ -168,7 +175,7 @@ static uint32_t grid_beats(void)
         uint32_t p = key_place(k), i = ui.bank * 16u + p;
         if (key_black(k) || p % 4u || i >= len || p == ph)
             continue;
-        m |= (uint32_t)(((acc ? step_accents(&seq_steps(t)[i]) : step_lanes(&seq_steps(t)[i])) & b) == 0u) << k;
+        m |= (uint32_t)!grid_lit(t, &seq_steps(t)[i], b, acc) << k;
     }
     return m;
 }
@@ -180,7 +187,7 @@ static uint32_t grid_glow(void)
     uint32_t k, m = 0, len = (uint32_t)TSEL->p[P_SLEN];
     for (k = 0; k < 27u; k++) {
         uint32_t p = key_place(k);
-        m |= (uint32_t)(!key_black(k) ? ui.bank * 16u + p < len : p < NLANE || p == GK_ACC || len > 16u) << k;
+        m |= (uint32_t)(!key_black(k) ? ui.bank * 16u + p < len : (p < NLANE && drum_track(TSEL)) || p == GK_ACC || len > 16u) << k;
     }
     return m;
 }
@@ -338,11 +345,36 @@ static int idle_leds(void)
 /* the key LEDs, bit k = key k: NAME's keys, the layer's map, the DRUM grid, else the keys held and the notes
  * the selected track's sequencer, ARP and MIDI IN play, on STEP while stopped the cursor step's notes (#89; and
  * on SLICES the keys of the selected slice; on SONG the key of the cell's slot, 1.2) */
+#if FELUCCA_MONOFM
+/* MONOFM (MONOFM.md): the selected track's trigs on the white keys, the 16 steps of the page playing (stopped: the page
+ * shown on STEP), the step playing inverted (a light running over them); EUCLID on: its hits. Shown while playing on
+ * every page but the layers' maps, NAME, the menu and the keyboard for the step (SEQ + ARP); stopped, with REC held */
+static uint32_t mf_trig_leds(void)
+{
+    const track_t *t = TSEL;
+    const step_t *s = seq_steps(t);
+    uint32_t len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP), k, m = 0, run = song.playing && t->seq_idx < len;
+    uint32_t bank = run ? t->seq_idx / 16u : ui.bank, ph = run ? t->seq_idx % 16u : 0xFFu;
+    for (k = 0; k < 27u; k++) {
+        uint32_t p = key_place(k), i = bank * 16u + p, on;
+        if (key_black(k))
+            continue;
+        on = i < len && (MF_EUC_ON(t) ? (uint32_t)mf_euc_hit(t->p, i) : (uint32_t)step_on(&s[i]));
+        m |= (on ^ (uint32_t)(p == ph)) << k;
+    }
+    return m;
+}
+#endif
 static uint32_t key_leds(uint32_t *br)                 /* (*br: a layer's keys that breathe, layer_leds) */
 {
     uint32_t c;
     if (br)
         *br = 0;
+#if FELUCCA_MONOFM
+    if (!ui.menu && !name_on() && ((ui.layer == LAYER_REC && !song.playing) ||
+                                   (!ui.layer && !grid_on() && song.playing && !mf_kbd)))
+        return mf_trig_leds() | (ui.layer ? 0u : fm1_in.notes & ~kb_layer & 0x252A52Au);   /* (the black keys held) */
+#endif
     c = name_on() && !ui.menu ? name_leds() : ui.layer ? layer_leds(br) : grid_on() ? grid_leds() :
                  (fm1_in.notes & ~kb_layer) | play_leds() | step_leds() | (song_keys_on() ? song_leds() : 0u);
 #if FELUCCA_SLICE
@@ -635,6 +667,10 @@ static void grid_edit(uint32_t slot, int32_t steps)
         grid_acc(TSEL, ui.cursor, ui.lane, steps > 0);
 }
 
+#if FELUCCA_MONOFM
+#define MF_PICK_MS 350u                                 /* KEYS: a trig's key held this long only picks the step */
+static uint32_t mf_rm_ms;
+#endif
 /* the keys on the grid (presses): a white key toggles the selected lane at its step of the page (its accent
  * while ACC is held) and puts the cursor there; a lane key selects the lane (seq.c plays it); the page keys */
 static void grid_keys(uint32_t pressed)
@@ -653,6 +689,22 @@ static void grid_keys(uint32_t pressed)
                 cursor_set((int32_t)i);
                 continue;
             }
+#if FELUCCA_MONOFM
+            if (!drum_track(TSEL)) {                    /* KEYS: a trig on at once; on, it goes when let go (unless held
+                                                         * for a lock: lock_keys); ACC held: the accent */
+                uint64_t b = (uint64_t)1 << i;
+                if (step_on(&TSEL->step[i]) && !(black_held(GK_ACC) && !(TSEL->step[i].flags & SF_ACCENT))) {
+                    mf_rm_ms = fm1_ms;                  /* (held past MF_PICK_MS: only picked, it stays) */
+                    ui.plk_rm |= b;
+                    ui.plk_acc = black_held(GK_ACC) ? ui.plk_acc | b : ui.plk_acc & ~b;
+                    ui.plk_trk = song.sel;
+                } else {
+                    mf_trig(TSEL, i, 1, (uint32_t)black_held(GK_ACC));
+                }
+                cursor_set((int32_t)i);
+                continue;
+            }
+#endif
             {   /* a hit (an accent) there goes when the key is let go, unless it was held for a lock (lock_keys) */
                 const step_t *st = &TSEL->step[i];
                 uint64_t b = (uint64_t)1 << i;
@@ -708,6 +760,12 @@ static void lock_keys(void)
     uint32_t i;
     for (i = 0; gone && i < NSTEP; i++)
         if ((gone >> i) & 1u) {
+#if FELUCCA_MONOFM
+            if (!drum_track(&trk[ui.plk_trk % NTRK])) {
+                if (fm1_ms - mf_rm_ms < MF_PICK_MS)
+                    mf_trig(&trk[ui.plk_trk % NTRK], i, 0, (ui.plk_acc >> i) & 1u);
+            } else
+#endif
             if ((ui.plk_acc >> i) & 1u)
                 grid_acc(&trk[ui.plk_trk % NTRK], i, ui.plk_lane, 0);
             else
@@ -862,6 +920,53 @@ static void sd_reset(void)
     ui_message("STEP RESET");
 }
 
+#if FELUCCA_MONOFM
+/* the KEYS editor's keyboard (SEQ + ARP, ui.c mf_kbd): a key pressed writes its note (the note it plays: seq.c kb_note)
+ * into the cursor step; keys held together a chord (up to 4; MONO / LEGATO: the last), a new press after all were let
+ * go replaces it. The cursor stays: the step is picked with the keys of the editor (SEQ + ARP again) or KNOB 1 */
+static void mf_kbd_keys(uint32_t pressed)
+{
+    static uint32_t chord;
+    uint32_t k, held = fm1_in.notes & ~kb_layer;
+    track_t *t = TSEL;
+    step_t *st = &t->step[ui.cursor % NSTEP];
+    chord &= held | pressed;
+    if (!pressed)
+        return;
+    if (chain_busy()) {
+        ui_message("STOP TO EDIT");
+        return;
+    }
+    for (k = 0; k < 27u; k++) {
+        uint32_t n = kb_note[k], i, dup = 0;
+        if (!((pressed >> k) & 1u) || n > 127u)
+            continue;
+        if (!(chord & ~(1u << k))) {                    /* the first key of a chord: the step anew */
+            step_undo_take(t, 0x7000u | ui.cursor);
+            st->n = 0;
+            st->time = ST_NOTE;
+            st->hit = st->acc = 0;
+        }
+        chord |= 1u << k;
+        if (t->p[P_VOICE] == V_MONO || t->p[P_VOICE] == V_LEGATO)
+            st->n = 0;
+        for (i = 0; i < st->n; i++)
+            dup |= st->note[i] == n;
+        if (!dup && st->n < 4u)
+            st->note[st->n++] = (uint8_t)n;
+        last_note = (uint8_t)n;
+        motion_undo_done(t);
+    }
+    {
+        char b[8], m[16] = "STEP ";
+        fmt_int(m + 5, (int32_t)ui.cursor + 1);
+        str_cpy(m + str_len(m), " ", 4);
+        note_name(b, st->note[st->n ? st->n - 1u : 0]);
+        str_cpy(m + str_len(m), b, sizeof m - str_len(m));
+        ui_message(m);
+    }
+}
+#endif
 static void step_edit(uint32_t slot, int32_t steps)
 {
     step_t *st = &TSEL->step[ui.cursor];
@@ -874,6 +979,15 @@ static void step_edit(uint32_t slot, int32_t steps)
         grid_edit(slot, steps);
         return;
     }
+#if FELUCCA_MONOFM
+    if (!(ui_prefs2 & (PREF_ROLL >> 16))) {               /* KEYS: KNOB 1 NOTE, 2 VEL, 3 LEN, 4 CHANCE of the cursor step */
+        if (slot == 1u || slot == 3u) {                   /* (VEL, CHANCE: DETAIL's, sd_turn: VEL its KNOB 4, CHANCE 1) */
+            sd_turn(slot == 1u ? 3u : 0u, steps);
+            return;
+        }
+        slot = slot == 0u ? 1u : 2u;                      /* (NOTE, LEN: the roll's below) */
+    }
+#endif
     switch (slot) {
     case 0:                                               /* STEP: the cursor */
         cursor_move(ui.cursor + steps);
@@ -1491,6 +1605,10 @@ static void ui_input(void)
         if (ui.ly == LAYER_FX && ((pressed >> panel.btn[B_EDIT]) & 1u))
             fx_default();                               /* .. EDIT: its default back */
 #if FELUCCA_MONOFM
+        if (ui.ly == LAYER_SEQ && ((pressed >> panel.btn[B_ARP]) & 1u)) {   /* SEQ + ARP: the keyboard for the step */
+            mf_kbd_toggle();
+            combo = 1;
+        }
         if ((s = panel_enc(EN_ALGO)) != 0 && ui.ly == LAYER_SEQ) {   /* SEQ + ALGORITHM: the next / previous scene */
             mf_scene_turn(s);
             combo = 1;
@@ -1695,6 +1813,10 @@ static void ui_input(void)
     } else if (ui.ml.on && oct) {                          /* MIDI LEARN: OCT- clears the picked CC, OCT+ done */
         ml_oct(oct);
     }
+#if FELUCCA_MONOFM
+    if (mf_kbd && (ui.home || cur_page()->graph != GR_ROLL || drum_track(TSEL)))
+        mf_kbd = 0;                                     /* (the keyboard for the step: on STEP only) */
+#endif
     song.grid = (uint8_t)keys_mode();                 /* (seq.c: the keys are the grid's) */
 #if FELUCCA_SLICE
     if (notes && slice_page_on())                       /* SLICES: a key picks the slice it plays */
@@ -1705,6 +1827,10 @@ static void ui_input(void)
         song_keys(notes);
     } else if (song.grid) {
         grid_keys(notes);
+#if FELUCCA_MONOFM
+    } else if (mf_kbd && song.seq_mode && cur_page()->graph == GR_ROLL) {   /* SEQ + ARP: the keys write the cursor step */
+        mf_kbd_keys(notes);
+#endif
     } else if (song.seq_mode && cur_page()->graph == GR_ROLL) {   /* STEP */
         if (live_rec_sel() || !((song.rec >> song.sel) & 1u))   /* armed and playing: the keys record live, not
                                                          * into the cursor step too; not armed (1.2, #133): they

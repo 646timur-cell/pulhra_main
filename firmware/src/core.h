@@ -319,6 +319,9 @@ static inline int mf_euc_hit(const int16_t *p, uint32_t i)
     k = k < n ? k : n;
     return k && (((i + r) % n) * k) % n < k;
 }
+#define MF_EUC_ON(t) ((t)->p[P_EUC] != 0)   /* the track's EUCLID on */
+#else
+#define MF_EUC_ON(t) 0
 #endif
 
 /* ------------------------------------------------- tracks, the song --- */

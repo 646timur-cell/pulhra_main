@@ -1183,6 +1183,26 @@ static void draw_columns(void)
         draw_column(3, "ACC", ac ? "ON" : "--", "", ac ? VAL(3u) : T_DIM, -1, ICON_AUTO);
         return;
     }
+#if FELUCCA_MONOFM
+    if (cur_page()->scope == SC_STEP && !detail_on() && !(ui_prefs2 & (PREF_ROLL >> 16))) {   /* KEYS: the cursor step's
+                                                                                          * NOTE VEL LEN CHANCE */
+        const step_t *st = &seq_steps(TSEL)[ui.cursor];
+        uint32_t on = (uint32_t)step_on(st) && st->n;
+        char sn[8], u[8];
+        fmt_int(sn, (int32_t)ui.cursor + 1);
+        str_cpy(u, "STEP", 8);
+        if (on) note_name(val, st->note[0]); else str_cpy(val, "--", 12);
+        if (on && st->n > 1u) { str_cpy(u, "+", 8); fmt_int(u + 1, (int32_t)st->n - 1); }
+        draw_column(0, "NOTE", val, on ? u : sn, on ? VAL(0u) : T_DIM, -1, ICON_AUTO);
+        fmt_int(sn, st->vel ? st->vel : 96);
+        draw_column(1, "VEL", on ? sn : "--", "", on ? VAL(1u) : T_DIM, -1, ICON_AUTO);
+        fmt_int(sn, (int32_t)note_len(TSEL, ui.cursor));
+        draw_column(2, "LEN", on ? sn : "--", "", on ? VAL(2u) : T_DIM, -1, ICON_AUTO);
+        fmt_int(sn, (int32_t)step_chance(st));
+        draw_column(3, "CHNC", on ? sn : "--", on ? "%" : "", on ? VAL(3u) : T_DIM, -1, ICON_AUTO);
+        return;
+    }
+#endif
     if (cur_page()->scope == SC_STEP) {
         static const char *const TIME_N[3] = {"NOTE", "TIE", "REST"};
         const step_t *st = &seq_steps(TSEL)[ui.cursor];

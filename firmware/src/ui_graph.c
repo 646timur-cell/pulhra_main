@@ -1309,7 +1309,7 @@ static void page_title(char *ti)
             if (i == ui.page)
                 k = n;
         }
-    str_cpy(ti, pt ? pt : grid_on() && !detail_on() ? "GRID" : pg->title, 12);
+    str_cpy(ti, pt ? pt : grid_on() && !detail_on() && drum_track(TSEL) ? "GRID" : pg->title, 12);
     if (n > 1) {
         str_cpy(ti + str_len(ti), " ", 4);
         fmt_int(ti + str_len(ti), (int32_t)k);

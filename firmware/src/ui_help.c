@@ -113,6 +113,10 @@ static const char *help_page(void)
     if (ui.home)
         return FELUCCA_MONOFM && ui.home == 3u ? "[K1-2]X Y[K3-4]HPF LPF[HOME]BACK" : ui.home == HOME_TRANSPOSE ? H_TRANS
                : home_levels() ? H_LEVELS : H_HOME;
+    if (FELUCCA_MONOFM && grid_on() && !detail_on() && !drum_track(TSEL))
+        return "[KEYS]TRIGS HOLD+KNOB LOCK[SEQ+ARP]NOTES";
+    if (FELUCCA_MONOFM && mf_kbd && cur_page()->graph == GR_ROLL)
+        return "[KEYS]NOTES INTO THE STEP[SEQ+ARP]TRIGS";
     if (grid_on() && !detail_on())
         return H_GRID;
     t = cur_page()->title;

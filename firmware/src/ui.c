@@ -80,6 +80,7 @@ static uint32_t up_gen;                      /* bumped on every user bank change
 #define PREF_PREVIEW (0x02u << 16)
 #define PREF_CHORD_ADD (0x04u << 16)
 #define PREF_HELP (0x08u << 16)
+#define PREF_ROLL (0x10u << 16)                /* MONOFM: MENU > CONTROL > STEP EDIT ROLL: SEQ > STEP as Felucca's roll */
 /* 1.3 (Discussions #112, #134): MENU > DISPLAY > HOME, what the HOME page shows under its four cards: 0 SCOPE (the
  * oscilloscope, as before), 1 TRACKS (the four tracks as rows: ui_graph.c draw_home_tracks), 2 LEVELS (1.5, #134: the
  * rows of TRACKS, and KNOB 1..4 the LEVEL of T1..T4 in place of the engine's four: home_param). A byte of its own no
@@ -583,7 +584,21 @@ static uint32_t note_set_len(track_t *t, uint32_t i, uint32_t want)
  * down / up. KNOB 1 STEP, 2 LANE, 3 HIT, 4 ACC edit the cursor step. A sound load never converts the
  * steps: the grid shows a step's notes on their lanes (eng_drum.c step_lanes) and an edit makes the lane its
  * own (grid_own). Live recording on a DRUM track writes hits (seq.c rec_note) */
-static int grid_on(void) { return !ui.home && !ui.menu && !ui.confirm && cur_page()->graph == GR_ROLL && drum_track(TSEL); }
+/* MONOFM (MONOFM.md): SEQ > STEP's KEYS editor (MENU > STEP EDIT KEYS, the default): on a melodic track too the white
+ * keys are the page's 16 steps, as the DRUM grid's (a tap a trig on / off, held a lock with KNOB 1..4), KNOB 1..4 the
+ * cursor step's NOTE VEL LEN CHANCE, black keys 10 / 11 the pages. SEQ + ARP (mf_kbd): the keys play again and write the
+ * cursor step's notes (ui_input.c mf_kbd_keys), until SEQ + ARP again or another page */
+#if FELUCCA_MONOFM
+static uint8_t mf_kbd;
+static int mf_trigs(void) { return !(ui_prefs2 & (PREF_ROLL >> 16)) && !mf_kbd; }
+#else
+#define mf_kbd 0
+#define mf_trigs() 0
+#endif
+static int grid_on(void)
+{
+    return !ui.home && !ui.menu && !ui.confirm && cur_page()->graph == GR_ROLL && (drum_track(TSEL) || mf_trigs());
+}
 /* SEQ > DETAIL (1.5.1, Discussion #199; params.c, between STEP and AUTOMATION): a step page as STEP (the cursor, the
  * roll's keys, the grid's lane and page keys), its knobs the cursor step's CHANCE RATCH NUDGE VEL (ui_input.c sd_turn),
  * its panel their lanes (ui_graph.c graph_detail). No state of its own: the page is what says so */
@@ -645,6 +660,30 @@ static void grid_hit(track_t *t, uint32_t i, uint32_t l, uint32_t on)
     }
 }
 
+#if FELUCCA_MONOFM
+/* MONOFM's KEYS editor (grid_on): step i of a melodic track, its trig on (the note last played: seq.c last_note) or off
+ * (its TIEs with it: a longer note goes whole); acc: its accent only (on: a trig too) */
+static void mf_trig(track_t *t, uint32_t i, uint32_t on, uint32_t acc)
+{
+    step_t *s = &t->step[i % NSTEP];
+    uint32_t j, len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
+    if (on && !step_on(s)) {
+        step_clear(s);
+        s->time = ST_NOTE;
+        s->n = 1;
+        s->note[0] = last_note;
+    }
+    if (acc) {
+        s->flags = (uint8_t)(on ? s->flags | SF_ACCENT : s->flags & ~SF_ACCENT);
+        return;
+    }
+    if (on)
+        return;
+    step_clear(s);
+    for (j = i + 1u; j < len && t->step[j].time == ST_TIE; j++)
+        step_clear(&t->step[j]);
+}
+#endif
 /* the accent of lane l at step i (on 1, off 0, toggled 2); an accent on an empty lane adds the hit */
 static void grid_acc(track_t *t, uint32_t i, uint32_t l, uint32_t on)
 {
@@ -740,6 +779,34 @@ static void mf_euclid_toggle(void)
         page_entered();
     }
     ui_message(TSEL->p[P_EUC] ? "EUCLID ON" : "EUCLID OFF");
+    ui.force = 1;
+}
+/* SEQ + ARP (ui_input.c): the KEYS editor's keyboard on (SEQ > STEP shown: the keys play and write the cursor step's
+ * notes, mf_kbd_keys) / off (the keys the steps again) */
+static void mf_kbd_toggle(void)
+{
+    uint32_t i;
+    if (drum_track(TSEL)) {
+        ui_message("NOT ON A DRUM TRACK");
+        return;
+    }
+    if (mf_kbd && !ui.home && cur_page()->graph == GR_ROLL) {
+        mf_kbd = 0;
+        ui_message("KEYS: STEPS");
+        ui.force = 1;
+        return;
+    }
+    for (i = 0; i < NPAGES; i++)
+        if (PAGES[i].graph == GR_ROLL && str_eq(PAGES[i].title, "STEP"))
+            break;
+    if (i < NPAGES && (ui.home || cur_page()->graph != GR_ROLL)) {
+        ui.page = (uint8_t)i;
+        ui.fam_last[FAM_SEQ] = (uint8_t)i;
+        ui.home = 0;
+        page_entered();
+    }
+    mf_kbd = 1;
+    ui_message("KEYS: NOTES > STEP");
     ui.force = 1;
 }
 /* HOME tapped twice (on HOME, the second tap within 0.4 s of the first): XY, HOME's knobs X and Y of every track

@@ -158,7 +158,7 @@ static void mf_scene_pick(uint32_t n, int chain)
         msc_say(n, transport_busy() ? " EMPTY" : " EMPTY: HOLD SAVES");
         return;
     }
-    if (chain && msc.tap1 != MSC_NONE && msc.tap1 != n) {
+    if (chain && msc.tap1 != MSC_NONE && msc.tap1 != n && mf_scene_info(msc.tap1, 0)) {
         msc.chain[0] = msc.tap1;
         msc.chain[1] = (uint8_t)n;
         msc.nchain = 2;
@@ -247,7 +247,8 @@ static void mf_scene_keys(uint64_t held_keys)
     if (msc.saved & 0x80u)
         return;
     mf_scene_pick(p, 1);
-    msc.tap1 = msc.nchain ? MSC_NONE : (uint8_t)p;    /* (a chain made: the next tap starts afresh) */
+    msc.tap1 = msc.nchain || !mf_scene_info(p, 0) ? MSC_NONE : (uint8_t)p;   /* (a chain made: the next tap starts
+                                                                            * afresh; an empty one starts nothing) */
 }
 static void mf_scene_layer_open(void) { msc.tap1 = MSC_NONE; msc.key = 0; }
 /* the SEQ layer's LEDs and map: the scene playing, the one coming / the chain */

@@ -777,7 +777,7 @@ static void input_on(track_t *t, uint32_t note, uint32_t vel)
     last_note = (uint8_t)note;
     if (cin_left)
         cin_keep(t, note, vel);
-    if (rec_on(t) && !t->p[P_AMODE] && !(FELUCCA_MONOFM && t->p[P_EUC]))   /* (ARP on: arp_tick records its notes;
+    if (rec_on(t) && !t->p[P_AMODE] && !MF_EUC_ON(t))   /* (ARP on: arp_tick records its notes;
                                                      * EUCLID: its keys are not steps) */
         rec_note(t, note, vel);
     if (t->p[P_AMODE])
@@ -977,7 +977,12 @@ static void keyboard_block(void)
             if ((mute >> k) & 1u)                 /* NAME (ui_name.c): every key types, none sounds; SONG: A..D */
                 kb_note[k] = KB_SILENT;
             else if (song.grid == 1u)             /* the DRUM grid: a lane key plays its lane, the rest are the UI's */
+#if FELUCCA_MONOFM
+                kb_note[k] = drum_track(&trk[kb_trk[k]]) ? grid_key_note(k) : KB_SILENT;   /* (MONOFM's KEYS editor:
+                                                                                         * a melodic track's keys silent) */
+#else
                 kb_note[k] = grid_key_note(k);
+#endif
             else
                 kb_note[k] = (uint8_t)kb_map(&trk[kb_trk[k]], k);
             if (kb_note[k] == KB_SILENT)
@@ -1534,7 +1539,7 @@ static void events_block(uint32_t n)
             t->p[P_AMODE] = 0;                        /* (sound module: no ARP, whatever a project or preset holds;
                                                        * STRANGE: the arp is EUCLID's) */
         /* ARP turned off, or HOLD released with no key down: drop the latched chord */
-        if ((FELUCCA_MODULE || FELUCCA_MONOFM) && t->aholdp && !t->p[P_AHOLD] && !(FELUCCA_MONOFM && t->p[P_EUC])) {
+        if ((FELUCCA_MODULE || FELUCCA_MONOFM) && t->aholdp && !t->p[P_AHOLD] && !MF_EUC_ON(t)) {
             latch_release(t);                         /* LATCH OFF: the latched notes go (keys down sound on) */
             t->arp_phys = 0;
         }
