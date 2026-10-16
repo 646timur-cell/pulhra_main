@@ -17,9 +17,19 @@ static void lcd_wake_now(void) {}
 /* the screen as the panel gets it (byte-swapped RGB565), and what the draw hooks of gfx.c see: the ink boxes of the texts of
  * the canvas being drawn, moved to screen rows when it is blitted (the lint of test_draw_lint) */
 static uint16_t host_screen[240 * 240];
+static uint32_t lcd_px;                                  /* the pixels the display got (the budget is measured here) */
+static void (*begin_hook)(void);                         /* run at the next cv_begin (once): the audio stream moving on mid-frame */
+static void lint_begin(void)
+{
+    void (*h)(void) = begin_hook;
+    begin_hook = 0;
+    if (h)
+        h();
+}
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 {
     uint32_t j;
+    lcd_px += w * h;
     for (j = 0; j < h; j++)
         memcpy(host_screen + (y + j) * 240u + x, p + j * w, w * 2u);
 }
@@ -45,7 +55,7 @@ static void lint_blit(uint32_t x, uint32_t y)
 }
 #define GFX_HOOK_TEXT(x0, y0, x1, y1, s, flags) lint_text(x0, y0, x1, y1, s, flags)
 #define GFX_HOOK_BLIT(x, y, r0) lint_blit(x, y)
-#define GFX_HOOK_BEGIN() ((void)0)
+#define GFX_HOOK_BEGIN() lint_begin()
 #define GFX_HOOK_PIXELS(n) ((void)0)
 static void fm1_led_key(unsigned k, int on) { (void)k; (void)on; }
 #include "../firmware/src/gfx.c"
@@ -1054,7 +1064,9 @@ static int lint_frame(const char *what)
 }
 static int test_draw_lint(void)
 {
-    uint32_t pg, m, i, v, bad = 0, frames = 0;
+    uint32_t pg, m, v, bad = 0, frames = 0, grained = 0;
+    static uint16_t shot[240 * 240];
+    static lint_box_t keep[256];
     for (m = 0; m < SM_NMACHINE; m++) {
         for (pg = 0; pg < sm_page_count(); pg++) {
             const sm_page_t *P = &SM_PAGES[pg];
@@ -1084,71 +1096,133 @@ static int test_draw_lint(void)
                     draw_full();
                     snprintf(what, sizeof what, "machine %u page %s id %u val %d", m, P->name, id, (int)vals[v]);
                     bad += lint_frame(what);
+                    {   /* no grain, dust or blood inside any ink box: the same frame without the grime, box by box */
+                        uint32_t n = lint_n < 256u ? lint_n : 256u, b, x, y;
+                        memcpy(keep, lint_box, n * sizeof keep[0]);
+                        memcpy(shot, host_screen, sizeof shot);
+                        ux.grime = 0;
+                        draw_full();
+                        ux.grime = 1;
+                        for (b = 0; b < n; b++)
+                            for (y = (uint32_t)keep[b].y0; y < (uint32_t)keep[b].y1 && y < 240u; y++)
+                                for (x = (uint32_t)keep[b].x0; x < (uint32_t)keep[b].x1 && x < 240u; x++)
+                                    if (shot[y * 240u + x] != host_screen[y * 240u + x]) {
+                                        if (grained++ < 8u)
+                                            printf("  grain in '%s' at %u,%u (%s)\n", keep[b].s, x, y, what);
+                                    }
+                    }
                     frames++;
                 }
             }
         }
     }
-    (void)i;
     printf("  lint: %u frames\n", frames);
+    bad += check("draw lint: no grain or blood inside any text's ink box", grained == 0);
     return check("draw lint: every text inside its cell, none cut, none overlapping", bad == 0 && frames > 500u);
+}
+static uint32_t px_bad;
+static uint32_t frame_px(void)                           /* a frame; its pixels as the display counted them (= px) */
+{
+    lcd_px = 0;
+    sm_draw();
+    if (lcd_px != sm_draw_px)
+        px_bad++;
+    return lcd_px;
 }
 static int test_draw_budget(void)
 {
     int bad = 0;
+    uint32_t px;
+    px_bad = 0;
     draw_setup();
-    sm_draw();
-    bad += check("budget: the first frame draws the screen", sm_draw_px >= 240u * 200u && sm_draw_px <= 240u * 240u);
-    sm_draw();
-    bad += check("budget: nothing changed, nothing drawn", sm_draw_px == 0);
+    px = frame_px();
+    bad += check("budget: the first frame draws the screen", px >= 240u * 200u && px <= 240u * 240u);
+    px = frame_px();
+    bad += check("budget: nothing changed, nothing drawn", px == 0);
     sm_playing = 1;                                           /* the transport started: the header's glyph */
     sm_dirty = 1;
-    sm_draw();
-    bad += check("budget: play -> header and strip only", sm_draw_px > 0 && sm_draw_px <= 240u * 70u);
+    px = frame_px();
+    bad += check("budget: play -> header and strip only", px > 0 && px <= 240u * 70u);
     sm_pos[0] = 3;                                            /* the playing step moved (no flag: the sequencer does not set it) */
-    sm_draw();
-    bad += check("budget: the playing step moved -> <= 240 x 40", sm_draw_px > 0 && sm_draw_px <= 240u * 40u);
+    px = frame_px();
+    bad += check("budget: the playing step moved -> <= 240 x 40", px > 0 && px <= 240u * 40u);
     sm_pos[0] = 4;
-    sm_draw();
-    bad += check("budget: ... again", sm_draw_px > 0 && sm_draw_px <= 240u * 40u);
+    px = frame_px();
+    bad += check("budget: ... again", px > 0 && px <= 240u * 40u);
     sm_page_press(SMFAM_GLO);
-    sm_draw();
-    bad += check("budget: a page change <= a full frame, more than a step", sm_draw_px > 240u * 40u && sm_draw_px <= 240u * 240u);
+    px = frame_px();
+    bad += check("budget: a page change <= a full frame, more than a step", px > 240u * 40u && px <= 240u * 240u);
     sm_ui.trk = 1;
     sm_dirty = 1;
-    sm_draw();
-    bad += check("budget: a track change <= a full frame", sm_draw_px > 0 && sm_draw_px <= 240u * 240u);
+    px = frame_px();
+    bad += check("budget: a track change <= a full frame", px > 0 && px <= 240u * 240u);
     {   /* a knob turned: its row of cells only (and the SELECT row never) */
         sm_sound_t *s = ksnd(sm_ui.trk);
         uint32_t id = sm_cur_page()->id[0];
         s->p[id] = (int8_t)(s->p[id] + 1);
         sm_dirty = 1;
-        sm_draw();
-        bad += check("budget: one value -> one row of cells <= 240 x 64", sm_draw_px > 0 && sm_draw_px <= 240u * 64u);
+        px = frame_px();
+        bad += check("budget: one value -> one row of cells <= 240 x 64", px > 0 && px <= 240u * 64u);
     }
     sm_redraw_all();
-    sm_draw();
-    bad += check("budget: redraw_all repaints the screen", sm_draw_px >= 240u * 200u && sm_draw_px <= 240u * 240u);
+    px = frame_px();
+    bad += check("budget: redraw_all repaints the screen", px >= 240u * 200u && px <= 240u * 240u);
+    bad += check("budget: sm_draw_px is what the display got, frame by frame", px_bad == 0);
     return bad;
 }
 static int test_draw_grain(void)
 {
-    const uint16_t TEXT = swap16(0xEF5Bu), DIM = swap16(0x4100u), BG = swap16(0x0000u);
-    uint32_t x, y, grain = 0, tot = 0;
+    const uint16_t TEXT = swap16(0xEF5Bu), DIM = swap16(0x4100u), BG = swap16(0x0000u), CLEAN = swap16(SMT_CLEAN);
+    const uint16_t BLOOD = swap16(0xB800u);
+    uint32_t x, y, s, grain = 0, tot = 0, dirty_in = 0, blood_in_strip = 0;
     int bad = 0;
     draw_setup();
     smp.pat[smp.cur].step[0][2].n = 1;                         /* a trig on step 2, none on step 3 */
     smp.pat[smp.cur].step[0][3].n = 0;
     draw_full();
     bad += check("grain: a trig is bone all through", host_screen[220 * 240 + 2 * 15 + 7] == TEXT && host_screen[208 * 240 + 2 * 15 + 3] == TEXT);
-    bad += check("grain: an empty step has its dim frame, a bare inside", host_screen[206 * 240 + 3 * 15 + 6] == DIM &&
-                 (host_screen[220 * 240 + 3 * 15 + 6] == BG || host_screen[220 * 240 + 3 * 15 + 6] != TEXT));
-    for (y = 202; y < 240; y++)                                /* the strip's background rows between the cells */
+    bad += check("grain: an empty step has its dim frame", host_screen[206 * 240 + 3 * 15 + 6] == DIM);
+    for (s = 0; s < 16u; s++)                                  /* the inside of every empty step: clean, all of it */
+        if (s != 2u)
+            for (y = 207; y < 235; y++)
+                for (x = s * 15u + 1u; x < s * 15u + 13u; x++)
+                    dirty_in += host_screen[y * 240u + x] != CLEAN;
+    bad += check("grain: the inside of an empty step is clean (no grain, no blood)", dirty_in == 0);
+    for (y = 202; y < 240; y++)
         for (x = 0; x < 240; x++) {
-            uint16_t c = host_screen[y * 240 + x];
-            if (y < 206 || y >= 236) { tot++; grain += c != BG; }
+            uint16_t c = host_screen[y * 240u + x];
+            if (y < 206 || y >= 236) { tot++; grain += c != BG; blood_in_strip += c == BLOOD; }
         }
-    bad += check("grain: the background wears the photocopy, sparsely", grain > tot / 50 && grain < tot / 3);
+    bad += check("grain: the ground around the strip wears the photocopy, sparsely", grain > tot / 50 && grain < tot / 3);
+    bad += check("grain: no blood run reaches the step strip", blood_in_strip == 0);
+    {   /* blood runs are there (the look), somewhere above the strip */
+        uint32_t n = 0;
+        for (y = 0; y < 202; y++)
+            for (x = 0; x < 240; x++)
+                n += host_screen[y * 240u + x] == BLOOD;
+        bad += check("grain: the blood runs are drawn", n > 40u);
+    }
+    return bad;
+}
+/* the audio stream moves the playhead between the frame's signatures and its drawing: the strip must show the step its
+ * signature saw, and the next frame must see the move */
+static void hook_move_pos(void) { sm_pos[0] = 9; }
+static int test_draw_playhead_snapshot(void)
+{
+    const uint16_t BLOOD = swap16(0xB800u);
+    int bad = 0;
+    uint32_t px;
+    draw_setup();
+    sm_playing = 1;
+    sm_pos[0] = 3;
+    sm_redraw_all();
+    begin_hook = hook_move_pos;                               /* the first cv_begin of the frame: after the signatures */
+    px = frame_px();
+    bad += check("playhead: the strip shows the step the frame read (3), not the one the audio stream moved to (9)",
+                 host_screen[206 * 240 + 3 * 15 + 5] == BLOOD && host_screen[206 * 240 + 9 * 15 + 5] != BLOOD && begin_hook == 0);
+    px = frame_px();
+    bad += check("playhead: the next frame sees the move and draws step 9",
+                 px > 0 && px <= 240u * 40u && host_screen[206 * 240 + 9 * 15 + 5] == BLOOD && host_screen[206 * 240 + 3 * 15 + 5] != BLOOD);
     return bad;
 }
 static void write_ppm(const char *dir, const char *name)
@@ -1225,6 +1299,7 @@ int main(void)
     bad += test_draw_lint();
     bad += test_draw_budget();
     bad += test_draw_grain();
+    bad += test_draw_playhead_snapshot();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

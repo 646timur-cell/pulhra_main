@@ -11,6 +11,7 @@
 #define SMT_MID 0x8A22u                                   /* rust */
 #define SMT_DIM 0x4100u
 #define SMT_REC 0xF800u
+#define SMT_CLEAN 0x0001u                                 /* near-black that is not a flat ground colour: cv_grime leaves it alone */
 
 static void sm_theme_pizdaks(void)
 {
@@ -34,6 +35,19 @@ static void sm_theme_pizdaks(void)
         ux.gd[k][0] = swap16(ux_mix(f[k], SMT_TEXT, k ? 12 : 16));
         ux.gd[k][1] = swap16(k ? ux_mix(f[k], SMT_BG, 55) : ux_mix(f[k], SMT_ACCENT, 28));
         ux.gd[k][2] = swap16(k ? ux_mix(f[k], SMT_BG, 28) : ux_mix(f[k], SMT_TEXT, 7));
+    }
+    {   /* the blood runs (MONOFM's drips, gfx.c gm_px): fixed, in blood, only where nothing is written: under the header and the
+         * page name's right, the gutters of the cells, the right edge, never into the step strip (y >= 202) */
+        static const int16_t DR[GM_DRIPS][3] = {{150, 22, 16}, {176, 24, 20}, {204, 22, 12}, {228, 24, 22}, {114, 48, 18},
+                                                {236, 48, 14}, {114, 112, 20}, {236, 112, 16}, {226, 176, 18}};
+        for (k = 0; k < GM_DRIPS; k++) {
+            gm_drip[k][0] = DR[k][0];
+            gm_drip[k][1] = DR[k][1];
+            gm_drip[k][2] = DR[k][2];
+        }
+        for (k = 0; k < 3u; k++)
+            gm_blood[k] = swap16(SMT_ACCENT);
+        gm_tear = 0;
     }
     ux.gen++;                                             /* the text ramps follow the theme */
 }
