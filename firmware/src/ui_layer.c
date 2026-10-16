@@ -195,12 +195,22 @@ static const page_t *ly_page(uint32_t l) { return l == LAYER_SCL ? &LY_SCL : l =
 typedef char ly_init_fits[LY_INIT < 16u ? 1 : -1];   /* (a white key: F3 .. G5) */
 /* EDIT's engine pages (STRANGE: more engines than keys): LY_INIT engines a page, OCT+ the next page (wraps); the layer
  * opens on the page of the selected track's engine. ly_eng(p): the engine on white key p of the page, NENGINES none */
+#if FELUCCA_MONOFM
+/* MONOFM: three pages of a family each (engines.c MF_PAGE: MONO, SOMA, SLICE), OCT+ the next */
+#define LY_PAGES 3u
+static uint32_t ly_pg0(uint32_t pg) { return MF_PAGE[pg % LY_PAGES]; }
+static uint32_t ly_pgn(uint32_t pg) { return (uint32_t)MF_PAGE[pg % LY_PAGES + 1u] - MF_PAGE[pg % LY_PAGES]; }
+static uint32_t ly_pg_of(uint32_t rank) { return rank >= MF_PAGE[2] ? 2u : rank >= MF_PAGE[1] ? 1u : 0u; }
+#else
 #define LY_PAGES 1u                    /* (one page: STRANGE's engines past the white keys are on the black ones, EQA_ENG) */
+static uint32_t ly_pg0(uint32_t pg) { return pg * LY_INIT; }
+static uint32_t ly_pgn(uint32_t pg) { return NENG_SHOWN - pg * LY_INIT < LY_INIT ? NENG_SHOWN - pg * LY_INIT : LY_INIT; }
+static uint32_t ly_pg_of(uint32_t rank) { return rank / LY_INIT; }
+#endif
 static uint8_t ly_epage;
 static uint32_t ly_eng(uint32_t p)
 {
-    uint32_t i = ly_epage * LY_INIT + p;
-    return p < LY_INIT && i < NENG_SHOWN ? eng_vis(i) : NENGINES;
+    return p < ly_pgn(ly_epage) ? eng_vis(ly_pg0(ly_epage) + p) : NENGINES;
 }
 #define layer_seen (favorites.factory[15][31])   /* bit l: layer l opened once (a byte no engine uses) */
 static const khint_t FX_LATCH_FOOT[3] = {{KC_KEYS, "ON / OFF"}, {KC_K14, "MACROS"}, {KC_OCTDN, "ALL OFF"}};
@@ -360,7 +370,7 @@ static void layer_opened(uint32_t l)
     lys.trk = song.sel;
     lys.loaded = 0;
     lys.cook = 0;
-    ly_epage = (uint8_t)(eng_rank(TSEL->eng_req % NENGINES) / LY_INIT);   /* (EDIT: the engine's page) */
+    ly_epage = (uint8_t)ly_pg_of(eng_rank(TSEL->eng_req % NENGINES));   /* (EDIT: the engine's page) */
 #if FELUCCA_STRANGE
     se_page = eng_rank(TSEL->eng_req % NENGINES) >= SE_P1;   /* (EDIT: the machine's page) */
 #endif
@@ -1298,16 +1308,16 @@ static void layer_edit(void)
 #else
 static void layer_edit(void)                            /* the engines from F3, INIT next (LY_INIT), the sound under them */
 {                                                        /* (cells show the engine's icon, not the key's note) */
-    uint32_t n = NENG_SHOWN - ly_epage * LY_INIT < LY_INIT ? NENG_SHOWN - ly_epage * LY_INIT : LY_INIT;   /* (this page's) */
+    uint32_t n = ly_pgn(ly_epage);                     /* (this page's) */
     uint32_t cells = LY_PAGES > 1u ? LY_INIT + 1u : n + 1u, i, h = cells > 12u ? 20u : 28u;   /* 4 rows of 20: 8 px clear
                                                                     * above the sound row (pages: INIT on its key's cell) */
     uint32_t na = eqa_count(TSEL);
     for (i = 0; i < cells; i++) {
         int32_t x = LC_X(i % 4u), y = 4 + (int32_t)(h + 4u) * (int32_t)(i / 4u);
-        const engine_t *en = ENGINES[eng_vis(ly_epage * LY_INIT + i) % NENGINES];
+        const engine_t *en = ENGINES[eng_vis(ly_pg0(ly_epage) + i) % NENGINES];
         if (i < n)
             lcell(x, y, (int32_t)h, 0, engine_icon(en->name), 0, h > 24u ? en->name : eng_abbr(en->name),
-                  eng_vis(ly_epage * LY_INIT + i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, 0);
+                  eng_vis(ly_pg0(ly_epage) + i) == TSEL->eng_req % NENGINES ? LS_SEL : LS_OFF, 0);
         else if (i < cells - 1u)
             continue;                                   /* (a page's keys past its engines: nothing) */
         else

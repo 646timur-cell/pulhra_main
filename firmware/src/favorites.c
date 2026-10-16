@@ -31,6 +31,11 @@ static uint8_t *fav_byte(uint32_t engine, uint32_t preset)
     if (engine == ENGI_PLANT)                            /* (28 PLANT: row 1's last two bytes, past LYRA .. BLOW's) */
         return preset < 16u ? &favorites.factory[1][30u + preset / 8u] : 0;
 #endif
+#if FELUCCA_MONOFM
+    /* MONOFM's machines 29..41: row 0 (ANALOG's, never shown in MONOFM), two bytes (16 presets) each */
+    if (engine >= ENGI_MSAW && engine <= ENGI_MNOISE)
+        return preset < 16u ? &favorites.factory[0][(engine - ENGI_MSAW) * 2u + preset / 8u] : 0;
+#endif
     return engine < NENGINES && engine < 14u && preset < 256u ? &favorites.factory[engine][preset / 8u] : 0;
 }
 static int favorite_has(uint32_t engine, uint32_t preset)

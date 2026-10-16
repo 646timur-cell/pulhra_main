@@ -48,7 +48,7 @@
 #if !FELUCCA_SLICE && FELUCCA_MODULE && !FELUCCA_STRANGE
 #error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
 #endif
-#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_DARK) + 14 * FELUCCA_DARK)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
+#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_DARK) + 14 * FELUCCA_DARK + 13 * FELUCCA_MONOFM)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
                                                             * STRANGE's 15..19: the others keep their numbers */
 #define ENGI_GURDY 14u           /* GURDY: the hurdy-gurdy (eng_gurdy.c, from GHOULBOX by Jason Persinger, GPL-3.0) */
 #define ENGI_LYRA 15u            /* STRANGE: eng_lyra.c (Lyra-8-like organismic pairs, hyper-LFO, delay) */
@@ -65,9 +65,23 @@
 #define ENGI_BIO 26u             /* STRANGE: eng_glitch.c again, its BIO kit (body, forest, water, creatures) */
 #define ENGI_ERROR 27u           /* STRANGE: eng_glitch.c again, its ERROR kit (the classic broken digital) */
 #define ENGI_PLANT 28u           /* STRANGE: eng_plant.c (a sound that grows: a seed, a branch a key) */
+/* MONOFM's machines, after Elektron's Monomachine (eng_mono.c; BBOX: eng_glitch.c with a drum kit). Append-only */
+#define ENGI_MSAW 29u            /* SWAVE SAW: a saw, its unison pairs, three subs */
+#define ENGI_MPULSE 30u          /* SWAVE PULSE: pulses with a width sweep */
+#define ENGI_MENS 31u            /* SWAVE ENSEMBLE: up to four pitches (a chord on a mono track), a chorus */
+#define ENGI_MSID 32u            /* SID: a 6581-style oscillator (combined waves, ring, sync, its grit) */
+#define ENGI_MWAVE 33u           /* DIGIPRO WAVE: 32 raw single cycles, morphed, synced, crushed */
+#define ENGI_MDDRAW 34u          /* DIGIPRO DOUBLEDRAW: two of them blended */
+#define ENGI_MBBOX 35u           /* DIGIPRO BEAT BOX: a 12-bit drum kit (eng_glitch.c) */
+#define ENGI_MFMST 36u           /* FM+ STATIC: two modulators, feedback */
+#define ENGI_MFMPAR 37u          /* FM+ PARALLEL: three modulators side by side */
+#define ENGI_MFMDYN 38u          /* FM+ DYNAMIC: linear and exponential FM, a pitch envelope */
+#define ENGI_MVO 39u             /* VO-6: a voice: a consonant into vowels */
+#define ENGI_MSINE 40u           /* GND SINE */
+#define ENGI_MNOISE 41u          /* GND NOISE */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (FELUCCA_MONOFM ? 14 : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
+#define NENG_SHOWN (FELUCCA_MONOFM ? 27 : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))

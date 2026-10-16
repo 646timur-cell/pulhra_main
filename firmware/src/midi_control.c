@@ -245,6 +245,12 @@ static const uint8_t MIDI_CC_ENG[NENGINES] = {
     0x63,                                             /* ERROR: CC74 CRSH, CC71 STUT */
     0x51,                                             /* PLANT: CC74 BLOOM, CC71 GROW */
 #endif
+#if FELUCCA_MONOFM
+    0x21, 0x56, 0x45, 0x26, 0x23, 0x34, 0x63,         /* SAW UNIW UNIL, PULSE PWAD PW, ENS WAVE PW, SID PW GRIT, WAVE
+                                                       * MORF MSPD, DDRAW MIX MMOD, BBOX CRSH STUT */
+    0x25, 0x24, 0x13, 0x46, 0x12, 0x12,               /* FM-ST DEP2 FB, FM-PAR LEV2 LEV3, FM-DYN LIN EXP, VO-6 VOW1 MORF,
+                                                       * SINE FOLD SUB, NOISE RATE COLR */
+#endif
 };
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */
 static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)

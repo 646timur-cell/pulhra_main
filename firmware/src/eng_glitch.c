@@ -64,17 +64,30 @@ static uint32_t gl_kit(const int16_t *p) { return (uint32_t)clamp(p[P_FM3_REL], 
 #define GL_MEC 5u
 #define GL_BIO 6u
 #define GL_ERR 7u
+#define GL_BBX 8u                                        /* MONOFM's BBOX (DIGIPRO BEAT BOX): its drum kit */
 static uint32_t gl_src(const track_t *t)
 {
     uint32_t kit = gl_kit(t->p);
+#if FELUCCA_MONOFM
+    if (!kit && t->engine == ENGI_MBBOX)
+        return GL_BBX;
+#endif
     return kit ? kit : t->engine == ENGI_RITUAL ? GL_RIT : t->engine == ENGI_MECH ? GL_MEC : t->engine == ENGI_BIO ? GL_BIO : t->engine == ENGI_ERROR ? GL_ERR : 0u;
 }
 static uint32_t gl_nz(uint32_t sc)
 {
+#if FELUCCA_MONOFM
+    if (sc == GL_BBX)
+        return BBX_NZ;
+#endif
     return sc - 1u < SMP_USER_SLOTS ? usr_nz[sc - 1u] : sc == GL_RIT ? RIT_NZ : sc == GL_MEC ? MEC_NZ : sc == GL_BIO ? BIO_NZ : sc == GL_ERR ? ERR_NZ : GLT_NZ;
 }
 static const smp_zone_t *gl_zone(uint32_t sc, uint32_t z)
 {
+#if FELUCCA_MONOFM
+    if (sc == GL_BBX)
+        return &BBX_ZONES[z % BBX_NZ];
+#endif
     return sc - 1u < SMP_USER_SLOTS ? &usr_zone[sc - 1u][z & 15u] : sc == GL_RIT ? &RIT_ZONES[z % RIT_NZ]
                                                                  : sc == GL_MEC ? &MEC_ZONES[z % MEC_NZ]
                                                                  : sc == GL_BIO ? &BIO_ZONES[z % BIO_NZ]
@@ -469,4 +482,34 @@ static const engine_t ENG_ERROR = {
     .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(7), XY_E(6), XY_E(1)}},
     .xya = {{40, 40, 30}, {50, 40, 20}},
 };
+#if FELUCCA_MONOFM
+/* BBOX (MONOFM, after the Monomachine's DIGIPRO BEAT BOX): GLITCH with a 12-bit drum kit (tools/gen_strange_samples.py
+ * bbox_kit, 12,000 Hz, C3 .. D#4): BD, BD LONG, SD, SD SNAP, CLAP, RIM, HH CL, HH OP, TOM LO, TOM MID, TOM HI, COWBELL,
+ * CLAVE, CYMBAL, SHAKER, ZAP. STUT and REP are its retrigs; poly: a kit plays its hits over each other */
+#define MONO_CAT_MBBOX "DDDDDD"
+static const preset_t MBBOX_PRESETS[] = {
+    {"BEAT BOX", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 10)},
+    {"12 BIT KIT", {0, 0, 0, 1, 0, 40, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(10, 0, 0, 10)},
+    {"LOW KIT", {0, -5, 0, 1, 0, 20, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(10, 0, 0, 20)},
+    {"ROLLS", {0, 0, 60, 4, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 10, 10)},
+    {"TRASH KIT", {0, 3, 30, 2, 20, 90, 20, 20}, {0, 64, 127, 30}, 0, 0, FX(20, 0, 10, 20)},
+    {"REVERSE KIT", {0, 0, 20, 1, 127, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 20, 40)},
+};
+static const engine_t ENG_MBBOX = {
+    .name = "BBOX",
+    .page_title = {"SLICE", "BREAK"},
+    .edit = GL_EDIT,
+    .presets = MBBOX_PRESETS,
+    .npresets = NELEM(MBBOX_PRESETS),
+    .note_on = glitch_note_on,
+    .render = glitch_render,
+    .block = glitch_block,
+    .knob = {P_E1, P_E2, P_E3, P_E5},
+    .poly = GL_POLY,
+    .sampled = 1,
+    .mem = sizeof(gl_part_t),
+    .xyd = {{XY_E(2), XY_E(5), XY_E(4)}, {XY_E(1), XY_E(6), XY_E(7)}},
+    .xya = {{40, 40, 30}, {30, 40, 40}},
+};
+#endif
 #undef GL_EDIT

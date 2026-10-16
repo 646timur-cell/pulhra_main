@@ -154,6 +154,9 @@ static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-",
 #if FELUCCA_DARK
                                              "LYRA", "CHAOS", "STRING", "MODAL", "BLOW", "RESO", "GLITCH", "JUNK", "DRIFT", "RITUAL", "MECH", "BIO", "ERROR", "PLANT",
 #endif
+#if FELUCCA_MONOFM
+                                             "SAW", "PULSE", "ENS", "SID", "WAVE", "DDRAW", "BBOX", "FM-ST", "FM-PAR", "FM-DYN", "VO-6", "SINE", "NOISE",
+#endif
 };
 
 #define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}

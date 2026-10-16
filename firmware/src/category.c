@@ -54,6 +54,10 @@ static const char *const PRESET_CAT[NENGINES > 16 ? NENGINES : 16] = {
                                                                                                 * files: next to their presets) */
     STRANGE_CAT_RESO, STRANGE_CAT_GLITCH, STRANGE_CAT_JUNK, STRANGE_CAT_DRIFT, STRANGE_CAT_RITUAL, STRANGE_CAT_MECH, STRANGE_CAT_BIO, STRANGE_CAT_ERROR, STRANGE_CAT_PLANT,
 #endif
+#if FELUCCA_MONOFM
+    MONO_CAT_MSAW, MONO_CAT_MPULSE, MONO_CAT_MENS, MONO_CAT_MSID, MONO_CAT_MWAVE, MONO_CAT_MDDRAW, MONO_CAT_MBBOX,   /* 29.. */
+    MONO_CAT_MFMST, MONO_CAT_MFMPAR, MONO_CAT_MFMDYN, MONO_CAT_MVO, MONO_CAT_MSINE, MONO_CAT_MNOISE,                 /* ..41 */
+#endif
 };
 static uint32_t preset_cat(uint32_t e, uint32_t k)    /* factory preset k of engine e */
 {

@@ -262,6 +262,9 @@ static uint32_t engine_icon(const char *name)
         {"STRING", ICON_PHYS}, {"MODAL", ICON_PHYS}, {"BLOW", ICON_PHYS},
         {"RESO", ICON_PHYS}, {"GLITCH", ICON_SLICE}, {"JUNK", ICON_NOISE}, {"DRIFT", ICON_LOOP},
         {"RITUAL", ICON_SLICE}, {"MECH", ICON_SLICE}, {"BIO", ICON_SLICE}, {"ERROR", ICON_SLICE}, {"PLANT", ICON_WAVE},
+        {"SAW", ICON_WAVE}, {"PULSE", ICON_WAVE}, {"ENS", ICON_WAVE}, {"SID", ICON_BITS},   /* MONOFM */
+        {"WAVE", ICON_WAVE}, {"DDRAW", ICON_WAVE}, {"BBOX", ICON_DRUM}, {"FM-ST", ICON_MOD}, {"FM-PAR", ICON_MOD},
+        {"FM-DYN", ICON_MOD}, {"VO-6", ICON_MOUTH}, {"SINE", ICON_WAVE},
     };
     uint32_t i;
     for (i = 0; i < sizeof M / sizeof M[0]; i++)

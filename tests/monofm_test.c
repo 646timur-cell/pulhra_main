@@ -47,32 +47,146 @@ static void wav_write(const char *dir, const char *name, uint32_t frames)
 static int test_engines(void)
 {
     int bad = 0, ok = 1;
-    uint32_t i, e;
-    bad += check("MONOFM: 14 engines shown", NENG_SHOWN == 14u && NLIVE == NPART && !FELUCCA_MODULE);
+    uint32_t i, e, pg;
+    bad += check("MONOFM: 27 machines shown (13 MONO, 9 SOMA, 5 SLICE)", NENG_SHOWN == 27u && NENGINES == 42u &&
+                 NLIVE == NPART && !FELUCCA_MODULE);
     for (e = 0; e < ENGI_LYRA; e++)
         ok &= !eng_ok(e);
     bad += check("MONOFM: Felucca's engines 0..14 hidden", ok);
     ok = 1;
     for (i = 0; i < NENG_SHOWN; i++)
-        ok &= eng_vis(i) >= ENGI_LYRA && eng_vis(i) <= ENGI_PLANT && eng_ok(eng_vis(i)) && eng_rank(eng_vis(i)) == i;
-    for (e = ENGI_LYRA; e <= ENGI_PLANT; e++)
-        ok &= eng_ok(e);
-    bad += check("MONOFM: darkmachine's 14 (LYRA .. PLANT) shown, each once", ok);
+        ok &= eng_vis(i) >= ENGI_LYRA && eng_vis(i) < NENGINES && eng_ok(eng_vis(i)) && eng_rank(eng_vis(i)) == i;
+    for (e = ENGI_LYRA; e < NENGINES; e++)
+        ok &= eng_ok(e) && ENGINES[e]->npresets > 0u && ENGINES[e]->render && ENGINES[e]->note_on;
+    bad += check("MONOFM: darkmachine's 14 and the 13 machines shown, each once, each with presets", ok);
     ok = 1;
-    for (i = 0; i < 16u; i++)
-        ok &= ly_eng(i) == (i < NENG_SHOWN ? ENGINE_ORDER[i] : NENGINES);
-    bad += check("MONOFM: EDIT's white keys F3.. are the engines, INIT after", ok && LY_INIT == NENG_SHOWN);
+    for (pg = 0; pg < 3u; pg++) {
+        ly_epage = (uint8_t)pg;
+        for (i = 0; i < 16u; i++)
+            ok &= ly_eng(i) == (i < (uint32_t)(MF_PAGE[pg + 1u] - MF_PAGE[pg]) ? ENGINE_ORDER[MF_PAGE[pg] + i] : NENGINES);
+        for (i = MF_PAGE[pg]; i < MF_PAGE[pg + 1u]; i++)
+            ok &= ly_pg_of(i) == pg;
+    }
+    ly_epage = 0;
+    bad += check("MONOFM: EDIT's three pages (MONO SOMA SLICE), white keys F3.., INIT on G5", ok && LY_PAGES == 3u &&
+                 LY_INIT == 15u && ly_eng(0) == ENGI_MSAW);
     ui_power_on();
-    bad += check("MONOFM: power-on T1..T4 STRING MODAL LYRA ERROR", trk[0].eng_req == ENGI_STRING &&
-                 trk[1].eng_req == ENGI_MODAL && trk[2].eng_req == ENGI_LYRA && trk[3].eng_req == ENGI_ERROR);
+    bad += check("MONOFM: power-on T1..T4 SAW FM-ST STRING BBOX", trk[0].eng_req == ENGI_MSAW &&
+                 trk[1].eng_req == ENGI_MFMST && trk[2].eng_req == ENGI_STRING && trk[3].eng_req == ENGI_MBBOX);
     ok = 1;
-    for (e = ENGI_LYRA; e <= ENGI_PLANT; e++)
+    for (e = ENGI_LYRA; e < NENGINES; e++)
         ok &= ENGINES[e]->mem <= ENG_MEM_PART;
     bad += check("MONOFM: every engine's state fits a part's 28 KiB", ok && ENG_MEM_PART == 28672u);
+    ok = 1;
+    for (e = ENGI_MSAW; e < NENGINES; e++) {             /* favourites: two bytes of row 0 each, none shared */
+        uint32_t k;
+        for (k = 0; k < ENGINES[e]->npresets; k++)
+            ok &= fav_byte(e, k) == &favorites.factory[0][(e - ENGI_MSAW) * 2u + k / 8u];
+        ok &= ENGINES[e]->npresets <= 16u && str_eq(N_ENGNAME[e], ENGINES[e]->name);
+    }
+    bad += check("MONOFM: the machines' names, favourites (row 0), categories", ok);
     /* the pool (app.ld POOL, 0x5A000): what the stock build keeps besides the engine memory (276,248 B, CI's log), four
      * parts of ENG_MEM_PART, the global delay 32 KiB shorter; at least 8 KiB spare (tools/build.py) */
     bad += check("MONOFM: four parts fit the pool with 8 KiB spare",
                  276248u - 2u * 65536u + sizeof dly_buf + NPART * ENG_MEM_PART + 8192u <= 0x5A000u);
+    return bad;
+}
+
+/* the fundamental (Hz) of wav_l[a .. a + len): the first strong autocorrelation peak, 30 Hz .. 2 kHz; 0 = none */
+static double f0_of(uint32_t a, uint32_t len)
+{
+    static double r[SR / 30u + 2u];
+    uint32_t lag, lo = SR / 2000u, hi = SR / 30u, best = 0, i;
+    double e0 = 0, top = 0;
+    for (i = 0; i < len; i++)
+        e0 += (double)wav_l[a + i] * wav_l[a + i];
+    if (e0 <= 0)
+        return 0;
+    for (lag = lo; lag <= hi + 1u; lag++) {
+        double s = 0;
+        for (i = 0; i + lag < len; i++)
+            s += (double)wav_l[a + i] * wav_l[a + i + lag];
+        r[lag] = s / e0;
+        if (r[lag] > top)
+            top = r[lag];
+    }
+    for (lag = lo + 1u; lag <= hi; lag++)
+        if (r[lag] > r[lag - 1u] && r[lag] >= r[lag + 1u] && r[lag] > 0.85 * top) {
+            best = lag;
+            break;
+        }
+    if (!best)
+        return 0;
+    {
+        double y0 = r[best - 1u], y1 = r[best], y2 = r[best + 1u], d = y0 - 2 * y1 + y2;
+        return SR / (best + (d != 0 ? 0.5 * (y0 - y2) / d : 0));
+    }
+}
+
+/* every preset of every machine 29..41: note 45 (A2, 110 Hz) held 1 s on T1, released; the whole mix 2 s. It sounds, stays
+ * under full scale, has no DC, goes quiet after the release; the plain pitched ones are in tune (f0 of the held note) */
+static int test_machines(const char *wavs)
+{
+    int bad = 0;
+    uint32_t e, k;
+    for (e = ENGI_MSAW; e < NENGINES; e++)
+        for (k = 0; k < ENGINES[e]->npresets; k++) {
+            int32_t buf[2 * CTL], peak = 0;
+            uint32_t f = 0, i, hold = SR, end = 2u * SR, clip = 0;
+            double sum = 0, sq = 0, late = 0, f0 = 0;
+            char what[160];
+            int pitched;
+            ui_power_on();
+            memset(eng_mem, 0, sizeof eng_mem);
+            memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+            memset(dly_buf, 0, sizeof dly_buf);
+            rev_clear();
+            rng_state = 0x1234567u;
+            song.master_q12 = 4096;
+            song.sel = 0;
+            set_engine_of(&trk[0], e);
+            apply_preset_to(&trk[0], k);
+            trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;   /* (the dry sound: its pitch, its silence) */
+            for (i = 0; i < 8u; i++)
+                mix_block(buf, CTL);
+            midi_event(0x90, 0, 45, 100);
+            while (f < end) {
+                if (f >= hold && f - hold < CTL)
+                    midi_event(0x80, 0, 45, 0);
+                mix_block(buf, CTL);
+                for (i = 0; i < CTL && f < end; i++, f++) {
+                    int32_t l = buf[2u * i], a = l < 0 ? -l : l;
+                    wav_l[f] = l;
+                    wav_r[f] = buf[2u * i + 1u];
+                    peak = a > peak ? a : peak;
+                    clip += a >= 32000;
+                    sum += l;
+                    if (f > SR / 10u && f < hold)
+                        sq += (double)l * l;
+                    if (f > end - SR / 4u)
+                        late += (double)l * l;
+                }
+            }
+            pitched = (e == ENGI_MSAW || e == ENGI_MPULSE || e == ENGI_MSINE || e == ENGI_MWAVE || e == ENGI_MFMPAR ||
+                       (e == ENGI_MSID && k != 3u && k != 2u && k != 4u) || (e == ENGI_MFMST && k != 2u) || e == ENGI_MDDRAW) &&
+                      !(e == ENGI_MWAVE && k >= 3u) && !(e == ENGI_MDDRAW && k == 3u) && !(e == ENGI_MFMPAR && k == 3u);
+            if (pitched)
+                f0 = f0_of(SR / 2u, (uint32_t)(SR * 0.3));
+            snprintf(what, sizeof what, "MONOFM %-6s %-12s peak %5d rms %5.0f dc %4.0f clip %u late %4.0f f0 %6.1f",
+                     ENGINES[e]->name, ENGINES[e]->presets[k].name, peak, sqrt(sq / (SR * 0.9)), sum / f, clip,
+                     sqrt(late / (SR / 4u)), f0);
+            bad += check(what, peak > 2000 && clip < 16u && fabs(sum / f) < 400.0 &&
+                               (ENGINES[e]->presets[k].env[3] >= 100u || sqrt(late / (SR / 4u)) < 600.0) &&
+                               (!pitched || (f0 > 0 && (fabs(f0 / 110.0 - 1.0) < 0.02 || fabs(f0 / 55.0 - 1.0) < 0.02 ||
+                                                       fabs(f0 / 220.0 - 1.0) < 0.02))));
+            if (wavs) {
+                char nm[80];
+                snprintf(nm, sizeof nm, "%s_%s", ENGINES[e]->name, ENGINES[e]->presets[k].name);
+                for (i = 0; nm[i]; i++)
+                    nm[i] = nm[i] == ' ' || nm[i] == '/' ? '_' : nm[i];
+                wav_write(wavs, nm, f);
+            }
+        }
     return bad;
 }
 
@@ -145,13 +259,17 @@ static run_t run_pattern(const uint8_t *eng, uint32_t mask, double secs)
 static int test_steps(const char *wavs)
 {
     static const uint8_t SETS[][NPART] = {
-        {ENGI_STRING, ENGI_MODAL, ENGI_LYRA, ENGI_ERROR},          /* the power-on four */
+        {ENGI_MSAW, ENGI_MFMST, ENGI_STRING, ENGI_MBBOX},          /* the power-on four */
+        {ENGI_MSID, ENGI_MWAVE, ENGI_MVO, ENGI_MENS},
+        {ENGI_MPULSE, ENGI_MDDRAW, ENGI_MFMDYN, ENGI_MFMPAR},
+        {ENGI_STRING, ENGI_MODAL, ENGI_LYRA, ENGI_ERROR},
         {ENGI_BLOW, ENGI_RESO, ENGI_JUNK, ENGI_GLITCH},
         {ENGI_CHAOS, ENGI_DRIFT, ENGI_PLANT, ENGI_RITUAL},
         {ENGI_LYRA, ENGI_DRIFT, ENGI_RESO, ENGI_STRING},           /* the heaviest state, all four at once */
         {ENGI_MECH, ENGI_BIO, ENGI_MODAL, ENGI_BLOW},
     };
-    static const char *const NAMES[] = {"default", "blow_reso_junk_glitch", "chaos_drift_plant_ritual", "heavy",
+    static const char *const NAMES[] = {"default", "sid_wave_vo_ens", "pulse_ddraw_dyn_par", "string_modal_lyra_error",
+                                        "blow_reso_junk_glitch", "chaos_drift_plant_ritual", "heavy",
                                         "mech_bio_modal_blow"};
     int bad = 0;
     uint32_t s, i;
@@ -261,6 +379,7 @@ int main(void)
     bad += test_midi_parts();
     bad += test_plock();
     bad += test_steps(wavs);
+    bad += test_machines(wavs);
     printf(bad ? "monofm: %d FAILED\n" : "monofm: all passed\n", bad);
     return bad != 0;
 }

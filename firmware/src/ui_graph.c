@@ -1361,7 +1361,9 @@ static const char *eng_abbr(const char *name)
                                        {"NOISE", "NOIS"}, {"FM6", "FM6"}, {"SLICE", "SLCE"}, {"GURDY", "GRDY"},
                                        {"LYRA", "LYRA"}, {"CHAOS", "CHAO"}, {"STRING", "STRG"}, {"MODAL", "MODL"},
                                        {"BLOW", "BLOW"}, {"RESO", "RESO"}, {"GLITCH", "GLCH"}, {"JUNK", "JUNK"},
-                                       {"DRIFT", "DRFT"}, {"RITUAL", "RITL"}, {"MECH", "MECH"}, {"BIO", "BIO"}, {"ERROR", "ERR"}, {"PLANT", "PLNT"}};
+                                       {"DRIFT", "DRFT"}, {"RITUAL", "RITL"}, {"MECH", "MECH"}, {"BIO", "BIO"}, {"ERROR", "ERR"}, {"PLANT", "PLNT"},
+                                       {"PULSE", "PULS"}, {"DDRAW", "DDRW"}, {"FM-ST", "FMST"}, {"FM-PAR", "FMPR"},
+                                       {"FM-DYN", "FMDY"}, {"VO-6", "VO6"}};   /* (MONOFM's machines) */
     uint32_t i;
     for (i = 0; i < sizeof A / sizeof A[0]; i++)
         if (str_eq(name, A[i][0]))

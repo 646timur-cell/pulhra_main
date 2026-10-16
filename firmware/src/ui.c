@@ -415,7 +415,8 @@ static int page_visible(uint32_t i)
     if (FELUCCA_DARK && PAGES[i].id[0] == P_FM3_REL)
         return TSEL->eng_req % NENGINES == ENGI_GLITCH || TSEL->eng_req % NENGINES == ENGI_RITUAL ||
                TSEL->eng_req % NENGINES == ENGI_MECH || TSEL->eng_req % NENGINES == ENGI_BIO ||
-               TSEL->eng_req % NENGINES == ENGI_ERROR;   /* (KIT: the slice machines') */
+               TSEL->eng_req % NENGINES == ENGI_ERROR || (FELUCCA_MONOFM && TSEL->eng_req % NENGINES == 35u);   /* (KIT:
+                                                                                  * the slice machines', MONOFM's BBOX) */
     if (FELUCCA_DARK && PAGES[i].graph == GR_MICRO)
         return 1;                                     /* (STRANGE: SCL > MICRO, the lanes and OP4 its degrees) */
     if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
