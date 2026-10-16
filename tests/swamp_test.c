@@ -906,6 +906,36 @@ static int test_held_step(void)
     return bad;
 }
 
+/* the PLAY button: PLAY / STOP in turn, through the queue; STOP leaves silence */
+static int test_play_key(void)
+{
+    int bad = 0;
+    uint32_t b, peak = 0, loud = 0;
+    in_reset();
+    sm_step_toggle(0, 0);
+    bad += check("PLAY: stopped at the start", !sm_playing);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    bad += check("PLAY key: sm_playing == 1 after a block", sm_playing == 1u);
+    for (b = 0; b < 400u; b++) {
+        uint32_t a = block_peak(0, 0);
+        loud = a > loud ? a : loud;
+    }
+    bad += check("PLAY key: the step sounds", loud > 2u);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    bad += check("PLAY key again: sm_playing == 0", sm_playing == 0u);
+    for (b = 0; b < 400u; b++) {
+        uint32_t a = block_peak(0, 0);
+        if (b >= 390u)
+            peak = a > peak ? a : peak;
+    }
+    bad += check("PLAY key: ... silence 400 blocks later (|x| <= 2)", peak <= 2u);
+    return bad;
+}
+
 /* the model is the main loop's: a full ring and the audio stream behind -> the core ends equal to the model */
 static int test_input_backpressure(void)
 {
@@ -1293,6 +1323,7 @@ int main(void)
     bad += test_white_key_toggles_trig();
     bad += test_presets_knob_loads();
     bad += test_held_step();
+    bad += test_play_key();
     bad += test_input_backpressure();
     bad += test_cmd_e8_guard();
     bad += test_held_step_bank_key();
