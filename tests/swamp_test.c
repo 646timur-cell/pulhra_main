@@ -671,6 +671,248 @@ static int test_panic(void)
     return bad;
 }
 
+
+/* ------------------------------------------------------------------------------------------------ INPUT --- */
+static void in_reset(void)
+{
+    uint32_t k;
+    for (k = 0; k < 8u; k++)
+        run_block();                                      /* (the ring empty) */
+    panel = PANEL_DEFAULT;
+    seq_reset();
+    host_pressed = host_notes = 0;
+    fm1_in.notes = 0;
+    for (k = 0; k < 7u; k++)
+        host_enc[k] = 0;
+}
+static void turn(uint32_t role, int32_t n) { host_enc[panel.enc[role]] += n * panel.dir[role]; }
+static void press(uint32_t b) { host_pressed |= 1u << panel.btn[b]; }
+static const uint8_t WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* F3 .. G5 */
+static sm_sound_t *ksnd(uint32_t t) { return &smp.pat[smp.cur].kit.snd[t]; }
+
+static int test_alg_selects_track(void)
+{
+    int bad = 0;
+    in_reset();
+    turn(EN_ALGO, 5);
+    sm_input_poll();
+    bad += check("INPUT: 5 detents of ALGORITHM: track 1", sm_ui.trk == 1u);
+    turn(EN_ALGO, -2);
+    sm_input_poll();
+    bad += check("INPUT: ... -2 more: wraps to track 3", sm_ui.trk == 3u);
+    return bad;
+}
+
+static int test_pages_cycle(void)
+{
+    int bad = 0, ok = 1;
+    static const char *const want[4] = {"EDIT 1", "EDIT 2", "VOICE", "EDIT 1"};
+    uint32_t k;
+    in_reset();
+    press(B_ENV);
+    sm_input_poll();
+    bad += check("INPUT: ENV: FILTER, again: F.ENV, again: FILTER",
+                 !strcmp(sm_cur_page()->name, "FILTER"));
+    press(B_ENV);
+    sm_input_poll();
+    ok = !strcmp(sm_cur_page()->name, "F.ENV");
+    press(B_ENV);
+    sm_input_poll();
+    bad += check("INPUT: ... the cycle of the ENV family", ok && !strcmp(sm_cur_page()->name, "FILTER"));
+    for (k = 0; k < 4u; k++) {
+        press(B_EDIT);
+        sm_input_poll();
+        ok &= !strcmp(sm_cur_page()->name, want[k]);
+    }
+    bad += check("INPUT: EDIT x4 from another family: EDIT 1, EDIT 2, VOICE, EDIT 1", ok);
+    press(B_GLO);
+    sm_input_poll();
+    ok = !strcmp(sm_cur_page()->name, "AMP");
+    press(B_GLO);
+    sm_input_poll();
+    bad += check("INPUT: GLO: AMP, MIX", ok && !strcmp(sm_cur_page()->name, "MIX"));
+    return bad;
+}
+
+static int test_knob_writes_model_and_core(void)
+{
+    int bad = 0;
+    int8_t v0, v1;
+    uint32_t sel;
+    in_reset();
+    press(B_ENV);
+    sm_input_poll();
+    sel = sm_ui.trk;
+    turn(EN_K2, -200);
+    sm_input_poll();
+    v0 = ksnd(sel)->p[P_FCUT];
+    bad += check("INPUT: FILTER, K2 -200: CUT at its minimum in the model", v0 == TP[P_FCUT].min);
+    turn(EN_K2, 10);
+    sm_input_poll();
+    v1 = ksnd(sel)->p[P_FCUT];
+    bad += check("INPUT: K2 +10: CUT grew", v1 > v0);
+    run_block();
+    bad += check("INPUT: ... after one block the core has it", trk[sel].p[P_FCUT] == v1);
+    turn(EN_K2, 500);
+    sm_input_poll();
+    run_block();
+    bad += check("INPUT: K2 +500: clipped at TP max, model and core",
+                 ksnd(sel)->p[P_FCUT] == TP[P_FCUT].max && trk[sel].p[P_FCUT] == TP[P_FCUT].max);
+    sm_dirty = 0;
+    turn(EN_K1, 1);
+    sm_input_poll();
+    bad += check("INPUT: a knob turn sets sm_dirty", sm_dirty);
+    in_reset();
+    press(B_ENV);                                         /* FILTER: SELECT is HWIDTH */
+    sm_input_poll();
+    turn(EN_SELECT, -3);
+    sm_input_poll();
+    run_block();
+    bad += check("INPUT: SELECT on FILTER: HWIDTH, model and core",
+                 ksnd(0)->p[P_HWIDTH] == TP[P_HWIDTH].def - 3 && trk[0].p[P_HWIDTH] == ksnd(0)->p[P_HWIDTH]);
+    in_reset();
+    press(B_ENV);
+    sm_input_poll();
+    press(B_ENV);                                         /* F.ENV: the fourth knob has no parameter */
+    sm_input_poll();
+    {
+        sm_sound_t before = *ksnd(0);
+        turn(EN_K4, 5);
+        turn(EN_SELECT, 5);
+        sm_input_poll();
+        bad += check("INPUT: a knob without a parameter (0xFF) changes nothing", !memcmp(&before, ksnd(0), sizeof before));
+    }
+    return bad;
+}
+
+static int test_white_key_toggles_trig(void)
+{
+    int bad = 0;
+    in_reset();
+    host_notes = 1u << WHITE[2];
+    sm_input_poll();
+    bad += check("INPUT: the 3rd white key: step 2 of the selected track on", smp.pat[smp.cur].step[0][2].n == 1u);
+    host_notes = 1u << WHITE[2];
+    sm_input_poll();
+    bad += check("INPUT: ... again: off", smp.pat[smp.cur].step[0][2].n == 0u);
+    host_notes = 1u << 25;                                /* F#5: bank 1 */
+    sm_input_poll();
+    bad += check("INPUT: F#5: bank 1, no trig", sm_ui.bank == 1u && !smp.pat[smp.cur].step[0][25].n);
+    host_notes = 1u << WHITE[2];
+    sm_input_poll();
+    bad += check("INPUT: bank 1, the 3rd white key: step 18", smp.pat[smp.cur].step[0][18].n == 1u &&
+                 !smp.pat[smp.cur].step[0][2].n);
+    host_notes = 1u << 3;                                 /* G#3: black */
+    sm_input_poll();
+    bad += check("INPUT: a black key: nothing", !smp.pat[smp.cur].step[0][3].n && !smp.pat[smp.cur].step[0][19].n);
+    host_notes = 1u << 22;                                /* D#5: bank 0 */
+    sm_input_poll();
+    host_notes = 1u << WHITE[15];
+    sm_input_poll();
+    bad += check("INPUT: D#5: bank 0, the 16th white key: step 15", sm_ui.bank == 0u && smp.pat[smp.cur].step[0][15].n == 1u);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    host_notes = 1u << WHITE[0];
+    sm_input_poll();
+    bad += check("INPUT: the trig goes to the selected track", smp.pat[smp.cur].step[1][0].n == 1u && !smp.pat[smp.cur].step[0][0].n);
+    return bad;
+}
+
+static int test_presets_knob_loads(void)
+{
+    int bad = 0;
+    uint32_t sel;
+    sm_sound_t ref;
+    in_reset();
+    sel = sm_ui.trk;
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    bad += check("INPUT: PRESETS +1: the model's sound is preset 1", ksnd(sel)->preset == 1u);
+    sm_sound_from_preset(&ref, ksnd(sel)->machine, 1);
+    bad += check("INPUT: ... all of it (sm_sound_from_preset)", !memcmp(&ref, ksnd(sel), sizeof ref));
+    run_block();
+    bad += check("INPUT: ... after a block the core's preset is 1 and the values are the model's",
+                 trk[sel].preset == 1u && core_is_model());
+    turn(EN_PRESET, -1);
+    sm_input_poll();
+    turn(EN_ALGO, 2);
+    sm_input_poll();
+    run_block();
+    bad += check("INPUT: PRESETS -1 back to 0 (track 0 only); ALGORITHM +2 moves the next ones",
+                 ksnd(0)->preset == 0u && ksnd(2)->preset == 0u && sm_ui.trk == 2u && core_is_model());
+    return bad;
+}
+
+static int test_held_step(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    host_notes = 1u << WHITE[5];
+    fm1_in.notes = 1u << WHITE[5];
+    sm_input_poll();
+    bad += check("INPUT: a key just pressed: no held step", sm_ui.held_step == 0xFFu);
+    host_ticks += 300000u * FM1_TICKS_PER_US;
+    sm_input_poll();
+    bad += check("INPUT: held 0.30 s: still none", sm_ui.held_step == 0xFFu);
+    host_ticks += 100000u * FM1_TICKS_PER_US;
+    sm_input_poll();
+    bad += check("INPUT: held 0.40 s: held_step 5", sm_ui.held_step == 5u);
+    fm1_in.notes = 0;
+    sm_input_poll();
+    bad += check("INPUT: let go: none again", sm_ui.held_step == 0xFFu);
+    return bad;
+}
+
+/* the model is the main loop's: a full ring and the audio stream behind -> the core ends equal to the model */
+static int test_input_backpressure(void)
+{
+    int bad = 0;
+    uint32_t i, t, n;
+    sm_cmd_t f = {SMC_PARAM, 3, 0, P_LRATE, 0};
+    in_reset();
+    f.val = ksnd(3)->p[P_LRATE];
+    for (i = 0; i < SM_NCMD; i++)
+        sm_ring_put(&sm_cq, f);                           /* (the ring full of what changes nothing) */
+    press(B_GLO);
+    sm_input_poll();                                      /* AMP: K1..K4, SELECT ESYNC */
+    for (t = 0; t < 2u; t++) {                            /* 10 distinct {trk, param} past the full ring: sm_cov (8) overflows */
+        turn(EN_K1, 3); turn(EN_K2, -2); turn(EN_K3, 5); turn(EN_K4, 4); turn(EN_SELECT, 1);
+        sm_input_poll();
+        turn(EN_ALGO, 1);
+        sm_input_poll();
+    }
+    turn(EN_PRESET, 1);                                   /* a LOAD on the way (refused: the values wait in sm_cov) */
+    sm_input_poll();
+    press(B_PLAY);
+    sm_input_poll();                                      /* a PLAY, refused */
+    {
+        uint32_t w, any = 0;
+        for (t = 0; t < SM_NTRK; t++)
+            for (w = 0; w < 4u; w++)
+                any |= sm_pdirty[t][w];
+        bad += check("INPUT/FULL: the ring and sm_cov full: values refused (marked), LOAD and PLAY kept, the core behind",
+                     any && sm_ld_pend && sm_tr_pend == 1u && !core_is_model());
+    }
+    for (n = 0; n < 40u; n++) {                           /* the main loop keeps polling, the audio stream drains a block now and then */
+        sm_input_poll();
+        if (n % 4u == 3u)
+            run_block();
+    }
+    for (n = 0; n < 8u; n++) {
+        sm_input_poll();
+        run_block();
+    }
+    bad += check("INPUT/FULL: then the core's values == the model's, the preset too", core_is_model() &&
+                 trk[sm_ui.trk].preset == ksnd(sm_ui.trk)->preset);
+    bad += check("INPUT/FULL: and the refused PLAY went through", sm_playing);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    bad += check("INPUT: PLAY again: STOP", !sm_playing);
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -690,6 +932,13 @@ int main(void)
     bad += test_stop_releases();
     bad += test_load_order();
     bad += test_panic();
+    bad += test_alg_selects_track();
+    bad += test_pages_cycle();
+    bad += test_knob_writes_model_and_core();
+    bad += test_white_key_toggles_trig();
+    bad += test_presets_knob_loads();
+    bad += test_held_step();
+    bad += test_input_backpressure();
     printf("swamp: %d failed\n", bad);
     return bad != 0;
 }

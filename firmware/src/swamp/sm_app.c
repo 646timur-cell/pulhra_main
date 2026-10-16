@@ -13,9 +13,10 @@ static volatile uint8_t panic_req;
 #include "sm_cmd.c"                                       /* the command queue: the main loop -> the audio stream */
 #include "sm_seq.c"                                       /* events_block: the commands, the engines, the steps */
 
-/* the main loop's two halves, 15 ms apart (sm_main.c): the knobs and keys into the model, the model onto the screen
- * (Tasks 5 and 6 replace them) */
-static void sm_input_poll(void) {}
+#include "sm_pages.c"                                     /* the pages, sm_ui */
+#include "sm_input.c"                                     /* sm_input_poll: the knobs and keys into the model */
+
+/* the main loop's second half (sm_main.c): the model onto the screen (Task 6 replaces it) */
 static void sm_draw(void) {}
 
 /* power-on, before audio_init: every track with its parameter defaults and empty steps, the master level, then the kit
@@ -34,6 +35,7 @@ static void sm_core_init(void)
     sm_project_init();
     sm_kit_boot(&smp.pat[smp.cur].kit);
     sm_seq_init();
+    sm_input_init();
     song.master_q12 = 2048;                   /* (master_boot replaces it with the pot's level before the audio starts) */
 }
 
