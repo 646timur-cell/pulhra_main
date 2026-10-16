@@ -38,6 +38,9 @@
 #ifndef FELUCCA_UART
 #define FELUCCA_UART 1           /* TRS MIDI IN on UART1 / PH8 */
 #endif
+#if !FELUCCA_UAC || !FELUCCA_UART
+#error "SWAMP needs FELUCCA_UAC and FELUCCA_UART (swamp/ has no #if FELUCCA_*)"
+#endif
 #ifndef FELUCCA_ID
 #define FELUCCA_ID "FM-1_900"    /* package identity (build.py: the .fwsc marker string) */
 #endif
@@ -77,14 +80,13 @@
 
 /* ------------------------------------------------------------- MIDI --- */
 #include "usb.c"
-#if FELUCCA_UART
 #include "midi_uart.c"
-#endif
 static uint32_t kb_out_tick;             /* audio.c writes it; seq.c's press-latency stat (not in SWAMP) reads it */
 #include "audio.c"
 
 /* ------------------------------------------------- panel, storage, update --- */
 #include "panel.c"
+#include "settings_persist.c"    /* the settings record: SWAMP reads the panel table and the palette / LEDS / HOLD from it */
 #if FELUCCA_FLASH
 #include "fm1_flash.h"
 #include "storage_hw.c"

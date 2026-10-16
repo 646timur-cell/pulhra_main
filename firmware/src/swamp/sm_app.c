@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* SWAMP MACHINE app: the part of the build that the host test (tests/swamp_test.c) shares with the firmware
- * (swamp.c includes it after the sound core and audio.c, before master.c and sm_main.c). No #if FELUCCA_*, nothing
+ * (swamp.c includes it after the sound core and audio.c, before master.c and sm_main.c). No build-flag conditionals, nothing
  * from ui*.c, seq.c, project.c, mf_pat.c, song_chain.c. The next tasks add the model, the sequencer and the screen. */
 
 /* the sequencer's side of the audio block (fx.c mix_block calls it first); the stub plays nothing (Task 4 replaces it:
@@ -29,4 +29,13 @@ static void sm_core_init(void)
             trk[k].step[i].time = ST_REST;
     }
     song.master_q12 = 2048;                   /* (master_boot replaces it with the pot's level before the audio starts) */
+}
+
+/* the settings record (storage.c OBJ_SETTINGS, written by Felucca): its panel table and settings into panel / settings,
+ * as project.c persist_boot does; no record, a torn or a foreign one: the defaults (panel_init, settings_init) */
+static void sm_settings_load(void)
+{
+    persist_t p;
+    int n = st_load(OBJ_SETTINGS, &p, sizeof p);
+    (void)settings_import(&p, n);
 }

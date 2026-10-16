@@ -34,27 +34,21 @@ void fm1_timer5_irq(void)
     }
     if (usb_due)
         owed |= 1u;                             /* 2 kHz: all USB SIE traffic lives here */
-#if FELUCCA_UART
     if (sub % 5u == 2u)
         owed |= 2u;                             /* 2 kHz: <= ~7 bytes per call at 31250 baud */
-#endif
     if (++sub == 10u)
         sub = 0;
     if (felucca_dbg.in_audio) {
         felucca_dbg.nested++;
-#if FELUCCA_UAC
         if (usb_due)
             uac_service();
-#endif
         t5_nested_ticks += fm1_ticks() - t0;
         return;
     }
     if (owed & 1u)
         usb_poll();
-#if FELUCCA_UART
     if (owed & 2u)
         uart_midi_poll();
-#endif
     owed = 0;
 }
 extern void isr_timer5(void);
@@ -97,8 +91,9 @@ static void fm1_fault(const fm1_crash_t *c)
 }
 
 /* the flash: the part must be the expected one (else RAM-only, as project.c persist_boot); the user sample slots are
- * scanned (the sample machines play from them). SWAMP keeps no settings in the flash yet: the panel table and the
- * palette are the defaults at every start */
+ * scanned (the sample machines play from them); the settings record is read for the learned panel table (so the knobs
+ * and buttons map as on a calibrated unit) and the HOLD / LEDS / palette settings (sm_settings_load). SWAMP writes no
+ * settings: the record stays as Felucca left it */
 static void persist_boot(void)
 {
     uint32_t f = irq_save(), k;
@@ -109,6 +104,7 @@ static void persist_boot(void)
     fl_plain_window_init();                        /* flash above 0x93000 reads as plaintext through XIP */
     for (k = 0; k < SMP_USER_SLOTS; k++)
         smp_user_scan(k);
+    sm_settings_load();
 }
 
 static uint8_t sm_uboot;                              /* the UBOOT countdown shown (seconds left, 0 = none) */
@@ -145,9 +141,7 @@ static void fm1_main(void)
     master_boot();
     audio_init();
     usb_start();
-#if FELUCCA_UART
     uart_midi_init();
-#endif
     timer5_start();
     fm1_guard_lock_top();
     fm1_irq_enable_all();

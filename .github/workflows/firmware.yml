@@ -55,7 +55,7 @@ jobs:
       - name: Host tests (SWAMP)
         run: |
           cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/swamp_test tests/swamp_test.c -lm
-          build/host/swamp_test | tail -n 30
+          build/host/swamp_test
 
       - name: JieLi toolchain
         run: tools/get_toolchain.sh
