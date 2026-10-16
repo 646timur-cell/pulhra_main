@@ -1681,8 +1681,8 @@ static int test_v4(void)
                  "the octave", ok);
     song.octave = 0;
 
-    /* SEQ held, the white keys (spread out): F CLEAR, G COPY P, A COPY T, B PASTE T, C held SAVE, D PASTE P, E / F SHIFT,
-     * B / C (the next) TRN */
+    /* SEQ held, the white keys (spread out): F CLEAR, G COPY P, A COPY T, B PASTE T, D PASTE P, E / F SHIFT, B / C (the
+     * next) TRN; F#5 held SAVE */
     {
         uint32_t k;
         v4_page("EDIT 1");
@@ -1697,10 +1697,10 @@ static int test_v4(void)
         ok = mf_pat_trn(song.sel) == 1 && mf_pat_shift(song.sel) == 1;
         SEQ_TAP(6);
         ok &= mf_pat_shift(song.sel) == 0;
-        key_down(key_at(0, 4));
+        key_down(key_at(1, 10));                         /* (F#5 held: SAVE) */
         for (k = 0; k < 60u; k++)
             frame();
-        key_up(key_at(0, 4));
+        key_up(key_at(1, 10));
         frame();
         ok &= !mf_pat_unsaved();
         SEQ_TAP(0);
@@ -1708,7 +1708,7 @@ static int test_v4(void)
         ok &= mf_pat_trn(song.sel) == 0;
         btn_up(B_SEQ);
         frames(400);
-        bad += check("MONOFM v4 SEQ held: B / C TRN, E / F SHIFT, C held SAVE, F CLEAR (keys spread out)", ok);
+        bad += check("MONOFM v4 SEQ held: B / C TRN, E / F SHIFT, F CLEAR (keys spread out), F#5 held SAVE", ok);
     }
 
     /* RETRIG: ARP held, a key: its note again every RATE (1/16), not toggling a trig; KNOB 1 its RATE; ARP let go: the
