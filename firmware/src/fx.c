@@ -2,7 +2,17 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* Effects: per-track DIST and INSERT (1.5), then sends into three
  * shared buses (chorus, tempo delay, reverb). Mono buses, stereo dry mix. */
+#if FELUCCA_MONOFM
+/* MONOFM: 1.11 s (96 KiB, the rest of the pool to four parts' engine memory, engines.c): 1/4 fits from 54 BPM, 1/4D
+ * from 81, 1/2 from 108. Not a power of two: the ring wraps by compare (DLY_AT, DLY_NEXT) */
+#define DLY_LEN 49152u
+#define DLY_AT(w, d) ((w) >= (d) ? (w) - (d) : (w) + DLY_LEN - (d))
+#define DLY_NEXT(w) ((w) + 1u >= DLY_LEN ? 0u : (w) + 1u)
+#else
 #define DLY_LEN 65536u           /* 1.49 s: 1/4 fits from 41 BPM, 1/4D from 61, 1/2 from 81 */
+#define DLY_AT(w, d) (((w) - (d)) & (DLY_LEN - 1u))
+#define DLY_NEXT(w) ((w) + 1u)
+#endif
 #define CHO_LEN 2048u
 static int16_t dly_buf[DLY_LEN] __attribute__((section(".pool")));
 static int16_t cho_buf[CHO_LEN] __attribute__((section(".pool")));
@@ -554,11 +564,11 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
         }
         fx.cho_w++;
         /* delay with a low-passed feedback */
-        x = dly_buf[(fx.dly_w - dl) & (DLY_LEN - 1u)];
+        x = dly_buf[DLY_AT(fx.dly_w, dl)];
         fx.dly_lp += mulq15(x - fx.dly_lp, col);
-        dly_buf[fx.dly_w & (DLY_LEN - 1u)] =
+        dly_buf[fx.dly_w & (FELUCCA_MONOFM ? 0xFFFFFFFFu : DLY_LEN - 1u)] =
             (int16_t)clamp((dly_in[i] >> 1) + mulq15(fx.dly_lp, fb), -32768, 32767);
-        fx.dly_w++;
+        fx.dly_w = DLY_NEXT(fx.dly_w);
         y += mulq15(x << 1, dmix);
         wet[i] = y;
     }
@@ -901,7 +911,7 @@ static __attribute__((noinline)) void scope_take_mix(uint32_t n)
         scope_buf[scope_w++ & (SCOPE_N - 1u)] = (int16_t)clamp(mix_l[i] + wet[i], -32767, 32767);
 }
 
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 /* STRANGE: the master HPF and LPF (G_MHPF, G_MLPF: TRANSPOSE's KNOB 3 / 4), 12 dB/oct each (Simper's SVF, Butterworth
  * damping), on the mix after MASTER, before the speaker EQ and the limiter (master_out). 0 = off: the filter is left
  * out (a project of another build stores 0 there). The cutoffs glide a quarter of the way each block (no zipper) */
@@ -983,7 +993,7 @@ static void mix_block(int32_t *out, uint32_t n)
     int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;   /* (USB LEVEL FIXED: MASTER after) */
     for (i = 0; i < n; i++)
         send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     mf_prep();
 #endif
     events_block(n);

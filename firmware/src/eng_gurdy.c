@@ -206,7 +206,7 @@ static const preset_t GURDY_PRESETS[] = {
     {"VIELLE", {2, 0, 0, 70, 0, 0, 100, 45}, {35, 64, 120, 70}, 0, 1, FX(0, 25, 10, 100)},
     {"BAGPIPE", {2, 127, 90, 127, 0, 0, 25, 0}, {4, 64, 127, 30}, 0, 1, FX(18, 0, 0, 80)},
     /* GHOULBOX end */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     /* STRANGE: textures */
     {"ABBEY DRONE", {2, 127, 110, 40, 0, 0, 120, 90}, {120, 64, 127, 127}, 0, 0, FX(0, 20, 0, 110)},
     {"DARK WHEEL", {0, 100, 60, 30, 20, 0, 127, 110}, {110, 64, 127, 127}, 0, 0, FX(10, 0, 20, 110)},

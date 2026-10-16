@@ -226,7 +226,7 @@ static const preset_t PHYS_PRESETS[] = {
     /* SYMP: {MODEL, CHRD, BRIT, DAMP, SYMP, ACC, BUZZ, EXC} */
     {"DRONE STRING", {PM_SYMP, 127, 80, 88, 64, 100, 92, 0}, {0, 100, 127, 90}, 0, 0, FX(0, 10, 20, 50), PAT(3)},
     {"HARP", {PM_SYMP, 8, 62, 74, 60, 90, 0, 0}, {0, 100, 127, 80}, 0, 0, FX(0, 20, 20, 60), PAT(3)},
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     /* STRANGE: textures */
     {"SYMP CLOUD", {PM_SYMP, 127, 70, 110, 90, 80, 30, 0}, {80, 100, 127, 127}, 0, 0, FX(0, 20, 30, 110)},
     {"BOWED TREE", {PM_MODAL, 70, 100, 120, 12, 80, 100, 0}, {110, 100, 127, 127}, 0, 0, FX(0, 30, 20, 110)},

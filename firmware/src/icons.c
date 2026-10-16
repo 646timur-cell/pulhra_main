@@ -194,7 +194,7 @@ static uint32_t param_icon(const param_desc_t *d, int32_t v)
         return ICON_LFO_WAVE;                 /* "WAVE" is also the oscillator wave */
     if (d == &TP[P_ARATE] || d == &TP[P_SLRATE])
         return ICON_DIVISION;                 /* arp / SLICER RATE is a note division, not Hz */
-#if !FELUCCA_STRANGE
+#if !FELUCCA_DARK
     if (d->names == N_TRIO_MODE)
         return ICON_CUTOFF;                   /* TRIO's MODE is the filter type, not the arp mode */
 #endif
@@ -222,7 +222,7 @@ static uint32_t mod_src_icon(int32_t s)
 {
     static const uint8_t I[MS_N] = {ICON_MOD, ICON_LFO_WAVE, ICON_ENV, ICON_ACCENT, ICON_KEYTRACK, ICON_PROB,
                                     ICON_MOD, ICON_MIDI, ICON_LEVEL, ICON_W_SH, ICON_GLIDE,
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
                                     ICON_MOD, ICON_MOD,   /* X, Y */
 #endif
     };

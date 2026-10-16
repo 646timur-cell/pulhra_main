@@ -42,7 +42,7 @@
  * and the engines read t->p as before. An engine reads its parameters in note_on (events_block) unmodulated.
  * Nothing active (every slot with SRC, DST or AMT at 0): no work, and the sound is bit-identical. */
 enum { MS_OFF, MS_LFO, MS_ENV, MS_VEL, MS_KEY, MS_RAND, MS_MODW, MS_AT, MS_EXPR, MS_SH, MS_SLEW,
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
        MS_X, MS_Y,               /* STRANGE: the XY morph, per track, 0..1 (xy_val: HOME KNOB 3 / 4, CC16 / CC17) */
 #endif
        MS_N };
@@ -130,7 +130,7 @@ static int32_t mod_tsrc(const track_t *t, uint32_t s, int32_t lfo)
         return t->mw * 258;
     case MS_AT:
         return t->at * 258;
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     case MS_X:
     case MS_Y:
         return xy_val[(t - trk) % NTRK][s - MS_X] * 258;
@@ -179,7 +179,7 @@ static __attribute__((noinline)) int32_t mod_depth(const track_t *t, int32_t lfo
 
 /* before a part's block (fx.c mix_part): the per-track offsets, the per-block destinations into t->p.
  * 0 = no slot active (then nothing changed) */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 /* ARP > X, Y: the sound's own routes of an axis, DST AMT twice at OP1 (X) / OP2 (Y)'s ATK DEC SUS REL; one route
  * set (a destination and an amount): those, not the engine's (engine_t.xyd / xya) */
 #define XY_ROUTE(ax) (P_FM1_ATK + 5u * (ax))
@@ -203,7 +203,7 @@ static __attribute__((noinline)) int mod_begin(track_t *t)
             vd[nv] = (uint8_t)p[P_M1DST + 3u * k];
             va[nv++] = (int8_t)p[P_M1AMT + 3u * k];
         }
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     {   /* XY: an axis no slot takes plays the sound's own routes (ARP > X, Y: xy_route), else the engine's */
         const engine_t *e = ENGINES[t->engine];
         uint32_t ax, r, used;
@@ -343,7 +343,7 @@ static __attribute__((noinline)) void mod_midi(track_t *t, uint32_t st, uint32_t
             t->ex_off = (uint8_t)(127u - d2);
         else if (d1 == 121u)
             t->mw = t->at = t->ex_off = 0;
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
         else if (d1 == 16u || d1 == 17u)                /* STRANGE: X, Y of the XY morph */
             xy_val[(t - trk) % NTRK][d1 - 16u] = (int16_t)d2;
 #endif

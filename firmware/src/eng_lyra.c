@@ -24,8 +24,17 @@
 #define LY_POLY 4
 static uint8_t spread_on;                                /* (voice.c: SPREAD of the part being rendered) */
 static int32_t spread_buf[CTL];
+#if FELUCCA_MONOFM
+#define LY_DLEN 12288u                                   /* MONOFM (four parts' memory): 0.56 s at FS / 2, TIME tops out there */
+#define LY_AT(w, a) ((w) >= (a) ? (w) - (a) : (w) + LY_DLEN - (a))   /* (a ring of compares: not a power of two) */
+#define LY_NEXT(w) ((w) + 1u >= LY_DLEN ? 0u : (w) + 1u)
+#define LY_W(w) (w)
+#else
 #define LY_DLEN 16384u                                   /* the delay line, at FS / 2: 0.74 s */
-#define LY_DMASK (LY_DLEN - 1u)
+#define LY_AT(w, a) (((w) - (a)) & (LY_DLEN - 1u))
+#define LY_NEXT(w) ((w) + 1u)
+#define LY_W(w) ((w) & (LY_DLEN - 1u))
+#endif
 
 typedef struct {
     int16_t own[NVOICE][CTL];                            /* each voice's block before (CROSS: the others' share) */
@@ -161,17 +170,17 @@ static uint32_t lyra_post(track_t *t, int32_t *out, uint32_t n)
         uint32_t a, f;
         a = (uint32_t)d >> 16;                           /* tap 1: TIME */
         f = ((uint32_t)d >> 1) & 0x7FFFu;
-        y1 = L->dl[(w - a) & LY_DMASK];
-        y1 += ((L->dl[(w - a - 1u) & LY_DMASK] - y1) * (int32_t)f) >> 15;
+        y1 = L->dl[LY_AT(w, a)];
+        y1 += ((L->dl[LY_AT(w, a + 1u)] - y1) * (int32_t)f) >> 15;
         d = (int32_t)(((int64_t)d * 40501) >> 16);       /* tap 2: TIME x 0.618 */
         a = (uint32_t)d >> 16;
         f = ((uint32_t)d >> 1) & 0x7FFFu;
-        y2 = L->dl[(w - a) & LY_DMASK];
-        y2 += ((L->dl[(w - a - 1u) & LY_DMASK] - y2) * (int32_t)f) >> 15;
+        y2 = L->dl[LY_AT(w, a)];
+        y2 += ((L->dl[LY_AT(w, a + 1u)] - y2) * (int32_t)f) >> 15;
         y = (y1 + y2) >> 1;
         L->dlp += mulq15(y - L->dlp, klp);
-        L->dl[w & LY_DMASK] = (int16_t)softclip((x >> 1) + ((L->dlp * fb) >> 14));   /* the drive in the loop */
-        w++;
+        L->dl[LY_W(w)] = (int16_t)softclip((x >> 1) + ((L->dlp * fb) >> 14));   /* the drive in the loop */
+        w = LY_NEXT(w);
         d0 += dd;
         L->wlp += mulq15(y - L->wlp, 14000);             /* the wet, smoothed (half rate: its images) */
         wet = L->wlp;

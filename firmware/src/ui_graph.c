@@ -561,7 +561,7 @@ static void graph_euclid(const track_t *t, uint16_t c)
 }
 #endif
 
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 /* MICRO (SCL > MICRO 1..3): the tuning's name, then the 12 degrees from ROOT as bars off a centre line (+-100 cents:
  * +-32 px), each under its note; the degrees of the page shown ACCENT. TUNE OFF: all of it dim */
 static void graph_micro(const track_t *t, uint16_t c)

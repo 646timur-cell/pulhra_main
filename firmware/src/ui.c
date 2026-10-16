@@ -412,11 +412,11 @@ static int page_visible(uint32_t i)
         return PAGES[i].graph == GR_XY || PAGES[i].scope == SC_GLOBAL;   /* (STRANGE: ARP is X, Y, XY LINK) */
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SAVE && PAGES[i].graph == GR_BROWSE && PAGES[i].title[0] == 'F')
         return i == ui.page;                          /* (FAV: SAVE three times, never in SAVE's round) */
-    if (FELUCCA_STRANGE && PAGES[i].id[0] == P_FM3_REL)
+    if (FELUCCA_DARK && PAGES[i].id[0] == P_FM3_REL)
         return TSEL->eng_req % NENGINES == ENGI_GLITCH || TSEL->eng_req % NENGINES == ENGI_RITUAL ||
                TSEL->eng_req % NENGINES == ENGI_MECH || TSEL->eng_req % NENGINES == ENGI_BIO ||
                TSEL->eng_req % NENGINES == ENGI_ERROR;   /* (KIT: the slice machines') */
-    if (FELUCCA_STRANGE && PAGES[i].graph == GR_MICRO)
+    if (FELUCCA_DARK && PAGES[i].graph == GR_MICRO)
         return 1;                                     /* (STRANGE: SCL > MICRO, the lanes and OP4 its degrees) */
     if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
                            PAGES[i].graph == GR_PATS))
@@ -1168,7 +1168,7 @@ static void pat_load_ui(track_t *t, uint32_t n)
  * insert, which chops whatever the track plays in time with its sequencer */
 static int param_kept(uint32_t i)
 {
-    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_STRANGE && (i == P_FM3_ATK ||
+    return i == P_LEVEL || i == P_PAN || i == P_MUTE || (i >= P_AMODE && i <= P_SGATE) || (FELUCCA_DARK && (i == P_FM3_ATK ||
            i == P_FM3_DEC || i == P_FM3_SUS || i == P_FM3_REL || i == P_FM1_LEVEL || (i >= P_FM4_ATK && i <= P_FM4_LEVEL) || (i >= P_LN0 && i <= P_LN7))) ||
            (i >= P_SLCR && i <= P_SLDEPTH) || i == P_CHRD || i == P_VOIC || i == P_SQNT;
 }

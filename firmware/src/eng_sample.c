@@ -17,7 +17,7 @@ typedef struct {
     const char *name;
     uint16_t z0, nz;
 } smp_set_t;
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 #include "felucca_samples_strange.h"   /* STRANGE: synthesized sources and the GLITCH kit (tools/gen_strange_samples.py) */
 #else
 #include "felucca_samples.h"

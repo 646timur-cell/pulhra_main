@@ -1258,8 +1258,13 @@ static void draw_columns(void)
 #define SPL_X0 ((240u - SPL_SQ) / 2u)               /* its top-left on the screen (x and y) */
 #define SPL_PAD 16                                  /* the text's inset: left (its ink), top and bottom (the capitals) */
 #define SPL_PITCH 20                                /* line to line */
-#if FELUCCA_STRANGE                                 /* (STRANGE: darkmachine, so a glance tells the builds apart) */
-static const char *const SPLASH_LINES[] = {"darkmachine", "STRANGE " FELUCCA_VERSION, "H\xFCgelton Instruments", "with community"};
+#if FELUCCA_DARK                                 /* (STRANGE: darkmachine, so a glance tells the builds apart) */
+#if FELUCCA_MONOFM
+#define SPL_BUILD "MONOFM "                         /* (MONOFM: the groovebox of the same machines) */
+#else
+#define SPL_BUILD "STRANGE "
+#endif
+static const char *const SPLASH_LINES[] = {"darkmachine", SPL_BUILD FELUCCA_VERSION, "H\xFCgelton Instruments", "with community"};
 #define SPLASH_MS 1600u                             /* (main.c: STRANGE's splash stays longer) */
 #else
 #define SPLASH_MS 400u
@@ -1276,7 +1281,7 @@ static void splash_band(uint32_t y, uint32_t h, int32_t ly, const char *const *l
     cv_text_on(SPL_PAD, ly + SPL_PITCH, &AF_M, l[1], T_TEXT, T_RAISE);
     cv_blit(SPL_X0, y);
 }
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 /* STRANGE: no square; on the background, "darkmachine" in L centred a little over the middle, under it STRANGE and
  * the version in THEME, at the bottom the maker and "with community" in S, dim */
 static void splash_line(int32_t y, const aafont_t *f, const char *s, uint16_t c)

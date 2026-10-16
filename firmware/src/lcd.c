@@ -66,7 +66,7 @@ static void lcd_window(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1)
 
 static uint16_t lcd_fillbuf[240];
 
-#if FELUCCA_STRANGE
+#if FELUCCA_STRANGE || FELUCCA_MONOFM
 static int gm_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c);   /* gfx.c: DARK's worn fills */
 #endif
 static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
@@ -78,7 +78,7 @@ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
         w = 240u - x;
     if (y + h > 240u)
         h = 240u - y;
-#if FELUCCA_STRANGE
+#if FELUCCA_STRANGE || FELUCCA_MONOFM
     if (gm_fill(x, y, w, h, c))
         return;
 #endif

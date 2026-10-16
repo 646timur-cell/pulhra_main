@@ -225,11 +225,11 @@ static const uint8_t MIDI_CC_ENG[NENGINES] = {
     0x56, 0x00, 0x30, 0x80, 0x50, 0x07, 0x67, 0x00,   /* ANALOG CUT RES, -, PHASE DCW, LOFI TONE, SAMPLE CUT, VOICE Q,
                                                        * TRIO CUT RES, WHEEL - */
     0x80, 0x30, 0x30, 0x34, 0x30,                     /* GRAIN TONE, PHYS BRIT, DRUM TONE, NOISE FREQ RES, FM6 MLVL */
-#if FELUCCA_SLICE || FELUCCA_STRANGE
+#if FELUCCA_SLICE || FELUCCA_DARK
     0x80,                                             /* SLICE TONE (STRANGE: its number, played by none) */
 #endif
     0x04,                                             /* GURDY: CC71 WHL (the bow's pressure) */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     0x23,                                             /* LYRA: CC74 SHRP, CC71 MOD */
     0x32,                                             /* CHAOS: CC74 TONE, CC71 CHAO */
     0x82,                                             /* STRING: CC74 BRIT, CC71 PRES */

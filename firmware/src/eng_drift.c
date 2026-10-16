@@ -18,7 +18,11 @@
 
 #define DR_POLY 4
 #define DR_LA 16384u                                     /* loop A: 1.49 s at FS / 4 */
+#if FELUCCA_MONOFM
+#define DR_LB 11776u                                     /* loop B: 1.07 s (MONOFM: four parts' memory, 28 KiB each) */
+#else
 #define DR_LB 12288u                                     /* loop B: 1.11 s */
+#endif
 enum { DS_SINE, DS_SAW, DS_NOISE, DS_PLUCK, DS_N };
 static const char *const N_DR_SRC[] = {"SINE", "SAW", "NOISE", "PLUCK"};
 

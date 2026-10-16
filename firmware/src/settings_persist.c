@@ -65,7 +65,7 @@ static int settings_import(persist_t *p, int n)
 #ifdef FELUCCA_FAVORITES
     memcpy(&favorites, &p->favorites, sizeof favorites);
     favorites.filter = favorites.filter == 1u;
-#if defined(FM4_NPRESETS) && !FELUCCA_FM4 && !FELUCCA_STRANGE   /* (STRANGE: row 1 holds its own engines' stars) */
+#if defined(FM4_NPRESETS) && !FELUCCA_FM4 && !FELUCCA_DARK   /* (STRANGE: row 1 holds its own engines' stars) */
     {   /* DIGITAL's starred presets (engine 1, retired) -> the FM6 presets that cover them (fm4_convert.c) */
         uint32_t k;
         for (k = 0; k < FM4_NPRESETS; k++)
@@ -74,14 +74,14 @@ static int settings_import(persist_t *p, int n)
         memset(favorites.factory[ENGI_DIGITAL], 0, sizeof favorites.factory[ENGI_DIGITAL]);
     }
 #endif
-#if defined(SMP_SET_PERC) && !FELUCCA_STRANGE   /* (STRANGE: rows 4 and 10 are DRIFT's and GLITCH's stars) */
+#if defined(SMP_SET_PERC) && !FELUCCA_DARK   /* (STRANGE: rows 4 and 10 are DRIFT's and GLITCH's stars) */
     if ((favorites.factory[ENGI_SAMPLE][0] >> SMP_SET_PERC) & 1u) {   /* SAMPLE's PERC (preset 4, retired): DRUM's */
         favorites.factory[ENGI_DRUM][0] |= 1u;                         /* kit (core.h drum_from_perc) */
         favorites.factory[ENGI_SAMPLE][0] &= (uint8_t)~(1u << SMP_SET_PERC);
     }
 #endif
 #endif
-#if FELUCCA_STRANGE && defined(FELUCCA_FAVORITES)
+#if FELUCCA_DARK && defined(FELUCCA_FAVORITES)
     if (favorites.factory[15][25] != STRANGE_DARK_SEEN) {   /* STRANGE's first start over earlier settings: DARK, once */
         favorites.factory[15][25] = STRANGE_DARK_SEEN;      /* (then MENU > COLOR as saved; a byte no engine uses) */
         settings.palette = UI_DARK_INDEX;

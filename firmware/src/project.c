@@ -731,6 +731,11 @@ static void proj_legacy_drums(track_t *t)
     static const uint8_t FX_DEF[4] = {0, 24, 28, 36};
     const preset_t *pr = &ENGINES[ENGI_DRUM]->presets[0];
     uint32_t i;
+    if (!ENGINES[ENGI_DRUM]->npresets) {                 /* (STRANGE, MONOFM: no DRUM; the part keeps its sound, its
+                                                          * engine the build's first) */
+        t->eng_req = (uint8_t)eng_vis(0);
+        return;
+    }
     t->eng_req = ENGI_DRUM;
     t->preset = 0;
     for (i = 0; i < P_E0; i++)

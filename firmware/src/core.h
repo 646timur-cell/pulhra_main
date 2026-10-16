@@ -17,8 +17,12 @@
 #define FELUCCA_FM4 0            /* the DIGITAL engine (eng_digital.c, four-operator FM): kept in the tree, not built
                                   * by default; replaced by FM6, its sounds convert (fm4_convert.c) */
 #endif
+#ifndef FELUCCA_MONOFM
+#define FELUCCA_MONOFM 0         /* the MONOFM build (MONOFM.md): Felucca's four-track groovebox (its sequencer, p-locks,
+                                  * REC, FX layer) playing darkmachine's engines and the Monomachine-style machines only */
+#endif
 #ifndef FELUCCA_MODULE
-#define FELUCCA_MODULE 1         /* the sound-module build: TRACK CH MIDI, HOME levels / TRANSPOSE, no groovebox pages;
+#define FELUCCA_MODULE !FELUCCA_MONOFM         /* the sound-module build: TRACK CH MIDI, HOME levels / TRANSPOSE, no groovebox pages;
                                   * FELUCCA_MODULE=0 keeps Felucca's panel (the upstream UI tests build so) */
 #endif
 #ifndef FELUCCA_STRANGE
@@ -26,8 +30,16 @@
                                   * nor hear MIDI), their CPU and memory spent on five engines of its own (LYRA, CHAOS,
                                   * STRING, MODAL, BLOW: engines 15..19) shown with PHYS and GURDY; the rest hidden */
 #endif
+#define FELUCCA_DARK (FELUCCA_STRANGE || FELUCCA_MONOFM)   /* darkmachine's engines (15..28), their kits, MICRO, XY,
+                                                          * the master filters, the DARK palette: STRANGE and MONOFM */
+#if FELUCCA_STRANGE && FELUCCA_MONOFM
+#error "STRANGE and MONOFM are two builds"
+#endif
+#if FELUCCA_MONOFM && FELUCCA_MODULE
+#error "MONOFM is a groovebox build (FELUCCA_MODULE=0)"
+#endif
 #ifndef FELUCCA_SLICE
-#define FELUCCA_SLICE !FELUCCA_STRANGE   /* the SLICE engine (eng_slice.c), engine 13; FELUCCA_SLICE=0 builds without it
+#define FELUCCA_SLICE !FELUCCA_DARK   /* the SLICE engine (eng_slice.c), engine 13; FELUCCA_SLICE=0 builds without it
                                           * (STRANGE: without; its number 13 stays, played by none) */
 #endif
 #if FELUCCA_STRANGE && !FELUCCA_MODULE
@@ -36,7 +48,7 @@
 #if !FELUCCA_SLICE && FELUCCA_MODULE && !FELUCCA_STRANGE
 #error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
 #endif
-#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_STRANGE) + 14 * FELUCCA_STRANGE)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
+#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_DARK) + 14 * FELUCCA_DARK)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
                                                             * STRANGE's 15..19: the others keep their numbers */
 #define ENGI_GURDY 14u           /* GURDY: the hurdy-gurdy (eng_gurdy.c, from GHOULBOX by Jason Persinger, GPL-3.0) */
 #define ENGI_LYRA 15u            /* STRANGE: eng_lyra.c (Lyra-8-like organismic pairs, hyper-LFO, delay) */
@@ -55,7 +67,7 @@
 #define ENGI_PLANT 28u           /* STRANGE: eng_plant.c (a sound that grows: a seed, a branch a key) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
+#define NENG_SHOWN (FELUCCA_MONOFM ? 14 : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))

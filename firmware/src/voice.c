@@ -608,7 +608,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
     int32_t tune_fine = (song.g[G_TUNE] * 16 - tune * 100) * 2367 / 16000;   /* rest, in 1/4096 (1 ct = 2.367) */
     int32_t bend, bend16, bend_fine;
     uint32_t ti = (uint32_t)(t - trk);
-    if (!FELUCCA_STRANGE && ENGINES[eng_idx(t->eng_req)] == &ENG_DRUM) {   /* (STRANGE: no DRUM) */
+    if (!FELUCCA_DARK && ENGINES[eng_idx(t->eng_req)] == &ENG_DRUM) {   /* (STRANGE: no DRUM) */
         midi_bend_q8[ti] = midi_bend_target[ti] = 0;
     } else {
         int32_t d = midi_bend_target[ti] - midi_bend_q8[ti];
@@ -631,7 +631,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
             pe_new[i] = t->p[P_E0 + i];
             t->p[P_E0 + i] = t->pe_old[i];
         }
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     micro_fix(t->p);                                    /* (values from before MICRO: OFF) */
 #endif
     track_lfo_tick(t);
@@ -678,7 +678,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
             continue;                                   /* held at a silent sustain (SUS 0): nothing to render */
         pitch = v->pitch_cur + tune + bend16 + ((lfo * p[P_LD_PIT] * 3) >> 15) + ((m.envq15 * p[P_ED_PIT] * 3) >> 15);
         fine = v->fine + tune_fine + bend_fine;
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
         if (p[P_FM4_LEVEL]) {                           /* MICRO: the note's degree from ROOT, its cents, as TUNE's */
             int32_t mc = micro_cents(p, (uint32_t)((int32_t)v->note - p[P_ROOT] + 120) % 12u);
             int32_t mc16 = mc >= 0 ? mc * 16 / 100 : -((-mc * 16 + 99) / 100);

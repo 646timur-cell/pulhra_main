@@ -70,13 +70,13 @@ static const char *const N_IRATE[] = {"689", "919", "1.1k", "1.4k", "1.8k", "2.2
 /* modulation matrix (mod.c): sources, destinations (E1..E8 = P_E0..P_E7: shown with the engine's labels).
  * Append-only (stored values keep their meaning): S&H SLEW and DEPTH (#132) came after EXPR and E8 */
 static const char *const N_MSRC[] = {"OFF", "LFO", "ENV", "VEL", "KEY", "RAND", "MODW", "AT", "EXPR", "S&H", "SLEW",
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
                                      "X", "Y",   /* STRANGE: the XY morph (HOME KNOB 3 / 4, CC16 / 17) */
 #endif
 };
 static const char *const N_MDST[] = {"OFF", "PITCH", "CUT", "SHP", "AMP", "PAN", "DIST", "CHO", "DLY", "REV", "RATE",
                                      "VIB", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "DEPTH"};
-#if FELUCCA_STRANGE   /* EUCLID's DIV (OP3's ATK, inert here): its step RATE x 1 .. x 64, for slow sequences */
+#if FELUCCA_DARK   /* EUCLID's DIV (OP3's ATK, inert here): its step RATE x 1 .. x 64, for slow sequences */
 static const char *const N_EUC_DIV[] = {"/1", "/2", "/3", "/4", "/6", "/8", "/12", "/16", "/24", "/32", "/64"};
 static const uint8_t EUC_DIV_X[] = {1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64};
 /* MICRO (SCL > MICRO): a tuning of the 12 degrees from ROOT, cents off equal temperament, the part's own (scenes keep
@@ -147,11 +147,11 @@ static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-",
                                              "DRUM", "NOISE", "FM6",
 #if FELUCCA_SLICE
                                              "SLICE",
-#elif FELUCCA_STRANGE
+#elif FELUCCA_DARK
                                              "-",
 #endif
                                              "GURDY",
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
                                              "LYRA", "CHAOS", "STRING", "MODAL", "BLOW", "RESO", "GLITCH", "JUNK", "DRIFT", "RITUAL", "MECH", "BIO", "ERROR", "PLANT",
 #endif
 };
@@ -228,7 +228,7 @@ static const param_desc_t TP[P_COUNT] = {
                 [P_FM##k##_SUS] = PD("SUS", F_PCT, 0, 127, 127), \
                 [P_FM##k##_REL] = PD("REL", F_TIME, 0, 127, 0), \
                 [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
-#if FELUCCA_STRANGE   /* STRANGE: OP1 / OP2's first four are X / Y's routes (ARP > X, Y; mod.c mod_begin): DST AMT, twice */
+#if FELUCCA_DARK   /* STRANGE: OP1 / OP2's first four are X / Y's routes (ARP > X, Y; mod.c mod_begin): DST AMT, twice */
 #define XYR(k) [P_FM##k##_ATK] = PE("DST1", N_MDST, 0), [P_FM##k##_DEC] = PD("AMT1", F_BIPCT, -64, 63, 0), \
                [P_FM##k##_SUS] = PE("DST2", N_MDST, 0), [P_FM##k##_REL] = PD("AMT2", F_BIPCT, -64, 63, 0), \
                [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
@@ -253,7 +253,7 @@ static const param_desc_t TP[P_COUNT] = {
     LANE(0, "KICK"), LANE(1, "SNARE"), LANE(2, "CLAP"), LANE(3, "HATCL"),
     LANE(4, "HATOP"), LANE(5, "TOM"), LANE(6, "RIM"), LANE(7, "BELL"),
 #undef LANE
-#if FELUCCA_STRANGE                 /* (the lanes are MICRO's degrees 1 .. 7 here) */
+#if FELUCCA_DARK                 /* (the lanes are MICRO's degrees 1 .. 7 here) */
     MDEG(0u, "1"), MDEG(1u, "b2"), MDEG(2u, "2"), MDEG(3u, "b3"), MDEG(4u, "3"), MDEG(5u, "4"), MDEG(6u, "#4"),
     MDEG(7u, "5"),
 #undef MDEG
@@ -329,7 +329,7 @@ static const param_desc_t GP[G_COUNT] = {
     /* inert: they set the GM drum part (level, reverb send), which is gone (drums are the DRUM engine
      * on any part). On no page; kept so the ids and G_COUNT, which the project format and the
      * editor protocol depend on, do not move */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     [G_MHPF] = PD("HPF", F_HPF, 0, 127, 0),     /* STRANGE: the master filters (fx.c master_filter) */
     [G_MLPF] = PD("LPF", F_LPF, 0, 127, 0),
 #else
@@ -582,7 +582,7 @@ static const page_t PAGES[] = {
     {"CHORUS", FAM_FX, SC_GLOBAL, GR_NONE, {G_CRATE, G_CDEPTH, 0xFF, 0xFF}},
     {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}},
     {"CHORD", FAM_SCL, SC_TRACK, GR_CHORD, {P_CHRD, P_VOIC, 0xFF, 0xFF}},   /* SCL again: the chord keys (chord.c) */
-#if FELUCCA_STRANGE   /* SCL: MICRO, the part's tuning, then its 12 degrees' own offsets */
+#if FELUCCA_DARK   /* SCL: MICRO, the part's tuning, then its 12 degrees' own offsets */
     {"MICRO", FAM_SCL, SC_TRACK, GR_MICRO, {P_FM4_LEVEL, P_FM3_DEC, P_FM3_SUS, P_ROOT}},
     {"MICRO 1", FAM_SCL, SC_TRACK, GR_MICRO, {P_LN0, P_LN1, P_LN2, P_LN3}},
     {"MICRO 2", FAM_SCL, SC_TRACK, GR_MICRO, {P_LN4, P_LN5, P_LN6, P_LN7}},
@@ -590,7 +590,7 @@ static const page_t PAGES[] = {
 #endif
     {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
     {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     {"KIT", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM3_REL, P_FM1_LEVEL, 0xFF, 0xFF}},   /* GLITCH only: its samples */
 #endif
     {"FILTER", FAM_EDIT, SC_TRACK, GR_NONE, {P_FTYPE, P_E4, P_E5, P_E7}},   /* ANALOG only (1.5, #104): TYPE CUT RES KTR */

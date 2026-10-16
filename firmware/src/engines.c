@@ -12,7 +12,11 @@
  * that runs on across notes and switches stays outside (WHEEL's wheels, GRAIN's random numbers).
  * Sized by the largest, PHYS (3 x SYMP's slot); an engine that needs more than ENG_MEM_PART grows it for
  * every part (x NPART of the pool). Zero-initialised pool section: main.c fm1_cstart clears it. */
-#if FELUCCA_STRANGE
+#if FELUCCA_MONOFM
+/* MONOFM: four parts of 28 KiB (the global delay gave up 32 KiB of the pool for it, fx.c DLY_LEN): LYRA's delay and DRIFT's
+ * second loop a little shorter than STRANGE's (eng_lyra.c, eng_drift.c), the rest as there */
+#define ENG_MEM_PART 28672u
+#elif FELUCCA_STRANGE
 /* STRANGE: two parts render (NLIVE), so the pool of four regions of 12888 goes to two of 36 KiB (+20 KiB in all): the
  * delay of LYRA, the strings of STRING, the bores of BLOW */
 #define ENG_MEM_PART 36864u
@@ -33,7 +37,7 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
 #include "eng_lofi.c"
 #include "eng_sample.c"
 #include "eng_formant.c"
-#if !FELUCCA_STRANGE                     /* (STRANGE: TRIO, DRUM, SLICE dropped; their numbers stay, played by none) */
+#if !FELUCCA_DARK                     /* (STRANGE: TRIO, DRUM, SLICE dropped; their numbers stay, played by none) */
 #include "eng_trio.c"
 #endif
 #include "eng_wheel.c"
@@ -50,7 +54,7 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
 #include "eng_slice.c"
 #endif
 #include "eng_gurdy.c"          /* GURDY: the hurdy-gurdy (from GHOULBOX, GPL-3.0) */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 #include "strange_dsp.c"        /* STRANGE: the shared pieces of its engines */
 #include "eng_lyra.c"
 #include "eng_chaos.c"
@@ -76,7 +80,7 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_LOFI,                   /* 3 */
     &ENG_SAMPLE,                 /* 4 */
     &ENG_FORMANT,                /* 5 VOICE (eng_formant.c: "voice" is a sounding note in voice.c) */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     &ENG_FM4_GONE,               /* 6: TRIO (not in STRANGE) */
 #else
     &ENG_TRIO,                   /* 6 */
@@ -84,7 +88,7 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_WHEEL,                  /* 7 */
     &ENG_GRAIN,                  /* 8 */
     &ENG_PHYS,                   /* 9 (ENGI_PHYS) */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     &ENG_FM4_GONE,               /* 10: DRUM (not in STRANGE; its code drops out unreferenced) */
 #else
     &ENG_DRUM,                   /* 10 (ENGI_DRUM) */
@@ -93,11 +97,11 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_FM6,                    /* 12 (ENGI_FM6) */
 #if FELUCCA_SLICE
     &ENG_SLICE,                  /* 13 (FELUCCA_SLICE=0 builds without it) */
-#elif FELUCCA_STRANGE
+#elif FELUCCA_DARK
     &ENG_FM4_GONE,               /* 13: SLICE (not in STRANGE; GURDY's 14 and STRANGE's 15..19 stay) */
 #endif
     &ENG_GURDY,                  /* 14 (ENGI_GURDY) */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     &ENG_LYRA,                   /* 15 (ENGI_LYRA) */
     &ENG_CHAOS,                  /* 16 (ENGI_CHAOS) */
     &ENG_STRING,                 /* 17 (ENGI_STRING) */
@@ -152,7 +156,7 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
         return slc_get(si) ? 0 : N_SLC_SRC[si];
     }
 #endif
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     if (e == &ENG_GLITCH || e == &ENG_RITUAL || e == &ENG_MECH || e == &ENG_BIO || e == &ENG_ERROR) {   /* KIT: a user slot */
         uint32_t k = (uint32_t)clamp(t->p[P_FM3_REL], 0, SMP_USER_SLOTS);
         *code = 96u + k;
@@ -168,7 +172,15 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
 /* the order the engines are shown in (PRESETS browsing and its ENG knob, the EDIT layer's keys, the editor's list):
  * engine indices, never DIGITAL's reserved 1 (with FELUCCA_FM4 it follows FM6). The indices stay as they are (the
  * stores and the protocol hold them); only this table orders them */
-#if FELUCCA_STRANGE
+#if FELUCCA_MONOFM
+static const uint8_t ENGINE_ORDER[] = {                 /* MONOFM: darkmachine's engines only (none of Felucca's), by
+                                                         * family; the EDIT layer's white keys F3 .. */
+    ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO,             /* physical models, */
+    ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT,              /* springs and drones, */
+    ENGI_GLITCH, ENGI_ERROR, ENGI_RITUAL, ENGI_MECH,           /* the slice machines, */
+    ENGI_BIO, ENGI_PLANT,                                      /* the organic */
+};
+#elif FELUCCA_STRANGE
 static const uint8_t ENGINE_ORDER[] = {                 /* STRANGE: the EDIT layer's two pages (ui_layer.c SE_P1), the
                                                          * machines on the keys from F3, four a row */
     ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO,             /* page 1, darkmachine's own: physical models, */
@@ -198,7 +210,7 @@ static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
 
 /* the engines one can pick (engine 1 only with FELUCCA_FM4), in ENGINE_ORDER: eng_ok(e), the n-th of them
  * eng_vis(n), e's place among them eng_rank(e), the next / previous one eng_step(e, dir) (wraps) */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 static int eng_ok(uint32_t e)                    /* STRANGE: only the engines it shows (a stored sound of another still
                                                   * plays: its engine number is kept) */
 {
@@ -216,7 +228,7 @@ static uint32_t eng_rank(uint32_t e)
 {
     uint32_t n;
     if (!eng_ok(e))
-        e = FELUCCA_STRANGE ? ENGINE_ORDER[0] : ENGI_FM6;   /* (DIGITAL without FELUCCA_FM4: its sounds play as FM6;
+        e = FELUCCA_DARK ? ENGINE_ORDER[0] : ENGI_FM6;   /* (DIGITAL without FELUCCA_FM4: its sounds play as FM6;
                                                              * STRANGE: a hidden engine's place is the first) */
     for (n = 0; n < NENG_SHOWN && ENGINE_ORDER[n] != e; n++)
         ;
@@ -271,7 +283,11 @@ static const struct {
 #define NPATTERNS (sizeof PATTERNS / sizeof PATTERNS[0])
 
 /* the parts at power-on (engine, preset, PATTERNS[n - 1] in the sequencer, 0 = empty: all are): bass, pad, lead, drums */
-#if FELUCCA_STRANGE
+#if FELUCCA_MONOFM
+/* MONOFM: T1 STRING, T2 MODAL, T3 LYRA, T4 ERROR (a kit), their first sounds, the patterns empty */
+static const uint8_t TRK_DEF[NPART][3] = {{ENGI_STRING, 0, 0}, {ENGI_MODAL, 0, 0}, {ENGI_LYRA, 0, 0}, {ENGI_ERROR, 0, 0}};
+_Static_assert(sizeof ENGINE_ORDER == NENG_SHOWN, "MONOFM: NENG_SHOWN is ENGINE_ORDER's length");
+#elif FELUCCA_STRANGE
 /* STRANGE: T1 LYRA's first, T2 STRING's first; T3, T4 (never rendered) PHYS and GURDY, so a hidden engine is nowhere */
 static const uint8_t TRK_DEF[NPART][3] = {{ENGI_LYRA, 0, 0}, {ENGI_STRING, 0, 0}, {ENGI_PHYS, 0, 0}, {ENGI_GURDY, 0, 0}};
 _Static_assert(sizeof ENGINE_ORDER == NENG_SHOWN, "STRANGE: NENG_SHOWN is ENGINE_ORDER's length");

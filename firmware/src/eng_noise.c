@@ -246,7 +246,7 @@ static const preset_t NOISE_PRESETS[] = {
      * a pitched chip-style buzz */
     {"ARCADE", {NZ_LFSR, 0, 127, 0, 127, 112, 0, 84}, {0, 80, 0, 50}, 0, 0, FX(0, 0, 10, 20), PAT(3)},
     {"METAL", {NZ_META, 0, 100, 40, 100, 32, 0, 0}, {0, 75, 40, 60}, 10, 0, FX(0, 20, 30, 45), PAT(7)},
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     /* STRANGE: textures */
     {"DEEP WIND", {NZ_ANLG, 30, 40, 90, 127, 0, 100, 0}, {120, 90, 127, 127}, 0, 0, FX(0, 30, 20, 110)},
     {"SPARK FIELD", {NZ_DUST, 90, 110, 60, 64, 60, 90, 0}, {60, 90, 127, 120}, 0, 0, FX(0, 0, 40, 110)},

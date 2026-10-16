@@ -18,7 +18,7 @@ static uint32_t cat_of_engine(uint32_t e) { return e == 10u || e == 13u ? CAT_DR
  * L LEAD, P PAD, U PLUCK, K KEYS, D DRUM, F FX, O OTHER); a preset past its string (DIGITAL's, FELUCCA_FM4 builds
  * only; SAMPLE's retired PERC, past SMP_NPRESETS): its engine's (cat_of_engine). tests/ui_test.c checks every string
  * against its engine's preset count. A preset's category is a hint for browsing: nothing else reads it */
-#if FELUCCA_STRANGE                                      /* STRANGE's texture sounds after the stock ones */
+#if FELUCCA_DARK                                      /* STRANGE's texture sounds after the stock ones */
 #define XCAT_ANALOG "PP"
 #define XCAT_GRAIN "PPFP"
 #define XCAT_PHYS "PPF"
@@ -49,7 +49,7 @@ static const char *const PRESET_CAT[NENGINES > 16 ? NENGINES : 16] = {
     "KUBLPUKU",                  /* 12 FM6: TINE EP, BELL, FM BASS, BRASS, PAD, MARIMBA, ORGAN, PLUCK */
     "DD",                        /* 13 SLICE: CHOP, STUTTER */
     "LPLLLL" XCAT_GURDY,                    /* 14 GURDY: HURDY GURDY, DRONE WHEEL, DANCE GURDY, TROMPETTE, VIELLE, BAGPIPE */
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     STRANGE_CAT_LYRA, STRANGE_CAT_CHAOS, STRANGE_CAT_STRING, STRANGE_CAT_MODAL, STRANGE_CAT_BLOW,   /* 15..23 (the engine
                                                                                                 * files: next to their presets) */
     STRANGE_CAT_RESO, STRANGE_CAT_GLITCH, STRANGE_CAT_JUNK, STRANGE_CAT_DRIFT, STRANGE_CAT_RITUAL, STRANGE_CAT_MECH, STRANGE_CAT_BIO, STRANGE_CAT_ERROR, STRANGE_CAT_PLANT,

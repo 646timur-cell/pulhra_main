@@ -28,7 +28,7 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"REVERB", "[K1]ROOM SPRING HALL[FX]CHORUS"},
     {"CHORUS", "[K1-4]ALL TRACKS[FX]FX"},
     {"SCL", "[K2]SCALE[K3]QUANTIZE[SCL]CHORDS"},
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     {"CHORD", "[K1]CHORD[KEYS]ONE FINGER[SCL]MICRO"},
     {"MICRO", "[K1]TUNING[K2]AMOUNT[SCL]BY NOTE"},
     {"MICRO 1", "[K1-4]CENTS 1-b3[SCL]MORE"},
@@ -40,7 +40,7 @@ static const struct { const char *title, *hint; } HELP_PAGE[] = {
     {"EDIT 1", H_EDIT},
     {"EDIT 2", H_EDIT},
     {"FILTER", "[K1]LP BP HP[K2]CUTOFF[EDIT]VOICE"},
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
     {"KIT", "[K1]YOUR SLOTS[K2]CUTS[EDIT]MORE"},
 #endif
     {"LANES", H_LANES},

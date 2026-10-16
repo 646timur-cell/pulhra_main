@@ -82,7 +82,7 @@ static uint32_t trk_midi_ch(uint32_t i)
     return (midi_base() > 0 ? (uint32_t)midi_base() : 0u) + i % NTRK;
 }
 
-#if FELUCCA_STRANGE
+#if FELUCCA_DARK
 static int drum_track(const track_t *t) { (void)t; return 0; }   /* (STRANGE: no DRUM engine; its lane helpers stay) */
 #else
 static int drum_track(const track_t *t) { return ENGINES[eng_idx(t->eng_req)] == &ENG_DRUM; }
