@@ -3,6 +3,9 @@
  * (swamp.c includes it after the sound core and audio.c, before master.c and sm_main.c). No build-flag conditionals, nothing
  * from ui*.c, seq.c, project.c, mf_pat.c, song_chain.c. The next tasks add the model, the sequencer and the screen. */
 
+#include "sm_model.h"
+#include "sm_model.c"
+
 /* the sequencer's side of the audio block (fx.c mix_block calls it first); the stub plays nothing (Task 4 replaces it:
  * the audio stream is the only writer of trk[]) */
 static void events_block(uint32_t n) { (void)n; }
@@ -28,6 +31,7 @@ static void sm_core_init(void)
         for (i = 0; i < NSTEP; i++)
             trk[k].step[i].time = ST_REST;
     }
+    sm_project_init();
     song.master_q12 = 2048;                   /* (master_boot replaces it with the pot's level before the audio starts) */
 }
 

@@ -88,11 +88,72 @@ static int test_settings(void)
     return bad;
 }
 
+_Static_assert(sizeof(sm_step_t) == 10u, "a step is 10 bytes");
+
+/* the project at power-on: 120.0 BPM, swing 50, empty steps, no locks, the default kit in every pattern */
+static int test_model_init(void)
+{
+    uint32_t pp, t, s;
+    int empty = 1;
+    int bad = 0;
+    memset(&smp, 0x5A, sizeof smp);
+    sm_project_init();
+    for (pp = 0; pp < SM_NPAT; pp++) {
+        empty &= smp.pat[pp].nlock == 0;
+        for (t = 0; t < SM_NTRK; t++)
+            for (s = 0; s < SM_NSTEP; s++)
+                empty &= smp.pat[pp].step[t][s].n == 0;
+    }
+    bad += check("MODEL: 16 patterns x 4 tracks x 32 steps empty, no locks", empty);
+    bad += check("MODEL: BPM 120.0, swing 50, 16 steps",
+                 smp.bpm10 == 1200u && smp.swing == 50u && smp.pat[0].kit.snd[0].len == 16u);
+    bad += check("MODEL: kit T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX",
+                 sm_engine_of(smp.pat[0].kit.snd[0].machine) == ENGI_MSAW &&
+                 sm_engine_of(smp.pat[0].kit.snd[1].machine) == ENGI_MFMST &&
+                 sm_engine_of(smp.pat[0].kit.snd[2].machine) == ENGI_STRING &&
+                 sm_engine_of(smp.pat[0].kit.snd[3].machine) == ENGI_MBBOX);
+    bad += check("MODEL: the kit is the same in pattern 0 and 15",
+                 !memcmp(&smp.pat[0].kit, &smp.pat[15].kit, sizeof(sm_kit_t)));
+    return bad;
+}
+
+/* every machine, every preset: the engine's values, the envelope, the filter envelope, the sends */
+static int test_sound_from_preset(void)
+{
+    uint32_t m, pi, i;
+    int ok = 1, n = 0;
+    sm_sound_t s;
+    static const uint8_t FXD[4] = {0, 24, 28, 36};
+    for (m = 0; m < SM_NMACHINE; m++) {
+        const engine_t *e = ENGINES[sm_engine_of(m)];
+        for (pi = 0; pi < e->npresets; pi++, n++) {
+            const preset_t *pr = &e->presets[pi];
+            sm_sound_from_preset(&s, m, pi);
+            ok &= s.machine == m && s.preset == pi;
+            for (i = 0; i < 8u; i++)
+                ok &= s.p[P_E0 + i] == (int8_t)pr->e[i];
+            ok &= s.p[P_ATK] == (int8_t)pr->env[0] && s.p[P_DEC] == (int8_t)pr->env[1] &&
+                  s.p[P_SUS] == (int8_t)pr->env[2] && s.p[P_REL] == (int8_t)pr->env[3];
+            ok &= s.p[P_ED_FLT] == pr->fenv;
+            ok &= s.p[P_VOICE] == (pr->mono ? V_LEGATO : V_POLY);
+            for (i = 0; i < 4u; i++)
+                ok &= s.p[P_DIST + i] == (pr->fx[i] ? pr->fx[i] - 1 : FXD[i]);
+        }
+    }
+    printf("swamp: sizeof smp %u, pattern %u\n", (unsigned)sizeof smp, (unsigned)sizeof(sm_pattern_t));
+    printf("swamp: %d presets over %u machines\n", n, (unsigned)SM_NMACHINE);
+    sm_sound_from_preset(&s, 0, 6);                      /* SAW SYNC LEAD: the ninth value */
+    ok &= s.p[P_E8] == 80;
+    return check("MODEL: every machine's every preset reaches the sound", ok);
+}
+
 int main(void)
 {
     int bad = 0;
     bad += test_core_silent();
     bad += test_settings();
+    bad += test_model_init();
+    bad += test_sound_from_preset();
     printf("swamp: %d failed\n", bad);
     return bad != 0;
 }
