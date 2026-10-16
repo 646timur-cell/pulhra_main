@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* SWAMP MACHINE pages, stage 1: four knobs and SELECT per page, grouped in the families of the buttons EDIT / GLO / ENV
- * (a second press of a family's button goes to its next page). The screen (sm_draw) reads sm_ui and sm_cur_page(). */
+/* SWAMP MACHINE pages: four knobs and SELECT per page, grouped in the families of the buttons EDIT / GLO / ENV / SEQ
+ * (a second press of a family's button goes to its next page). The screen (sm_draw) reads sm_ui and sm_cur_page().
+ * STEP (SEQ tapped) is the one page whose knobs edit a step, not the sound (sm_input.c sm_step_page): K1 NOTE, K2 VEL,
+ * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG */
 #define SM_NOPARAM 0xFFu
 
-enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_COUNT };
+enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_COUNT };
 
 typedef struct {
     const char *name;
@@ -20,11 +22,13 @@ static const sm_page_t SM_PAGES[] = {
     {"MIX", SMFAM_GLO, {P_LEVEL, P_PAN, P_DIST, P_REV}, SM_NOPARAM},
     {"FILTER", SMFAM_ENV, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}, P_HWIDTH},
     {"F.ENV", SMFAM_ENV, {P_FATK, P_FDEC, P_ED_FLT, SM_NOPARAM}, SM_NOPARAM},
+    {"STEP", SMFAM_SEQ, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
- * held on a white key (0..31, 0xFF: none; its knobs show and edit the step's locks), the bank of 16 steps */
-static struct { uint8_t page, trk, held_step, bank; } sm_ui;
+ * held on a white key (0..31, 0xFF: none; its knobs show and edit the step's locks), the bank of 16 steps, the step
+ * selected last (a key held past SM_HOLD_US or turned on; 0xFF none; the STEP page edits it when no key is down) */
+static struct { uint8_t page, trk, held_step, bank, sel_step; } sm_ui;
 enum { SML_NONE, SML_EDIT, SML_GLO, SML_SEQ };
 static uint8_t sm_layer;                                  /* the layer open while its button is held (sm_layer.c; the screen and the LEDs read it) */
 static volatile uint8_t sm_rec;                           /* recording (the REC key): knob turns while playing lock the playing trig */
@@ -49,4 +53,62 @@ static void sm_page_press(uint32_t fam)
         return;
     sm_ui.page = (uint8_t)(SM_PAGES[cur].fam == fam ? (next != n ? next : first) : first);
     sm_dirty = 1;
+}
+
+static int sm_page_is_step(void) { return sm_cur_page()->fam == SMFAM_SEQ; }
+
+/* the STEP page's FLAG list (the PRESETS knob, round): the flags byte of each place, its name */
+#define SM_NFLAG 12u
+static const uint8_t SM_FLAGV[SM_NFLAG] = {
+    0, SMF_ACCENT, SMF_SLIDE, SMF_ACCENT | SMF_SLIDE, 1u << 4, 2u << 4, 3u << 4,
+    SMF_ACCENT | (1u << 4), SMF_ACCENT | (2u << 4), SMF_ACCENT | (3u << 4), SMF_REST, SMF_PSLIDE,
+};
+static const char *const SM_FLAGN[SM_NFLAG] = {"-", "ACC", "SLD", "A+S", "X2", "X3", "X4", "AX2", "AX3", "AX4", "REST", "PSLD"};
+static uint32_t sm_flag_place(uint32_t f)                 /* a flags byte's place in the list (one not in it: 0) */
+{
+    uint32_t i;
+    for (i = 0; i < SM_NFLAG; i++)
+        if (SM_FLAGV[i] == f)
+            return i;
+    return 0;
+}
+
+/* COND (sm_model.h): the K4 walk 1 % .. 99 %, 100 % (place 99), then the conditions; the byte of place q, the place of
+ * byte v; A:B's byte; the name ("100%", "!1ST", "3:7"; b: 8 bytes) */
+#define SM_COND_PLACES SM_COND_END
+static uint32_t sm_cond_of_place(uint32_t q) { return q < 99u ? q + 1u : q == 99u ? 0u : q; }
+static uint32_t sm_cond_place(uint32_t v) { return !v ? 99u : v < SM_COND_1ST ? v - 1u : v < SM_COND_END ? v : 99u; }
+static uint32_t sm_cond_ab(uint32_t a, uint32_t b)
+{
+    b = b < 2u ? 2u : b > 8u ? 8u : b;
+    a = a < 1u ? 1u : a > b ? b : a;
+    return SM_COND_AB0 + (b * (b - 1u)) / 2u - 1u + (a - 1u);   /* (B 2 starts at 0, B 3 at 2, B 4 at 5, ..) */
+}
+static void sm_cond_name(uint32_t v, char *b)
+{
+    static const char *const N[6] = {"1ST", "!1ST", "PRE", "!PRE", "FILL", "!FILL"};
+    uint32_t i = 0, k;
+    if (v < SM_COND_1ST) {
+        v = v ? v : 100u;
+        if (v >= 100u)
+            b[i++] = '1';
+        if (v >= 10u)
+            b[i++] = (char)('0' + v / 10u % 10u);
+        b[i++] = (char)('0' + v % 10u);
+        b[i++] = '%';
+        b[i] = 0;
+    } else if (v < SM_COND_AB0) {
+        for (k = 0; N[v - SM_COND_1ST][k]; k++)
+            b[k] = N[v - SM_COND_1ST][k];
+        b[k] = 0;
+    } else {
+        uint32_t bb, a, j = (v < SM_COND_END ? v : SM_COND_AB0) - SM_COND_AB0;
+        for (bb = 2u; j >= bb; bb++)
+            j -= bb;
+        a = j + 1u;
+        b[0] = (char)('0' + a);
+        b[1] = ':';
+        b[2] = (char)('0' + bb);
+        b[3] = 0;
+    }
 }

@@ -109,7 +109,8 @@ static void sm_leds(void)
         sm_led_put(ng, panel.btn[k], 1);
         sm_led_put(ni, panel.btn[k], 1);
     }
-    sm_led_put(nl, panel.btn[sm_cur_page()->fam == SMFAM_EDIT ? B_EDIT : sm_cur_page()->fam == SMFAM_GLO ? B_GLO : B_ENV], 1);
+    sm_led_put(nl, panel.btn[sm_cur_page()->fam == SMFAM_EDIT ? B_EDIT : sm_cur_page()->fam == SMFAM_GLO ? B_GLO :
+                             sm_cur_page()->fam == SMFAM_SEQ ? B_SEQ : B_ENV], 1);
     if (sm_layer)                                         /* the open layer's button breathes: masked out of lit and glow below */
         sm_led_put(nb, panel.btn[sm_layer_button(sm_layer)], 1);
     sm_led_put(nl, panel.btn[B_REC], *(volatile uint8_t *)&sm_rec != 0u);

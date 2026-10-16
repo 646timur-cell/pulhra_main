@@ -78,6 +78,16 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
 /* the sequencer's note-ons (swamp/sm_seq.c) through a counter: per track how many, at which sample (seq_clock: the samples
  * the test has mixed or run through events_block before this block) */
 static uint32_t seq_clock, on_n[NTRK], on_at[NTRK][4], on_last[NTRK];
+/* ... and every note-on / note-off in order (the STEP tests: velocity, LEN, slide) */
+typedef struct { uint8_t on, t, note, vel, gl; uint32_t at; } seq_ev_t;  /* gl: the slide glide on at a note-on */
+static seq_ev_t seq_ev[1024];
+static uint32_t seq_nev;
+static void seq_ev_log(uint32_t on, uint32_t k, uint32_t note, uint32_t vel)
+{
+    if (seq_nev < 1024u)
+        seq_ev[seq_nev] = (seq_ev_t){(uint8_t)on, (uint8_t)k, (uint8_t)note, (uint8_t)vel, trk[k % NTRK].slide_glide, seq_clock};
+    seq_nev++;
+}
 static void seq_note_on(track_t *t, uint32_t note, uint32_t vel)
 {
     uint32_t k = (uint32_t)(t - trk);
@@ -85,7 +95,13 @@ static void seq_note_on(track_t *t, uint32_t note, uint32_t vel)
         on_at[k][on_n[k]] = seq_clock;
     on_n[k]++;
     on_last[k] = seq_clock;
+    seq_ev_log(1, k, note, vel);
     trk_note_on(t, note, vel);
+}
+static void seq_note_off(track_t *t, uint32_t note)
+{
+    seq_ev_log(0, (uint32_t)(t - trk), note, 0);
+    trk_note_off(t, note);
 }
 /* the audio stream preempting the main loop inside sm_cmd_push, between finding a pending command and storing into it */
 static int preempt_armed;
@@ -94,12 +110,14 @@ static void sm_cmd_drain(void);
 /* every note-on of the app code included below (the sequencer's) goes through the counter; the tests' own calls after
  * the #undef go to voice.c's directly */
 #define trk_note_on seq_note_on
+#define trk_note_off seq_note_off
 static void lock_applied(uint32_t t, uint32_t s, uint32_t p, int32_t v);   /* the locks test: every lock the ISR applies */
 static void lock_preempt(void);                                            /* ... and the ISR's moment inside a lock write */
 #define SM_LOCK_APPLIED(t, s, p, v) lock_applied(t, s, p, v)
 #define SM_LOCK_PREEMPT() lock_preempt()
 #include "../firmware/src/swamp/sm_app.c"
 #undef trk_note_on
+#undef trk_note_off
 
 static int check(const char *what, int ok)
 {
@@ -396,6 +414,7 @@ static void seq_log_clear(void)
     memset(on_n, 0, sizeof on_n);
     memset(on_at, 0, sizeof on_at);
     memset(on_last, 0, sizeof on_last);
+    seq_nev = 0;
 }
 
 /* power-on, the kit dry in the model and on the tracks (an SMC_LOAD copies the model's sends) */
@@ -587,8 +606,9 @@ static int test_step_toggle(void)
     bad += check("STEP: on: C3 + ROOT, vel 100, LEN 0 (the track's GATE), no flags, n 1",
                  s->n == 1u && s->note[0] == 51u && s->vel == 100u && !s->len && !s->flags && !s->cond && !s->nudge &&
                      !s->note[1] && !s->note[2] && !s->note[3]);
+    smp.pat[0].step[2][9].flags = SMF_REST;
     sm_step_toggle(2, 9);
-    bad += check("STEP: off: n 0", !s->n);
+    bad += check("STEP: off: n 0, no flags left (no REST shown on an empty step)", !s->n && !s->flags);
     sm_step_toggle(4, 0);
     sm_step_toggle(0, 32);
     bad += check("STEP: out of range: nothing", !smp.pat[0].step[0][0].n);
@@ -634,7 +654,7 @@ static int test_stop_releases(void)
     for (t = 0; t < SM_NTRK; t++)
         sm_step_toggle(t, 0);
     for (t = 0; t < SM_NTRK; t++)
-        smp.pat[smp.cur].step[t][0].len = 255u;           /* INF (the main loop's model; no LEN control in stage 1) */
+        smp.pat[smp.cur].step[t][0].len = SM_LEN_INF;     /* INF (the LEN list's last) */
     push(SMC_PLAY, 0, 0, 0, 0);
     for (b = 0; b < 2000u; b++)                           /* past step 0 (172 blocks): the notes ring on into step 11 */
         run_block();
@@ -1137,13 +1157,13 @@ static int test_tap_vs_hold(void)
         btn_up(B_GLO);
         sm_input_poll();
     }
-    /* SEQ has no page: a tap does nothing; ENV is its page at once */
+    /* SEQ tapped: the STEP page; ENV is its page at once */
     btn_down(B_SEQ);
     sm_input_poll();
     ms(100);
     btn_up(B_SEQ);
     sm_input_poll();
-    bad += check("LAYER: SEQ tapped: nothing (no page, no layer)", sm_ui.page == 0u && sm_layer == SML_NONE);
+    bad += check("LAYER: SEQ tapped: the STEP page, no layer", !strcmp(sm_cur_page()->name, "STEP") && sm_layer == SML_NONE);
     press(B_ENV);
     sm_input_poll();
     bad += check("LAYER: ENV: its page at once", !strcmp(sm_cur_page()->name, "FILTER"));
@@ -2121,7 +2141,8 @@ static int test_leds_family(void)
     ok &= led_of(fm1_led, panel.btn[B_ENV]) == 1 && led_of(fm1_led, panel.btn[B_EDIT]) == 0 && led_of(fm1_led, panel.btn[B_GLO]) == 0;
     ok &= led_of(fm1_led_dim, panel.btn[B_EDIT]) == 1 && led_of(fm1_led_dim, panel.btn[B_GLO]) == 1;     /* the rest glow */
     for (pg = 0; pg < sm_page_count(); pg++) {
-        uint32_t b = SM_PAGES[pg].fam == SMFAM_EDIT ? B_EDIT : SM_PAGES[pg].fam == SMFAM_GLO ? B_GLO : B_ENV;
+        uint32_t b = SM_PAGES[pg].fam == SMFAM_EDIT ? B_EDIT : SM_PAGES[pg].fam == SMFAM_GLO ? B_GLO :
+                     SM_PAGES[pg].fam == SMFAM_SEQ ? B_SEQ : B_ENV;
         sm_ui.page = (uint8_t)pg;
         sm_leds();
         ok &= led_of(fm1_led, panel.btn[b]) == 1;
@@ -2433,8 +2454,9 @@ static int test_lock_hold_turn(void)
     sm_input_poll();
     key_up(WHITE[6]);
     sm_input_poll();
-    bad += check("LOCK: an EMPTY step held + turned: no lock, no trig, no toggle, base kept",
-                 lk_val(0, 6, P_FCUT) == LK_NONE && !cpat()->step[0][6].n && cpat()->nlock == 1u && ksnd(0)->p[P_FCUT] == base &&
+    bad += check("LOCK: an EMPTY step held + turned: a REST trig (trigless lock) with both locks, base kept, no toggle",
+                 lk_val(0, 6, P_FCUT) == base + 5 && lk_val(0, 6, P_HWIDTH) == clamp(TP[P_HWIDTH].def + 2, TP[P_HWIDTH].min, TP[P_HWIDTH].max) && cpat()->step[0][6].n == 1u &&
+                 cpat()->step[0][6].flags == SMF_REST && cpat()->nlock == 3u && ksnd(0)->p[P_FCUT] == base &&
                  ksnd(0)->p[P_HWIDTH] == TP[P_HWIDTH].def);
     key_dn(WHITE[4]);                                     /* SELECT while held: its parameter (HWIDTH) locked */
     sm_input_poll();
@@ -2872,6 +2894,451 @@ static int test_rec_preview(void)
     return bad;
 }
 
+/* ------------------------------------------------------------------------------------------------ STEP (Task 5) --- */
+#define S120 ((double)FS / 8.0)                           /* a 1/16 at 120 BPM, in samples */
+static sm_step_t *stp(uint32_t t, uint32_t s) { return &smp.pat[smp.cur].step[t][s]; }
+static int near_d(uint32_t a, double b) { double d = (double)a - b; return d <= CTL && d >= -(double)CTL; }
+/* the sequencer alone (no mix) for n samples */
+static void seq_run(uint32_t n)
+{
+    uint32_t end = seq_clock + n;
+    while (seq_clock < end) {
+        events_block(CTL);
+        seq_clock += CTL;
+    }
+}
+static uint32_t ev_count(uint32_t on, uint32_t t)
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < seq_nev && i < 1024u; i++)
+        n += seq_ev[i].on == on && seq_ev[i].t == t;
+    return n;
+}
+static const seq_ev_t *ev_nth(uint32_t on, uint32_t t, uint32_t k)   /* the k-th note-on (on 1) / note-off (0) of track t */
+{
+    uint32_t i;
+    for (i = 0; i < seq_nev && i < 1024u; i++)
+        if (seq_ev[i].on == on && seq_ev[i].t == t && !k--)
+            return &seq_ev[i];
+    return 0;
+}
+static uint32_t ev_step(const seq_ev_t *e, double S) { return e ? (uint32_t)((double)e->at / S + 0.5) : 0xFFFFu; }
+
+static int test_step_vel_acc(void)
+{
+    const seq_ev_t *e;
+    int bad = 0;
+    seq_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->vel = 77;
+    sm_step_toggle(1, 0);
+    stp(1, 0)->vel = 60;
+    stp(1, 0)->flags = SMF_ACCENT;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run(CTL * 4u);
+    e = ev_nth(1, 0, 0);
+    bad += check("STEP: VEL 77: the note-on at velocity 77", e && e->vel == 77u);
+    e = ev_nth(1, 1, 0);
+    bad += check("STEP: ACCENT on VEL 60: the note-on at 127", e && e->vel == 127u);
+    return bad;
+}
+
+static int test_step_len(void)
+{
+    const seq_ev_t *on, *off;
+    int bad = 0;
+    seq_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->len = 2;                                   /* 1/4 */
+    sm_step_toggle(1, 0);
+    sm_step_toggle(1, 8);
+    stp(1, 0)->len = SM_LEN_INF;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(10.0 * S120));
+    on = ev_nth(1, 0, 0);
+    off = ev_nth(0, 0, 0);
+    printf("swamp: LEN 1/4: on %u off %u (want %.0f)\n", on ? on->at : 0u, off ? off->at : 0u, S120 / 4.0);
+    bad += check("STEP: LEN 1/4: the note-off a quarter step after the note-on (+-CTL)",
+                 on && off && near_d(off->at - on->at, S120 / 4.0));
+    off = ev_nth(0, 1, 0);
+    bad += check("STEP: LEN INF: held to the next trig (step 8), no note-off before",
+                 off && near_d(off->at, 8.0 * S120) && ev_count(1, 1) == 2u);
+    bad += check("STEP: sm_seq_len8: TRK 0, 1/8 1, 1 8, 16 128 (the MONOFM list)",
+                 SM_LEN_INF == 13u && MF_LEN8[0] == 0u && MF_LEN8[1] == 1u && MF_LEN8[5] == 8u && MF_LEN8[12] == 128u);
+    return bad;
+}
+
+static int test_step_cond(void)
+{
+    uint32_t t, i, ok;
+    int bad = 0;
+    /* 50 %: about half of 1000 passes (the LFSR seeded) */
+    seq_reset();
+    smp.bpm10 = 3000;
+    ksnd(0)->len = 1;
+    sm_step_toggle(0, 0);
+    stp(0, 0)->cond = 50;
+    sm_lfsr = 0xACE1u;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(999.5 * (double)FS * 150.0 / 3000.0));
+    printf("swamp: COND 50%%: %u of 1000\n", on_n[0]);
+    bad += check("STEP: COND 50%: 440..560 of 1000 passes play", on_n[0] >= 440u && on_n[0] <= 560u);
+    /* A:B 2:4, 1ST, !1ST, FILL / !FILL (sm_fill 0): tracks of length 1, 8 passes */
+    seq_reset();
+    for (t = 0; t < SM_NTRK; t++) {
+        ksnd(t)->len = 1;
+        sm_step_toggle(t, 0);
+    }
+    stp(0, 0)->cond = (uint8_t)sm_cond_ab(2, 4);
+    stp(1, 0)->cond = SM_COND_1ST;
+    stp(2, 0)->cond = SM_COND_N1ST;
+    stp(3, 0)->cond = SM_COND_FILL;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(7.5 * S120));
+    ok = on_n[0] == 2u && ev_step(ev_nth(1, 0, 0), S120) == 1u && ev_step(ev_nth(1, 0, 1), S120) == 5u;
+    bad += check("STEP: COND 2:4: the 2nd of every 4 passes (passes 1 and 5 of 8)", ok);
+    bad += check("STEP: COND 1ST: the first pass only; !1ST: the other 7", on_n[1] == 1u && on_n[2] == 7u &&
+                 ev_step(ev_nth(1, 1, 0), S120) == 0u);
+    bad += check("STEP: COND FILL with sm_fill 0: never", on_n[3] == 0u);
+    seq_reset();
+    ksnd(0)->len = 1;
+    sm_step_toggle(0, 0);
+    stp(0, 0)->cond = SM_COND_NFILL;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(3.5 * S120));
+    bad += check("STEP: COND !FILL with sm_fill 0: always", on_n[0] == 4u);
+    /* PRE / !PRE: step 0 1:2 (passes 0, 2), step 1 PRE (T1) or !PRE (T2); tracks of length 2, 4 passes */
+    seq_reset();
+    for (t = 0; t < 2u; t++) {
+        ksnd(t)->len = 2;
+        sm_step_toggle(t, 0);
+        sm_step_toggle(t, 1);
+        stp(t, 0)->cond = (uint8_t)sm_cond_ab(1, 2);
+        stp(t, 1)->cond = t ? SM_COND_NPRE : SM_COND_PRE;
+    }
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(7.5 * S120));
+    ok = on_n[0] == 4u;
+    for (i = 0; i < 4u; i++)
+        ok &= ev_step(ev_nth(1, 0, i), S120) == (uint32_t)((uint32_t[]){0, 1, 4, 5})[i];
+    bad += check("STEP: COND PRE: plays when the trig before played (steps 0 1 4 5)", ok);
+    ok = on_n[1] == 4u;
+    for (i = 0; i < 4u; i++)
+        ok &= ev_step(ev_nth(1, 1, i), S120) == (uint32_t)((uint32_t[]){0, 3, 4, 7})[i];
+    bad += check("STEP: COND !PRE: plays when it did not (steps 0 3 4 7)", ok);
+    /* the knob's walk: 1 % .. 99 %, 100 % (0), the conditions; the names */
+    {
+        char b[8];
+        ok = sm_cond_of_place(0) == 1u && sm_cond_of_place(98) == 99u && sm_cond_of_place(99) == 0u &&
+             sm_cond_of_place(100) == SM_COND_1ST && sm_cond_of_place(SM_COND_PLACES - 1u) == sm_cond_ab(8, 8);
+        for (i = 0; i < SM_COND_PLACES; i++)
+            ok &= sm_cond_place(sm_cond_of_place(i)) == i;
+        sm_cond_name(0, b);
+        ok &= !strcmp(b, "100%");
+        sm_cond_name(SM_COND_N1ST, b);
+        ok &= !strcmp(b, "!1ST");
+        sm_cond_name(sm_cond_ab(3, 7), b);
+        ok &= !strcmp(b, "3:7");
+        bad += check("STEP: COND walk 1%..99%, 100%, 1ST .. 8:8 and back; names 100% !1ST 3:7", ok);
+    }
+    return bad;
+}
+
+static int test_step_ratchet(void)
+{
+    int bad = 0;
+    seq_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->flags = (uint8_t)(2u << 4);                /* x3 */
+    sm_step_toggle(0, 2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(1.9 * S120));
+    printf("swamp: x3: %u note-ons at %u %u %u\n", on_n[0], on_at[0][0], on_at[0][1], on_at[0][2]);
+    bad += check("STEP: ratchet x3: 3 note-ons in the step, at 0, 1/3, 2/3 (+-CTL)",
+                 on_n[0] == 3u && near_d(on_at[0][0], 0) && near_d(on_at[0][1], S120 / 3.0) && near_d(on_at[0][2], 2.0 * S120 / 3.0));
+    bad += check("STEP: ... each part let go before the next (3 note-offs by step 1.9)", ev_count(0, 0) == 3u);
+    seq_run((uint32_t)(0.5 * S120));
+    bad += check("STEP: ... the next trig (x1) plays once", on_n[0] == 4u);
+    return bad;
+}
+
+static int test_step_rest(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    set_param(0, P_FCUT, 100);
+    sm_step_toggle(0, 2);
+    stp(0, 2)->flags = SMF_REST;
+    sm_lock_set(0, 2, P_FCUT, 20);
+    press(B_PLAY);
+    sm_input_poll();
+    bad += check("STEP: REST trig: its lock applied (20)", run_to_step(0, 2) && trk[0].p[P_FCUT] == 20);
+    bad += check("STEP: ... and no note", on_n[0] == 0u);
+    bad += check("STEP: ... the next pass's step 0 (no trig) keeps it; step 2 again too",
+                 run_to_step(0, 0) && trk[0].p[P_FCUT] == 20 && run_to_step(0, 2) && on_n[0] == 0u);
+    return bad;
+}
+
+static int test_step_pslide(void)
+{
+    int bad = 0;
+    int32_t mid, late, res_mid;
+    in_reset();
+    host_ticks = 1000u;
+    set_param(0, P_FCUT, 60);
+    set_param(0, P_FRES, 0);
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
+    stp(0, 0)->flags = SMF_PSLIDE;
+    sm_lock_set(0, 0, P_FCUT, 20);
+    sm_lock_set(0, 4, P_FCUT, 100);
+    sm_lock_set(0, 4, P_FRES, 64);                        /* (locked on the next trig only: from the base) */
+    seq_log_clear();
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(0.5 * S120));
+    mid = trk[0].p[P_FCUT];
+    res_mid = trk[0].p[P_FRES];
+    seq_run((uint32_t)(0.4 * S120));
+    late = trk[0].p[P_FCUT];
+    printf("swamp: PSLIDE 20 -> 100: %d at 1/2 step, %d at 0.9; RES 0 -> 64: %d at 1/2\n", mid, late, res_mid);
+    bad += check("STEP: PSLIDE: CUT half way between the locks at the middle of the step (60 +-3)", mid >= 57 && mid <= 63);
+    bad += check("STEP: ... RES (locked on the next trig only) half way too (32 +-3)", res_mid >= 29 && res_mid <= 35);
+    bad += check("STEP: ... 0.9 of the step: 92 +-4", late >= 88 && late <= 96);
+    seq_run((uint32_t)(1.0 * S120));
+    bad += check("STEP: ... after the step: at the next trig's lock (100), held", trk[0].p[P_FCUT] == 100 && trk[0].p[P_FRES] == 64);
+    seq_run((uint32_t)(2.5 * S120));
+    bad += check("STEP: ... the next trig fires its own lock (100)", trk[0].p[P_FCUT] == 100);
+    return bad;
+}
+
+static int test_step_nudge(void)
+{
+    int bad = 0;
+    seq_reset();
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 2);
+    stp(0, 2)->nudge = 4;
+    sm_step_toggle(0, 6);
+    stp(0, 6)->nudge = -4;
+    sm_step_toggle(0, 9);
+    stp(0, 9)->nudge = 7;
+    stp(0, 9)->flags = (uint8_t)(1u << 4);                /* x2: plays on its start */
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(9.9 * S120));
+    printf("swamp: NUDGE: on at %u %u %u (want 0, %.0f, %.0f), x2 at %u\n", on_at[0][0], on_at[0][1], on_at[0][2],
+           2.25 * S120, 5.75 * S120, on_at[0][3]);
+    bad += check("STEP: NUDGE +4: the trig starts a quarter step late", near_d(on_at[0][1], 2.25 * S120));
+    bad += check("STEP: NUDGE -4: a quarter step early, once (not again on its step)",
+                 near_d(on_at[0][2], 5.75 * S120) && on_n[0] == 5u);
+    bad += check("STEP: NUDGE on a ratchet: on its start", near_d(on_at[0][3], 9.0 * S120));
+    /* an early trig on step 0 fires in the pass before: its COND counts the pass it belongs to (1ST: once) */
+    seq_reset();
+    ksnd(0)->len = 2;
+    sm_step_toggle(0, 0);
+    stp(0, 0)->nudge = -4;
+    stp(0, 0)->cond = SM_COND_1ST;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(7.9 * S120));
+    bad += check("STEP: NUDGE -4 on step 0 with 1ST: the first pass only (the early fire counts the next pass)", on_n[0] == 1u);
+    return bad;
+}
+
+static int test_step_slide(void)
+{
+    const seq_ev_t *on2, *off1;
+    int bad = 0;
+    uint32_t i, i_on2 = 0, i_off1 = 0;
+    seq_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->note[0] = 48;
+    stp(0, 0)->flags = SMF_SLIDE;
+    stp(0, 0)->len = 1;                                   /* (1/8: a SLIDE holds to the next trig all the same) */
+    sm_step_toggle(0, 1);
+    stp(0, 1)->note[0] = 55;
+    sm_step_toggle(0, 4);
+    stp(0, 4)->flags = SMF_SLIDE;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(1.5 * S120));
+    on2 = ev_nth(1, 0, 1);
+    off1 = ev_nth(0, 0, 0);
+    for (i = 0; i < seq_nev; i++) {
+        if (&seq_ev[i] == on2) i_on2 = i;
+        if (&seq_ev[i] == off1) i_off1 = i;
+    }
+    bad += check("STEP: SLIDE: the note held to the next trig (no note-off before step 1)", off1 && near_d(off1->at, S120));
+    bad += check("STEP: ... the next note on before the old one off (legato), the glide flag on at its note-on",
+                 on2 && on2->note == 55u && i_on2 < i_off1 && on2->gl);
+    seq_run((uint32_t)(4.0 * S120));                      /* step 4 SLIDE, step 5 empty: let go on step 5 */
+    off1 = ev_nth(0, 0, 2);
+    bad += check("STEP: a SLIDE into an empty step: let go on that step", off1 && near_d(off1->at, 5.0 * S120));
+    return bad;
+}
+
+/* carried from the review of Task 4: a preview while stopped; a stale SMC_UNLOCK (retried) against a re-trigged lock */
+static int test_step_carried(void)
+{
+    int bad = 0;
+    uint32_t i;
+    in_reset();
+    host_ticks = 1000u;
+    set_param(0, P_FCUT, 64);
+    run_block();
+    push(SMC_PREVIEW, 0, 0, P_FCUT, 20);
+    run_block();
+    bad += check("FIX: SMC_PREVIEW while stopped: ignored (base, not locked)", trk[0].p[P_FCUT] == 64 && !sm_lk_is(0, P_FCUT));
+    sm_step_toggle(0, 4);
+    sm_lock_set(0, 4, P_FCUT, 20);
+    press(B_PLAY);
+    sm_input_poll();
+    run_to_step(0, 4);
+    {
+        sm_cmd_t f = {SMC_PARAM, 3, 0, P_LRATE, 0};
+        f.val = ksnd(3)->p[P_LRATE];
+        for (i = 0; i < SM_NCMD; i++)
+            sm_ring_put(&sm_cq, f);
+    }
+    sm_step_toggle(0, 4);                                 /* off: the unlock refused (the queue full), kept */
+    bad += check("FIX: the queue full: the unlock kept", (sm_unl_pend & 1u) != 0u);
+    sm_step_toggle(0, 4);                                 /* on again, a new lock, fired before the unlock is retried */
+    sm_lock_set(0, 4, P_FCUT, 30);
+    bad += check("FIX: ... re-trigged, fired: 30", run_to_step(0, 4) && trk[0].p[P_FCUT] == 30);
+    sm_input_poll();                                      /* the stale unlock goes out now */
+    run_block();
+    bad += check("FIX: ... the stale unlock (an older generation) does not cut the new lock", !sm_unl_pend && trk[0].p[P_FCUT] == 30);
+    return bad;
+}
+
+/* the STEP page: SEQ tapped; the step edited (held, else the last selected); K1..K4, SELECT, PRESETS */
+static int test_step_page(void)
+{
+    int bad = 0;
+    sm_step_t *s;
+    uint32_t p0;
+    in_reset();
+    host_ticks = 1000u;
+    btn_down(B_SEQ);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_SEQ);
+    sm_input_poll();
+    bad += check("STEPPG: SEQ tapped: STEP", !strcmp(sm_cur_page()->name, "STEP"));
+    sm_step_toggle(0, 3);
+    turn(EN_K2, 5);
+    turn(EN_PRESET, 3);
+    sm_input_poll();
+    bad += check("STEPPG: no step selected: the knobs do nothing", sm_step_edit() < 0 && stp(0, 3)->vel == 100u && !stp(0, 3)->flags);
+    p0 = ksnd(0)->preset;
+    key_dn(WHITE[3]);                                     /* held past SM_HOLD_US: selected */
+    sm_input_poll();
+    ms(400);
+    sm_input_poll();
+    key_up(WHITE[3]);
+    sm_input_poll();
+    s = stp(0, 3);
+    bad += check("STEPPG: step 3 held 400 ms: selected, still on", sm_step_edit() == 3 && s->n == 1u && sm_ui.held_step == 0xFFu);
+    turn(EN_K1, 2);
+    sm_input_poll();
+    bad += check("STEPPG: K1 NOTE +2", s->note[0] == 50u + (uint32_t)ksnd(0)->p[P_ROOT]);
+    turn(EN_K1, 200);
+    sm_input_poll();
+    bad += check("STEPPG: ... up to G9 (127)", s->note[0] == 127u);
+    turn(EN_K2, -200);
+    sm_input_poll();
+    bad += check("STEPPG: K2 VEL down to 1", s->vel == 1u);
+    turn(EN_K2, 300);
+    sm_input_poll();
+    bad += check("STEPPG: ... up to 127", s->vel == 127u);
+    turn(EN_K3, 2);
+    sm_input_poll();
+    bad += check("STEPPG: K3 LEN +2: 1/4", s->len == 2u);
+    turn(EN_K3, 100);
+    sm_input_poll();
+    bad += check("STEPPG: ... up to INF", s->len == SM_LEN_INF);
+    turn(EN_K4, 1);
+    sm_input_poll();
+    bad += check("STEPPG: K4 COND from 100%: +1 1ST", s->cond == SM_COND_1ST);
+    turn(EN_K4, -51);
+    sm_input_poll();
+    bad += check("STEPPG: ... -51: 50%", s->cond == 50u);
+    turn(EN_SELECT, 20);
+    sm_input_poll();
+    bad += check("STEPPG: SELECT NUDGE up to +7", s->nudge == 7);
+    turn(EN_SELECT, -30);
+    sm_input_poll();
+    bad += check("STEPPG: ... down to -8", s->nudge == -8);
+    turn(EN_PRESET, 5);
+    sm_input_poll();
+    bad += check("STEPPG: PRESETS FLAG +5: X3; no preset loaded", s->flags == (2u << 4) && ksnd(0)->preset == p0);
+    turn(EN_PRESET, 5);
+    sm_input_poll();
+    bad += check("STEPPG: ... +5: REST", s->flags == SMF_REST);
+    turn(EN_PRESET, 2);
+    sm_input_poll();
+    bad += check("STEPPG: ... +2: wraps to -", s->flags == 0u);
+    turn(EN_PRESET, -1);
+    sm_input_poll();
+    bad += check("STEPPG: ... -1: PSLD", s->flags == SMF_PSLIDE);
+    /* an empty step held: K1..K4 nothing; PRESETS: a REST trig; no toggle on the release */
+    key_dn(WHITE[5]);
+    sm_input_poll();
+    turn(EN_K2, 4);
+    sm_input_poll();
+    bad += check("STEPPG: an empty step held: the knobs edit nothing (the held one, not 3)", !stp(0, 5)->n && s->vel == 127u &&
+                 sm_step_edit() == 5);
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    key_up(WHITE[5]);
+    sm_input_poll();
+    bad += check("STEPPG: ... PRESETS: a REST trig on it; the release does not toggle",
+                 stp(0, 5)->n == 1u && stp(0, 5)->flags == SMF_REST && sm_step_edit() == 5);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    bad += check("STEPPG: another track: no step selected", sm_step_edit() < 0);
+    return bad;
+}
+
+static int test_step_draw(void)
+{
+    int bad = 0;
+    uint32_t v, nb = 0;
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("STEP");
+    draw_full();
+    bad += check("STEPDRAW: no step: STEP -", lint_has("STEP -", 0, 0));
+    for (v = 0; v < 4u; v++) {                            /* the widest values in their cells */
+        sm_step_t *s;
+        char what[48];
+        draw_setup();
+        sm_ui.page = (uint8_t)page_by_name("STEP");
+        sm_step_toggle(0, 12);
+        s = stp(0, 12);
+        s->note[0] = (uint8_t)(v & 1u ? 1u : 127u);        /* C#-1, G9 */
+        s->vel = (uint8_t)(v & 1u ? 1u : 127u);
+        s->len = (uint8_t)(v == 0 ? 6u : v == 1u ? 13u : v == 2u ? 4u : 0u);
+        s->cond = (uint8_t)(v == 0 ? 0u : v == 1u ? SM_COND_NFILL : v == 2u ? sm_cond_ab(8, 8) : 1u);
+        s->nudge = (int8_t)(v & 1u ? -8 : 7);
+        s->flags = (uint8_t)(v == 0 ? SMF_ACCENT | (3u << 4) : v == 1u ? SMF_PSLIDE : v == 2u ? SMF_ACCENT | SMF_SLIDE : SMF_REST);
+        sm_ui.sel_step = 12;
+        sm_ui.bank = 0;
+        smp.bpm10 = 3000;
+        draw_full();
+        snprintf(what, sizeof what, "STEP page values %u", v);
+        nb += lint_frame(what);
+    }
+    bad += check("STEPDRAW: every text inside its cell (the widest values)", nb == 0u);
+    bad += check("STEPDRAW: ... the last frame: the page line, NOTE C#-1, NUDGE -8, REST",
+                 lint_has("STEP 13 \x12 REST", 0, 0) && lint_has("C#-1", 0, 0) && lint_has("-8", 0, 0) && lint_has("NUDGE", 0, 0));
+    {
+        uint32_t a = smd_knob_sig(1), b = smd_page_sig();
+        stp(0, 12)->vel = 64;
+        bad += check("STEPDRAW: a VEL edit changes the VEL knob's signature", smd_knob_sig(1) != a);
+        stp(0, 12)->flags = SMF_ACCENT;
+        bad += check("STEPDRAW: a FLAG edit changes the page line's", smd_page_sig() != b);
+    }
+    return bad;
+}
+
 static void write_ppm(const char *dir, const char *name)
 {
     char path[256];
@@ -2948,6 +3415,29 @@ static int test_draw_shots(void)
         sm_lock_msg = 0;
         sm_rec = 0;
         sm_playing = 0;
+    }
+    {   /* the STEP page: a x3 trig selected (E3, VEL 90, LEN 1/2, COND 2:4, NUDGE +3), then a REST trig selected */
+        static const char *const NAME[2] = {"swamp_step_x3", "swamp_step_rest"};
+        uint32_t k;
+        for (k = 0; k < 2u; k++) {
+            sm_step_t *st;
+            draw_setup();
+            st = smp.pat[smp.cur].step[0];
+            sm_step_toggle(0, 0); sm_step_toggle(0, 4); sm_step_toggle(0, 8); sm_step_toggle(0, 12);
+            sm_step_toggle(0, 6);
+            st[6].note[0] = 52; st[6].vel = 90; st[6].len = 3; st[6].cond = (uint8_t)sm_cond_ab(2, 4); st[6].nudge = 3;
+            st[6].flags = (uint8_t)(2u << 4);
+            sm_step_toggle(0, 10);
+            st[10].flags = SMF_REST;
+            sm_lock_set(0, 10, P_FCUT, 30);
+            sm_ui.page = (uint8_t)page_by_name("STEP");
+            sm_ui.sel_step = (uint8_t)(k ? 10u : 6u);
+            sm_playing = 1;
+            sm_pos[0] = 4;
+            draw_full();
+            write_ppm(dir, NAME[k]);
+            sm_playing = 0;
+        }
     }
     {   /* the three layer maps, over the EDIT 1 page: T1 SAW, T3 muted, T4 soloed (the header shows T1 muted), 24 steps */
         static const char *const NAME[4] = {"", "EDIT", "GLO", "SEQ"};
@@ -3048,6 +3538,17 @@ int main(void)
     bad += test_lock_layer_disarms();
     bad += test_lock_unlock_on_remove();
     bad += test_rec_preview();
+    bad += test_step_vel_acc();
+    bad += test_step_len();
+    bad += test_step_cond();
+    bad += test_step_ratchet();
+    bad += test_step_rest();
+    bad += test_step_pslide();
+    bad += test_step_nudge();
+    bad += test_step_slide();
+    bad += test_step_carried();
+    bad += test_step_page();
+    bad += test_step_draw();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

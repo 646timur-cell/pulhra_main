@@ -20,10 +20,13 @@
  *    drained after the main one and coalesced the same way. While it holds anything the main ring takes nothing (a later
  *    command must not overtake an earlier value), the values go on into sm_cov; anything else is refused (0). */
 enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD, SMC_UNLOCK, SMC_PREVIEW };
-/* SMC_UNLOCK {trk, step}: the trig of step (0xFF: every step, SEQ CLEAR) was taken off; if the values locked on the core
- *   came from it, they go back to the model's base (a removed trig's lock must not stay on the core till the next trig).
- * SMC_PREVIEW {trk, param, val}: a lock REC just wrote, onto the core at once; the parameter counts as locked, so the
- *   next unlocked trig of the track takes the base again. */
+/* SMC_UNLOCK {trk, step, val = gen}: the trig of step (0xFF: every step, SEQ CLEAR) was taken off; if the values locked on
+ *   the core came from it, they go back to the model's base (a removed trig's lock must not stay on the core till the next
+ *   trig). gen: the track's fire count (sm_gen) when the trig was taken off; a later fire (the step trigged again and
+ *   fired before a refused unlock got through) makes it stale: ignored (8 bits: 256 fires of the track while the queue
+ *   stays full, seconds; never in practice).
+ * SMC_PREVIEW {trk, param, val}: a lock REC just wrote, onto the core at once (playing only; stopped: ignored); the
+ *   parameter counts as locked, so the next unlocked trig of the track takes the base again. */
 typedef struct { uint8_t kind, trk, step, param; int16_t val; } sm_cmd_t;
 
 #define SM_NCMD 64u                                       /* the ring */
@@ -126,6 +129,8 @@ static void sm_lock_clear_step(uint32_t t, uint32_t s);  /* sm_lock.c */
 #define SM_LKB ((P_COUNT + 7u) / 8u)
 static uint8_t sm_lk_on[SM_NTRK][SM_LKB];
 static uint8_t sm_lk_step[SM_NTRK];                       /* the step whose trig set sm_lk_on (0xFF: none) */
+static uint8_t sm_gen[SM_NTRK];                           /* the track's trig fires (sm_seq_fire bumps it; the main loop reads) */
+static volatile uint8_t sm_playing;                       /* the transport (sm_seq.c writes it) */
 static void sm_seq_unlock(uint32_t t);                    /* sm_seq.c: the locked values of track t back to the base */
 static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock);
 static int sm_lk_is(uint32_t t, uint32_t p) { return p < P_COUNT && ((sm_lk_on[t % SM_NTRK][p >> 3] >> (p & 7u)) & 1u); }
@@ -151,11 +156,11 @@ static void sm_cmd_apply(const sm_cmd_t *c)
         }
         break;
     case SMC_UNLOCK:
-        if (t < SM_NTRK && (c->step == 0xFFu || c->step == sm_lk_step[t]))
+        if (t < SM_NTRK && (uint8_t)c->val == sm_gen[t] && (c->step == 0xFFu || c->step == sm_lk_step[t]))
             sm_seq_unlock(t);
         break;
     case SMC_PREVIEW:
-        if (t < SM_NTRK && c->param < P_COUNT) {
+        if (t < SM_NTRK && c->param < P_COUNT && sm_playing) {
             sm_seq_pset(t, c->param, c->val, 0, 0);
             sm_lk_on[t][c->param >> 3] |= (uint8_t)(1u << (c->param & 7u));
         }
@@ -180,19 +185,25 @@ static void sm_cmd_drain(void)
         sm_cmd_apply(&c);
 }
 
-/* the main loop: SMC_UNLOCK for track t (step st, 0xFF every step); refused (the queue full): kept, sm_flush pushes it
- * again on every poll (one per track: a later request widens to every step) */
-static uint8_t sm_unl_pend, sm_unl_step[SM_NTRK];
+/* the main loop: SMC_UNLOCK for track t (step st, 0xFF every step), with the track's fire count read now (after the trig
+ * was taken off: no fire of it can come after this read). Refused (the queue full): kept, sm_unlock_flush pushes it again
+ * on every poll; one per track: a second request of the same count widens to every step, of a later count replaces it
+ * (the older one is stale: a fire since has replaced the core's locks) */
+static uint8_t sm_unl_pend, sm_unl_step[SM_NTRK], sm_unl_gen[SM_NTRK];
 static void sm_unlock_req(uint32_t t, uint32_t st)
 {
+    uint8_t g = *(volatile uint8_t *)&sm_gen[t];
     sm_cmd_t c = {SMC_UNLOCK, (uint8_t)t, (uint8_t)st, 0, 0};
+    c.val = g;
     if ((sm_unl_pend >> t) & 1u) {
-        sm_unl_step[t] = sm_unl_step[t] == st ? (uint8_t)st : 0xFFu;
+        sm_unl_step[t] = sm_unl_gen[t] != g || sm_unl_step[t] == st ? (uint8_t)st : 0xFFu;
+        sm_unl_gen[t] = g;
         return;
     }
     if (!sm_cmd_push(c)) {
         sm_unl_pend |= (uint8_t)(1u << t);
         sm_unl_step[t] = (uint8_t)st;
+        sm_unl_gen[t] = g;
     }
 }
 static void sm_unlock_flush(void)
@@ -201,16 +212,32 @@ static void sm_unlock_flush(void)
     for (t = 0; t < SM_NTRK; t++)
         if ((sm_unl_pend >> t) & 1u) {
             sm_cmd_t c = {SMC_UNLOCK, (uint8_t)t, sm_unl_step[t], 0, 0};
+            c.val = sm_unl_gen[t];
             if (sm_cmd_push(c))
                 sm_unl_pend &= (uint8_t)~(1u << t);
         }
 }
 
-/* the main loop: toggle the trig of step st on track t in the current pattern. On: C3 + the track's ROOT, vel 100, LEN 0
- * (the track's GATE), no flags; every field first, then a compiler barrier, then n (one byte store): the audio stream
- * (sm_seq_step reads n first) sees either no trig or the whole one. Off: n = 0 (one byte). Either way the step's
- * locks go (after n = 0 when off: the step no longer fires while they are removed; before n when on: a trig placed
- * again starts with none) */
+/* the main loop: a fresh trig's fields on step st of track t (not n): C3 + the track's ROOT, vel 100, LEN TRK (the
+ * track's GATE), 100 %, the flags given, no nudge */
+static void sm_step_fresh(uint32_t t, uint32_t st, uint32_t flags)
+{
+    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    sm_step_t *s = &pt->step[t][st];
+    s->note[0] = (uint8_t)(48 + clamp(pt->kit.snd[t].p[P_ROOT], 0, 11));
+    s->note[1] = s->note[2] = s->note[3] = 0;
+    s->vel = 100;
+    s->len = 0;
+    s->cond = 0;
+    s->flags = (uint8_t)flags;
+    s->nudge = 0;
+}
+
+/* the main loop: toggle the trig of step st on track t in the current pattern. On: a fresh trig (sm_step_fresh, no
+ * flags); every field first, then a compiler barrier, then n (one byte store): the audio stream (sm_seq_fire reads n
+ * first) sees either no trig or the whole one. Off: n = 0 (one byte), then the flags cleared (an empty step shows no
+ * REST). Either way the step's locks go (after n = 0 when off: the step no longer fires while they are removed; before
+ * n when on: a trig placed again starts with none) */
 static void sm_step_toggle(uint32_t t, uint32_t st)
 {
     sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
@@ -220,18 +247,14 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     s = &pt->step[t][st];
     if (s->n) {
         s->n = 0;
+        SM_BARRIER();
+        s->flags = 0;
         sm_lock_clear_step(t, st);
         sm_unlock_req(t, st);                             /* (its lock may be on the core: back to the base) */
         return;
     }
     sm_lock_clear_step(t, st);
-    s->note[0] = (uint8_t)(48 + clamp(pt->kit.snd[t].p[P_ROOT], 0, 11));
-    s->note[1] = s->note[2] = s->note[3] = 0;
-    s->vel = 100;
-    s->len = 0;
-    s->cond = 0;
-    s->flags = 0;
-    s->nudge = 0;
+    sm_step_fresh(t, st, 0);
     SM_BARRIER();
     s->n = 1;
 }

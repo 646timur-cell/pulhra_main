@@ -2,7 +2,7 @@
 /* SWAMP MACHINE button holds, stage 2: what a family button does when it is tapped and what when it is held (after
  * Felucca's quick layers, ui_layer.c, and its HOLD setting: HOLD_MS[settings_hold], 300 .. 600 ms).
  *   EDIT, GLO  tap: the family's next page (the page changes when the button is let go: a hold must not change it)
- *   SEQ        tap: nothing (no page); ENV: its page at once (no layer)
+ *   SEQ        tap: the STEP page; ENV: its page at once (no layer)
  *   hold       the button down for HOLD_MS, or a key pressed / a knob turned while it is down (even at 50 ms): the layer is
  *              open until the button is let go; the page under it stays as it was
  *   EDIT       white keys from F3: the machines of the page (MONO 13, SOMA 9, SLICE 5: engines.c MF_PAGE, in the order of
@@ -19,7 +19,7 @@ static uint8_t sm_lay_epage;                              /* EDIT: the page of m
 static uint8_t sm_lay_cleared;                            /* SEQ: the track was cleared since the layer opened (CLEARED) */
 
 static const struct { uint8_t btn, layer, fam; } SM_LBTN[3] = {
-    {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_COUNT},
+    {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ},
 };
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_NEPAGE 3u

@@ -11,9 +11,12 @@
  * still queued from a turn a block ago must not drain half a sound.
  * Locks (sm_lock.c): a white key down holds its step; a knob or SELECT turned while it is down locks that parameter on the
  * step (from the lock's value, else the base; the base stays) and the key's release then does not toggle; a release with
- * no turn toggles the trig (taking it off removes its locks). Held on an EMPTY step a turn does nothing (no lock, no
- * trig, no toggle). REC on and playing, no key down: a turn locks the selected track's playing step, only if it has a
- * trig; the base stays. */
+ * no turn toggles the trig (taking it off removes its locks). Held on an EMPTY step a turn makes a REST trig with that
+ * lock (a trigless lock; no toggle). REC on and playing, no key down: a turn locks the selected track's playing step,
+ * only if it has a trig; the base stays.
+ * The STEP page (SEQ tapped): the knobs edit a step's fields, not the sound (sm_step_page): the step of the white key
+ * down on the selected track (the last pressed), else the step selected last (sm_ui.sel_step); none: nothing. Field
+ * writes are single bytes the audio stream reads at a fire (a step edited between two fires is whole by bytes). */
 #define SM_HOLD_US 350000u                                /* a key held longer is a select, not a tap */
 #define SM_BLACK_KEYS 0x252A52Au                          /* the black keys of F3 .. G5, bit n = key n (ui_input.c) */
 #define SM_KEY_BANK0 22u                                  /* D#5: steps 0..15 */
@@ -31,7 +34,7 @@ static uint32_t sm_key_used;                              /* bit per key: a knob
 static void sm_input_init(void)
 {
     memset(&sm_ui, 0, sizeof sm_ui);
-    sm_ui.held_step = 0xFFu;
+    sm_ui.held_step = sm_ui.sel_step = 0xFFu;
     memset(sm_pdirty, 0, sizeof sm_pdirty);
     sm_ld_pend = sm_tr_pend = 0;
     sm_key_arm = sm_key_used = 0;
@@ -69,12 +72,12 @@ static void sm_turn_held(uint32_t id, int32_t s)
         if (!((sm_key_arm >> k) & 1u))
             continue;
         sm_key_used |= 1u << k;
-        (void)sm_lock_turn(sm_key_trk[k], sm_key_step[k], id, s);
+        (void)sm_lock_turn(sm_key_trk[k], sm_key_step[k], id, s, 1);
         if (last == SM_NKEYS || (int32_t)(sm_key_t0[k] - sm_key_t0[last]) >= 0)
             last = k;
     }
     if (sm_key_trk[last] == sm_ui.trk && sm_ui.held_step != sm_key_step[last]) {
-        sm_ui.held_step = sm_key_step[last];
+        sm_ui.held_step = sm_ui.sel_step = sm_key_step[last];
         sm_dirty = 1;
     }
 }
@@ -94,7 +97,7 @@ static void sm_turn(uint32_t id, int32_t s)
     }
     if (sm_rec && sm_playing) {                           /* (the playing step: the audio stream's byte) */
         uint32_t t = sm_ui.trk % SM_NTRK, st = *(volatile uint8_t *)&sm_pos[t];
-        if (sm_lock_turn(t, st, id, s)) {                 /* heard at once: the lock onto the core (a refused preview: */
+        if (sm_lock_turn(t, st, id, s, 0)) {                 /* heard at once: the lock onto the core (a refused preview: */
             sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, 0, (uint8_t)id, 0};   /* the step's next fire plays it) */
             c.val = smp.pat[smp.cur % SM_NPAT].lock[sm_lock_find(&smp.pat[smp.cur % SM_NPAT], t, st, id)].val;
             (void)sm_cmd_push(c);
@@ -197,8 +200,57 @@ static void sm_keys_release(uint32_t now)
     }
     if (hs != sm_ui.held_step) {
         sm_ui.held_step = (uint8_t)hs;
+        if (hs < SM_NSTEP)
+            sm_ui.sel_step = (uint8_t)hs;
         sm_dirty = 1;
     }
+}
+
+/* the step the STEP page edits on the selected track: the white key down on it pressed last, else the step selected last;
+ * -1 none */
+static int32_t sm_step_edit(void)
+{
+    uint32_t k, last = SM_NKEYS;
+    for (k = 0; k < SM_NKEYS; k++)
+        if (((sm_key_arm >> k) & 1u) && sm_key_trk[k] == sm_ui.trk &&
+            (last == SM_NKEYS || (int32_t)(sm_key_t0[k] - sm_key_t0[last]) >= 0))
+            last = k;
+    if (last < SM_NKEYS)
+        return sm_key_step[last];
+    return sm_ui.sel_step < SM_NSTEP ? (int32_t)sm_ui.sel_step : -1;
+}
+
+/* the STEP page's knobs onto the step edited: K1 NOTE 0..127 (C-1 .. G9), K2 VEL 1..127, K3 LEN (the list's index),
+ * K4 COND (its walk), SELECT NUDGE -8..+7, PRESETS the FLAG list round. An empty step: PRESETS makes it a REST trig
+ * (sm_step_toggle's order: fields, barrier, n; the place REST), the rest nothing */
+static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
+{
+    int32_t st = sm_step_edit();
+    uint32_t t = sm_ui.trk % SM_NTRK;
+    sm_step_t *s;
+    if (st < 0 || (!pre && !sel && !k[0] && !k[1] && !k[2] && !k[3]))
+        return;
+    s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    sm_dirty = 1;
+    if (!s->n) {
+        if (pre) {
+            sm_lock_clear_step(t, (uint32_t)st);
+            sm_step_fresh(t, (uint32_t)st, SMF_REST);
+            SM_BARRIER();
+            s->n = 1;
+        }
+        return;
+    }
+    if (pre) {
+        int32_t q = ((int32_t)sm_flag_place(s->flags) + pre) % (int32_t)SM_NFLAG;
+        s->flags = SM_FLAGV[q < 0 ? q + (int32_t)SM_NFLAG : q];
+    }
+    s->note[0] = (uint8_t)clamp((int32_t)s->note[0] + k[0], 0, 127);
+    s->vel = (uint8_t)clamp((int32_t)s->vel + k[1], 1, 127);
+    s->len = (uint8_t)clamp((int32_t)s->len + k[2], 0, (int32_t)MF_NLEN - 1);
+    if (k[3])
+        s->cond = (uint8_t)sm_cond_of_place((uint32_t)clamp((int32_t)sm_cond_place(s->cond) + k[3], 0, (int32_t)SM_COND_PLACES - 1));
+    s->nudge = (int8_t)clamp((int32_t)s->nudge + sel, -8, 7);
 }
 
 /* everything the queue refused so far, again */
@@ -256,18 +308,22 @@ static void sm_input_poll(void)
     if (alg) {
         int32_t t = ((int32_t)sm_ui.trk + alg) % (int32_t)SM_NTRK;
         sm_ui.trk = (uint8_t)(t < 0 ? t + (int32_t)SM_NTRK : t);
-        sm_ui.held_step = 0xFFu;
+        sm_ui.held_step = sm_ui.sel_step = 0xFFu;
         sm_dirty = 1;
     }
     sm_keys_press(notes, now);
-    if (sel || k[0] || k[1] || k[2] || k[3])              /* (any of them, a knob without a parameter too: no toggle) */
-        sm_key_used |= sm_key_arm;
-    sm_preset_turn(pre);
-    for (i = 0; i < 4; i++)
-        if (sm_cur_page()->id[i] != SM_NOPARAM)
-            sm_turn(sm_cur_page()->id[i], k[i]);
-    if (sm_cur_page()->sel != SM_NOPARAM)
-        sm_turn(sm_cur_page()->sel, sel);
+    if (sel || k[0] || k[1] || k[2] || k[3] || (pre && sm_page_is_step()))   /* (any of them, a knob without a parameter */
+        sm_key_used |= sm_key_arm;                                           /* too: no toggle) */
+    if (sm_page_is_step()) {
+        sm_step_page(k, sel, pre);
+    } else {
+        sm_preset_turn(pre);
+        for (i = 0; i < 4; i++)
+            if (sm_cur_page()->id[i] != SM_NOPARAM)
+                sm_turn(sm_cur_page()->id[i], k[i]);
+        if (sm_cur_page()->sel != SM_NOPARAM)
+            sm_turn(sm_cur_page()->sel, sel);
+    }
     sm_keys_release(now);
     sm_flush();
 }

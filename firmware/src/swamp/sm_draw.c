@@ -4,10 +4,12 @@
  *   y   0..19   header: T1 SAW 03 (track, machine, preset) left, the track inverted while it is muted; A01 120.0 > (pattern,
  *               tempo, transport) right; while recording REC (inverted) at the right corner in place of the pattern;
  *               the lock pool full: LOCKS FULL (inverted) alone for a second
- *   y  20..47   the page and the preset: EDIT 1 . SYNC LEAD (a layer open: its name instead)
+ *   y  20..47   the page and the preset: EDIT 1 . SYNC LEAD (a layer open: its name instead); STEP: STEP 05 . X3, the step
+ *               edited and its FLAG (none: STEP -)
  *   y  48..159  the four knobs, a column of 60 each: the label, a ring of 16 dots, the value. A ring of a value locked on the
  *               held step is a filled disc; a dot in its centre: locked on another step
  *   y 168..187  SELECT: its label and value
+ *   (STEP: the knobs NOTE VEL LEN COND, SELECT NUDGE, of the step edited; an empty one or none: "-", the rings empty)
  *   y  48..217  (a layer open: its key map over the knobs and SELECT, five rows of 34, the labels of the keys at scale 2)
  *   y 220..239  the 16 steps of the bank as dots only (a trig a dot, a ratchet stacked dots, a REST a hollow dot; a bar under
  *               the one playing, over the one held); the panel LEDs carry the rest of the steps (sm_leds.c)
@@ -155,10 +157,22 @@ static void smd_header(void)
 }
 
 /* -------------------------------------------------------------- page --- */
+/* the STEP page's step: the step edited (sm_step_edit), 0 none; *st its index */
+static const sm_step_t *smd_step(int32_t *st)
+{
+    int32_t i = sm_step_edit();
+    *st = i;
+    return i < 0 ? 0 : &smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][i];
+}
 static uint32_t smd_page_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t h = smd_mix(smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine), s->preset);
+    if (sm_page_is_step()) {
+        int32_t st;
+        const sm_step_t *p = smd_step(&st);
+        h = smd_mix(smd_mix(smd_mix(h, (uint32_t)st), p ? p->n : 0u), p ? p->flags : 0u);
+    }
     if (sm_layer)                                         /* (the title of the layer: its page of machines, the track's length) */
         h = smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk);
     return h;
@@ -187,6 +201,20 @@ static void smd_page(void)
             b[n++] = (char)('1' + sm_ui.trk % SM_NTRK);
             b[n] = 0;
         }
+    } else if (sm_page_is_step()) {                     /* STEP 05 . X3 (the step edited, its FLAG); STEP - none */
+        int32_t st;
+        const sm_step_t *p = smd_step(&st);
+        n = 0;
+        smd_cat(b, &n, "STEP ");
+        if (!p) {
+            smd_cat(b, &n, "-");
+        } else {
+            smd_two(b + n, (uint32_t)st + 1u);
+            n += 2;
+            b[n++] = ' '; b[n++] = '\x12'; b[n++] = ' ';
+            b[n] = 0;
+            smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");
+        }
     } else {
         smd_upper(b, sm_cur_page()->name, 8u);
         for (n = 0; b[n]; n++) {}
@@ -200,11 +228,62 @@ static void smd_page(void)
 /* ------------------------------------------------------------- knobs --- */
 typedef struct {
     const param_desc_t *d;                                /* 0: no parameter on this knob */
+    int on;                                               /* the knob is drawn (a parameter, or a STEP field) */
     char lab[8], val[12];
     uint32_t pos;                                         /* 0..256 on the ring */
     int filled, dot;                                      /* locked on the held step; locked elsewhere */
     int32_t v;                                            /* the value shown: the lock's on the held step */
 } smd_knob_t;
+/* a note's name: C-1 .. G9 (b: 6 bytes) */
+static void smd_note(char *b, uint32_t n)
+{
+    static const char NM[12][3] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    int32_t o = (int32_t)(n / 12u) - 1;
+    uint32_t i = 0, k;
+    for (k = 0; NM[n % 12u][k]; k++)
+        b[i++] = NM[n % 12u][k];
+    if (o < 0)
+        b[i++] = '-';
+    b[i++] = (char)('0' + (o < 0 ? -o : o));
+    b[i] = 0;
+}
+static void smd_int(char *b, int32_t v, int plus)         /* a signed integer (plus: "+4") */
+{
+    uint32_t i = 0, a = (uint32_t)(v < 0 ? -v : v);
+    if (v < 0)
+        b[i++] = '-';
+    else if (plus && v > 0)
+        b[i++] = '+';
+    if (a >= 100u)
+        b[i++] = (char)('0' + a / 100u);
+    if (a >= 10u)
+        b[i++] = (char)('0' + a / 10u % 10u);
+    b[i++] = (char)('0' + a % 10u);
+    b[i] = 0;
+}
+/* the STEP page's knob k: its label, the step's field (empty or none: "-", the ring at 0) */
+static void smd_step_knob(uint32_t k, smd_knob_t *o)
+{
+    static const char *const LAB[4] = {"NOTE", "VEL", "LEN", "COND"};
+    int32_t st;
+    const sm_step_t *p = smd_step(&st);
+    uint32_t i;
+    o->on = 1;
+    for (i = 0; LAB[k][i]; i++)
+        o->lab[i] = LAB[k][i];
+    o->lab[i] = 0;
+    o->val[0] = '-';
+    o->val[1] = 0;
+    if (!p || !p->n)
+        return;
+    switch (k) {
+    case 0: smd_note(o->val, p->note[0] & 127u); o->pos = (uint32_t)(p->note[0] & 127u) * 256u / 127u; break;
+    case 1: smd_int(o->val, p->vel, 0); o->pos = (uint32_t)(p->vel > 1u ? p->vel - 1u : 0u) * 256u / 126u; break;
+    case 2: i = p->len < MF_NLEN ? p->len : 0u; smd_upper(o->val, MF_LEN_N[i], 5u); o->pos = i * 256u / (MF_NLEN - 1u); break;
+    default: sm_cond_name(p->cond, o->val); o->pos = sm_cond_place(p->cond) * 256u / (SM_COND_PLACES - 1u); break;
+    }
+    o->v = (int32_t)o->pos;
+}
 static void smd_knob_get(uint32_t k, smd_knob_t *o)
 {
     const sm_sound_t *s = smd_snd();
@@ -216,11 +295,17 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     o->pos = 0;
     o->filled = o->dot = 0;
     o->v = 0;
+    o->on = 0;
+    if (sm_page_is_step()) {
+        smd_step_knob(k & 3u, o);
+        return;
+    }
     if (id == SM_NOPARAM)
         return;
     o->d = sm_desc_safe(sm_engine_of(s->machine), id);
     if (!o->d)
         return;
+    o->on = 1;
     o->v = s->p[id];
     if (sm_ui.held_step < SM_NSTEP) {
         int32_t li = sm_lock_find(pt, t, sm_ui.held_step, id);
@@ -241,9 +326,12 @@ static uint32_t smd_knob_sig(uint32_t k)
 {
     smd_knob_t o;
     uint32_t h = 2166136261u;
+    uint32_t i;
     smd_knob_get(k, &o);
-    h = smd_mix(h, sm_ui.page); h = smd_mix(h, smd_snd()->machine); h = smd_mix(h, o.d != 0);
+    h = smd_mix(h, sm_ui.page); h = smd_mix(h, smd_snd()->machine); h = smd_mix(h, (uint32_t)o.on);
     h = smd_mix(h, (uint32_t)o.v); h = smd_mix(h, (uint32_t)o.filled); h = smd_mix(h, (uint32_t)o.dot);
+    for (i = 0; o.val[i]; i++)                            /* (the STEP page: the text is the value) */
+        h = smd_mix(h, (uint8_t)o.val[i]);
     return h;
 }
 static void smd_knob(uint32_t k)
@@ -251,7 +339,7 @@ static void smd_knob(uint32_t k)
     smd_knob_t o;
     smd_knob_get(k, &o);
     smd_begin(k * SMD_KNOB_W, SMD_KNOB_Y, SMD_KNOB_W, SMD_KNOB_H);
-    if (o.d) {
+    if (o.on) {
         sm_px_text((60 - 12 * smd_len(o.lab)) / 2, 4, 2u, o.lab, T_TEXT, 0);
         sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, o.pos, o.filled, o.dot);
         sm_px_text((60 - 12 * smd_len(o.val)) / 2, 98, 2u, o.val, T_TEXT, 0);
@@ -266,11 +354,30 @@ static int32_t smd_sel_val(uint32_t id)                  /* SELECT's value: the 
     int32_t li = sm_ui.held_step < SM_NSTEP ? sm_lock_find(pt, sm_ui.trk % SM_NTRK, sm_ui.held_step, id) : -1;
     return li >= 0 ? pt->lock[li].val : smd_snd()->p[id];
 }
+static void smd_step_nudge(char *b)                       /* the STEP page's SELECT: the step's NUDGE, "-" none */
+{
+    int32_t st;
+    const sm_step_t *p = smd_step(&st);
+    if (p && p->n)
+        smd_int(b, p->nudge, 1);
+    else {
+        b[0] = '-';
+        b[1] = 0;
+    }
+}
 static uint32_t smd_sel_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_cur_page()->sel;
     uint32_t h = smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine);
+    if (sm_page_is_step()) {
+        char b[8];
+        uint32_t i;
+        smd_step_nudge(b);
+        for (i = 0; b[i]; i++)
+            h = smd_mix(h, (uint8_t)b[i]);
+        return h;
+    }
     return id == SM_NOPARAM ? h : smd_mix(smd_mix(h, id), (uint32_t)smd_sel_val(id));
 }
 static void smd_select(void)
@@ -279,7 +386,13 @@ static void smd_select(void)
     uint32_t id = sm_cur_page()->sel;
     const param_desc_t *d = id == SM_NOPARAM ? 0 : sm_desc_safe(sm_engine_of(s->machine), id);
     smd_begin(0, SMD_SEL_Y, 240u, SMD_SEL_H);
-    if (d) {
+    if (sm_page_is_step()) {
+        char val[8];
+        int32_t x;
+        smd_step_nudge(val);
+        x = sm_px_text(4, 2, 2u, "NUDGE", T_TEXT, 0) + 4 + 12;
+        sm_px_text(x, 2, 2u, val, T_TEXT, 1);
+    } else if (d) {
         char lab[8], val[12];
         const char *unit;
         int32_t x;
@@ -391,6 +504,11 @@ static int32_t smd_playhead(void)                         /* the step playing on
 {
     return smd_play ? (int32_t)smd_pos : -1;
 }
+static uint32_t smd_mark(void)                            /* the bar over a step: the one held, on STEP the one edited */
+{
+    int32_t st = sm_page_is_step() ? sm_step_edit() : -1;
+    return sm_ui.held_step < SM_NSTEP ? sm_ui.held_step : st >= 0 ? (uint32_t)st : 0xFFu;
+}
 static uint32_t smd_dots(const sm_step_t *st)             /* 0 empty, 1..4 a trig with that many dots, 5 a REST */
 {
     return (st->flags & SMF_REST) ? 5u : st->n ? 1u + SMF_RAT(st->flags) : 0u;
@@ -403,7 +521,7 @@ static uint32_t smd_strip_sig(void)
     for (i = 0; i < 16u; i++)
         h = smd_mix(h, smd_dots(&pt->step[t][b + i]));
     h = smd_mix(h, ph >= (int32_t)b && ph < (int32_t)b + 16 ? (uint32_t)ph : 0xFFu);
-    h = smd_mix(h, sm_ui.held_step >= b && sm_ui.held_step < b + 16u ? sm_ui.held_step : 0xFFu);
+    h = smd_mix(h, smd_mark() >= b && smd_mark() < b + 16u ? smd_mark() : 0xFFu);
     return smd_mix(h, t * 2u + (b != 0));
 }
 static void smd_strip(void)
@@ -427,7 +545,7 @@ static void smd_strip(void)
         }
         if (ph == (int32_t)s)
             cv_rect(x + 3, 19, 8, 1, T_TEXT);
-        if (sm_ui.held_step == s)
+        if (smd_mark() == s)
             cv_rect(x + 3, 0, 8, 2, T_TEXT);
     }
     smd_end();

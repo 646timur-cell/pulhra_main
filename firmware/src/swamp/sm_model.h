@@ -16,9 +16,23 @@
 #define SMF_PSLIDE 8u
 #define SMF_RAT(f) (((f) >> 4) & 3u)                      /* ratchet: 0..3 = x1..x4 */
 
+/* a step's cond: 0 100 % (no condition), 1..99 that chance; then the conditions (MONOFM's, without NEI): 1ST !1ST (the
+ * track's first pass since PLAY or not), PRE !PRE (the track's last condition passed or not), FILL !FILL, and A:B (the
+ * A-th of every B passes of the track) 1:2 2:2 1:3 .. 8:8 */
+#define SM_COND_1ST 100u
+#define SM_COND_N1ST 101u
+#define SM_COND_PRE 102u
+#define SM_COND_NPRE 103u
+#define SM_COND_FILL 104u
+#define SM_COND_NFILL 105u
+#define SM_COND_AB0 106u                                  /* 1:2; 35 of them, B = 2..8 */
+#define SM_COND_END (SM_COND_AB0 + 35u)
+/* a step's len: an index into MONOFM's LEN list (core.h MF_LEN8 / MF_LEN_N: TRK 1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 16 INF) */
+#define SM_LEN_INF MF_LEN_INF
+
 typedef struct {
-    uint8_t note[4], n, vel, len, cond, flags;            /* n == 0: the trig is off */
-    int8_t nudge;
+    uint8_t note[4], n, vel, len, cond, flags;            /* n == 0: the trig is off; n with SMF_REST: a lock trig, no note */
+    int8_t nudge;                                         /* -8..+7, in 1/16 step */
 } sm_step_t;
 
 typedef struct {

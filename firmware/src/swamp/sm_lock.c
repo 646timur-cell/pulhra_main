@@ -11,8 +11,9 @@
  *  - compaction (the tombstones squeezed out, nlock down): many stores, so only while stopped AND with the audio
  *    interrupt off for the copy (<= 192 x 4 bytes, a few microseconds; a block is 0.73 ms): a PLAY still in the queue
  *    could otherwise start the sequencer between two of its stores. While playing the tombstones stay and are reused.
- * A lock lives only on a step with a trig (n > 0): the gesture and REC write none elsewhere (a lock on an EMPTY step makes
- * nothing in this stage: no lock trig; the REST lock trigs come later), and taking a trig off removes its locks. */
+ * A lock lives only on a step with a trig (n > 0): REC writes none elsewhere; the gesture on an EMPTY step makes a REST
+ * trig (Elektron's trigless lock: n 1 with SMF_REST, its locks fire, no note) after the lock is written; taking a trig
+ * off removes its locks. */
 #define SM_LOCK_DEAD 0xFFu
 #define SM_LOCK_MSG_US 1000000u                           /* LOCKS FULL: 1 s in the header */
 #ifndef SM_LOCK_PREEMPT
@@ -139,20 +140,30 @@ static void sm_lock_clear_step(uint32_t t, uint32_t s)
 }
 
 /* the main loop: the lock of (t, s, id) turned by d detents from its value (none yet: from the base), clamped. A step
- * without a trig takes no lock (0) */
-static int sm_lock_turn(uint32_t t, uint32_t s, uint32_t id, int32_t d)
+ * without a trig: 0 (REC), or, mk (the held-key gesture), a REST trig made for it: the lock first, then the step's
+ * fields, a barrier, n (sm_step_toggle's order); the pool full: neither */
+static int sm_lock_turn(uint32_t t, uint32_t s, uint32_t id, int32_t d, int mk)
 {
-    const sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
     const sm_sound_t *sd = &p->kit.snd[t % SM_NTRK];
     const param_desc_t *dc = sm_desc_safe(sm_engine_of(sd->machine), id);
     int32_t i, v;
-    if (!d || !dc || t >= SM_NTRK || s >= SM_NSTEP || !p->step[t][s].n)
+    uint32_t make;
+    if (!d || !dc || t >= SM_NTRK || s >= SM_NSTEP)
+        return 0;
+    make = !p->step[t][s].n;
+    if (make && !mk)
         return 0;
     i = sm_lock_find(p, t, s, id);
     v = i >= 0 ? p->lock[i].val : sd->p[id];
     v = clamp(param_turn(dc, clamp(v, dc->min, dc->max), d), dc->min, dc->max);
     if (!sm_lock_set(t, s, id, v))
         return 0;
+    if (make) {                                           /* (n 0: the audio stream reads none of it yet) */
+        sm_step_fresh(t, s, SMF_REST);
+        SM_BARRIER();
+        p->step[t][s].n = 1;
+    }
     sm_dirty = 1;
     return 1;
 }
