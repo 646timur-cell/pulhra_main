@@ -84,8 +84,8 @@ static int mom_turn(uint32_t k, int32_t s)
         d = &TP[MIX_ID[k & 3u]];
     } else {
         if (act_cols() || lock_held() || !(pg->scope == SC_TRACK || pg->scope == SC_ENGINE || pg->scope == SC_GLOBAL) ||
-            pg->graph == GR_EVENTS || pg->graph == GR_SONG || pg->graph == GR_BROWSE || pg->graph == GR_USER ||
-            pg->graph == GR_PATS || (pg->graph == GR_SLICES && k < 2u) || (pg->graph == GR_MOD && k == 0u))
+            (!FELUCCA_MONOFM && pg->graph == GR_EVENTS) || (!FELUCCA_MONOFM && pg->graph == GR_SONG) || pg->graph == GR_BROWSE || pg->graph == GR_USER ||
+            (!FELUCCA_MONOFM && pg->graph == GR_PATS) || (pg->graph == GR_SLICES && k < 2u) || (pg->graph == GR_MOD && k == 0u))
             return 0;
         d = page_desc(pg, k, &vp);
     }
@@ -613,7 +613,7 @@ static int rec_tap(void)                                /* 1: the arming changed
         ui_message("STOP TO RECORD");
         return 0;
     }
-    if (!ui.home && cur_page()->graph == GR_SONG && !(song.rec & bit)) {
+    if (!ui.home && (!FELUCCA_MONOFM && cur_page()->graph == GR_SONG) && !(song.rec & bit)) {
         ui_message("[SEQ] TO RECORD");
         return 0;
     }
@@ -950,6 +950,23 @@ static void nudge_turn(uint64_t held, int32_t steps)
 }
 
 #if FELUCCA_MONOFM
+/* MONOFM v4, RETRIG (seq.c mf_rtg_*): each frame, ARP still down and nothing else open, or off; a key played with it:
+ * ARP's release opens no page */
+static void mf_rtg_frame(uint32_t notes)
+{
+    uint32_t was = mf_rtg_ui;
+    if (!((fm1_in.buttons >> panel.btn[B_ARP]) & 1u) || ui.ly || ui.layer || ui.menu || ui.confirm || name_on() ||
+        drum_track(TSEL))
+        mf_rtg_ui = 0;
+    if (mf_rtg_ui && (notes || (fm1_in.notes & ~kb_layer)))
+        ui.pg_down &= (uint16_t)~(1u << panel.btn[B_ARP]);
+    mf_rtg_on = mf_rtg_ui;
+    if (was != mf_rtg_ui)
+        ui.force = 1;
+    if (mf_rtg_ui && !was)
+        ui_message("RETRIG");
+}
+
 /* MONOFM v4, the SELECT knob (no layer held): HOME (and its MIXER, CLOCK) the tempo; a trig held on any page, or the
  * trig picked on STEP, its NUDGE; ARP > XY the axis; elsewhere the page's fifth value (ui.c mf_sel_id: params.c
  * page_t.sel, EDIT the machine's most used), recorded and learned as a knob's; a page without one: nothing */
@@ -979,6 +996,12 @@ static void mf_sel_turn(int32_t s)
             return;
         }
         nudge_turn((uint64_t)1 << (ui.cursor % NSTEP), s);
+        ui.force = 1;
+        return;
+    }
+    if (MF_MIX_PAGE(pg)) {                              /* GLO > MIX: KNOB 4's send, DST CHO DLY REV */
+        mf_mix_send = (uint8_t)clamp((int32_t)mf_mix_send + (s > 0 ? 1 : -1), 0, 3);
+        ui_say("KNOB 4: SEND ", TP[P_DIST + mf_mix_send].label);
         ui.force = 1;
         return;
     }
@@ -1188,11 +1211,11 @@ static void edit_param(uint32_t slot, int32_t steps)
     const page_t *pg = cur_page();
     const param_desc_t *d;
     int32_t v;
-    if (pg->graph == GR_EVENTS) {                         /* AUTOMATION (ui_events.c) */
+    if ((!FELUCCA_MONOFM && pg->graph == GR_EVENTS)) {                         /* AUTOMATION (ui_events.c) */
         ev_knob(slot, steps);
         return;
     }
-    if (pg->graph == GR_SONG) {                       /* KNOB 1 SECTION, 2 TRACK, 3 PAT (A..D, -), 4 REPS */
+    if ((!FELUCCA_MONOFM && pg->graph == GR_SONG)) {                       /* KNOB 1 SECTION, 2 TRACK, 3 PAT (A..D, -), 4 REPS */
         chain_row_t *r;
         if (slot == 0u) {
             ui.song_row = (uint8_t)clamp((int32_t)ui.song_row + steps, 0,
@@ -1268,7 +1291,7 @@ static void edit_param(uint32_t slot, int32_t steps)
             ui.uslot = (uint8_t)clamp((int32_t)ui.uslot + steps, 0, FELUCCA_STRANGE ? 7 : UP_SLOTS - 1);   /* (STRANGE: 8 scenes) */
         return;
     }
-    if (pg->graph == GR_PATS) {                          /* KNOB 1 the pattern */
+    if ((!FELUCCA_MONOFM && pg->graph == GR_PATS)) {                          /* KNOB 1 the pattern */
         if (slot == 0u)
             ui.ppick = (uint8_t)clamp((int32_t)pat_pick() + steps, 0, (int32_t)pat_count() - 1);
         return;
@@ -1299,7 +1322,7 @@ static void act_do(void)
     uint32_t c = act_col(), id, k = (uint32_t)song.g[G_SLOT] - 1u;
     if (!c--)
         return;
-    if (cur_page()->graph == GR_EVENTS) {
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_EVENTS)) {
         ev_oct();
         return;
     }
@@ -1315,7 +1338,7 @@ static void act_do(void)
         return;
     }
 #endif
-    if (cur_page()->graph == GR_TOOLS) {
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_TOOLS)) {
         if (chain_busy()) { ui_message("STOP TO EDIT"); return; }
         if (!act_ready()) {                               /* nothing there to clear or delete */
             ui_message(c == 2u ? "NOTHING TO DELETE" : "NOTHING TO CLEAR");
@@ -1325,12 +1348,12 @@ static void act_do(void)
                      c == 2u ? CF_DEL_ROW : CF_CLEAR_SONG, c == 2u ? ui.song_row : song.sel);
         return;
     }
-    if (cur_page()->graph == GR_SONG) {
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_SONG)) {
         if (song.playing || chain_busy() || seq_counting()) transport_req = 2;
         else chain_play_ui();
         return;
     }
-    if (cur_page()->graph == GR_PATS) {
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_PATS)) {
         if (chain_busy()) { ui_message("STOP TO EDIT"); return; }
         if (pat_needs_confirm(TSEL))                      /* the user's steps: the dialog */
             confirm_open(CF_LOAD_PAT, song.sel);
@@ -1401,6 +1424,10 @@ static void act_do(void)
 
 /* OCT- / OCT+ where they answer (the dialogs, the menu, action pages): on release, and only a press
  * that began there; both down together (UPDATE MODE, main.c) is no tap. Bit 0 OCT-, bit 1 OCT+ */
+#if FELUCCA_MONOFM
+static uint8_t mf_oct_chord;     /* OCT- + OCT+ held together: the keyboard toggled once (until both are let go) */
+static int8_t mf_oct_was;        /* the octave before the first OCT of a pair */
+#endif
 static uint32_t oct_taps(uint32_t pressed, int here)
 {
     static uint8_t down, chord;
@@ -1410,6 +1437,10 @@ static uint32_t oct_taps(uint32_t pressed, int here)
         down |= (uint8_t)(((pressed >> dn) & 1u) | ((pressed >> up) & 1u) << 1);
     if (now == 3u)
         chord = 1;
+#if FELUCCA_MONOFM
+    if (!now)
+        mf_oct_chord = 0;
+#endif
     tap = down & ~now;
     down &= (uint8_t)now;
     if (chord) {
@@ -1613,11 +1644,11 @@ static int page_tap(uint32_t b)
         ui_message("STEP CLEARED");
         return 1;
     }
-    if (b == B_EDIT && !ui.home && cur_page()->graph == GR_EVENTS) {   /* AUTOMATION: EDIT deletes the row's record */
+    if (b == B_EDIT && !ui.home && (!FELUCCA_MONOFM && cur_page()->graph == GR_EVENTS)) {   /* AUTOMATION: EDIT deletes the row's record */
         ev_delete();
         return 1;
     }
-    if (b == B_EDIT && !ui.home && ((!FELUCCA_STRANGE && cur_page()->graph == GR_USER) || cur_page()->graph == GR_SLOTS)) {
+    if (b == B_EDIT && !ui.home && ((!FELUCCA_STRANGE && cur_page()->graph == GR_USER) || (!FELUCCA_MONOFM && cur_page()->graph == GR_SLOTS))) {
         name_rename();                                  /* SAVE > USER / PROJECT: EDIT renames the slot */
         return 1;
     }
@@ -1949,7 +1980,7 @@ static void ui_input(void)
 #endif
             if (song.playing || chain_busy() || seq_counting())   /* (a count-in: PLAY stops it) */
                 transport_req = 2;
-            else if (!ui.home && cur_page()->graph == GR_SONG)
+            else if (!ui.home && (!FELUCCA_MONOFM && cur_page()->graph == GR_SONG))
                 chain_play_ui();
             else
                 transport_req = 1;
@@ -1975,6 +2006,17 @@ static void ui_input(void)
 #endif
             if (act_cols() || layer_set_open() || ui.ml.on)   /* action pages: enter / back (below); SET layers: OCT-; */
                 break;                                  /* MIDI LEARN: clear / done (below) */
+#if FELUCCA_MONOFM
+            if ((fm1_in.buttons & both) == both) {      /* v4: OCT- + OCT+ together: the keys play the selected track */
+                if (!mf_oct_chord) {                    /* freely (the notes), again: the trigs; the octave as it was */
+                    mf_oct_chord = 1;                   /* before the first of the two */
+                    song.octave = mf_oct_was;
+                    mf_kbd_toggle();
+                }
+                break;
+            }
+            mf_oct_was = song.octave;
+#endif
             if ((fm1_in.buttons & both) == both)
                 song.octave = 0;
             else
@@ -1989,6 +2031,8 @@ static void ui_input(void)
                     ;
                 if (!lay && f < FAM_COUNT && mf_lock_pick(1, f))
                     break;
+                if (!lay && b == B_ARP)                 /* ARP alone: RETRIG while held (a tap still its page) */
+                    mf_rtg_ui = 1;
             }
 #endif
             if (!lay)                                   /* (with FX held: swallowed) */
@@ -2014,6 +2058,7 @@ static void ui_input(void)
 #if FELUCCA_MONOFM
     if (mf_kbd && drum_track(TSEL))
         mf_kbd = 0;                                     /* (SEQ + ARP's keyboard: on every page, until again) */
+    mf_rtg_frame(notes);
 #endif
     song.grid = (uint8_t)keys_mode();                 /* (seq.c: the keys are the grid's) */
 #if FELUCCA_SLICE
@@ -2085,6 +2130,17 @@ static void ui_input(void)
             continue;
         if (mom_down())                                 /* (LFO + a knob, MOMENTARY or not: LFO's release opens no page) */
             ui.pg_down &= (uint16_t)~(1u << panel.btn[B_LFO]);
+#if FELUCCA_MONOFM
+        if (mf_rtg_ui) {                                /* RETRIG: KNOB 1..4 its RATE GATE VEL PIT */
+            static const int8_t LO[4] = {0, 1, -64, -12}, HI[4] = {(int8_t)(MF_RTG_N - 1u), 127, 63, 12};
+            mf_rtg_p[k] = (int8_t)clamp(mf_rtg_p[k] + (k == 1u || k == 2u ? accel(EN_K1 + k, s, 127) : (s > 0 ? 1 : -1)),
+                                        LO[k], HI[k]);
+            ui.pg_down &= (uint16_t)~(1u << panel.btn[B_ARP]);
+            ui.hot_col = (uint8_t)k;
+            ui.hot_t = 40;
+            continue;
+        }
+#endif
         if ((held = lock_held()) != 0u) {               /* a step held on STEP: KNOB k locks (parameter locks) */
 #if FELUCCA_MONOFM
             if (mf_held_fields())
@@ -2102,8 +2158,8 @@ static void ui_input(void)
             continue;
         }
         if (ui.home || pg->scope == SC_STEP || pg->scope == SC_TRK || page_desc(pg, k, &hv) ||
-            ((pg->graph == GR_USER || pg->graph == GR_MOD || pg->graph == GR_PATS) && k == 0u)
-            || pg->graph == GR_SONG || (pg->graph == GR_SLICES && k < 2u) || fop_page(pg->graph)) {   /* (not an empty
+            ((pg->graph == GR_USER || pg->graph == GR_MOD || (!FELUCCA_MONOFM && pg->graph == GR_PATS)) && k == 0u)
+            || (!FELUCCA_MONOFM && pg->graph == GR_SONG) || (pg->graph == GR_SLICES && k < 2u) || fop_page(pg->graph)) {   /* (not an empty
                                                                                                           * column) */
             ui.hot_col = (uint8_t)k;
             ui.hot_t = 40;

@@ -646,7 +646,8 @@ static const page_t PAGES[] = {
     {"VOICE", FAM_EDIT, SC_TRACK, GR_NONE, {P_VOICE, P_GLIDE, P_DETUNE, P_SPRD}, SELP(P_PRIO), 0},
     /* GLO (Elektron's AMP): the amplitude envelope (SELECT: ENV SYNC, its times as note values), the track's mix */
     {"AMP", FAM_GLO, SC_TRACK, GR_ADSR, {P_ATK, P_DEC, P_SUS, P_REL}, SELP(P_ESYNC), 0},
-    {"MIX", FAM_GLO, SC_TRACK, GR_NONE, {P_LEVEL, P_PAN, P_DIST, P_SPRD}, 0, 0},
+    {"MIX", FAM_GLO, SC_TRACK, GR_NONE, {P_LEVEL, P_PAN, P_DIST, P_DIST}, 0, 0},   /* KNOB 4: a send, SELECT which of FX's
+                                                                                * four (mf_mix_send: page_desc) */
     /* SAVE: the sound's slots (the quick save), the presets, the project of 16 patterns (mf_pat.c) */
     {"USER", FAM_SAVE, SC_GLOBAL, GR_USER, {0xFF, 0xFF, 0xFF, 0xFF}, 0, 0},
     {"PRESETS", FAM_SAVE, SC_GLOBAL, GR_BROWSE, {0xFF, 0xFF, 0xFF, 0xFF}, 0, 0},
@@ -776,6 +777,8 @@ static const page_t PAGES[] = {
 static uint8_t mod_ui_slot;      /* the MOD page: the matrix slot (0..3) KNOB 2..4 edit */
 #if FELUCCA_MONOFM
 static uint8_t mf_xy_axis;       /* ARP > XY: the axis shown, 0 X, 1 Y (SELECT): Y's routes are X's ids + 5 (OP2's) */
+static uint8_t mf_mix_send = 3u; /* GLO > MIX: the send KNOB 4 is, 0 DST 1 CHO 2 DLY 3 REV (SELECT) */
+#define MF_MIX_PAGE(pg) ((pg)->fam == FAM_GLO && (pg)->id[0] == P_LEVEL)
 #else
 #define mf_xy_axis 0u
 #endif
@@ -800,6 +803,8 @@ static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **
 #if FELUCCA_MONOFM
     if (pg->graph == GR_XY && mf_xy_axis)
         id += 5u;
+    if (MF_MIX_PAGE(pg) && slot == 3u)
+        id = P_DIST + mf_mix_send % 4u;
 #endif
     *valp = &TSEL->p[id];
     return track_desc(TSEL, id);

@@ -447,7 +447,7 @@ static int page_visible(uint32_t i)
         return PAGES[i].graph == GR_XY || PAGES[i].scope == SC_GLOBAL;   /* (STRANGE: ARP is X, Y, XY LINK) */
     if (FELUCCA_STRANGE && PAGES[i].fam == FAM_SAVE && PAGES[i].graph == GR_BROWSE && PAGES[i].title[0] == 'F')
         return i == ui.page;                          /* (FAV: SAVE three times, never in SAVE's round) */
-    if (FELUCCA_MONOFM && (PAGES[i].graph == GR_EVENTS || (PAGES[i].fam == FAM_EDIT && PAGES[i].id[0] == P_ALLOC)))
+    if (FELUCCA_MONOFM && ((!FELUCCA_MONOFM && PAGES[i].graph == GR_EVENTS) || (PAGES[i].fam == FAM_EDIT && PAGES[i].id[0] == P_ALLOC)))
         return PAGES[i].graph != GR_EVENTS && !(TSEL->eng_req % NENGINES == ENGI_GLITCH || TSEL->eng_req % NENGINES == ENGI_RITUAL ||
                TSEL->eng_req % NENGINES == ENGI_MECH || TSEL->eng_req % NENGINES == ENGI_BIO ||
                TSEL->eng_req % NENGINES == ENGI_ERROR || TSEL->eng_req % NENGINES == 35u);   /* (MONOFM: no AUTOMATION
@@ -457,12 +457,12 @@ static int page_visible(uint32_t i)
                TSEL->eng_req % NENGINES == ENGI_MECH || TSEL->eng_req % NENGINES == ENGI_BIO ||
                TSEL->eng_req % NENGINES == ENGI_ERROR || (FELUCCA_MONOFM && TSEL->eng_req % NENGINES == 35u);   /* (KIT:
                                                                                   * the slice machines', MONOFM's BBOX) */
-    if (FELUCCA_MONOFM && PAGES[i].graph == GR_SONG)
+    if (FELUCCA_MONOFM && (!FELUCCA_MONOFM && PAGES[i].graph == GR_SONG))
         return 0;                                     /* (MONOFM: no SONG, the patterns chain: mf_pat.c) */
     if (FELUCCA_DARK && PAGES[i].graph == GR_MICRO)
         return 1;                                     /* (STRANGE: SCL > MICRO, the lanes and OP4 its degrees) */
-    if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || PAGES[i].graph == GR_SONG ||
-                           PAGES[i].graph == GR_PATS))
+    if (FELUCCA_MODULE && (PAGES[i].fam == FAM_SEQ || PAGES[i].fam == FAM_ARP || (!FELUCCA_MONOFM && PAGES[i].graph == GR_SONG) ||
+                           (!FELUCCA_MONOFM && PAGES[i].graph == GR_PATS)))
         return 0;                                     /* (sound module: no sequencer, arpeggiator, song or phrases) */
     if (PAGES[i].scope == SC_TRACK && PAGES[i].id[0] >= P_LN0 && PAGES[i].id[0] <= P_LN7)
         return TSEL->eng_req % NENGINES == ENGI_DRUM;
@@ -562,7 +562,7 @@ static void help_start(void) { ui.help_t = (uint8_t)(help_on() ? HELP_FRAMES : 0
 static void page_entered(void)
 {
     const page_t *pg = cur_page();
-    if (!ui.home && pg->graph == GR_EVENTS)      /* AUTOMATION: + ADD on the SEQ cursor's step */
+    if (!ui.home && (!FELUCCA_MONOFM && pg->graph == GR_EVENTS))      /* AUTOMATION: + ADD on the SEQ cursor's step */
         ev_enter();
     if (!ui.home && lock_page_ok(ui.page))
         ui.plk_src = (uint8_t)(ui.page + 1u);
@@ -695,9 +695,15 @@ static int mf_grid_page(void)
     return 0;
 #endif
 }
+#if FELUCCA_MONOFM
+static uint8_t mf_rtg_ui;        /* v4 RETRIG: ARP held (pressed with no trig held, no layer): the keys are notes, its hits
+                                  * (seq.c mf_rtg_*), KNOB 1..4 its RATE GATE VEL PIT (ui_input.c mf_rtg_frame) */
+#else
+#define mf_rtg_ui 0
+#endif
 static int grid_on(void)
 {
-    return !ui.home && !ui.menu && !ui.confirm &&
+    return !ui.home && !ui.menu && !ui.confirm && !mf_rtg_ui &&
            ((cur_page()->graph == GR_ROLL && (drum_track(TSEL) || mf_trigs())) || mf_grid_page());
 }
 /* SEQ > DETAIL (1.5.1, Discussion #199; params.c, between STEP and AUTOMATION): a step page as STEP (the cursor, the
@@ -711,7 +717,7 @@ static int detail_on(void)
 }
 /* GLO > SONG (1.2): the white keys A B C D (A3 B3 C4 D4, white places 2..5: seq.c song_key) set the selected cell's slot;
  * they do not sound there, the other keys play as anywhere (seq.c keyboard_block: song.grid 3) */
-static int song_keys_on(void) { return !ui.home && !ui.menu && !ui.confirm && !ui.layer && cur_page()->graph == GR_SONG; }
+static int song_keys_on(void) { return !ui.home && !ui.menu && !ui.confirm && !ui.layer && (!FELUCCA_MONOFM && cur_page()->graph == GR_SONG); }
 
 /* black key place p (seq.c key_place) held, 0 = not */
 static int black_held(uint32_t p)
@@ -1915,11 +1921,11 @@ static uint32_t act_cols(void)                   /* the columns that are actions
     uint32_t c, m = 0;
     if (ui.home)
         return 0;
-    if (pg->graph == GR_EVENTS) return 16u;     /* AUTOMATION: no knob is an action; OCT+ by the row (ev_oct) */
-    if (pg->graph == GR_TOOLS) return 15u;
-    if (pg->graph == GR_SONG)
+    if ((!FELUCCA_MONOFM && pg->graph == GR_EVENTS)) return 16u;     /* AUTOMATION: no knob is an action; OCT+ by the row (ev_oct) */
+    if ((!FELUCCA_MONOFM && pg->graph == GR_TOOLS)) return 15u;
+    if ((!FELUCCA_MONOFM && pg->graph == GR_SONG))
         return 1u;                               /* PLAY / STOP (also the PLAY button) */
-    if (pg->graph == GR_PATS)
+    if ((!FELUCCA_MONOFM && pg->graph == GR_PATS))
         return 2u;                               /* LOAD */
     if (pg->graph == GR_USER)
         return 14u;                              /* LOAD ERASE SAVE */
@@ -1935,23 +1941,23 @@ static uint32_t act_cols(void)                   /* the columns that are actions
 /* the action OCT+ does: its column + 1, 0 = none picked yet (PHRASES has LOAD only) */
 static uint32_t act_col(void)
 {
-    if (!ui.home && cur_page()->graph == GR_SONG) return 1u;
-    if (!ui.home && cur_page()->graph == GR_EVENTS) return 5u;
-    return !ui.home && cur_page()->graph == GR_PATS ? 2u : ui.act;
+    if (!ui.home && (!FELUCCA_MONOFM && cur_page()->graph == GR_SONG)) return 1u;
+    if (!ui.home && (!FELUCCA_MONOFM && cur_page()->graph == GR_EVENTS)) return 5u;
+    return !ui.home && (!FELUCCA_MONOFM && cur_page()->graph == GR_PATS) ? 2u : ui.act;
 }
 
 static const char *act_name(uint32_t c)          /* column c's action (the footer hint) */
 {
     static const char *const UP_GO[3] = {"LOAD", "ERASE", "SAVE"};
     uint32_t id = cur_page()->id[c & 3u];
-    if (cur_page()->graph == GR_EVENTS) return ev_act_name();
-    if (cur_page()->graph == GR_TOOLS) {
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_EVENTS)) return ev_act_name();
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_TOOLS)) {
         static const char *const actions[] = {"CLEAR", "INIT", "DELETE", "CLEAR"};
         return actions[c & 3u];
     }
-    if (cur_page()->graph == GR_SONG)
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_SONG))
         return song.playing || chain_busy() ? "STOP" : "PLAY";
-    if (cur_page()->graph == GR_PATS)
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_PATS))
         return "LOAD";
     if (cur_page()->graph == GR_USER)
         return UP_GO[(c + 2u) % 3u];
@@ -1967,13 +1973,13 @@ static int act_ready(void)
     uint32_t c = act_col(), s = song.sel, id;
     if (!c--)
         return 0;
-    if (cur_page()->graph == GR_EVENTS) return ev_act_ready();
-    if (cur_page()->graph == GR_TOOLS)                  /* one case per column: CLEAR PAT, INIT, DELETE ROW, CLEAR SONG */
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_EVENTS)) return ev_act_ready();
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_TOOLS))                  /* one case per column: CLEAR PAT, INIT, DELETE ROW, CLEAR SONG */
         return !chain_busy() && (c == 0u ? !seq_is_empty(TSEL) || motion_count(TSEL) : c == 1u ? 1 :
                                  c == 2u ? ui.song_row < chain_config.count : chain_config.count != 0u);
-    if (cur_page()->graph == GR_SONG)
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_SONG))
         return song.playing || chain_busy() || chain_config.count;
-    if (cur_page()->graph == GR_PATS)
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_PATS))
         return pat_last[s] != pat_pick() + 1u || steps_sig(TSEL) != pat_sig[s];
 #if FELUCCA_STRANGE
     if (cur_page()->graph == GR_USER)

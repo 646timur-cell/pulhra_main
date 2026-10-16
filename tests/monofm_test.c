@@ -1546,6 +1546,17 @@ static int test_v4(void)
     ok &= e == NENG_SHOWN;
     bad += check("MONOFM v4 SELECT: EDIT the machine's own (every machine has one), INSERT dry / wet, AMP ENV SYNC", ok);
 
+    /* GLO > MIX: KNOB 4 a send, SELECT which (DST CHO DLY REV) */
+    v4_page("MIX");
+    mf_mix_send = 3u;
+    t->p[P_REV] = t->p[P_DLY] = 10;
+    turn(EN_K4, 5);
+    ok = t->p[P_REV] > 10 && t->p[P_DLY] == 10;
+    turn(EN_SELECT, -1);
+    turn(EN_K4, 5);
+    ok &= mf_mix_send == 2u && t->p[P_DLY] > 10;
+    bad += check("MONOFM v4 GLO > MIX: KNOB 4 a send (REV), SELECT another (DLY)", ok);
+
     /* XY: SELECT the axis */
     v4_page("XY");
     turn(EN_SELECT, 1);
@@ -1610,6 +1621,74 @@ static int test_v4(void)
     frames(100);
     ok &= step_nudge(&t->step[2]) == 0 && step_on(&t->step[2]);
     bad += check("MONOFM v4 NUDGE: SELECT on STEP (the trig picked), a trig held on EDIT; it plays (QNTZ ignored)", ok);
+
+    /* OCT- + OCT+ together: the keys play the selected track (no trigs), the octave as it was; again: trigs */
+    v4_page("EDIT 1");
+    mf_kbd = 0;
+    song.octave = 1;
+    btn_down(B_OCTDN);
+    frame();
+    btn_down(B_OCTUP);
+    frame();
+    btn_up(B_OCTDN);
+    btn_up(B_OCTUP);
+    frames(100);
+    ok = mf_kbd == 1 && song.octave == 1 && !grid_on();
+    btn_down(B_OCTUP);
+    btn_down(B_OCTDN);
+    frame();
+    btn_up(B_OCTDN);
+    btn_up(B_OCTUP);
+    frames(100);
+    ok &= mf_kbd == 0 && song.octave == 1 && grid_on();
+    press(B_OCTDN);
+    ok &= song.octave == 0;
+    bad += check("MONOFM v4 OCT- + OCT+: the keys play the track (the octave kept), again: the trigs; one OCT- still "
+                 "the octave", ok);
+    song.octave = 0;
+
+    /* RETRIG: ARP held, a key: its note again every RATE (1/16), not toggling a trig; KNOB 1 its RATE; ARP let go: the
+     * hits stop, ARP's page not opened */
+    {
+        int32_t buf[2 * CTL];
+        uint32_t k, ons = 0, was = 0, pg;
+        v4_page("EDIT 1");
+        pg = ui.page;
+        track_defaults_steps(t);
+        mf_kbd = 0;
+        mf_rtg_p[0] = 3;
+        btn_down(B_ARP);
+        frame();
+        ok = mf_rtg_ui && !grid_on();
+        turn(EN_K1, 1);
+        ok &= mf_rtg_p[0] == 4;
+        turn(EN_K1, -1);
+        key_down(key_at(0, 0));
+        frame();
+        for (k = 0; k < 2000u; k++) {                   /* ~1.45 s at 120: 1/16 every 5512 samples, ~11 hits */
+            uint32_t n = ke_voices(t);
+            if (n && !was)
+                ons++;
+            was = n;
+            mix_block(buf, CTL);
+            if (mf_rtg_snd[0] == 0 && mf_rtg_n && n)
+                ;                                       /* (gated off between hits) */
+        }
+        ok &= mf_rtg_n == 1u && !step_on(&t->step[0]);
+        key_up(key_at(0, 0));
+        frame();
+        btn_up(B_ARP);
+        frames(100);
+        for (k = 0; k < 200u; k++)
+            mix_block(buf, CTL);
+        ok &= !mf_rtg_ui && !mf_rtg_n && ui.page == pg && !ui.home;
+        snprintf(what, sizeof what, "MONOFM v4 RETRIG: ARP held + a key repeats it (%u hits in 1.45 s), no trig; KNOB 1 RATE; "
+                 "ARP let go: stops, no ARP page", ons);
+        bad += check(what, ok && ons >= 6u && ons <= 14u);
+        press(B_ARP);
+        frames(50);
+        bad += check("MONOFM v4 RETRIG: ARP tapped alone still opens ARP", cur_page()->fam == FAM_ARP);
+    }
 
     /* F.ENV: LP at a low CUT opened by FILTER's ENV with a slow decay: louder than without */
     {

@@ -126,6 +126,8 @@ static const char *help_page(void)
         uint32_t id = mf_sel_id(cur_page());
         if (cur_page()->graph == GR_ROLL)
             return "[K1]FLAG[PRESETS]NOTE[SELECT]NUDGE";
+        if (MF_MIX_PAGE(cur_page()))
+            return "[K4]SEND[SELECT]DST CHO DLY REV";
         if (id == 0xFFu)
             return "[KEYS]TRIGS[K1-4]+TRIG: LOCK";
         str_cpy(hb, "[KEYS]TRIGS[SELECT]", sizeof hb);

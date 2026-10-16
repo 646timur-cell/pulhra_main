@@ -795,6 +795,8 @@ static void draw_foot(void)
     if (grid_on())
         sig += 0x51EDu + (uint32_t)black_held(GK_ACC) * 977u;
 #if FELUCCA_MONOFM
+    if (!ui.home && MF_MIX_PAGE(pg))
+        sig += (mf_mix_send + 1u) * 104729u;
     if (!ui.home && mf_sel_id(pg) != 0xFFu)             /* (the SELECT knob's value, footer row 1) */
         sig += (uint32_t)(TSEL->p[mf_sel_id(pg)] + 300) * 2731u + mf_sel_id(pg) * 7u;
 #endif
@@ -821,7 +823,7 @@ static void draw_foot(void)
         kh[1] = (khint_t){KC_OCTDN, hb + 5};
         if (rn) {                                     /* USER / PROJECT: "EDIT NAME" between them */
             kh[2] = kh[1];
-            kh[1] = (khint_t){KC_EDIT, cur_page()->graph == GR_EVENTS ? "DELETE" : "NAME"};
+            kh[1] = (khint_t){KC_EDIT, (!FELUCCA_MONOFM && cur_page()->graph == GR_EVENTS) ? "DELETE" : "NAME"};
             cv_key_row(8, 232, 2, kh, 3, (act_ready() ? 1u : 0u) | (rn == 2u ? 2u : 0u) | 4u, T_BG);
         } else {
             cv_key_row(8, 232, 2, kh, 2, act_ready() ? 3u : 2u, T_BG);
@@ -840,7 +842,10 @@ static void draw_foot(void)
         fmt_int(b + str_len(b), (int32_t)((len + 15u) / 16u));
         cv_text(8, 2, &AF_S, b, T_THEME);
 #if FELUCCA_MONOFM
-        if (!black_held(GK_ACC) && mf_sel_id(pg) != 0xFFu) {   /* the SELECT knob's value: "SEL CUT 64" */
+        if (!black_held(GK_ACC) && MF_MIX_PAGE(pg)) {   /* GLO > MIX: SELECT picks KNOB 4's send */
+            x = cv_text_r(232, 2, &AF_S, TP[P_DIST + mf_mix_send].label, T_TEXT, T_BG);
+            cv_text_r(x - 6, 2, &AF_S, "SEL SEND", T_DIM, T_BG);
+        } else if (!black_held(GK_ACC) && mf_sel_id(pg) != 0xFFu) {   /* the SELECT knob's value: "SEL CUT 64" */
             uint32_t id = mf_sel_id(pg);
             const param_desc_t *d = track_desc(TSEL, id);
             const char *u = "";
@@ -883,7 +888,7 @@ static void draw_foot(void)
         int32_t r = 232, tx, ex, need = text_w(&AF_S, pn), ew = text_w(&AF_S, ename);
         ex = 8 + (FELUCCA_ICONS ? 12 + 5 : 0) + (ew < 80 ? ew : 80);   /* (where the engine's name ends) */
         tx = r - text_w(&AF_S, ti) - (pi != ICON_NONE ? 16 : 0);
-        if (!ui.home && pg->graph == GR_EVENTS && tx - 12 - (ex + 10) < need) {
+        if (!ui.home && (!FELUCCA_MONOFM && pg->graph == GR_EVENTS) && tx - 12 - (ex + 10) < need) {
             str_cpy(ti + 4, ti + 10, sizeof ti - 4);    /* #93: "AUTOMATION 6/6" -> "AUTO 6/6" where the sound's name */
             tx = r - text_w(&AF_S, ti) - (pi != ICON_NONE ? 16 : 0);   /* would be cut (MENU > LARGE) */
         }
@@ -925,6 +930,19 @@ static void draw_columns(void)
     char val[12];
     const char *unit;
     (void)motion_mask(song.sel, card_mot_mask);       /* (PLAY OFF: no scan) */
+#if FELUCCA_MONOFM
+    if (mf_rtg_ui) {                                    /* RETRIG (ARP held): RATE GATE VEL PIT */
+        fmt_int(val, mf_rtg_p[1] * 100 / 127);
+        draw_column(0, "RATE", MF_RTG_RATE_N[clamp(mf_rtg_p[0], 0, (int32_t)MF_RTG_N - 1)], "", VAL(0u),
+                    mf_rtg_p[0] * 1000 / (int32_t)(MF_RTG_N - 1u), ICON_AUTO);
+        draw_column(1, "GATE", val, "%", VAL(1u), mf_rtg_p[1] * 1000 / 127, ICON_AUTO);
+        fmt_int(val, mf_rtg_p[2]);
+        draw_column(2, "VEL", val, "", mf_rtg_p[2] ? VAL(2u) : T_DIM, (mf_rtg_p[2] + 64) * 1000 / 127, ICON_AUTO);
+        fmt_int(val, mf_rtg_p[3]);
+        draw_column(3, "PIT", val, "st", mf_rtg_p[3] ? VAL(3u) : T_DIM, (mf_rtg_p[3] + 12) * 1000 / 24, ICON_AUTO);
+        return;
+    }
+#endif
     if (ui.home) {
         for (c = 0; c < 4u; c++) {
             int16_t *vp;
@@ -943,7 +961,7 @@ static void draw_columns(void)
         }
         return;
     }
-    if (cur_page()->graph == GR_SONG) {             /* SECTION, TRACK, its PAT (A..D, -), REPS (the section's) */
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_SONG)) {             /* SECTION, TRACK, its PAT (A..D, -), REPS (the section's) */
         uint32_t row = ui.song_row < CHAIN_ROWS ? ui.song_row : CHAIN_ROWS - 1u, k = ui.song_trk % NTRK, sl;
         int used = row < chain_config.count;
         fmt_int(val, (int32_t)row + 1);
@@ -961,7 +979,7 @@ static void draw_columns(void)
         draw_column(3, "REPS", val, "", used ? VAL(3u) : T_DIM, -1, ICON_AUTO);
         return;
     }
-    if (cur_page()->graph == GR_EVENTS) {              /* AUTOMATION (ui_events.c): ROW STEP PARAM VALUE */
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_EVENTS)) {              /* AUTOMATION (ui_events.c): ROW STEP PARAM VALUE */
         const track_t *t = TSEL;
         uint16_t rw[EV_ROWS];
         uint32_t n, c = ev_cur(rw, &n), r = ev_row(n), k = c >> 8, step, id;
@@ -1048,7 +1066,7 @@ static void draw_columns(void)
                     k != EVK_ADD ? VAL(3u) : T_DIM, RATIO(d, enum_rank(d, v)), param_icon(d, v));
         return;
     }
-    if (cur_page()->graph == GR_TOOLS) {
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_TOOLS)) {
         static const char *const labels[] = {"PAT", "SOUND", "SEC", "SONG"};
         static const uint8_t icons[] = {ICON_AUTO, ICON_AUTO, ICON_X_SONG, ICON_X_SONG};   /* ROW, SONG: the song's */
         for (c = 0; c < 4u; c++) draw_act_column(c, labels[c], VAL(c), icons[c]);
@@ -1082,7 +1100,7 @@ static void draw_columns(void)
         draw_column(3, "LIST", list_name(list_mode()), "", VAL(3u), -1, ICON_X_FOLDER);
         return;
     }
-    if (cur_page()->graph == GR_PATS) {                  /* PAT, then LOAD (a GO button) */
+    if ((!FELUCCA_MONOFM && cur_page()->graph == GR_PATS)) {                  /* PAT, then LOAD (a GO button) */
         uint32_t n = pat_count(), k = pat_pick();
         char tag[4], nm[13];
         pat_label(k, tag, nm);

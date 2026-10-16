@@ -773,8 +773,99 @@ static __attribute__((noinline)) void sx_retrig(track_t *t, uint32_t k)
 }
 #endif
 
+#if FELUCCA_MONOFM
+/* MONOFM v4, RETRIG: ARP held (ui_input.c mf_rtg_ui), the keys play the selected track as a note repeat: the notes held
+ * (up to 4, together) again every RATE, each GATE long, the velocity moving by VEL a hit, the pitch by PIT semitones a
+ * hit (a riser / a faller, within +-24). Free running, the transport or not; ARP let go: the hits stop. Not recorded */
+#define MF_RTG_N 7u
+static const char *const MF_RTG_RATE_N[MF_RTG_N] = {"1/4", "1/8", "8T", "1/16", "16T", "1/32", "1/64"};
+static const uint8_t MF_RTG_DIV[MF_RTG_N] = {0, 1, 4, 2, 5, 3, 3};   /* (N_DIV: fx.c div_samples; 1/64 half of 1/32) */
+static volatile uint8_t mf_rtg_on;              /* (ui_input.c: ARP held for it, every frame) */
+static int8_t mf_rtg_p[4] = {3, 64, 0, 0};      /* RATE (MF_RTG_RATE_N), GATE 1..127, VEL -64..63, PIT -12..12 */
+static uint8_t mf_rtg_n, mf_rtg_note[4], mf_rtg_snd[4], mf_rtg_trk;
+static uint16_t mf_rtg_k;
+static uint32_t mf_rtg_pos, mf_rtg_off;
+static int mf_rtg_take(const track_t *t) { return mf_rtg_on && trk_index(t) == song.sel % NTRK && !drum_track(t); }
+static __attribute__((noinline)) void mf_rtg_silence(void)
+{
+    uint32_t i;
+    for (i = 0; i < 4u; i++)
+        if (mf_rtg_snd[i]) {
+            trk_note_off(&trk[mf_rtg_trk % NTRK], mf_rtg_snd[i]);
+            mf_rtg_snd[i] = 0;
+        }
+}
+static void mf_rtg_add(track_t *t, uint32_t note)
+{
+    uint32_t i;
+    if (!mf_rtg_n) {
+        mf_rtg_silence();
+        mf_rtg_trk = (uint8_t)trk_index(t);
+        mf_rtg_k = 0;
+        mf_rtg_pos = 0xFFFFFFF;                     /* (the first hit on this block) */
+    }
+    for (i = 0; i < mf_rtg_n; i++)
+        if (mf_rtg_note[i] == note)
+            return;
+    if (mf_rtg_n < 4u)
+        mf_rtg_note[mf_rtg_n++] = (uint8_t)note;
+}
+static void mf_rtg_remove(uint32_t note)
+{
+    uint32_t i, k = 0;
+    for (i = 0; i < mf_rtg_n; i++)
+        if (mf_rtg_note[i] != note)
+            mf_rtg_note[k++] = mf_rtg_note[i];
+    mf_rtg_n = (uint8_t)k;
+    if (!mf_rtg_n)
+        mf_rtg_silence();
+}
+static __attribute__((noinline)) void mf_rtg_tick(uint32_t n)
+{
+    track_t *t = &trk[mf_rtg_trk % NTRK];
+    uint32_t period, i;
+    if (!mf_rtg_on && mf_rtg_n) {                   /* ARP let go: the hits stop */
+        mf_rtg_n = 0;
+        mf_rtg_silence();
+    }
+    if (mf_rtg_snd[0] | mf_rtg_snd[1] | mf_rtg_snd[2] | mf_rtg_snd[3]) {
+        if (mf_rtg_off <= n)
+            mf_rtg_silence();
+        else
+            mf_rtg_off -= n;
+    }
+    if (!mf_rtg_n)
+        return;
+    i = (uint32_t)clamp(mf_rtg_p[0], 0, (int32_t)MF_RTG_N - 1);
+    period = div_samples(MF_RTG_DIV[i]) >> (i == MF_RTG_N - 1u ? 1 : 0);
+    mf_rtg_pos += n;
+    if (mf_rtg_pos < period && mf_rtg_pos != 0xFFFFFFF + n)
+        return;
+    mf_rtg_pos = mf_rtg_pos == 0xFFFFFFF + n || mf_rtg_pos - period >= period ? 0u : mf_rtg_pos - period;
+    mf_rtg_silence();
+    {
+        int32_t dp = clamp((int32_t)mf_rtg_k * mf_rtg_p[3], -24, 24);
+        int32_t v = clamp(100 + (int32_t)mf_rtg_k * mf_rtg_p[2] / 4, 1, 127);
+        for (i = 0; i < mf_rtg_n; i++) {
+            mf_rtg_snd[i] = (uint8_t)clamp((int32_t)mf_rtg_note[i] + dp, 1, 127);
+            trk_note_on(t, mf_rtg_snd[i], (uint32_t)v);
+        }
+    }
+    mf_rtg_off = (uint32_t)(((uint64_t)period * (uint32_t)clamp(mf_rtg_p[1], 1, 127)) >> 7);
+    if (mf_rtg_k < 1000u)
+        mf_rtg_k++;
+}
+#endif
+
 static void input_on(track_t *t, uint32_t note, uint32_t vel)
 {
+#if FELUCCA_MONOFM
+    if (mf_rtg_take(t)) {                           /* RETRIG: the note goes into its hits, not played itself */
+        last_note = (uint8_t)note;
+        mf_rtg_add(t, note);
+        return;
+    }
+#endif
     last_note = (uint8_t)note;
     if (cin_left)
         cin_keep(t, note, vel);
@@ -805,6 +896,13 @@ static void input_off(track_t *t, uint32_t note)
             if (cin_note[i][k] == note)
                 cin_up[i] |= (uint8_t)(1u << k);
     }
+#if FELUCCA_MONOFM
+    if (mf_rtg_n && trk_index(t) == mf_rtg_trk) {    /* RETRIG: out of its hits (it may have been a plain note too) */
+        mf_rtg_remove(note);
+        trk_note_off(t, note);
+        return;
+    }
+#endif
     rec_release(t, note);
 #if FELUCCA_MONOFM
     if (t->p[P_EUC] && !t->p[P_AMODE]) {            /* EUCLID: out of its notes (LATCH: kept, arp_remove) */
@@ -1699,6 +1797,9 @@ static void events_block(uint32_t n)
         click_tick(seq_n);
     for (i = 0; i < NPART; i++)
         arp_step(&trk[i], clock_mode ? seq_n : n, clock_mode && song.playing ? seq_n : n);
+#if FELUCCA_MONOFM
+    mf_rtg_tick(clock_mode ? seq_n : n);
+#endif
     if (song.playing)
         euc_clk += clock_mode ? seq_n : n;            /* (EUCLID's timeline, euc_align) */
     beat_pos += clock_mode ? seq_n : n;               /* the beat the ARP LED flashes on (ui_leds) */
