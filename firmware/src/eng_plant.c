@@ -54,6 +54,8 @@ static void plant_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     {
         int32_t held = v->s[0] < 0x7FFFFFFF ? v->s[0]++ : v->s[0], full = p[P_E2] ? (int32_t)sx_expmap(p[P_E2], 28u, 9) : 1;   /* blocks */
         grow = p[P_E1] * 258;                            /* Q15 */
+        if (MF_E8(p))                                    /* VSNS (MONOFM's ninth): the velocity, how far it grows */
+            grow = mulq15(grow, 32767 - mulq15(MF_E8(p) * 258, (127 - clamp(v->vel, 0, 127)) * 258));
         if (held < full)
             grow = (int32_t)((int64_t)grow * held / full);
     }
@@ -141,4 +143,7 @@ static const engine_t ENG_PLANT = {
     .poly = PL_POLY,
     .xyd = {{XY_E(1), XY_E(4), XY_E(7)}, {XY_E(5), XY_E(3), XY_E(6)}},   /* X: GROW INDEX WIND (the growth), Y: BLOOM RATIO NOISE (the flower) */
     .xya = {{50, 40, 30}, {50, 30, 30}},
+#if FELUCCA_MONOFM
+    .e8 = {"VSNS", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

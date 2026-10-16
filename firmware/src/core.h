@@ -331,6 +331,7 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
 #define P_DOUT P_LN5             /* .. OUT, -64..63 dB-ish trim (0: as before) */
 #define MF_FENV_ID(i) ((i) >= P_LN0 && (i) <= P_LN5)
 #define P_E8 P_LN6               /* the machine's ninth value (engine_t e8; its SELECT on EDIT): the engine's, as E1..E8 */
+#define MF_E8(p) ((p)[P_E8])     /* (in the engines STRANGE shares: 0 there) */
 /* step i (0..LEN-1) of a euclidean pattern of hits k over n = LEN steps, rotated by r: x..x..x. for 3 of 8 */
 static inline int mf_euc_hit(const int16_t *p, uint32_t i)
 {
@@ -353,6 +354,7 @@ static const uint8_t MF_SCALE_DIV[7] = {3, 5, 2, 4, 1, 0, 6};
 #else
 #define MF_EUC_ON(t) 0
 #define seq_div(t) ((uint32_t)(t)->p[P_SDIV])
+#define MF_E8(p) 0
 #endif
 
 /* ------------------------------------------------- tracks, the song --- */

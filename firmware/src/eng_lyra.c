@@ -109,6 +109,8 @@ static void lyra_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     ib = cents_inc(m->pitch16, LY_TUNE_CT[tune], m->fine + db);
     g = 4096 + sh * sh * 3;                              /* SHRP: x1 .. x12 into the tanh (Q12) */
     dk = (md * md * 10431) >> 14;                        /* MOD: up to ~8 radians of phase per full-scale source */
+    if (MF_E8(p))                                        /* VSNS (MONOFM's ninth): the velocity sets MOD (soft: less) */
+        dk = mulq15(dk, 32767 - mulq15(MF_E8(p) * 258, (127 - clamp(v->vel, 0, 127)) * 258));
     if (m->cutoff > 0)                                   /* the track's ENV / LFO -> FLT open the sharpness too */
         g += m->cutoff >> 1;
     /* what modulates both oscillators from outside the pair: the hyper-LFO (LFO), the other notes of the block before
@@ -244,4 +246,7 @@ static const engine_t ENG_LYRA = {
     .mem = sizeof(lyra_mem_t),
     .xyd = {{XY_E(2), XY_E(1), XY_E(4)}, {XY_E(5), XY_E(6), XY_E(7)}},   /* X: MOD SHRP HLFO (the chaos of the pairs), Y: TIME FDBK DMOD (the space) */
     .xya = {{40, 30, 30}, {30, 35, 40}},
+#if FELUCCA_MONOFM
+    .e8 = {"VSNS", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

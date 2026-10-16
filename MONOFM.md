@@ -35,7 +35,7 @@
 | SINE (GND SINE) | FOLD SUB FB SYM · RAT2 LVL2 DRIV TUNE | — | синус, вейвфолдер, синус октавой ниже, самомодуляция, асимметрия фолда, второй синус (кратность и уровень), драйв |
 | NOISE (GND NOISE) | RATE COLR DCAY RES · BITS TUNE | — | шум, удержанный с частотой ноты, цвет, свой спад (хэты), резонанс на ноте, биты |
 
-Слайс-машины (GLITCH ERROR RITUAL MECH BIO) тоже получили DCAY на SELECT. У машин SOMA SELECT пока дублирует главную ручку.
+Слайс-машины (GLITCH ERROR RITUAL MECH BIO) тоже получили DCAY на SELECT. Машины SOMA на SELECT: STRING DTUN (вторая струна рядом, биения, как у 12-струнки), MODAL MUTE (отпустил — ладонь глушит тело), BLOW OVBL (передув до 3×: верхние регистры, визг), RESO DRIV (перегруз на выходе), JUNK MUTE (отпустил — пружина глохнет), LYRA VSNS (велосити на MOD), CHAOS RATE (дрейф CHAO до 16× быстрее), DRIFT FRZ (память заморожена: новое не пишется, ничего не стирается), PLANT VSNS (велосити на рост). У SINE и NOISE SELECT дублирует FOLD и COLR.
 
 **Шаг:** до 32 на трек (две страницы по 16), на шаге аккорд, accent, slide, ратчет (всё на K1 FLAG), условие (COND), nudge (SELECT), velocity; p-lock любого параметра (держать шаг и крутить ручку; подробно — раздел «Секвенсор»); живая запись нот и ручек (REC + PLAY), пошаговая запись; swing общий на CLOCK (HOME трижды) и свой у трека в SEQ TOOLS; слой FX (зажать FX) — repeat, reverse, фильтр, tape stop, freeze и остальные punch-in эффекты Felucca.
 

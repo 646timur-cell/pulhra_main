@@ -132,7 +132,12 @@ static uint32_t drift_post(track_t *t, int32_t *out, uint32_t n)
     uint32_t i, j, size = 32u + (uint32_t)p[P_E6] * 96u / 127u;   /* the loops' share in 1/128: 1/4 .. 1 */
     int32_t fb = p[P_E4] * p[P_E4] * 228 / 100, kb = 32000 - p[P_E5] * 150, mix = p[P_E7] * 258, peak = 0;   /* fb Q15: 0 .. 1.12 (the
                                                                               * tanh holds it: at the top it keeps) */
-    int32_t drft = p[P_E2], step = (40 + p[P_E3] * p[P_E3] * 3) << 8;
+    int32_t drft = p[P_E2], step = (40 + p[P_E3] * p[P_E3] * 3) << 8, frz = MF_E8(p) * 258, xin = 32767 - frz;
+    if (frz) {                                           /* FRZ (MONOFM's ninth): the memory frozen, what plays now kept
+                                                          * out of it, nothing worn or blurred */
+        fb += px_m(36000 - fb, frz, 15);
+        kb += px_m(32767 - kb, frz, 15);
+    }
     int32_t ta = (int32_t)(DR_LA * size / 128u - 4u) << 16, tb = (int32_t)(DR_LB * size / 128u - 4u) << 16;
     if (!M->rng)
         M->rng = (uint32_t)rng() | 1u;
@@ -146,7 +151,7 @@ static uint32_t drift_post(track_t *t, int32_t *out, uint32_t n)
     M->da += (ta - M->da) >> 4;                          /* (smoothed: the pitch glides, never jumps) */
     M->db += (tb - M->db) >> 4;
     for (i = 0; i + 3u < n; i += 4u) {
-        int32_t x = (out[i] + out[i + 1u] + out[i + 2u] + out[i + 3u]) >> 2, ya, yb, f, wet, in;
+        int32_t x = px_m((out[i] + out[i + 1u] + out[i + 2u] + out[i + 3u]) >> 2, xin, 15), ya, yb, f, wet, in;
         uint32_t a;
         a = M->wa - ((uint32_t)M->da >> 16);             /* loop A's head, interpolated */
         f = (M->da >> 1) & 0x7FFF;
@@ -215,4 +220,7 @@ static const engine_t ENG_DRIFT = {
     .mem = sizeof(drift_mem_t),
     .xyd = {{XY_E(2), XY_E(3), XY_E(1)}, {XY_E(4), XY_E(5), XY_E(6)}},   /* X: DRFT MOTN TONE (the wobble), Y: ERAS BLUR SIZE (the memory) */
     .xya = {{40, 40, 30}, {25, 40, -40}},
+#if FELUCCA_MONOFM
+    .e8 = {"FRZ", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

@@ -105,6 +105,8 @@ static void junk_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     t60 = (int32_t)sx_expmap(p[P_E4], 2205u, 8);         /* 50 ms .. 13 s */
     fb = 32767 - (int32_t)((d16 >> 16) * 226361u / (uint32_t)t60);   /* (32-bit: no 64 / 64 divide) */
     fb = clamp(fb, 12000, 32600);
+    if (MF_E8(p) && !v->gate)                            /* MUTE (MONOFM's ninth): let go, the spring held still */
+        fb = mulq15(fb, 32767 - MF_E8(p) * 200);
     w = S->w;
     for (i = 0; i < n; i++) {
         int32_t amp = amp_at(m, i), x = 0, j = 0, y, z;
@@ -182,4 +184,7 @@ static const engine_t ENG_JUNK = {
     .mem = sizeof(jk_slot_t) * JK_POLY,
     .xyd = {{XY_E(1), XY_E(6), XY_E(7)}, {XY_E(3), XY_E(2), XY_E(4)}},   /* X: SHAKE JUNK DRIVE (the rattle), Y: CHIRP SIZE DAMP (the spring) */
     .xya = {{40, 40, 30}, {40, 30, 30}},
+#if FELUCCA_MONOFM
+    .e8 = {"MUTE", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

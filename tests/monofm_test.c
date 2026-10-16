@@ -1843,19 +1843,24 @@ static double e8_render(uint32_t e, uint32_t id, int32_t v, uint32_t k, uint32_t
     set_engine_of(&trk[0], e);
     trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = trk[0].p[P_DIST] = 0;
     trk[0].p[P_VOICE] = V_MONO;
+    if (e == ENGI_MODAL) {                              /* (MUTE: a body that rings on, a long release) */
+        trk[0].p[P_E0 + 3] = 110;
+        trk[0].p[P_REL] = 110;
+    }
     if (id != 0xFFu)
         trk[0].p[id] = (int16_t)v;
     for (b = 0; b < 16u; b++)
         mix_block(buf, CTL);
     midi_event(0x90, 0, 48, vel);
     for (b = 0; b < 300u; b++) {
+        if (b == 200u)
+            midi_event(0x80, 0, 48, 0);                  /* (let go for the last third: MUTE's part) */
         mix_block(buf, CTL);
         for (i = 0; i < CTL; i++) {
             e8_buf[k][b * CTL + i] = buf[2u * i];
             sq += (double)buf[2u * i] * buf[2u * i];
         }
     }
-    midi_event(0x80, 0, 48, 0);
     return sqrt(sq / (300.0 * CTL));
 }
 static int test_machines_v4(void)
@@ -1864,6 +1869,9 @@ static int test_machines_v4(void)
         {ENGI_MSAW, P_E8, 100}, {ENGI_MPULSE, P_E8, 100}, {ENGI_MENS, P_E8, 127}, {ENGI_MSID, P_E8, 3},
         {ENGI_MWAVE, P_E8, 127}, {ENGI_MDDRAW, P_E8, 127}, {ENGI_MFMST, P_E8, 127}, {ENGI_MFMPAR, P_E8, 127},
         {ENGI_MFMDYN, P_E8, 127}, {ENGI_MVO, P_E8, 127}, {ENGI_MBBOX, P_E8, 10}, {ENGI_GLITCH, P_E8, 10},
+        {ENGI_STRING, P_E8, 127}, {ENGI_MODAL, P_E8, 127}, {ENGI_BLOW, P_E8, 127}, {ENGI_RESO, P_E8, 127},
+        {ENGI_JUNK, P_E8, 127}, {ENGI_LYRA, P_E8, 127}, {ENGI_CHAOS, P_E8, 127}, {ENGI_DRIFT, P_E8, 127},
+        {ENGI_PLANT, P_E8, 127},
         {ENGI_MSINE, P_E0 + 2, 100}, {ENGI_MSINE, P_E0 + 3, 50}, {ENGI_MSINE, P_E0 + 5, 127}, {ENGI_MSINE, P_E0 + 6, 127},
         {ENGI_MNOISE, P_E0 + 2, 10}, {ENGI_MNOISE, P_E0 + 3, 120}, {ENGI_MNOISE, P_E0 + 4, 6},
     };
@@ -1886,7 +1894,8 @@ static int test_machines_v4(void)
     {   /* every MONO and SLICE machine has a ninth (SINE and NOISE: their pages filled instead); its default is silent */
         static const uint8_t NINE[] = {ENGI_MSAW, ENGI_MPULSE, ENGI_MENS, ENGI_MSID, ENGI_MWAVE, ENGI_MDDRAW, ENGI_MBBOX,
                                        ENGI_MFMST, ENGI_MFMPAR, ENGI_MFMDYN, ENGI_MVO, ENGI_GLITCH, ENGI_ERROR,
-                                       ENGI_RITUAL, ENGI_MECH, ENGI_BIO};
+                                       ENGI_RITUAL, ENGI_MECH, ENGI_BIO, ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO,
+                                       ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT, ENGI_PLANT};
         int ok = 1;
         for (k = 0; k < NELEM(NINE); k++)
             ok &= ENGINES[NINE[k]]->e8.label && ENGINES[NINE[k]]->e8.def == 0;
@@ -1894,7 +1903,7 @@ static int test_machines_v4(void)
             ok &= ENGINES[ENGI_MSINE]->edit[k].label[0] != '-';
         for (k = 0; k < 5u; k++)
             ok &= ENGINES[ENGI_MNOISE]->edit[k].label[0] != '-';
-        bad += check("MONOFM machines: MONO and SLICE each a ninth (default off), SINE 7 knobs, NOISE 5", ok);
+        bad += check("MONOFM machines: all 25 but SINE and NOISE a ninth (default off), SINE 7 knobs, NOISE 5", ok);
     }
     return bad;
 }

@@ -51,7 +51,8 @@ static void chaos_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     tsvf_t f;
     if (n > CTL)
         n = CTL;
-    dr = v->s[4] = sx_walk(v->s[4], &seed, p[P_E5] * 3, p[P_E5] * 24);   /* DRFT: CHAO wanders by up to ~24 */
+    dr = v->s[4] = sx_walk(v->s[4], &seed, p[P_E5] * 3 * (1 + MF_E8(p) / 8), p[P_E5] * 24);   /* DRFT: CHAO wanders by up
+                                                          * to ~24; RATE (MONOFM's ninth): up to 16 x faster */
     chao = clamp(p[P_E1] * 32 + dr, 0, 127 * 32);       /* 0 .. 4064 (CHAO x 32) */
     tsvf_coef(&f, clamp((p[P_E3] << 8) + m->cutoff * 2, 0, 127 << 8), 30);
     /* w = 2 pi f / FS (Q24) of the note, for the integrators; at most ~0.9 (stable: the step stays short of a cycle) */
@@ -61,6 +62,8 @@ static void chaos_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     case CH_FBFM:
         ib = (uint32_t)(((uint64_t)inc * sx_expmap(warp, 16384u, 4)) >> 16);   /* B at 1/4 .. 4 x the note */
         k1 = (chao * chao) >> 10;                        /* depth: 0 .. 16128 (<< 3: ~1 cycle, 6 radians, at full scale) */
+        x = clamp(x, -32767, 32767);                     /* (Q15 here: a system left from another ALGO is not) */
+        y = clamp(y, -32767, 32767);
         for (i = 0; i < n; i++) {
             int32_t a, b, nz = nois ? px_m(sx_noise(&seed), nois * 64, 20) : 0, s;
             a = sine_i(ph + ((uint32_t)((y + nz) * k1) << 3));
@@ -195,4 +198,7 @@ static const engine_t ENG_CHAOS = {
     .keep = 0x33,                                        /* the system and the drift run on over a retrigger */
     .xyd = {{XY_E(1), XY_E(5), XY_E(7)}, {XY_E(4), XY_E(3), XY_E(2)}},   /* X: CHAO DRFT NOIS (into chaos), Y: FOLD TONE WARP (the edge) */
     .xya = {{50, 40, 25}, {55, 25, 30}},
+#if FELUCCA_MONOFM
+    .e8 = {"RATE", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

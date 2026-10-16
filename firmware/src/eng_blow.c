@@ -94,6 +94,8 @@ static void blow_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         break;
     }
     kt = clamp(8000 + p[P_E4] * 194 + m->cutoff, 3000, 32767);   /* TONE: the bore's loss (ENV / LFO -> FLT) */
+    brth += px_m(brth, MF_E8(p) * 516, 15);              /* OVBL (MONOFM's ninth): blown up to 3 x harder: the upper
+                                                          * registers, a squeal */
     /* the vibrato: 5.3 Hz, coming in over ~0.4 s, up to +-1.2 % of the bore (about +-20 cents) */
     S->onset = S->onset < 32767 - 80 ? S->onset + 80 : 32767;
     vinc = 516178u * 32u;
@@ -215,4 +217,7 @@ static const engine_t ENG_BLOW = {
     .mem = sizeof(bw_slot_t) * BW_POLY,
     .xyd = {{XY_E(1), XY_E(3), XY_E(6)}, {XY_E(4), XY_E(5), XY_E(7)}},   /* X: BRTH NOIS GROWL (blown harder), Y: TONE VIBR AIR */
     .xya = {{40, 40, 30}, {40, 40, 40}},
+#if FELUCCA_MONOFM
+    .e8 = {"OVBL", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

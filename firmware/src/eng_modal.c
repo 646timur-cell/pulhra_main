@@ -195,6 +195,15 @@ static void modal_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     S->xn = xn;
     S->xlp = xlp;
     S->last = last;
+#if FELUCCA_MONOFM
+    if (MF_E8(p) && !v->gate) {                          /* MUTE (MONOFM's ninth): let go, a hand on the body damps it */
+        int32_t f = 32767 - MF_E8(p) * 40;
+        for (k = 0; k < S->nm; k++) {
+            S->y1[k] = (int32_t)(((int64_t)S->y1[k] * f) >> 15);
+            S->y2[k] = (int32_t)(((int64_t)S->y2[k] * f) >> 15);
+        }
+    }
+#endif
 }
 
 #define STRANGE_CAT_MODAL "UUPPFUPKPFPF"
@@ -237,4 +246,7 @@ static const engine_t ENG_MODAL = {
     .mem = sizeof(md_slot_t) * MD_POLY,
     .xyd = {{XY_E(1), XY_E(2), XY_E(6)}, {XY_E(3), XY_E(7), XY_E(4)}},   /* X: STRC BRIT HARD (the metal), Y: DAMP BEAT POS (the ring, the beating) */
     .xya = {{40, 40, 40}, {40, 50, 30}},
+#if FELUCCA_MONOFM
+    .e8 = {"MUTE", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

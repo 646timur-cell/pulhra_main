@@ -37,6 +37,10 @@ typedef struct {
     int32_t dcx, dcy;                                    /* the output's DC block */
     int32_t xn, xl, xlp;                                 /* the exciter: samples left, its length, its low-pass */
     uint8_t mode;
+#if FELUCCA_MONOFM
+    int16_t dt[512];                                     /* DTUN (MONOFM's ninth): the string doubled, a swaying copy */
+    uint32_t dtw, dtl;                                   /* .. its write index, its sway's phase */
+#endif
 } sr_slot_t;
 ENG_MEM_FITS("STRING", sizeof(sr_slot_t) * SR_POLY);
 
@@ -75,7 +79,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     uint32_t i, w, mode = (uint32_t)clamp(p[P_E0], 0, SR_NMODE - 1), body = (uint32_t)clamp(p[P_E6], 0, SB_N - 1);
     uint32_t L, Lb, Ln, comp;
     int32_t pres = p[P_E1], kb, g, c, slope, bmix = p[P_E7] * 258, t60, jaw = body == SB_SITAR ? SQ_ONE / 48 : 0;
-    int32_t lp, apx, apy, xn, xl, xlp, kx, gb[3], xf;
+    int32_t lp, apx, apy, xn, xl, xlp, kx, gb[3], xf, dtn = MF_E8(p) * 258;
     uint32_t xd;
     tsvf_t bf[3];
     if (!S)
@@ -165,6 +169,16 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
             o += mulq15(r - o, bmix);
         }
         o = clamp(soft_knee(o, 24000), -32767, 32767);
+#if FELUCCA_MONOFM
+        if (dtn) {                                       /* DTUN: a copy 4..7 ms late, the delay swaying at 0.9 Hz: a
+                                                          * second string a few cents off, beating (a 12-string's pair) */
+            uint32_t d = 220u + (uint32_t)((px_sin(S->dtl) >> 16) * 60 >> 15) + 60u, r = S->dtw - d;
+            S->dt[S->dtw & 511u] = (int16_t)o;
+            S->dtw++;
+            S->dtl += 87652u;                            /* (0.9 Hz) */
+            o = o - mulq15(o, dtn / 3) + mulq15(S->dt[r & 511u], dtn >> 1);
+        }
+#endif
         if (mode == SR_BOW)                              /* the bow sets the level; the release fades its ring */
             out[i] += mulq15(mulq15(o, clamp(amp << 2, 0, 32767)), VOICE_FS);
         else
@@ -225,4 +239,7 @@ static const engine_t ENG_STRING = {
     .mem = sizeof(sr_slot_t) * SR_POLY,
     .xyd = {{XY_E(2), XY_E(4), XY_E(1)}, {XY_E(7), XY_E(3), XY_E(5)}},   /* X: POS BRIT PRES (towards the bridge: glassy), Y: BMIX DAMP STIF (the body, the ring) */
     .xya = {{-50, 40, -20}, {50, 30, 30}},
+#if FELUCCA_MONOFM
+    .e8 = {"DTUN", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };

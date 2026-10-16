@@ -203,6 +203,8 @@ static void reso_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             }
             s += px_m(x, dirt * 64, 15) >> 5;            /* (the exciter heard through) */
             s = clamp(soft_knee(s >> 5, 24000), -32767, 32767);   /* Q20 / 8 / 32 -> Q15 */
+            if (MF_E8(p))                                /* DRIV (MONOFM's ninth): the sound into a tanh, up to ~6 x */
+                s = softclip(s + px_m(s, MF_E8(p) * 1290, 15)) - (softclip(s + px_m(s, MF_E8(p) * 1290, 15)) >> 2);
             out[i] += voice_amp(s, m, i);
         }
         return;
@@ -242,6 +244,8 @@ static void reso_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             s = (S->wg[(w - tap) & RS_WMASK] + y) >> 1;
             s += px_m(x, dirt * 64, 15) >> 2;
             s = clamp(soft_knee(s >> 5, 24000), -32767, 32767);
+            if (MF_E8(p))
+                s = softclip(s + px_m(s, MF_E8(p) * 1290, 15)) - (softclip(s + px_m(s, MF_E8(p) * 1290, 15)) >> 2);
             out[i] += voice_amp(s, m, i);
         }
         S->ww = w;
@@ -285,4 +289,7 @@ static const engine_t ENG_RESO = {
     .mem = sizeof(rs_slot_t) * RS_POLY,
     .xyd = {{XY_E(2), XY_E(3), XY_E(7)}, {XY_E(4), XY_E(5), XY_E(6)}},   /* X: RATE GRIT DIRT (the exciting), Y: DAMP STIFF POS (the body) */
     .xya = {{40, 40, 30}, {35, 40, 40}},
+#if FELUCCA_MONOFM
+    .e8 = {"DRIV", F_PCT, 0, 127, 0, 0, 0},
+#endif
 };
