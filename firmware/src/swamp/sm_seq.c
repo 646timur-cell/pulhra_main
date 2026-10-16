@@ -83,7 +83,7 @@ static void sm_seq_step(uint32_t t, uint32_t step_q8)
     sm_pos[t] = (uint8_t)i;
     sm_next[t] = (uint8_t)(i + 1u < len ? i + 1u : 0u);
     s = &pt->step[t][i];
-    if (!s->n || (s->flags & SMF_REST))
+    if (!s->n || (s->flags & SMF_REST))                   /* (n first: the main loop writes it last, sm_step_toggle) */
         return;                                           /* (no trig: the notes before run out their LEN) */
     sm_seq_release(t);
     for (k = 0; k < s->n && k < 4u; k++) {

@@ -194,6 +194,12 @@ static void fm1_main(void)
         if (usb.ota_req) {                              /* M-UPGRADE upgrade command */
             usb.ota_req = 0;
             panic_req = (1u << NTRK) - 1u;               /* every track (bit per track) */
+            {                                           /* and the transport stopped: no new note during the flash */
+                sm_cmd_t c = {SMC_STOP, 0, 0, 0, 0};    /* writes (a full queue empties within a block: a few tries) */
+                uint32_t k;
+                for (k = 0; k < 10u && !sm_cmd_push(c); k++)
+                    fm1_delay_ms(1);
+            }
             lcd_wake_now();                             /* (its progress on the screen) */
             if (flash_ok)
                 ota_session();                          /* returns only if nothing was committed */

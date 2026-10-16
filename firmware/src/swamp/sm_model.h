@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* SWAMP MACHINE project model: 16 patterns of 4 tracks x 32 steps, the kit (the four sounds) in every pattern, parameter
- * locks per pattern. The main loop is its only writer; the audio stream reads (Task 4 copies what it plays). */
+ * locks per pattern. Ownership: the main loop is the ONLY writer of the model (smp: parameters, steps, lengths, tempo,
+ * the current pattern, everything); the audio stream only reads it (the steps it plays, a sound on SMC_LOAD) and owns
+ * trk[], the transport and the sequencer's state (sm_cmd.c, sm_seq.c). */
 #define SM_NTRK 4u
 #define SM_NPAT 16u
 #define SM_NSTEP 32u

@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* SWAMP MACHINE command queue: the main loop -> the audio stream. The main loop never writes trk[] nor a step: it writes
- * the model (sm_model.h) and pushes a command; events_block (sm_seq.c) drains the queue at the start of each audio block,
- * before the engines and the notes of the block, so the core never sees half an edit.
+/* SWAMP MACHINE command queue: the main loop -> the audio stream. Ownership: the main loop is the only writer of the
+ * model (smp: parameters, steps, lengths, tempo, everything); the audio stream only reads it and owns trk[], the
+ * transport and the sequencer's state. So the main loop writes the model, then pushes a command for what the core must
+ * take (a value, a sound, PLAY / STOP); events_block (sm_seq.c) drains the queue at the start of each audio block,
+ * before the engines and the notes of the block, so the core never sees half an edit. A step is not a command: the
+ * sequencer reads it from the model (sm_step_toggle below writes it so that a half-written step never plays).
  *
  * One producer, one consumer: sm_cmd_push from the main loop only (never from an interrupt), sm_cmd_drain from the audio
  * interrupt only. The target (pi32v2) has one core and the audio interrupt preempts the main loop, never the other way
@@ -16,7 +19,7 @@
  *  - SMC_PARAM with the ring full and no pending value of its {trk, param}: a second small ring of values only (sm_cov),
  *    drained after the main one and coalesced the same way. While it holds anything the main ring takes nothing (a later
  *    command must not overtake an earlier value), the values go on into sm_cov; anything else is refused (0). */
-enum { SMC_PLAY, SMC_STOP, SMC_TRIG, SMC_PARAM, SMC_LOAD };
+enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD };
 typedef struct { uint8_t kind, trk, step, param; int16_t val; } sm_cmd_t;
 
 #define SM_NCMD 64u                                       /* the ring */
@@ -80,8 +83,10 @@ static int sm_ring_get(sm_ring_t *r, sm_cmd_t *c)
     return 1;
 }
 
-/* the main loop: 1 = queued (or coalesced), 0 = refused (full). Loops again only if the drain ran during this push (at
- * most once a block, and a push is far shorter than a block) */
+/* the main loop: 1 = queued (or coalesced), 0 = refused (full). A refused SMC_PARAM: its value is in the model already
+ * (the caller wrote it there first), the caller pushes it again later (its next push of that parameter, or its next
+ * poll); a refused PLAY / STOP / LOAD is not kept anywhere: the caller retries it on its next poll. Loops again only if
+ * the drain ran during this push (at most once a block, and a push is far shorter than a block) */
 static int sm_cmd_push(sm_cmd_t c)
 {
     for (;;) {
@@ -111,11 +116,12 @@ static int sm_cmd_push(sm_cmd_t c)
 static void sm_seq_play(void);
 static void sm_seq_stop(void);
 
-/* one command onto the model and the core (the audio stream's side) */
+/* one command onto the core (the audio stream's side; the model is the main loop's and was written before the push).
+ * A value is clamped to its parameter's range (P_E0..P_E8: the range of the engine the track is on its way to) */
 static void sm_cmd_apply(const sm_cmd_t *c)
 {
     uint32_t t = c->trk;
-    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     switch (c->kind) {
     case SMC_PLAY:
         sm_seq_play();
@@ -123,23 +129,10 @@ static void sm_cmd_apply(const sm_cmd_t *c)
     case SMC_STOP:
         sm_seq_stop();
         break;
-    case SMC_TRIG:                                        /* a trig toggled: on, C3 + the track's ROOT, vel 100, LEN 0 */
-        if (t < SM_NTRK && c->step < SM_NSTEP) {          /* (the track's GATE); off: n = 0 */
-            sm_step_t *s = &pt->step[t][c->step];
-            if (s->n) {
-                s->n = 0;
-            } else {
-                memset(s, 0, sizeof *s);
-                s->note[0] = (uint8_t)(48 + clamp(trk[t].p[P_ROOT], 0, 11));
-                s->n = 1;
-                s->vel = 100;
-            }
-        }
-        break;
     case SMC_PARAM:
         if (t < SM_NTRK && c->param < P_COUNT) {
-            pt->kit.snd[t].p[c->param] = (int8_t)c->val;
-            trk[t].p[c->param] = c->val;
+            const param_desc_t *d = param_desc_of(eng_idx(trk[t].eng_req), c->param);
+            trk[t].p[c->param] = (int16_t)clamp(c->val, d->min, d->max);
         }
         break;
     case SMC_LOAD:
@@ -157,4 +150,29 @@ static void sm_cmd_drain(void)
         sm_cmd_apply(&c);
     while (sm_ring_get(&sm_cov, &c))
         sm_cmd_apply(&c);
+}
+
+/* the main loop: toggle the trig of step st on track t in the current pattern. On: C3 + the track's ROOT, vel 100, LEN 0
+ * (the track's GATE), no flags; every field first, then a compiler barrier, then n (one byte store): the audio stream
+ * (sm_seq_step reads n first) sees either no trig or the whole one. Off: n = 0 (one byte). */
+static void sm_step_toggle(uint32_t t, uint32_t st)
+{
+    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    sm_step_t *s;
+    if (t >= SM_NTRK || st >= SM_NSTEP)
+        return;
+    s = &pt->step[t][st];
+    if (s->n) {
+        s->n = 0;
+        return;
+    }
+    s->note[0] = (uint8_t)(48 + clamp(pt->kit.snd[t].p[P_ROOT], 0, 11));
+    s->note[1] = s->note[2] = s->note[3] = 0;
+    s->vel = 100;
+    s->len = 0;
+    s->cond = 0;
+    s->flags = 0;
+    s->nudge = 0;
+    SM_BARRIER();
+    s->n = 1;
 }

@@ -4,7 +4,8 @@
  *   KIT    the kit reaches the core: every track sounds its machine, releases to silence; a machine change mid-note fades without a click
  *   SETTINGS  the settings record in the flash (the learned panel table, HOLD, palette) reaches SWAMP: sm_settings_load
  *   SEQ    the step sequencer (sm_seq.c): timing at 30 / 120 / 300 BPM, track lengths 1 and 32, trigs while playing, STOP
- *   CMD    the command queue (sm_cmd.c): full ring, coalesced values, a drain in the middle of a push; LOAD before engine_block; PANIC
+ *   CMD    the command queue (sm_cmd.c): full ring, coalesced and clamped values, a drain in the middle of a push
+ *   STEP   sm_step_toggle (the main loop's); LOAD before engine_block; PANIC
  *   cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/swamp_test tests/swamp_test.c -lm */
 #include "swamp_host.h"
 /* the settings record as the firmware reads it (swamp.c: gfx, panel, settings_persist, storage on a simulated NOR) */
@@ -47,6 +48,8 @@ static void seq_note_on(track_t *t, uint32_t note, uint32_t vel)
 static int preempt_armed;
 static void sm_cmd_drain(void);
 #define SM_CMD_PREEMPT() do { if (preempt_armed) { preempt_armed = 0; sm_cmd_drain(); } } while (0)
+/* every note-on of the app code included below (the sequencer's) goes through the counter; the tests' own calls after
+ * the #undef go to voice.c's directly */
 #define trk_note_on seq_note_on
 #include "../firmware/src/swamp/sm_app.c"
 #undef trk_note_on
@@ -372,6 +375,24 @@ static int push(uint32_t kind, uint32_t t, uint32_t step, uint32_t param, int32_
     return sm_cmd_push(c);
 }
 
+/* the main loop's way to change a value: the model first (in its range), then the command */
+static int set_param(uint32_t t, uint32_t p, int32_t v)
+{
+    smp.pat[smp.cur].kit.snd[t].p[p] = (int8_t)v;
+    return push(SMC_PARAM, t, 0, p, v);
+}
+
+/* every parameter of every track: the core's == the model's */
+static int core_is_model(void)
+{
+    uint32_t t, p;
+    int ok = 1;
+    for (t = 0; t < SM_NTRK; t++)
+        for (p = 0; p < P_COUNT; p++)
+            ok &= trk[t].p[p] == (int16_t)smp.pat[smp.cur].kit.snd[t].p[p];
+    return ok;
+}
+
 static void run_block(void)
 {
     block_peak(0, 0);
@@ -386,8 +407,8 @@ static int test_seq_timing(void)
     uint32_t b;
     int bad = 0;
     seq_reset();
-    push(SMC_TRIG, 0, 0, 0, 0);
-    push(SMC_TRIG, 0, 4, 0, 0);
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
     push(SMC_PLAY, 0, 0, 0, 0);
     for (b = 0; b < 1000u; b++)                          /* 32000 samples: steps 0 .. 5 */
         run_block();
@@ -415,9 +436,9 @@ static int test_seq_tempo_edges(void)
         smp.bpm10 = BPM[k];
         smp.pat[smp.cur].kit.snd[0].len = 1;
         smp.pat[smp.cur].kit.snd[1].len = 32;
-        push(SMC_TRIG, 0, 0, 0, 0);
+        sm_step_toggle(0, 0);
         for (i = 0; i < 4u; i++)
-            push(SMC_TRIG, 1, HIT[i], 0, 0);
+            sm_step_toggle(1, HIT[i]);
         push(SMC_PLAY, 0, 0, 0, 0);
         while (seq_clock <= end) {                           /* (the sequencer alone: nothing to hear) */
             events_block(CTL);
@@ -433,64 +454,95 @@ static int test_seq_tempo_edges(void)
     return bad;
 }
 
-/* the queue full (64 trig toggles, nothing drained), then 200 values of one parameter: the last one arrives, every
- * trig too; a trig more is refused (and so is anything but a value while values wait past the full ring) */
+/* T2's parameters 0..63 to another value in their range (and in the model's int8): 64 distinct values, the ring full */
+static int fill_ring_t2(void)
+{
+    uint32_t p;
+    int ok = 1;
+    for (p = 0; p < 64u; p++) {
+        const param_desc_t *d = param_desc_of(eng_idx(trk[1].eng_req), p);
+        int32_t v = smp.pat[smp.cur].kit.snd[1].p[p] == d->min ? d->max : d->min;
+        ok &= set_param(1, p, clamp(v, -64, 127));
+    }
+    return ok;
+}
+
+/* the queue full (64 values of distinct parameters, nothing drained), then 200 values of one parameter: the last one
+ * arrives, all 64 too; anything but a value is refused while values wait past the full ring; values out of range land
+ * clamped; after the drain the core is the model */
 static int test_cmd_coalesce(void)
 {
     uint32_t i;
     int ok = 1, bad = 0;
     seq_reset();
-    for (i = 0; i < 64u; i++)
-        ok &= push(SMC_TRIG, i >> 5, i & 31u, 0, 0);
-    bad += check("CMD: 64 commands fit the ring", ok);
-    bad += check("CMD: the 65th trig is refused (full)", !push(SMC_TRIG, 2, 0, 0, 0));
+    bad += check("CMD: 64 commands fit the ring", fill_ring_t2());
+    bad += check("CMD: the 65th command (a LOAD) is refused (full)", !push(SMC_LOAD, 2, 0, 0, 0));
     for (i = 0, ok = 1; i < 200u; i++)
-        ok &= push(SMC_PARAM, 0, 0, P_FCUT, (int32_t)i);
+        ok &= set_param(0, P_FCUT, (int32_t)(i % 128u));
     bad += check("CMD: 200 values of T1 CUT on the full ring are taken (coalesced)", ok);
-    bad += check("CMD: ... and then a trig, a STOP are refused (they would overtake the values)",
-                 !push(SMC_TRIG, 2, 1, 0, 0) && !push(SMC_STOP, 0, 0, 0, 0));
+    bad += check("CMD: ... and then a LOAD, a STOP are refused (they would overtake the values)",
+                 !push(SMC_LOAD, 2, 0, 0, 0) && !push(SMC_STOP, 0, 0, 0, 0));
+    bad += check("CMD: (nothing reached the core before the drain)", trk[0].p[P_FCUT] != 199 % 128 && !core_is_model());
     sm_cmd_drain();
-    for (i = 0, ok = 1; i < 64u; i++)
-        ok &= smp.pat[smp.cur].step[i >> 5][i & 31u].n == 1u;
-    bad += check("CMD: after the drain T1 CUT == 199", trk[0].p[P_FCUT] == 199);
-    bad += check("CMD: all 64 trigs applied, the refused ones not",
-                 ok && !smp.pat[smp.cur].step[2][0].n && !smp.pat[smp.cur].step[2][1].n);
-    bad += check("CMD: the ring takes commands again after the drain", push(SMC_TRIG, 2, 0, 0, 0));
+    printf("swamp: cmd: T1 CUT %d (want %d)\n", trk[0].p[P_FCUT], 199 % 128);
+    bad += check("CMD: after the drain T1 CUT == the last value, all 64 values of T2 applied: core == model",
+                 trk[0].p[P_FCUT] == 199 % 128 && core_is_model());
+    bad += check("CMD: the ring takes commands again after the drain", push(SMC_STOP, 0, 0, 0, 0));
+    smp.pat[smp.cur].kit.snd[0].p[P_FCUT] = 127;          /* (the main loop's model: its own clamp) */
+    push(SMC_PARAM, 0, 0, P_FCUT, 300);
+    smp.pat[smp.cur].kit.snd[0].p[P_LEVEL] = 0;
+    push(SMC_PARAM, 0, 0, P_LEVEL, -50);
     sm_cmd_drain();
-    bad += check("CMD: a trig sets the step: C3 + ROOT, vel 100, len 0 (the track's GATE)",
-                 smp.pat[smp.cur].step[2][0].note[0] == 48u + (uint32_t)trk[2].p[P_ROOT] &&
-                 smp.pat[smp.cur].step[2][0].vel == 100u && smp.pat[smp.cur].step[2][0].len == 0u);
+    bad += check("CMD: values out of range land clamped (CUT 300 -> 127, LEVEL -50 -> 0): core == model",
+                 trk[0].p[P_FCUT] == 127 && trk[0].p[P_LEVEL] == 0 && core_is_model());
     return bad;
 }
 
 /* the audio stream drains in the middle of a coalescing push (after the push found the pending value, before it stored
- * the new one): the new value still arrives, nothing is applied twice */
+ * the new one): the new value still arrives, the others once */
 static int test_cmd_coalesce_race(void)
 {
-    uint32_t i;
+    uint32_t p;
     int ok = 1, bad = 0;
-    seq_reset();                                          /* the ring: 63 trigs and CUT 5, full */
-    for (i = 0; i < 63u; i++)
-        push(SMC_TRIG, i >> 5, i & 31u, 0, 0);
-    push(SMC_PARAM, 0, 0, P_FCUT, 5);
+    seq_reset();                                          /* the ring: T2's values 0..62 and T1 CUT 5, full */
+    fill_ring_t2();
+    sm_cmd_drain();
+    for (p = 0; p < 63u; p++)                             /* (back to the defaults: 63 distinct values again) */
+        set_param(1, p, TP[p].def);
+    set_param(0, P_FCUT, 5);
     preempt_armed = 1;
-    ok &= push(SMC_PARAM, 0, 0, P_FCUT, 7);
+    ok &= set_param(0, P_FCUT, 7);
     ok &= !preempt_armed && trk[0].p[P_FCUT] == 5;        /* (the drain in the middle took CUT 5) */
     sm_cmd_drain();
-    for (i = 0; i < 63u; i++)
-        ok &= smp.pat[smp.cur].step[i >> 5][i & 31u].n == 1u;
-    bad += check("CMD: drained while coalescing into the ring: CUT 7 arrives, trigs once", ok && trk[0].p[P_FCUT] == 7);
-    seq_reset();                                          /* the ring full of trigs, CUT 5 past it */
-    for (i = 0; i < 64u; i++)
-        push(SMC_TRIG, i >> 5, i & 31u, 0, 0);
-    push(SMC_PARAM, 0, 0, P_FCUT, 5);
+    bad += check("CMD: drained while coalescing into the ring: CUT 7 arrives, core == model",
+                 ok && trk[0].p[P_FCUT] == 7 && core_is_model());
+    seq_reset();                                          /* the ring full of T2's values, T1 CUT 5 past it */
+    fill_ring_t2();
+    set_param(0, P_FCUT, 5);
     preempt_armed = 1;
-    ok = push(SMC_PARAM, 0, 0, P_FCUT, 7);
+    ok = set_param(0, P_FCUT, 7);
     ok &= !preempt_armed && trk[0].p[P_FCUT] == 5;
     sm_cmd_drain();
-    for (i = 0; i < 64u; i++)
-        ok &= smp.pat[smp.cur].step[i >> 5][i & 31u].n == 1u;
-    bad += check("CMD: drained while coalescing past the full ring: CUT 7 arrives, trigs once", ok && trk[0].p[P_FCUT] == 7);
+    bad += check("CMD: drained while coalescing past the full ring: CUT 7 arrives, core == model",
+                 ok && trk[0].p[P_FCUT] == 7 && core_is_model());
+    return bad;
+}
+
+/* the main loop's sm_step_toggle: on, the whole step then n; off, n = 0 */
+static int test_step_toggle(void)
+{
+    const sm_step_t *s = &smp.pat[0].step[2][9];
+    int bad = 0;
+    seq_reset();
+    smp.pat[0].kit.snd[2].p[P_ROOT] = 3;
+    sm_step_toggle(2, 9);
+    bad += check("STEP: on: C3 + ROOT, vel 100, LEN 0 (the track's GATE), no flags, n 1",
+                 s->n == 1u && s->note[0] == 51u && s->vel == 100u && !s->len && !s->flags && !s->cond && !s->nudge);
+    sm_step_toggle(2, 9);
+    bad += check("STEP: off: n 0", !s->n);
+    sm_step_toggle(4, 0);
+    sm_step_toggle(0, 32);
+    bad += check("STEP: out of range: nothing", !smp.pat[0].step[0][0].n);
     return bad;
 }
 
@@ -501,20 +553,26 @@ static int test_trig_while_playing(void)
     uint32_t b;
     int bad = 0;
     seq_reset();
-    push(SMC_TRIG, 0, 0, 0, 0);
-    push(SMC_TRIG, 1, 3, 0, 0);
-    push(SMC_TRIG, 3, 8, 0, 0);
+    sm_step_toggle(0, 0);
+    sm_step_toggle(1, 3);
+    sm_step_toggle(3, 8);
     push(SMC_PLAY, 0, 0, 0, 0);
-    for (b = 0; b < 300u; b++)
+    for (b = 0; b < 300u; b++)                            /* (to step 1) */
         run_block();
     memcpy(before, smp.pat[smp.cur].step, sizeof before);
-    push(SMC_TRIG, 1, 7, 0, 0);
+    sm_step_toggle(1, 7);
     run_block();
     memcpy(after, smp.pat[smp.cur].step, sizeof after);
+    for (b = 0; b < 1000u; b++)                           /* (to step 7.5) */
+        run_block();
     bad += check("SEQ: a trig while playing sets step 7 of T2",
                  !before[1][7].n && after[1][7].n == 1u && after[1][7].note[0] == 48u + (uint32_t)trk[1].p[P_ROOT]);
     after[1][7] = before[1][7];
     bad += check("SEQ: ... and no other step changes", !memcmp(before, after, sizeof before) && sm_playing);
+    printf("swamp: T2 note-ons %u, at %u, %u (want %u, %u)\n", on_n[1], on_at[1][0], on_at[1][1], 3u * FS / 8u,
+           7u * FS / 8u);
+    bad += check("SEQ: ... and plays in this pass (T2 steps 3 and 7)",
+                 on_n[1] == 2u && near(on_at[1][0], 3u * FS / 8u) && near(on_at[1][1], 7u * FS / 8u));
     return bad;
 }
 
@@ -525,10 +583,9 @@ static int test_stop_releases(void)
     int fading = 1, gated = 1, bad = 0;
     seq_reset();
     for (t = 0; t < SM_NTRK; t++)
-        push(SMC_TRIG, t, 0, 0, 0);
-    run_block();                                          /* (the trigs into the model) */
+        sm_step_toggle(t, 0);
     for (t = 0; t < SM_NTRK; t++)
-        smp.pat[smp.cur].step[t][0].len = 255u;           /* INF (stage 1 has no command for LEN yet) */
+        smp.pat[smp.cur].step[t][0].len = 255u;           /* INF (the main loop's model; no LEN control in stage 1) */
     push(SMC_PLAY, 0, 0, 0, 0);
     for (b = 0; b < 2000u; b++)                           /* past step 0 (172 blocks): the notes ring on into step 11 */
         run_block();
@@ -626,6 +683,7 @@ int main(void)
     bad += test_seq_tempo_edges();
     bad += test_cmd_coalesce();
     bad += test_cmd_coalesce_race();
+    bad += test_step_toggle();
     bad += test_trig_while_playing();
     bad += test_stop_releases();
     bad += test_load_order();
