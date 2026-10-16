@@ -927,6 +927,25 @@ static int test_scenes(void)
         frames(100);
         bad += check("MONOFM SCENES: SEQ held: the scene playing lit, the stored ones breathe, empty dark", ok);
     }
+    {   /* SAVE > SCENES over a stored E: the OVERWRITE? dialog, OCT+, the NAME screen's OCT+: E is written (not A) */
+        uint32_t i;
+        for (i = 0; i < NPAGES; i++)
+            if (PAGES[i].graph == GR_SLOTS) break;
+        ui.home = 0; ui.page = (uint8_t)i; page_entered(); frame();
+        song.g[G_SLOT] = 5;
+        trk[0].p[P_E0] = 33;
+        ui.act = 4; act_do();                                   /* (SAVE: the dialog, E is used) */
+        frame();
+        press(B_OCTUP);                                         /* (the dialog: OCT+, the NAME screen) */
+        press(B_OCTUP);                                         /* (NAME: OCT+ writes) */
+        frames(100);
+        {
+            project_t q;
+            int ok_e = proj_import(&q, proj_store(4), sizeof(project_store_t)) && q.t[0].p[P_E0] == 33;
+            int ok_a = proj_import(&q, proj_store(0), sizeof(project_store_t)) && q.t[0].p[P_E0] == 11;
+            bad += check("MONOFM SCENES: SAVE > SCENES over E (dialog, NAME): E written, A untouched", ok_e && ok_a);
+        }
+    }
     song.g[G_SLOT] = 1;
     mf_scene_pick((uint32_t)song.g[G_SLOT] - 1u, 0);
     bad += check("MONOFM SCENES: SAVE > SCENES: G_SLOT A..P, LOAD loads", msc.cur == 0u && trk[0].eng_req == ENGI_MSAW &&

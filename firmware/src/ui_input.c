@@ -1750,7 +1750,7 @@ static void ui_input(void)
             ui.confirm = 0;
             ui.force = 1;
             if (kind == CF_OVR_PROJ) {                  /* overwrite: the NAME screen writes it */
-                name_open(NK_PROJ_SAVE, ui.confirm_trk & 3u);
+                name_open(NK_PROJ_SAVE, ui.confirm_trk % (FELUCCA_MONOFM ? 16u : 4u));   /* (MONOFM: scenes A..P) */
             } else if (kind == CF_OVR_USER) {
                 name_open(NK_USER_SAVE, ui.confirm_trk);
             } else if (kind == CF_ERASE_USER) {

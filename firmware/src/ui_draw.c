@@ -1470,8 +1470,8 @@ static void confirm_text(char *a, char *b)
         break;
     case CF_OVR_PROJ:
         str_cpy(a, "OVERWRITE PROJECT A?", 24);
-        a[18] = (char)('A' + (k & 3u));
-        if (!project_name(k & 3u, b) || !b[0])          /* the project's name, else what SONG plays from it */
+        a[18] = (char)('A' + k % (FELUCCA_MONOFM ? 16u : 4u));
+        if (!project_name(k % (FELUCCA_MONOFM ? 16u : 4u), b) || !b[0])          /* the project's name, else what SONG plays from it */
             str_cpy(b, "SONG PATTERN CHANGES", 24);
         break;
     case CF_DEL_ROW:
