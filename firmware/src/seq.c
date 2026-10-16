@@ -1300,6 +1300,12 @@ static __attribute__((noinline)) void seq_nd_start(track_t *t, uint32_t period, 
     }
 }
 
+#if FELUCCA_MONOFM
+static uint32_t mf_sc_carry;                 /* MONOFM: a scene came in this block (scene_mf.c): samples into step 1 */
+static void mf_scene_tick(uint32_t n);
+#else
+#define mf_sc_carry 0u
+#endif
 static void seq_tick(track_t *t, uint32_t n)
 {
     uint32_t period, len;
@@ -1321,7 +1327,7 @@ static void seq_tick(track_t *t, uint32_t n)
             seq_nd_due(t, period, len, cur_len, n);
         if (t->seq_pos < cur_len && t->seq_pos != 0x7FFFFFFFu + n)
             break;
-        t->seq_pos = t->seq_pos >= 0x7FFFFFFFu ? (chain.running ? chain.carry : 0u) : t->seq_pos - cur_len;
+        t->seq_pos = t->seq_pos >= 0x7FFFFFFFu ? (chain.running ? chain.carry : mf_sc_carry) : t->seq_pos - cur_len;
         t->seq_idx = (uint16_t)((t->seq_idx + 1u) % len);
         rec_hold(t, t->seq_idx, len);
         if (t->p[P_SQNT] && !t->nd_fired)
@@ -1573,8 +1579,14 @@ static void events_block(uint32_t n)
     if (aud_req)
         seq_audition();                               /* (STEP PREVIEW: a step sounds, stopped) */
     chain_tick(seq_n);
+#if FELUCCA_MONOFM
+    mf_scene_tick(seq_n);                             /* (a scene at the pattern's end: scene_mf.c) */
+#endif
     for (i = 0; i < NTRK; i++)
         seq_tick(&trk[i], seq_n);
+#if FELUCCA_MONOFM
+    mf_sc_carry = 0;
+#endif
     if (cin_flush)
         cin_record();
     if (song.playing)

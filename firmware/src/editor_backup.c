@@ -136,6 +136,7 @@ static uint32_t ed_bk_commit(void)
 #endif
     if (ed_bk_id >= 2u && ed_bk_id <= 5u) {
         memset(&proj_slot[ed_bk_id - 2u], 0, sizeof proj_slot[0]);
+        mf_sc_forget(ed_bk_id - 2u);
         if (proj_cur == ed_bk_id - 2u)
             proj_cur = PROJ_NO_SLOT;                     /* (another project there now: the music keeps its name) */
         if (ed_bk_len) memcpy(&proj_slot[ed_bk_id - 2u], raw, ed_bk_len);

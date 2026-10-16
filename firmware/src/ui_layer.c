@@ -49,6 +49,15 @@
  * a double tap leaves the page as it was. A first tap that acted instead of opening a page (EDIT on STEP: clear the
  * step; on USER / PROJECT: rename) arms no double tap: two quick taps there still act twice. */
 #include "ui_tools.c"                                   /* SEQ TOOLS' actions */
+#if FELUCCA_MONOFM                                      /* the scenes (scene_mf.c): SEQ held, the white keys A .. P */
+static void mf_scene_key(uint32_t k, uint32_t p);
+static void mf_scene_keys(uint64_t held_keys);
+static void mf_scene_layer_open(void);
+static int mf_scene_is(uint32_t n);
+static int mf_scene_coming(uint32_t n);
+static uint32_t mf_scene_sig(void);
+static int mf_scene_info(uint32_t s, const char **name);
+#endif
 #if FELUCCA_STRANGE                                     /* the scenes (scene.c): GLO's white keys G4 .. G5 */
 #define SC_SIG ((uint32_t)sc_last * 7919u + (uint32_t)sc_used(0) + sc_used(1) * 2u + sc_used(2) * 4u + sc_used(3) * 8u + \
                 sc_used(4) * 16u + sc_used(5) * 32u + sc_used(6) * 64u + sc_used(7) * 128u)
@@ -374,6 +383,10 @@ static void layer_opened(uint32_t l)
     ly_epage = (uint8_t)ly_pg_of(eng_rank(TSEL->eng_req % NENGINES));   /* (EDIT: the engine's page) */
 #if FELUCCA_STRANGE
     se_page = eng_rank(TSEL->eng_req % NENGINES) >= SE_P1;   /* (EDIT: the machine's page) */
+#endif
+#if FELUCCA_MONOFM
+    if (l == LAYER_SEQ)
+        mf_scene_layer_open();                          /* (two taps from here on chain two scenes) */
 #endif
     if (l == LAYER_SEQ || l == LAYER_REC) {             /* the track as it is now (OCT-) */
         memcpy(tl_open.step, TSEL->step, sizeof tl_open.step);
@@ -872,6 +885,13 @@ static void layer_key(uint32_t l, uint32_t k)
     } else if (l == LAYER_SEQ) {
         eu_key(k);
 #endif
+#if FELUCCA_MONOFM
+    } else if (l == LAYER_SEQ) {                        /* the white keys the scenes, the black ones the tools */
+        if (!key_black(k))
+            mf_scene_key(k, p);
+        else
+            tools_key(p);
+#endif
     } else if (l == LAYER_SEQ) {
         if (!key_black(k))
             tools_key(p);
@@ -888,6 +908,9 @@ static void layer_keys(uint32_t keys)
             layer_key(l, k);
     if (lys.eqh)
         eqa_release();
+#if FELUCCA_MONOFM
+    mf_scene_keys(kb_layer);                            /* (a scene key let go: picked; held on: stored) */
+#endif
 #if FELUCCA_STRANGE
     if (sc_k != 0xFFu) {                                /* the scene key: still held (to store), let go (to call) */
         int held = (kb_layer >> sc_k) & 1u;
@@ -1088,6 +1111,16 @@ static uint32_t layer_leds(uint32_t *br)
         } else if (l == LAYER_EDIT && (a = eqa_of(TSEL, p)) != 0) {   /* the quick actions: on lit (DRUM: sounding), */
             on = a->on(TSEL, a->arg) != 0u;             /* a HOLD one off breathes, none dark */
             can = a->kind == LK_HOLD;
+#if FELUCCA_MONOFM
+        } else if (l == LAYER_SEQ) {                    /* the scene playing lit, the one coming blinks, the stored ones
+                                                         * breathe; the tools breathe */
+            if (b)
+                can = tl_cell(TSEL, p) && !chain_busy();
+            else {
+                on = mf_scene_is(p) || (mf_scene_coming(p) && ((fm1_ms >> 7) & 1u));
+                can = (uint32_t)mf_scene_info(p, 0);
+            }
+#endif
         } else if (l == LAYER_SEQ) {                    /* the tools breathe (not while a song plays); DRUM: the lane */
             on = b && p < NLANE && drum_track(TSEL) && p == ui.lane;   /* lit, the other lanes breathe */
             can = b ? p < NLANE && drum_track(TSEL) : tl_cell(TSEL, p) && !chain_busy();
@@ -1395,6 +1428,28 @@ static void layer_seq(void)
         eu_cell(6 + (int32_t)(i % 5u) * 46, 64 + (int32_t)(i / 5u) * 18, 43, EU_PATN[i],
                 p[P_SLEN] == EU_PAT[i][0] && p[P_SSWING] == EU_PAT[i][1]);
 }
+#elif FELUCCA_MONOFM
+/* MONOFM's SEQ held: the scenes A..P on the white keys (4 a row: the letter, the name), the one playing selected, the
+ * one coming (a chain: both) in the accent, empty ones dim; the tools on the black keys under them */
+static void layer_seq(void)
+{
+    static const char *const TN[6] = {"CLR", "REV", "<<", ">>", "RND", "COOK"};
+    uint32_t p, st = chain_busy() ? LS_DIM : LS_OFF;
+    for (p = 0; p < 16u; p++) {
+        const char *nm = "";
+        char n[2] = {(char)('A' + p), 0}, b[8];
+        int used = mf_scene_info(p, &nm);
+        str_cpy(b, used ? (nm[0] ? nm : "SAVED") : "--", 7);
+        lcell(LC_X(p % 4u), 4 + 22 * (int32_t)(p / 4u), 18, n, ICON_COUNT, 0, b,
+              mf_scene_is(p) ? LS_SEL : mf_scene_coming(p) ? LS_HELD : used ? LS_OFF : LS_DIM, 0);
+    }
+    for (p = 0; p < 6u; p++) {                          /* black keys 1..6: CLEAR REVERSE SHIFT < > RANDOM COOK */
+        int32_t x = 6 + 38 * (int32_t)p;
+        uint16_t ink, fill = lc_box(x, LM_Y, 35, LM_H, lc_fill(st, &ink));
+        GFX_HOOK_ALIGN(x, LM_Y, x + 35, LM_Y + LM_H, AL_HV, "seq tool cell name centred");
+        cv_text_in(x, LM_Y + CAP_IN(S, LM_H), 35, &AF_S, TN[p], ink, fill);
+    }
+}
 #else
 static void layer_seq(void)
 {
@@ -1536,7 +1591,11 @@ static void draw_layer(void)
         sig += (uint32_t)ui_rec_prefs * 31u + (uint32_t)chain_busy() * 3u + (uint32_t)rec_clearable() * 5u + song.sel * 977u;
     else if (l == LAYER_SEQ)
         sig += (uint32_t)TSEL->p[P_AMODE] * 7919u + (uint32_t)TSEL->p[P_SLEN] * 104729u + (uint32_t)TSEL->p[P_SSWING] * 31337u +
-               (uint32_t)drum_track(TSEL) * 31u + ui.lane * 5u + (uint32_t)chain_busy() * 3u + (uint32_t)TSEL->p[P_E0] * 131u + song.sel * 977u;
+               (uint32_t)drum_track(TSEL) * 31u + ui.lane * 5u + (uint32_t)chain_busy() * 3u + (uint32_t)TSEL->p[P_E0] * 131u + song.sel * 977u
+#if FELUCCA_MONOFM
+               + mf_scene_sig()
+#endif
+               ;
     else
         sig += snd_id() * 31u + (uint32_t)preset_favorite() * 5u + (uint32_t)chain_busy() * 3u + up_gen * 101u +
                eqa_sig() * 2654435761u;

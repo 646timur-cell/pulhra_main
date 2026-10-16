@@ -578,10 +578,195 @@ static int test_punch(void)
     return check(what, d2 / (299.0 * CTL) < 10.0 && d1 / (299.0 * CTL) > 200.0 && d0 / (299.0 * CTL) > 200.0);
 }
 
+
+/* STABILITY of the Monomachine machines (29..41): each one fuzzed MF_FUZZ rounds: a random preset, its eight sound
+ * parameters (and VOICE GLIDE DETUNE, the envelope, the filters) at their ends or anywhere, chords of 1..6 notes over the
+ * whole MIDI range at any velocity, a parameter changed every block or two while they sound, engine switches between
+ * the machines with notes held. Fails on: a run of full-scale samples (a blow-up), DC that stays, a voice left active
+ * or sound left after every note was let go with a short release, output that never comes back to a preset's own level
+ * (state ruined); built with -fsanitize=undefined,address (tests/monofm_stab.sh) it catches overflows and table reads
+ * out of range too. Then each preset held MF_LONG seconds: its level at the end against its level after the attack */
+static uint32_t st_rng = 0x9E3779B9u;
+static uint32_t st_rand(void) { st_rng ^= st_rng << 13; st_rng ^= st_rng >> 17; st_rng ^= st_rng << 5; return st_rng; }
+static int16_t st_val(uint32_t e, uint32_t id)
+{
+    const param_desc_t *d = param_desc_of(e, id);
+    uint32_t r = st_rand() % 4u, span = (uint32_t)(d->max - d->min + 1);
+    return (int16_t)(r == 0u ? d->min : r == 1u ? d->max : d->min + (int32_t)(st_rand() % span));
+}
+static const uint8_t ST_IDS[] = {P_E0, P_E0 + 1, P_E0 + 2, P_E0 + 3, P_E0 + 4, P_E0 + 5, P_E0 + 6, P_E0 + 7,
+                                 P_VOICE, P_GLIDE, P_DETUNE, P_ATK, P_DEC, P_SUS, P_REL, P_FLT, P_FCUT, P_FRES,
+                                 P_HBASE, P_HWIDTH, P_HRES, P_ED_FLT, P_LEVEL};
+static double st_level(uint32_t e, uint32_t preset, double secs, double *late, int32_t *peak)
+{
+    int32_t buf[2 * CTL];
+    uint32_t f = 0, n = (uint32_t)(SR * secs), i;
+    double a = 0, b = 0;
+    *peak = 0;
+    for (i = 0; i < 16u; i++)                          /* (the engine switched in: engine_block) */
+        mix_block(buf, CTL);
+    midi_event(0x90, 0, 48, 100);
+    while (f < n) {
+        mix_block(buf, CTL);
+        for (i = 0; i < CTL; i++, f++) {
+            double x = buf[2u * i];
+            int32_t ax = buf[2u * i] < 0 ? -buf[2u * i] : buf[2u * i];
+            *peak = ax > *peak ? ax : *peak;
+            if (f >= SR / 5u && f < SR / 5u + SR / 2u)
+                a += x * x;
+            if (f >= n - SR / 2u)
+                b += x * x;
+        }
+    }
+    midi_event(0x80, 0, 48, 0);
+    (void)e; (void)preset;
+    *late = sqrt(b / (SR / 2u));
+    return sqrt(a / (SR / 2u));
+}
+static void st_reset(void)
+{
+    ui_power_on();
+    memset(eng_mem, 0, sizeof eng_mem);
+    memset(eng_mem_owner, 0, sizeof eng_mem_owner);
+    memset(dly_buf, 0, sizeof dly_buf);
+    rev_clear();
+    song.master_q12 = 4096;
+    song.sel = 0;
+}
+static int test_stability(void)
+{
+    int bad = 0;
+    uint32_t e, rounds = getenv("MF_FUZZ") ? (uint32_t)atoi(getenv("MF_FUZZ")) : 40u;
+    double long_s = getenv("MF_LONG") ? atof(getenv("MF_LONG")) : 20.0;
+    for (e = ENGI_MSAW; e < NENGINES; e++) {
+        int32_t buf[2 * CTL];
+        uint32_t r, run = 0, worst_run = 0, blocks = 0, clips = 0, stuck = 0, ruined = 0;
+        double worst_dc = 0, worst_tail = 0;
+        char what[200];
+        int16_t fresh[P_COUNT];
+        st_reset();
+        set_engine_of(&trk[0], e);
+        apply_preset_to(&trk[0], 0);
+        memcpy(fresh, trk[0].p, sizeof fresh);
+        for (r = 0; r < rounds; r++) {
+            uint32_t nn = 1u + st_rand() % 6u, notes[6], i, b, len = 4u + st_rand() % 120u, k;
+            double sum = 0, tail = 0;
+            uint32_t cnt = 0;
+            if (st_rand() % 8u == 0u) {                  /* another machine with notes held, then back */
+                set_engine_of(&trk[0], ENGI_MSAW + st_rand() % (NENGINES - ENGI_MSAW));
+                midi_event(0x90, 0, 60, 90);
+                for (b = 0; b < 20u; b++) mix_block(buf, CTL);
+                set_engine_of(&trk[0], e);
+                midi_event(0x80, 0, 60, 0);
+            }
+            apply_preset_to(&trk[0], st_rand() % ENGINES[e]->npresets);
+            for (i = 0; i < NELEM(ST_IDS); i++)
+                if (st_rand() % 2u)
+                    trk[0].p[ST_IDS[i]] = st_val(e, ST_IDS[i]);
+            trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;   /* (the machine dry: the master's tails aside) */
+            for (i = 0; i < nn; i++) {
+                notes[i] = st_rand() % 128u;
+                midi_event(0x90, 0, notes[i], 1u + st_rand() % 127u);
+            }
+            for (b = 0; b < len; b++) {
+                if (st_rand() % 2u) {
+                    uint32_t id = ST_IDS[st_rand() % NELEM(ST_IDS)];
+                    trk[0].p[id] = st_val(e, id);
+                }
+                if (st_rand() % 16u == 0u)
+                    midi_event(0x90, 0, st_rand() % 128u, 1u + st_rand() % 127u);
+                mix_block(buf, CTL);
+                blocks++;
+                for (k = 0; k < CTL; k++) {
+                    int32_t l = buf[2u * k], a = l < 0 ? -l : l;
+                    if (a >= 32700) { clips++; run++; worst_run = run > worst_run ? run : worst_run; } else run = 0;
+                    sum += l;
+                    cnt++;
+                }
+            }
+            for (i = 0; i < 128u; i++)                   /* every note let go, a short release, FX dry */
+                midi_event(0x80, 0, i, 0);
+            trk[0].p[P_REL] = 0;
+            trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;
+            trk[0].p[P_ED_FLT] = 0;
+            sum = 0;
+            for (b = 0; b < (uint32_t)(SR * 2u / CTL); b++) {
+                mix_block(buf, CTL);
+                if (b >= (uint32_t)(SR * 3u / 2u / CTL))
+                    for (k = 0; k < CTL; k++) {
+                        tail += (double)buf[2u * k] * buf[2u * k];
+                        sum += buf[2u * k];
+                    }
+            }
+            tail = sqrt(tail / (SR / 2u));
+            sum = fabs(sum / (SR / 2u));                 /* (the DC left once everything is quiet) */
+            worst_dc = sum > worst_dc ? sum : worst_dc;
+            (void)cnt;
+            worst_tail = tail > worst_tail ? tail : worst_tail;
+            for (i = 0; i < NVOICE; i++)
+                stuck += trk[0].v[i].active;
+            dly_buf[0] = dly_buf[0];
+            memset(dly_buf, 0, sizeof dly_buf);          /* (the reverb / delay tails are the master's, not the machine's) */
+            rev_clear();
+        }
+        {   /* after all that: preset 0 sounds as from a fresh start */
+            double l0, l1, late;
+            int32_t pk;
+            memcpy(trk[0].p, fresh, sizeof fresh);
+            trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;
+            l1 = st_level(e, 0, 1.0, &late, &pk);
+            st_reset();
+            set_engine_of(&trk[0], e);
+            apply_preset_to(&trk[0], 0);
+            trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;
+            l0 = st_level(e, 0, 1.0, &late, &pk);
+            ruined = l0 > 50.0 && (l1 < 0.5 * l0 || l1 > 2.0 * l0);
+            snprintf(what, sizeof what, "MONOFM STABLE %-6s %u rounds: clip run %4u (%5.2f %%) dc %5.0f tail %4.0f stuck %u, "
+                     "fresh %5.0f after %5.0f", ENGINES[e]->name, rounds, worst_run, 100.0 * clips / (blocks * CTL + 1u),
+                     worst_dc, worst_tail, stuck, l0, l1);
+            bad += check(what, worst_run < 2000u && worst_dc < 20.0 && worst_tail < 30.0 && !stuck && !ruined);
+        }
+    }
+    for (e = ENGI_MSAW; long_s > 0 && e < NENGINES; e++) {   /* each preset held long_s seconds */
+        uint32_t k;
+        for (k = 0; k < ENGINES[e]->npresets; k++) {
+            double a, late;
+            int32_t pk;
+            char what[160];
+            const preset_t *pr = &ENGINES[e]->presets[k];
+            int sustains = pr->env[2] > 40u && e != ENGI_MBBOX;   /* (BBOX: drum hits, they end) */
+            st_reset();
+            set_engine_of(&trk[0], e);
+            apply_preset_to(&trk[0], k);
+            trk[0].p[P_DLY] = trk[0].p[P_REV] = trk[0].p[P_CHOR] = 0;
+            a = st_level(e, k, long_s, &late, &pk);
+            snprintf(what, sizeof what, "MONOFM LONG %-6s %-12s %4.0f s: rms after the attack %5.0f, at the end %5.0f, peak %5d",
+                     ENGINES[e]->name, pr->name, long_s, a, late, pk);
+            bad += check(what, pk < 32700 && (!sustains || a < 30.0 || (late > 0.3 * a && late < 2.5 * a)) && late < 3.0 * a + 50.0);
+        }
+    }
+    return bad;
+}
+
 int main(void)
 {
     const char *wavs = getenv("WAVS");
     int bad = 0;
+    if (getenv("BENCH_ENG")) {                          /* one machine, its preset BENCH_PRE: an 8-note chord for BENCH seconds,
+                                                         * T1 only (tests/monofm_cpu.sh ENG) */
+        int32_t buf[2 * CTL];
+        uint32_t e = (uint32_t)atoi(getenv("BENCH_ENG")), k, f, n = (uint32_t)(SR * atof(getenv("BENCH") ? getenv("BENCH") : "1"));
+        st_reset();
+        set_engine_of(&trk[0], e % NENGINES);
+        apply_preset_to(&trk[0], getenv("BENCH_PRE") ? (uint32_t)atoi(getenv("BENCH_PRE")) : 0u);
+        trk[0].p[P_VOICE] = V_POLY;
+        for (k = 0; k < 16u; k++) mix_block(buf, CTL);
+        for (k = 0; k < 8u; k++) midi_event(0x90, 0, 36 + k * 5u, 100);
+        for (f = 0; f < n; f += CTL) mix_block(buf, CTL);
+        return 0;
+    }
+    if (getenv("MF_STAB_ONLY"))
+        return test_stability() != 0;
     if (getenv("BENCH")) {                              /* tests/monofm_cpu.sh: one set for BENCH seconds */
         static const uint8_t B[][NPART] = {{ENGI_LYRA, ENGI_DRIFT, ENGI_RESO, ENGI_STRING},
                                            {ENGI_MODAL, ENGI_MODAL, ENGI_MODAL, ENGI_MODAL},
@@ -598,6 +783,7 @@ int main(void)
     bad += test_xy();
     bad += test_filter();
     bad += test_punch();
+    bad += test_stability();
     printf(bad ? "monofm: %d FAILED\n" : "monofm: all passed\n", bad);
     return bad != 0;
 }

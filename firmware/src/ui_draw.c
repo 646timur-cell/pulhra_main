@@ -280,7 +280,7 @@ static int head_slot(char *b)
         b[0] = s < 4u ? (char)('A' + s) : '-';
         return 1;
     }
-    if (!pat_from[k] || pat_from[k] > 4u)
+    if (!pat_from[k] || pat_from[k] > (FELUCCA_MONOFM ? 16u : 4u))   /* (MONOFM: the scenes A..P) */
         return 0;
     b[0] = (char)('A' + pat_from[k] - 1u);
     if (pat_from_sig(TSEL) != pat_from_h[k])

@@ -41,6 +41,10 @@ static const uint8_t FAM_BTN[FAM_COUNT] = {B_HOME, B_ENV, B_LFO, B_FX, B_SCL, B_
 static uint32_t cur_fam(void) { return ui.home ? FAM_HOME : cur_page()->fam; }
 
 static int layer_set_open(void);                       /* (ui_layer.c) */
+#if FELUCCA_MONOFM
+static void mf_scene_turn(int32_t s);                  /* (scene_mf.c) */
+static void mf_scene_pick(uint32_t n, int chain);
+#endif
 /* the OCT LEDs, bit 0 OCT- lit, bit 1 OCT+ lit, OCT_BREATH OCT+ breathing (can be pressed: dark .. ~60 %,
  * hal/fm1_input.h fm1_led_breath, #119). In the dialogs and on action pages OCT- (back) is lit and OCT+ breathes
  * while it would do something; the menu: on a value row OCT- and OCT+ both breathe while that way has a value to go to,
@@ -1083,7 +1087,11 @@ static void act_do(void)
         ui.act = 0;
     switch (id) {
     case G_LOAD:
+#if FELUCCA_MONOFM
+        mf_scene_pick(k, 0);                              /* (playing: at the pattern's end, scene_mf.c) */
+#else
         project_load(k);
+#endif
         break;
     case G_SAVE:                                          /* the NAME screen writes it */
         if (transport_busy())
@@ -1482,7 +1490,14 @@ static void ui_input(void)
         }
         if (ui.ly == LAYER_FX && ((pressed >> panel.btn[B_EDIT]) & 1u))
             fx_default();                               /* .. EDIT: its default back */
+#if FELUCCA_MONOFM
+        if ((s = panel_enc(EN_ALGO)) != 0 && ui.ly == LAYER_SEQ) {   /* SEQ + ALGORITHM: the next / previous scene */
+            mf_scene_turn(s);
+            combo = 1;
+        }
+#else
         panel_enc(EN_ALGO);                             /* (another track: OCT- puts back the layer's track only) */
+#endif
         if (glo && (sel = panel_enc(EN_SELECT)) != 0)   /* GLO + SELECT: the tempo, a combo (OCT- puts it back) */
             combo = 1;
     } else if ((kq = (uint32_t)layer_knobs_quiet()) != 0) {   /* a layer letting go: KNOB 1..4 are nobody's (#39) */

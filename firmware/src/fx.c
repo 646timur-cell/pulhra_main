@@ -875,7 +875,11 @@ static void mix_part(track_t *t, uint32_t n)
         int32_t xmax = c > d ? c : d;
         xmax = 0x7FFFFFFF / ((xmax > r ? xmax : r) | 1);   /* sends: loud chords at a high LEVEL */
         for (i = 0; i < n; i++) {
-            int32_t x = ((b[i] >> 2) * lvl) >> 10, a = x < 0 ? -x : x;   /* pre-shift: 8 loud voices */
+            int32_t x = ((b[i] >> 2) * lvl) >> 10, a;   /* pre-shift: 8 loud voices */
+#if FELUCCA_MONOFM
+            x = clamp(x, -524287, 524287);              /* (x 4096 below: a part driven far past full scale) */
+#endif
+            a = x < 0 ? -x : x;
             int32_t xs = clamp(x, -xmax, xmax);         /* sends: mulq15 would overflow */
             if (a > pk)
                 pk = a;

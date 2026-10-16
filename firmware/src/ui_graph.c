@@ -1106,6 +1106,18 @@ static uint16_t graph_plen[4][NTRK];                  /* .. each track's pattern
 static uint32_t graph_pden[4][NTRK];                  /* .. and its picture for SONG (project.c proj_density: 2 bits a cell) */
 static uint8_t graph_pcell[4][NTRK];                  /* .. in this many cells (min(LEN, 16)) */
 static uint32_t graph_pname_sig;
+#if FELUCCA_MONOFM                                    /* (the scenes A..P: their list is kept, scene_mf.c / project.c) */
+static int mf_scene_info(uint32_t s, const char **name);
+static uint32_t mf_scene_sig(void);
+static int mf_scene_is(uint32_t n);
+static int graph_project_used(uint32_t slot) { return mf_scene_info(slot, 0); }
+static const char *graph_project_name(uint32_t slot)
+{
+    const char *n = "";
+    mf_scene_info(slot, &n);
+    return n;
+}
+#else
 static int graph_project_used(uint32_t slot)
 {
     static uint32_t ms, frame;
@@ -1124,6 +1136,7 @@ static const char *graph_project_name(uint32_t slot)  /* (after graph_project_us
 {
     return graph_pname[slot & 3u];
 }
+#endif
 
 /* SONG's timeline (graph_song): the sections left to right, each as wide as it plays: REPS x its clock track's pattern
  * (song_chain.c chain_clock: the first track not silent there; project_info: that track's LEN x DIV in its slot, what
@@ -1374,9 +1387,13 @@ static uint32_t graph_signature(void)
     if (pg->graph == GR_SLCR && t->p[P_SLCR])        /* the SLICER's step playing */
         h ^= (sl[song.sel].idx + 1u) * 2654435761u;
     if (pg->graph == GR_SLOTS) {                     /* (a checksum over each slot) */
+#if FELUCCA_MONOFM
+        h += mf_scene_sig();
+#else
         for (i = 0; i < 4u; i++)
             h ^= (uint32_t)graph_project_used(i) << (20u + i);
         h += graph_pname_sig;
+#endif
     }
     if (pg->graph == GR_EVENTS)                      /* AUTOMATION: the rows, the one selected, + ADD's place, PLAY,
                                                       * QUANTIZE */
@@ -1732,6 +1749,17 @@ static void graph_events(void)
 static void graph_slots(void)
 {
     uint32_t i;
+#if FELUCCA_MONOFM                                    /* the scenes, 4 at a time (the selected one's four): A..P, the */
+    uint32_t i0 = ((uint32_t)song.g[G_SLOT] - 1u) & ~3u;   /* one playing marked ">" */
+    for (i = i0; i < i0 + 4u; i++) {
+        int32_t y = 12 + (int32_t)(i - i0) * 26;
+        char b[4] = {(char)('A' + i), mf_scene_is(i) ? '>' : 0, 0, 0};
+        int sel = (int32_t)i + 1 == song.g[G_SLOT], used = graph_project_used(i);
+        const char *n = graph_project_name(i);
+        list_row(y, sel, b, T_MID, !used ? "--" : n[0] ? n : "USED", used ? T_TEXT : T_DIM, 232);
+    }
+    return;
+#endif
     for (i = 0; i < 4u; i++) {
         int32_t y = 12 + (int32_t)i * 26;
         char b[4];

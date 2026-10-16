@@ -70,7 +70,7 @@ static void msaw_note_on(track_t *t, voice_t *v)
         v->ph[2] = r * 2654435761u;
         v->s[0] = (int32_t)(r * 40503u);
         v->s[1] = (int32_t)(r ^ 0x5BD1E995u);
-        v->s[2] = v->s[3] = 0;
+        v->s[2] = v->s[3] = v->s[4] = 0;              /* (a voice's state from another engine: never read) */
         v->s[5] = (int32_t)(r * 69069u + 1u);
     }
 }
@@ -98,9 +98,9 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     for (i = 0; i < n; i++) {
         int32_t o = osc_saw(ph0, b);
         if (ul)
-            o += mulq15(osc_saw(ph1, iu1) + osc_saw(ph2, iu2), ul);
+            o += mulq15(osc_saw(ph1, iu1), ul) + mulq15(osc_saw(ph2, iu2), ul);   /* (each alone: no overflow) */
         if (xl)
-            o += mulq15(osc_saw(px1, ix1) + osc_saw(px2, ix2), xl);
+            o += mulq15(osc_saw(px1, ix1), xl) + mulq15(osc_saw(px2, ix2), xl);
         if (sx)
             o += mulq15(ps1 < 0x80000000u ? 26000 : -26000, sx);
         if (s1)
@@ -134,7 +134,7 @@ static void mpulse_note_on(track_t *t, voice_t *v)
         v->ph[0] = 0;
         v->ph[1] = r;
         v->ph[2] = r * 2654435761u;
-        v->s[0] = v->s[1] = 0;
+        v->s[0] = v->s[1] = v->s[2] = v->s[3] = 0;
     }
     if (t->p[P_E6])                                      /* PWRS: the sweep from PW again */
         v->s[3] = 0;
@@ -158,19 +158,19 @@ static void mpulse_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     pw = (uint32_t)pwf << 17;
     g = mf_norm(32767 + 2 * ul + (s1 + s2) / 2);
     for (i = 0; i < n; i++) {
-        int32_t o = osc_pulse(ph0, b, pw) << 1;
+        int32_t o = osc_pulse(ph0, b, pw);               /* (at half scale, doubled after the gain: no overflow) */
         if (ul)
-            o += mulq15((osc_pulse(ph1, iu1, pw) + osc_pulse(ph2, iu2, pw)) << 1, ul);
+            o += mulq15(osc_pulse(ph1, iu1, pw), ul) + mulq15(osc_pulse(ph2, iu2, pw), ul);
         if (s1)
-            o += mulq15(sine_i(ps1), s1);
+            o += mulq15(sine_i(ps1), s1) >> 1;
         if (s2)
-            o += mulq15(sine_i(ps2), s2);
+            o += mulq15(sine_i(ps2), s2) >> 1;
         ph0 += b;
         ph1 += iu1;
         ph2 += iu2;
         ps1 += b >> 1;
         ps2 += b >> 2;
-        out[i] += voice_amp(clamp(mulq15(o, g), -32767, 32767), m, i);
+        out[i] += voice_amp(clamp(mulq15(o, g) << 1, -32767, 32767), m, i);
     }
     v->ph[0] = ph0;
     v->ph[1] = ph1;
@@ -259,7 +259,7 @@ static void msid_note_on(track_t *t, voice_t *v)
 {
     (void)t;
     if (mf_fresh(v)) {
-        v->ph[0] = v->ph[1] = 0;
+        v->ph[0] = v->ph[1] = v->ph[2] = 0;              /* (ph[2]: PWAD's width register) */
         v->s[0] = 0x7FFFF8;
         v->s[1] = v->s[2] = v->s[3] = v->s[4] = 0;
     }
@@ -348,8 +348,10 @@ static inline int32_t dpro_at(uint32_t w, uint32_t ph)
 /* ph[0] the oscillator, ph[1] SYNC's master, s[0] MSPD's position (Q16 of a wave), s[1] DEC's counter, s[2] the held */
 static void mwave_note_on(track_t *t, voice_t *v)
 {
-    if (mf_fresh(v))
+    if (mf_fresh(v)) {
         v->ph[0] = v->ph[1] = 0;
+        v->s[0] = v->s[1] = v->s[2] = 0;
+    }
     if (t->p[P_E3])                                      /* MRST: the sweep from WAVE again */
         v->s[0] = 0;
 }
@@ -398,6 +400,7 @@ static void mddraw_note_on(track_t *t, voice_t *v)
     if (mf_fresh(v)) {
         v->ph[0] = 0;
         v->ph[1] = rng();
+        v->s[0] = 0;
     }
 }
 static void mddraw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
@@ -439,8 +442,10 @@ static inline uint32_t mfm_rinc(uint32_t b, int32_t k)  /* the carrier's increme
 static void mfm_note_on(track_t *t, voice_t *v)
 {
     (void)t;
-    if (mf_fresh(v))
+    if (mf_fresh(v)) {
         v->ph[0] = v->ph[1] = v->ph[2] = 0;
+        v->s[0] = v->s[1] = 0;                           /* (the feedback's last output, PAR's third phase) */
+    }
     v->s[7] = 32767;
     v->s[5] = 32767;                                     /* (DYN: its pitch envelope) */
 }
@@ -691,8 +696,10 @@ static void msine_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
 static void mnoise_note_on(track_t *t, voice_t *v)
 {
     (void)t;
-    if (!v->s[0])
+    if (mf_fresh(v)) {
         v->s[0] = (int32_t)(rng() | 1u);
+        v->s[1] = v->s[2] = 0;
+    }
 }
 static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {

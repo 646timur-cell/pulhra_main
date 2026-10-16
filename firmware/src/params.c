@@ -59,6 +59,7 @@ static const char *const N_GO[] = {"--", "GO"};
 static const char *const N_XYLINK[] = {"OFF", "ON", "INV", "CROSS"};   /* XY LINK (G_XYLINK) */
 #endif
 #if FELUCCA_MONOFM
+static const char *const N_SCENE[] = {"-", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"};
 static const char *const N_MFILT[] = {"OFF", "LP", "BP", "HP", "NOTCH"};      /* MONOFM's track FILTER (P_FLT, voice.c) */
 #endif
 static const char *const N_SLCR[] = {"OFF", "GATE", "STUT"};             /* SL_OFF .. SL_STUT (slicer.c) */
@@ -341,7 +342,11 @@ static const param_desc_t GP[G_COUNT] = {
      * stored with the project as before. (was "--": stored 0 = CH1-4, as MIDI IN always was) */
     [G_ROUTE] = PE("ROUT", N_ROUTE, 0),
     [G_INFO] = PD("CPU", F_INT, 0, 0, 0),
+#if FELUCCA_MONOFM
+    [G_SLOT] = {"SCENE", F_ENUM, 1, 16, 1, N_SCENE, 0},   /* (MONOFM: the scenes A..P, scene_mf.c) */
+#else
     [G_SLOT] = PD("SLOT", F_INT, 1, 4, 1),
+#endif
     [G_NAME] = PE("NAME", N_DASH, 0),
     [G_LOAD] = PE("LOAD", N_GO, 0),
     [G_SAVE] = PE("SAVE", N_GO, 0),
@@ -662,7 +667,7 @@ static const page_t PAGES[] = {
     {"PRESETS", FAM_SAVE, SC_GLOBAL, GR_BROWSE, {0xFF, 0xFF, 0xFF, 0xFF}},   /* browser: PRESETS knob / KNOB 1 */
     {"PHRASES", FAM_SAVE, SC_GLOBAL, GR_PATS, {0xFF, 0xFF, 0xFF, 0xFF}},    /* pattern loader: PAT LOAD (ui.c pat_load);
                                                                              * the tap after PRESETS (up to 1.1.5 SEQ's) */
-    {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
+    {FELUCCA_MONOFM ? "SCENES" : "PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, 0xFF, G_LOAD, G_SAVE}},
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_TOOLS, {G_CLRSEQ, G_INITSND, 0xFF, 0xFF}},
 #if FELUCCA_STRANGE   /* FAV (the favourite sounds, PRESETS' browser on its FAV list): SAVE tapped three times (ui_input.c);
                        * ARP: X / Y's routes, then XY LINK (HOME's X / Y on both parts) */
