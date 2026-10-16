@@ -4,11 +4,11 @@
  *   y   0..19   header: T1 SAW 03 (track, machine, preset) left; A01 120.0 > (pattern, tempo, transport) right; while
  *               recording REC (inverted) at the right corner in place of the pattern
  *   y  20..47   the page and the preset: EDIT 1 . SYNC LEAD
- *   y  48..159  the four knobs, a column of 60 each: the label, a ring of 16 dots, the value. A ring of a value locked on the
+ *   y  48..179  the four knobs, a column of 60 each: the label, a ring of 16 dots, the value. A ring of a value locked on the
  *               held step is a filled disc; a dot in its centre: locked on another step
- *   y 160..199  SELECT: its label and value
- *   y 200..239  the 16 steps of the bank: 14 x 30 cells (a trig solid, empty a 1 px frame, the one playing inverted, the one
- *               held a 3 px frame), under them the bank bar
+ *   y 180..219  SELECT: its label and value
+ *   y 220..239  the 16 steps of the bank as dots only (a trig a dot, a ratchet stacked dots, a REST a hollow dot; a bar under
+ *               the one playing, over the one held); the panel LEDs carry the rest of the steps (sm_leds.c)
  * The LCD transfer is the dear part: a zone is redrawn only when what it shows changed (a signature of its inputs). */
 #define SMD_HDR_Y 0u
 #define SMD_HDR_H 20u
@@ -16,11 +16,11 @@
 #define SMD_PAGE_H 28u
 #define SMD_KNOB_Y 48u
 #define SMD_KNOB_W 60u
-#define SMD_KNOB_H 112u
-#define SMD_SEL_Y 160u
+#define SMD_KNOB_H 132u
+#define SMD_SEL_Y 180u
 #define SMD_SEL_H 40u
-#define SMD_STRIP_Y 200u
-#define SMD_STRIP_H 40u
+#define SMD_STRIP_Y 220u
+#define SMD_STRIP_H 20u
 #define SMD_STEP_W 15u
 #define SMD_NZONE 8u                                      /* header, page, four knobs, SELECT, strip */
 #define SMD_Z_KNOB0 2u
@@ -211,8 +211,8 @@ static void smd_knob(uint32_t k)
     smd_begin(k * SMD_KNOB_W, SMD_KNOB_Y, SMD_KNOB_W, SMD_KNOB_H);
     if (o.d) {
         sm_px_text((60 - 12 * smd_len(o.lab)) / 2, 4, 2u, o.lab, T_TEXT, 0);
-        sm_px_ring(30, 46, 22, o.pos, o.filled, o.dot);
-        sm_px_text((60 - 12 * smd_len(o.val)) / 2, 76, 2u, o.val, T_TEXT, 0);
+        sm_px_ring(30, 62, 28, o.pos, o.filled, o.dot);
+        sm_px_text((60 - 12 * smd_len(o.val)) / 2, 98, 2u, o.val, T_TEXT, 0);
     }
     smd_end();
 }
@@ -245,9 +245,17 @@ static void smd_select(void)
 }
 
 /* -------------------------------------------------------------- steps --- */
+/* the strip is dots only (the steps' story is on the panel LEDs): 16 places of 15 px, 20 px high. A trig is a filled dot
+ * 4 x 4, a ratchet x2 / x3 / x4 that many dots stacked (pitch 5), a REST a hollow dot, an empty step nothing (a dim 1 x 1
+ * on the strong beats 1 / 5 / 9 / 13 to count by). The step playing: a bar 8 x 1 under its place; the one held: a bar
+ * 8 x 2 over it. The stack grows up from the bottom dot (rows 14..17; a x4 stack takes rows 0..18) */
 static int32_t smd_playhead(void)                         /* the step playing on the selected track, -1: none */
 {
     return smd_play ? (int32_t)smd_pos : -1;
+}
+static uint32_t smd_dots(const sm_step_t *st)             /* 0 empty, 1..4 a trig with that many dots, 5 a REST */
+{
+    return (st->flags & SMF_REST) ? 5u : st->n ? 1u + SMF_RAT(st->flags) : 0u;
 }
 static uint32_t smd_strip_sig(void)
 {
@@ -255,7 +263,7 @@ static uint32_t smd_strip_sig(void)
     uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, h = 2166136261u;
     int32_t ph = smd_playhead();
     for (i = 0; i < 16u; i++)
-        h = smd_mix(h, pt->step[t][b + i].n != 0);
+        h = smd_mix(h, smd_dots(&pt->step[t][b + i]));
     h = smd_mix(h, ph >= (int32_t)b && ph < (int32_t)b + 16 ? (uint32_t)ph : 0xFFu);
     h = smd_mix(h, sm_ui.held_step >= b && sm_ui.held_step < b + 16u ? sm_ui.held_step : 0xFFu);
     return smd_mix(h, t * 2u + (b != 0));
@@ -263,33 +271,28 @@ static uint32_t smd_strip_sig(void)
 static void smd_strip(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i;
+    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, j;
     int32_t ph = smd_playhead();
     smd_begin(0, SMD_STRIP_Y, 240u, SMD_STRIP_H);
     for (i = 0; i < 16u; i++) {
-        int32_t x = (int32_t)(i * SMD_STEP_W), y = 2;
-        uint32_t s = b + i;
-        int trig = pt->step[t][s].n != 0;
-        if (sm_ui.held_step == s) {                       /* held: a 3 px frame, a gap, then the cell inside */
-            cv_rect(x, y, 14, 30, T_TEXT);
-            cv_rect(x + 3, y + 3, 8, 24, T_BG);
-            if (trig)
-                cv_rect(x + 4, y + 4, 6, 22, T_TEXT);
-        } else if (ph == (int32_t)s) {                    /* playing: the cell inverted */
-            if (trig) {
-                cv_rect(x, y, 14, 30, T_TEXT);
-                cv_rect(x + 1, y + 1, 12, 28, T_BG);
-            } else {
-                cv_rect(x, y, 14, 30, (uint16_t)SM_DIM_INK);
-            }
-        } else if (trig) {
-            cv_rect(x, y, 14, 30, T_TEXT);
+        int32_t x = (int32_t)(i * SMD_STEP_W);
+        uint32_t s = b + i, d = smd_dots(&pt->step[t][s]);
+        if (d == 0) {
+            if (i % 4u == 0)
+                cv_rect(x + 6, 15, 1, 1, (uint16_t)SM_DIM_INK);
+        } else if (d == 5u) {                             /* REST: a hollow dot */
+            cv_rect(x + 5, 14, 4, 4, T_TEXT);
+            cv_rect(x + 6, 15, 2, 2, T_BG);
         } else {
-            cv_rect(x, y, 14, 30, (uint16_t)SM_DIM_INK);
-            cv_rect(x + 1, y + 1, 12, 28, T_BG);
+            int32_t bottom = d == 4u ? 15 : 14;           /* (the top row of the lowest dot) */
+            for (j = 0; j < d; j++)
+                cv_rect(x + 5, bottom - (int32_t)j * 5, 4, 4, T_TEXT);
         }
+        if (ph == (int32_t)s)
+            cv_rect(x + 3, 19, 8, 1, T_TEXT);
+        if (sm_ui.held_step == s)
+            cv_rect(x + 3, 0, 8, 2, T_TEXT);
     }
-    cv_rect(b ? 120 : 0, 36, 120, 2, T_TEXT);             /* the bank bar: the half of the strip's 32 steps shown */
     smd_end();
 }
 

@@ -22,6 +22,7 @@ static volatile uint8_t panic_req;
 
 /* the main loop's second half (sm_main.c): the model onto the screen */
 #include "sm_draw.c"
+#include "sm_leds.c"                                      /* the panel LEDs: the steps, the playhead, the page family, REC, PLAY */
 
 /* power-on, before audio_init: every track with its parameter defaults and empty steps, the master level, then the kit
  * of the current pattern onto the tracks (T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX), the sequencer stopped, the queue empty */

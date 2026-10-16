@@ -116,6 +116,7 @@ static void fm1_main(void)
     if (flash_ok)
         ota_boot_cleanup();                             /* staging area left by an update */
     settings_init();
+    fm1_led_dim_level(settings_leds == LEDS_DIM_LO);    /* the glow level of the LEDS setting (Felucca's boot_leds) */
     sm_ux_mk1();                                        /* white on black over whatever palette the settings picked */
     lcd_init();
     lcd_fill(0, 0, 240, 240, T_BG);
@@ -224,6 +225,7 @@ static void fm1_main(void)
         sm_input_poll();
         felucca_dbg.stage = 2;
         sm_draw();
+        sm_leds();
         felucca_dbg.stage = 9;
         while (fm1_ms - m < 15u)                        /* ~60 frames/s at most */
             sm_input_poll();

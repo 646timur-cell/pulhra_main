@@ -1045,6 +1045,7 @@ static int test_held_step_bank_key(void)
 #define INK swap16(0xFFFFu)
 #define DIMC swap16(0x4208u)
 #define BGC swap16(0x0000u)
+#define SCR(x, y) host_screen[(y) * 240u + (x)]
 static void draw_setup(void)
 {
     sm_core_init();
@@ -1259,8 +1260,8 @@ typedef struct { int32_t x0, y0, x1, y1; const char *name; } zone_t;
  * the four knob columns (label, ring, value), the SELECT row; the step strip carries no text */
 static const zone_t ZONES[] = {
     {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "page"},
-    {0, 48, 60, 160, "knob0"}, {60, 48, 120, 160, "knob1"}, {120, 48, 180, 160, "knob2"}, {180, 48, 240, 160, "knob3"},
-    {0, 160, 240, 200, "select"},
+    {0, 48, 60, 180, "knob0"}, {60, 48, 120, 180, "knob1"}, {120, 48, 180, 180, "knob2"}, {180, 48, 240, 180, "knob3"},
+    {0, 180, 240, 220, "select"},
 };
 static uint32_t lint_shown;
 static int lint_frame(const char *what)
@@ -1355,16 +1356,16 @@ static int test_draw_budget(void)
     sm_playing = 1;                                           /* the transport started: the header's glyph */
     sm_dirty = 1;
     px = frame_px();
-    bad += check("budget: play -> header and strip only", px > 0 && px <= 240u * 60u);
+    bad += check("budget: play -> header and strip only", px > 0 && px <= 240u * 40u);
     sm_pos[0] = 3;                                            /* the playing step moved (no flag: the sequencer does not set it) */
     px = frame_px();
-    bad += check("budget: the playing step moved -> <= 240 x 40", px > 0 && px <= 240u * 40u);
+    bad += check("budget: the playing step moved -> <= 240 x 20", px > 0 && px <= 240u * 20u);
     sm_pos[0] = 4;
     px = frame_px();
-    bad += check("budget: ... again", px > 0 && px <= 240u * 40u);
+    bad += check("budget: ... again", px > 0 && px <= 240u * 20u);
     sm_page_press(SMFAM_GLO);
     px = frame_px();
-    bad += check("budget: a page change <= a full frame, more than a step", px > 240u * 40u && px <= 240u * 240u);
+    bad += check("budget: a page change <= a full frame, more than a step", px > 240u * 20u && px <= 240u * 240u);
     sm_ui.trk = 1;
     sm_dirty = 1;
     px = frame_px();
@@ -1375,7 +1376,7 @@ static int test_draw_budget(void)
         s->p[id] = (int8_t)(s->p[id] + 1);
         sm_dirty = 1;
         px = frame_px();
-        bad += check("budget: one value -> one knob column <= 60 x 112", px > 0 && px <= 60u * 112u);
+        bad += check("budget: one value -> one knob column <= 60 x 132", px > 0 && px <= 60u * 132u);
     }
     sm_redraw_all();
     px = frame_px();
@@ -1397,43 +1398,248 @@ static int test_draw_playhead_snapshot(void)
     begin_hook = hook_move_pos;                               /* the first cv_begin of the frame: after the signatures */
     px = frame_px();
     bad += check("playhead: the strip shows the step the frame read (3), not the one the audio stream moved to (9)",
-                 host_screen[216 * 240 + 3 * 15 + 7] == DIMC && host_screen[216 * 240 + 9 * 15 + 7] != DIMC && begin_hook == 0);
+                 SCR(3 * 15 + 5, 239) == INK && SCR(9 * 15 + 5, 239) == BGC && begin_hook == 0);
     px = frame_px();
     bad += check("playhead: the next frame sees the move and draws step 9",
-                 px > 0 && px <= 240u * 40u && host_screen[216 * 240 + 9 * 15 + 7] == DIMC && host_screen[216 * 240 + 3 * 15 + 7] != DIMC);
+                 px > 0 && px <= 240u * 20u && SCR(9 * 15 + 5, 239) == INK && SCR(3 * 15 + 5, 239) == BGC);
     return bad;
 }
-static int test_strip_cells(void)
+/* the 4 x 4 box at x, y: all ink / all ground */
+static int box_is(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+{
+    uint32_t i, j;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            if (SCR(x + i, y + j) != c)
+                return 0;
+    return 1;
+}
+static uint32_t scr_ink(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    uint32_t i, j, n = 0;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            n += SCR(x + i, y + j) != BGC;
+    return n;
+}
+static int test_strip_dots(void)
 {
     int bad = 0;
+    uint32_t px, i;
+    sm_step_t *st;
     draw_setup();
-    smp.pat[smp.cur].step[0][1].n = 1;                        /* a trig on 1, a held trig on 2, a held empty on 3 */
-    smp.pat[smp.cur].step[0][2].n = 1;
+    st = smp.pat[smp.cur].step[0];
+    st[1].n = 1;                                              /* a trig */
+    st[2].n = 1; st[2].flags = (uint8_t)(2u << 4);            /* x3 */
+    st[3].n = 1; st[3].flags = (uint8_t)(3u << 4);            /* x4 */
+    st[4].flags = SMF_REST;                                   /* a REST: locks only */
+    st[5].n = 1; st[5].flags = (uint8_t)(1u << 4);            /* x2 */
     draw_full();
-    bad += check("strip: a trig is solid", host_screen[216 * 240 + 15 + 7] == INK && host_screen[203 * 240 + 15 + 1] == INK);
-    bad += check("strip: an empty step is a 1 px frame", host_screen[216 * 240 + 7] == BGC && host_screen[216 * 240 + 0] == DIMC &&
-                                                       host_screen[202 * 240 + 7] == DIMC);
-    sm_ui.held_step = 3;
-    sm_dirty = 1;
-    sm_draw();
-    bad += check("strip: held: a 3 px frame, the inside clear", host_screen[216 * 240 + 3 * 15 + 2] == INK && host_screen[216 * 240 + 3 * 15 + 7] == BGC);
-    sm_ui.held_step = 2;
-    sm_dirty = 1;
-    sm_draw();
-    bad += check("strip: a held trig: the 3 px frame, a gap, the trig inside", host_screen[216 * 240 + 2 * 15 + 2] == INK &&
-                                                                              host_screen[216 * 240 + 2 * 15 + 3] == BGC && host_screen[216 * 240 + 2 * 15 + 7] == INK);
-    sm_ui.held_step = 0xFFu;
+    bad += check("strip: the strip is 20 px high, at the bottom of the screen", SMD_STRIP_H <= 20u && SMD_STRIP_Y + SMD_STRIP_H == 240u);
+    bad += check("strip: a trig is one filled 4 x 4 dot", box_is(15 + 5, 234, 4, 4, INK) && scr_ink(15, 220, 15, 20) == 16u);
+    bad += check("strip: x3 is three 4 x 4 dots stacked at a pitch of 5",
+                 box_is(30 + 5, 234, 4, 4, INK) && box_is(30 + 5, 229, 4, 4, INK) && box_is(30 + 5, 224, 4, 4, INK) &&
+                 scr_ink(30, 220, 15, 20) == 48u && SCR(30 + 6, 233) == BGC && SCR(30 + 6, 228) == BGC);
+    bad += check("strip: x4 is four dots (the stack takes the 19 rows 0..18)",
+                 box_is(45 + 5, 235, 4, 4, INK) && box_is(45 + 5, 220, 4, 4, INK) && scr_ink(45, 220, 15, 20) == 64u);
+    bad += check("strip: x2 is two dots", box_is(75 + 5, 234, 4, 4, INK) && box_is(75 + 5, 229, 4, 4, INK) && scr_ink(75, 220, 15, 20) == 32u);
+    bad += check("strip: a REST is a hollow dot (the outline 4 x 4)",
+                 SCR(60 + 5, 234) == INK && SCR(60 + 8, 237) == INK && SCR(60 + 5, 236) == INK && SCR(60 + 8, 235) == INK &&
+                 box_is(60 + 6, 235, 2, 2, BGC) && scr_ink(60, 220, 15, 20) == 12u);
+    bad += check("strip: an empty step is nothing, the beats 1 5 9 13 a dim 1 x 1",
+                 scr_ink(6 * 15, 220, 15, 20) == 0 && SCR(6, 235) == DIMC && scr_ink(0, 220, 15, 20) == 1u &&
+                 scr_ink(8 * 15, 220, 15, 20) == 1u && SCR(8 * 15 + 6, 235) == DIMC && SCR(6 * 15 + 6, 235) == BGC);
+    for (i = 0; i < 240u * 20u; i++) {                        /* nothing but the three inks */
+        uint16_t c = SCR(i % 240u, 220u + i / 240u);
+        if (c != INK && c != DIMC && c != BGC)
+            bad++;
+    }
     sm_playing = 1;
     sm_pos[0] = 1;
+    sm_ui.held_step = 2;
     sm_dirty = 1;
+    lcd_px = 0;
     sm_draw();
-    bad += check("strip: a playing trig is inverted (the ground inside an ink frame)", host_screen[216 * 240 + 15 + 7] == BGC && host_screen[216 * 240 + 15] == INK);
-    bad += check("strip: the bank bar under the first half", host_screen[236 * 240 + 5] == INK && host_screen[236 * 240 + 200] == BGC);
+    bad += check("strip: the step playing has a bar 8 x 1 under its place", box_is(15 + 3, 239, 8, 1, INK) && SCR(15 + 2, 239) == BGC &&
+                                                                          SCR(15 + 11, 239) == BGC && SCR(15 + 3, 238) == BGC);
+    bad += check("strip: the step held has a bar 8 x 2 over its place", box_is(30 + 3, 220, 8, 2, INK) && SCR(30 + 2, 220) == BGC &&
+                                                                       SCR(30 + 11, 221) == BGC && box_is(30 + 5, 224, 4, 4, INK));
+    sm_ui.held_step = 0xFFu;
+    sm_pos[0] = 4;
+    sm_dirty = 1;
+    px = frame_px();
+    bad += check("strip: a step change is at most 240 x 20 px", px > 0 && px <= 240u * 20u);
+    bad += check("strip: a REST with the playing bar under it", SCR(60 + 5, 234) == INK && box_is(60 + 3, 239, 8, 1, INK));
     sm_ui.bank = 1;
     sm_dirty = 1;
     sm_draw();
-    bad += check("strip: ... and under the second", host_screen[236 * 240 + 5] == BGC && host_screen[236 * 240 + 200] == INK);
+    bad += check("strip: the second bank shows steps 16..31 (empty here: the four beat marks)", scr_ink(0, 220, 240, 20) == 4u);
     return bad;
+}
+/* ------------------------------------------------------------- LEDs --- */
+/* LED id (0..13 buttons, 14.. keys) in a column picture, found by the matrix itself (not by the app's own table) */
+static uint32_t led_of(const uint8_t *pic, uint32_t id)
+{
+    uint32_t p, r;
+    for (p = 0; p < FM1_NCOL; p++)
+        for (r = 1; r < 5u; r++)
+            if (FM1_KEYMAP[r][p] == (int8_t)id)
+                return (pic[p] >> r) & 1u;
+    return 99;
+}
+static uint32_t wkey(uint32_t w)                          /* the key (0..26) of white key w (0..15), F3 .. G5 */
+{
+    uint32_t k;
+    for (k = 0; k < SM_NKEYS; k++)
+        if (!((SM_BLACK_KEYS >> k) & 1u) && w-- == 0)
+            return k;
+    return 99;
+}
+static uint32_t wl(uint32_t w) { return led_of(fm1_led, 14u + wkey(w)); }
+static uint32_t wd(uint32_t w) { return led_of(fm1_led_dim, 14u + wkey(w)); }
+static uint32_t wb(uint32_t w) { return led_of(fm1_led_breath, 14u + wkey(w)); }
+static uint32_t wm(uint32_t w) { return led_of(fm1_led_mid, 14u + wkey(w)); }
+static uint32_t wany(uint32_t w) { return wl(w) | wd(w) | wb(w) | wm(w); }
+static void leds_setup(uint32_t mode)
+{
+    draw_setup();
+    settings_leds = (uint8_t)mode;
+    memset(fm1_led, 0xAA, sizeof fm1_led);                    /* (every frame rebuilds the whole picture) */
+    memset(fm1_led_dim, 0xAA, sizeof fm1_led_dim);
+    memset(fm1_led_breath, 0xAA, sizeof fm1_led_breath);
+    memset(fm1_led_mid, 0xAA, sizeof fm1_led_mid);
+}
+static int test_leds_three_states(void)
+{
+    static const uint8_t modes[] = {LEDS_DIM, LEDS_DIM_LO, LEDS_OFF};
+    int ok = 1, inv_ok;
+    uint32_t m, w;
+    for (m = 0; m < 3u; m++) {
+        sm_step_t *st;
+        leds_setup(modes[m]);
+        st = smp.pat[smp.cur].step[0];
+        st[0].n = 1;                                      /* a trig */
+        st[1].flags = SMF_REST;                           /* a REST: locks only, no note */
+        sm_leds();
+        ok &= wl(0) == 1 && wb(0) == 0 && wm(0) == 0;
+        ok &= wb(1) == 1 && wl(1) == 0 && wd(1) == 0 && wm(1) == 0;      /* breath alone: no lit, no glow under it */
+        for (w = 2; w < 16u; w++)                         /* empty: nothing at all, glow included */
+            ok &= wany(w) == 0;
+        ok &= wany(0) == 1 && wany(1) == 1;
+    }
+    leds_setup(LEDS_INV);                                 /* INV turns every LED round: the trig dark, the empty lit */
+    smp.pat[smp.cur].step[0][0].n = 1;
+    smp.pat[smp.cur].step[0][1].flags = SMF_REST;
+    sm_leds();
+    inv_ok = wl(0) == 0 && wl(2) == 1 && wb(1) == 1 && wl(1) == 0;
+    return check("LEDS: trig lit, REST breathing (no lit, no glow), empty dark in OFF / DIM LO / DIM HI", ok) +
+           check("LEDS: INV turns the three states round (trig dark, empty lit, REST still breathing)", inv_ok);
+}
+static int test_leds_trigs(void)
+{
+    int ok = 1, bk = 1;
+    uint32_t w;
+    sm_step_t *st;
+    leds_setup(LEDS_DIM);
+    st = smp.pat[smp.cur].step[0];
+    st[0].n = 1;
+    st[5].n = 1;
+    sm_leds();
+    for (w = 0; w < 16u; w++)
+        ok &= wl(w) == (w == 0 || w == 5 ? 1u : 0u);
+    leds_setup(LEDS_DIM);                                 /* a 16 step track: no bank keys */
+    sm_leds();
+    bk &= led_of(fm1_led, 14u + SM_KEY_BANK0) == 0 && led_of(fm1_led_dim, 14u + SM_KEY_BANK1) == 0;
+    ksnd(0)->len = 32;                                    /* 32 steps: the page in view lit, the other glowing */
+    sm_leds();
+    bk &= led_of(fm1_led, 14u + SM_KEY_BANK0) == 1 && led_of(fm1_led_dim, 14u + SM_KEY_BANK1) == 1 &&
+          led_of(fm1_led, 14u + SM_KEY_BANK1) == 0;
+    sm_ui.bank = 1;
+    smp.pat[smp.cur].step[0][16 + 3].n = 1;               /* the second page: its steps on the white keys */
+    sm_leds();
+    bk &= led_of(fm1_led, 14u + SM_KEY_BANK1) == 1 && led_of(fm1_led, 14u + SM_KEY_BANK0) == 0 &&
+          led_of(fm1_led_dim, 14u + SM_KEY_BANK0) == 1 && wl(3) == 1 && wl(0) == 0;
+    return check("LEDS: trigs on steps 1 and 6 light white keys 1 and 6, no other white key", ok) +
+           check("LEDS: D#5 / F#5 light the visible page of steps, only on a track longer than 16", bk);
+}
+static int test_leds_playhead(void)
+{
+    int ok = 1, nb = 1, rest = 1, held = 1;
+    uint32_t w;
+    sm_step_t *st;
+    leds_setup(LEDS_DIM);
+    st = smp.pat[smp.cur].step[0];
+    st[4].n = 1;
+    st[6].flags = SMF_REST;
+    sm_playing = 1;
+    sm_pos[0] = 9;                                        /* an empty step playing */
+    sm_leds();
+    ok &= wm(9) == 1 && wl(9) == 0 && wd(9) == 0 && wb(9) == 0;
+    for (w = 0; w < 16u; w++)
+        ok &= w == 9u || wm(w) == 0;
+    sm_pos[0] = 4;                                        /* a trig playing: mid, not lit */
+    sm_leds();
+    ok &= wm(4) == 1 && wl(4) == 0 && wb(4) == 0;
+    sm_pos[0] = 6;                                        /* a REST playing: mid in place of the breath */
+    sm_leds();
+    rest = wm(6) == 1 && wb(6) == 0 && wl(6) == 0;
+    for (w = 0; w < 16u; w++)                             /* the neighbours stay as without the playhead */
+        if (w != 6u)
+            nb &= wm(w) == 0 && wl(w) == (w == 4u) && wb(w) == 0;
+    nb &= wany(5) == 0 && wany(7) == 0;
+    sm_playing = 0;                                       /* stopped: no running light at all */
+    sm_leds();
+    nb &= wm(6) == 0 && wb(6) == 1 && wl(4) == 1;
+    sm_ui.held_step = 4;                                  /* a held step is mid too */
+    sm_leds();
+    held = wm(4) == 1 && wl(4) == 0;
+    return check("LEDS: the playing empty step is mid only; a playing trig comes down to mid, not lit", ok) +
+           check("LEDS: a playing REST has mid in place of its breath", rest) +
+           check("LEDS: the neighbours of the playhead do not change; stopped: no mid", nb) +
+           check("LEDS: a held step is mid", held);
+}
+static int test_leds_rec_play(void)
+{
+    int rec, play, mode_ok = 1;
+    uint32_t m;
+    leds_setup(LEDS_DIM);
+    sm_leds();
+    rec = led_of(fm1_led, panel.btn[B_REC]) == 0 && (fm1_led[LED_PLAY_GREEN >> 3] & (1u << (LED_PLAY_GREEN & 7u))) == 0 &&
+          led_of(fm1_led_dim, panel.btn[B_PLAY]) == 1;
+    sm_rec = 1;
+    sm_leds();
+    rec &= led_of(fm1_led, panel.btn[B_REC]) == 1;
+    sm_playing = 1;
+    sm_leds();
+    play = (fm1_led[LED_PLAY_GREEN >> 3] & (1u << (LED_PLAY_GREEN & 7u))) != 0 && led_of(fm1_led, panel.btn[B_PLAY]) == 0 &&
+           led_of(fm1_led_dim, panel.btn[B_PLAY]) == 0;
+    for (m = 0; m < LEDS_COUNT; m++) {                    /* the green one in every mode */
+        settings_leds = (uint8_t)m;
+        sm_leds();
+        mode_ok &= (fm1_led[LED_PLAY_GREEN >> 3] & (1u << (LED_PLAY_GREEN & 7u))) != 0 && led_of(fm1_led, panel.btn[B_PLAY]) == 0;
+    }
+    return check("LEDS: sm_rec lights REC (dark otherwise)", rec) +
+           check("LEDS: playing sets LED_PLAY_GREEN, PLAY's own LED dark, in every LEDS mode", play && mode_ok);
+}
+static int test_leds_family(void)
+{
+    int ok = 1;
+    uint32_t pg;
+    leds_setup(LEDS_DIM);
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    sm_leds();
+    ok &= led_of(fm1_led, panel.btn[B_ENV]) == 1 && led_of(fm1_led, panel.btn[B_EDIT]) == 0 && led_of(fm1_led, panel.btn[B_GLO]) == 0;
+    ok &= led_of(fm1_led_dim, panel.btn[B_EDIT]) == 1 && led_of(fm1_led_dim, panel.btn[B_GLO]) == 1;     /* the rest glow */
+    for (pg = 0; pg < sm_page_count(); pg++) {
+        uint32_t b = SM_PAGES[pg].fam == SMFAM_EDIT ? B_EDIT : SM_PAGES[pg].fam == SMFAM_GLO ? B_GLO : B_ENV;
+        sm_ui.page = (uint8_t)pg;
+        sm_leds();
+        ok &= led_of(fm1_led, panel.btn[b]) == 1;
+    }
+    settings_leds = LEDS_OFF;
+    sm_leds();
+    ok &= led_of(fm1_led_dim, panel.btn[B_EDIT]) == 0;      /* OFF: no glow */
+    return check("LEDS: the page's family button is lit (FILTER -> ENV), the others glow by the LEDS mode", ok);
 }
 static void write_ppm(const char *dir, const char *name)
 {
@@ -1455,18 +1661,26 @@ static void write_ppm(const char *dir, const char *name)
 static int test_draw_shots(void)
 {
     const char *dir = getenv("SHOTS");
-    uint32_t pg, k;
+    uint32_t pg;
     if (!dir)
         return 0;
     for (pg = 0; pg < sm_page_count(); pg++) {
         char n[48], *c;
         draw_setup();
-        for (k = 0; k < 16u; k += (k % 4u == 0 ? 2u : 3u))
-            smp.pat[smp.cur].step[0][k].n = 1;
+        {   /* trigs, a x3 and a x2 ratchet, two RESTs on the track the shot shows */
+            sm_step_t *st = smp.pat[smp.cur].step[pg % 2u];
+            st[0].n = 1;
+            st[2].n = 1; st[2].flags = (uint8_t)(2u << 4);
+            st[4].n = 1;
+            st[5].flags = SMF_REST;
+            st[8].n = 1; st[8].flags = (uint8_t)(1u << 4);
+            st[12].n = 1;
+            st[14].flags = SMF_REST;
+        }
         sm_ui.page = (uint8_t)pg;
         sm_ui.trk = (uint8_t)(pg % 2u);
         sm_playing = 1;
-        sm_pos[sm_ui.trk] = 5;
+        sm_pos[sm_ui.trk] = 6;                            /* (the playhead on an empty step) */
         sm_ui.held_step = 9;
         sm_rec = (uint8_t)(pg % 2u);
         smp.pat[smp.cur].nlock = 1;
@@ -1517,10 +1731,15 @@ int main(void)
     bad += test_ring_lock_fill();
     bad += test_header_rec();
     bad += test_no_grime();
-    bad += test_strip_cells();
+    bad += test_strip_dots();
     bad += test_draw_lint();
     bad += test_draw_budget();
     bad += test_draw_playhead_snapshot();
+    bad += test_leds_three_states();
+    bad += test_leds_trigs();
+    bad += test_leds_playhead();
+    bad += test_leds_rec_play();
+    bad += test_leds_family();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;
