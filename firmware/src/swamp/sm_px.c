@@ -47,14 +47,15 @@ static int32_t sm_px_text(int32_t x, int32_t y, uint32_t sc, const char *s, uint
 
 /* the ring: 16 dots of 3 x 3 on an arc of 270 degrees from 225 to -45 (lower left, over the top, lower right) around cx, cy
  * at radius r; the first 1 + pos256 * 15 / 256 of them lit (pos256 0..256), the rest dim. filled: a solid disc inside the
- * dots (a locked value); lockdot: a 3 x 3 dot in the centre (the parameter is locked on some other step) */
+ * dots (a locked value); lockdot: a 3 x 3 dot in the centre (the parameter is locked on some other step); dim (a muted
+ * track's level on MIXER): the lit dots dim, the rest not drawn, a dotted ring with no ink */
 static const int16_t SM_RING_COS[16] = {-181, -228, -253, -253, -228, -181, -116, -40, 40, 116, 181, 228, 253, 253, 228, 181};
 static const int16_t SM_RING_SIN[16] = {-181, -116, -40, 40, 116, 181, 228, 253, 253, 228, 181, 116, 40, -40, -116, -181};
 static int32_t sm_ring_off(int32_t r, int32_t t)          /* r * t / 256, rounded away from zero */
 {
     return (r * t + (t < 0 ? -128 : 128)) / 256;
 }
-static void sm_px_ring(int32_t cx, int32_t cy, int32_t r, uint32_t pos256, int filled, int lockdot)
+static void sm_px_ring(int32_t cx, int32_t cy, int32_t r, uint32_t pos256, int filled, int lockdot, int dim)
 {
     int32_t i, lit, dy, rr = r - 5;
     if (pos256 > 256u)
@@ -67,9 +68,9 @@ static void sm_px_ring(int32_t cx, int32_t cy, int32_t r, uint32_t pos256, int f
                 hw++;
             cv_rect(cx - hw, cy + dy, 2 * hw + 1, 1, T_TEXT);
         }
-    for (i = 0; i < 16; i++)
+    for (i = 0; i < 16 && (!dim || i < lit); i++)
         cv_rect(cx + sm_ring_off(r, SM_RING_COS[i]) - 1, cy - sm_ring_off(r, SM_RING_SIN[i]) - 1, 3, 3,
-                i < lit ? T_TEXT : (uint16_t)SM_DIM_INK);
+                i < lit && !dim ? T_TEXT : (uint16_t)SM_DIM_INK);
     if (lockdot)
         cv_rect(cx - 1, cy - 1, 3, 3, filled ? T_BG : T_TEXT);
 }

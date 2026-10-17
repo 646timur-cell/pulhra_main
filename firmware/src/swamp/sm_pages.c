@@ -23,7 +23,7 @@ static const sm_page_t SM_PAGES[] = {
     {"VOICE", SMFAM_EDIT, {P_VOICE, P_GLIDE, P_DETUNE, P_PRIO}, SM_NOPARAM},
     {"AMP", SMFAM_GLO, {P_ATK, P_DEC, P_SUS, P_REL}, P_ESYNC},
     {"MIX", SMFAM_GLO, {P_LEVEL, P_PAN, P_DIST, P_REV}, SM_NOPARAM},
-    {"FILTER", SMFAM_ENV, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}, P_HWIDTH},
+    {"FILTER", SMFAM_ENV, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}, P_LD_FLT},   /* SELECT: LFO>FLT (HYB: WIDTH) */
     {"F.ENV", SMFAM_ENV, {P_FATK, P_FDEC, P_ED_FLT, SM_NOPARAM}, SM_NOPARAM},
     {"STEP", SMFAM_SEQ, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_NONE},
     {"MIXER", SMFAM_HOME, {P_LEVEL, P_LEVEL, P_LEVEL, P_LEVEL}, SM_NOPARAM, SMH_MIXER},   /* K1..K4: the LEVEL of T1..T4 */
@@ -62,15 +62,22 @@ static void sm_page_press(uint32_t fam)
 }
 
 /* the parameter on knob k (0..3; 4: SELECT) of the page shown. FILTER is MONOFM's twin page (params.c): FILT HYB (5) on
- * the selected track's sound makes K2 / K3 HYBRID's BASE / RES (CUT / RES do nothing then: voice.c mf_filter_voice) */
+ * the selected track's sound makes K2 / K3 HYBRID's BASE / RES (CUT / RES do nothing then: voice.c mf_filter_voice) and
+ * SELECT its WIDTH (the low-pass above BASE). In OFF / LP / BP / HP / NOTCH SELECT is the LFO's depth onto the cutoff
+ * (P_LD_FLT, LFO DEST's FLT): mf_filter_voice has no key tracking and no drive, its cutoff moves by ENV (K4), the LFO
+ * and the accent, so LFO>FLT is the one filter control not on K1..K4 (SWAMP has no LFO page; the LFO runs at its
+ * default RATE). Hardware 02:43: SELECT on FILTER was WIDTH in every FILT and did nothing outside HYB */
 static uint32_t sm_page_param(uint32_t k)
 {
     const sm_page_t *pg = sm_cur_page();
     uint32_t id = k < 4u ? pg->id[k] : pg->sel;
-    if (id == P_FCUT && pg->id[0] == P_FLT && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5)
+    int hyb = pg->id[0] == P_FLT && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5;
+    if (hyb && id == P_FCUT)
         return P_HBASE;
-    if (id == P_FRES && pg->id[0] == P_FLT && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5)
+    if (hyb && id == P_FRES)
         return P_HRES;
+    if (hyb && k == 4u)
+        return P_HWIDTH;
     return id;
 }
 

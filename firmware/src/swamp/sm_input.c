@@ -12,8 +12,8 @@
  * Locks (sm_lock.c): a white key down holds its step; a knob or SELECT turned while it is down locks that parameter on the
  * step (from the lock's value, else the base; the base stays) and the key's release then does not toggle; a release with
  * no turn toggles the trig (taking it off removes its locks). Held on an EMPTY step a turn makes a REST trig with that
- * lock (a trigless lock; no toggle). REC on and playing, no key down: a turn locks the selected track's playing step,
- * only if it has a trig; the base stays.
+ * lock (a trigless lock; no toggle). No key down a turn is the base, always; REC on and playing it is also recorded: the
+ * selected track's playing step, only if it has a trig, locks the new base value.
  * The STEP page (SEQ tapped): the knobs edit a step's fields, not the sound (sm_step_page): the step of the white key
  * down on the selected track (the last pressed), else the step selected last (sm_ui.sel_step); none: nothing. Field
  * writes are single bytes the audio stream reads at a fire (a step edited between two fires is whole by bytes).
@@ -124,35 +124,39 @@ static void sm_turn_base(uint32_t t, uint32_t id, int32_t s)
 }
 
 /* a knob: the model's value turned by s detents, then the command.
- * A white key down: a lock of the held step instead; REC while playing: a lock of the playing step (a trig there only) */
+ * A white key down: a lock of the held step instead. No key down the knob is always the track's base (the step selected
+ * on STEP is STEP's alone); REC while playing it also records: the playing step's trig (a trig there only) locks the
+ * value the base now has, and the value goes onto the core at once (a parameter a lock holds there would not take the
+ * base's SMC_PARAM until the next unlocked trig). Hardware 02:43: the knobs "do not turn at all without a step" was REC
+ * on while playing, where a turn used to move a lock only, never the base: no trig under the playhead, nothing at all */
 static void sm_turn(uint32_t id, int32_t s)
 {
     const param_desc_t *d = sm_desc_safe(sm_engine_of(sm_ui_sound()->machine), id);
+    uint32_t t = sm_ui.trk % SM_NTRK;
     if (!s || !d)
         return;
     if (sm_key_arm) {
         sm_turn_held(id, s);
         return;
     }
+    sm_turn_base(t, id, s);
     if (sm_rec && sm_playing) {                           /* (the playing step: the audio stream's byte) */
-        uint32_t t = sm_ui.trk % SM_NTRK, st = *(volatile uint8_t *)&sm_pos[t];
-        if (sm_lock_turn(t, st, id, s, 0)) {                 /* heard at once: the lock onto the core (a refused preview: */
-            sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};   /* the step's next fire plays it) */
-            c.val = smp.pat[smp.cur % SM_NPAT].lock[sm_lock_find(&smp.pat[smp.cur % SM_NPAT], t, st, id)].val;
-            (void)sm_cmd_push(c);
-        }
-        return;
+        uint32_t st = *(volatile uint8_t *)&sm_pos[t];
+        sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};
+        c.val = sm_ui_sound()->p[id];
+        if (smp.pat[smp.cur % SM_NPAT].step[t][st % SM_NSTEP].n)
+            (void)sm_lock_set(t, st % SM_NSTEP, id, c.val);   /* (the pool full: LOCKS FULL, the base moved all the same) */
+        (void)sm_cmd_push(c);                             /* (refused: the base's SMC_PARAM, or the next trig, brings it) */
     }
-    sm_turn_base(sm_ui.trk, id, s);
 }
 
-/* FILT OFF (the sound's default) makes CUT, RES, the filter envelope's ENV and its attack and decay do nothing: turning one
- * of them on a track whose FILT is OFF first sets FILT to LP (the model, then the command), so the knob is heard at once.
- * Another FILT (LP BP HP, HYB: K2 / K3 are BASE / RES then) is left as it is */
+/* FILT OFF (the sound's default) makes CUT, RES, the filter envelope's ENV and its attack and decay, and FILTER's SELECT
+ * (LFO>FLT) do nothing: turning one of them on a track whose FILT is OFF first sets FILT to LP (the model, then the
+ * command), so the knob is heard at once. Another FILT (LP BP HP, HYB: K2 / K3 are BASE / RES then) is left as it is */
 static void sm_filt_auto(uint32_t id)
 {
     sm_sound_t *sd = sm_ui_sound();
-    if (sd->p[P_FLT] || (id != P_FCUT && id != P_FRES && id != P_ED_FLT && id != P_FATK && id != P_FDEC))
+    if (sd->p[P_FLT] || (id != P_FCUT && id != P_FRES && id != P_ED_FLT && id != P_FATK && id != P_FDEC && id != P_LD_FLT))
         return;
     sd->p[P_FLT] = 1;
     sm_param_push(sm_ui.trk % SM_NTRK, P_FLT);
@@ -584,8 +588,10 @@ static void sm_input_poll(void)
                 sm_filt_auto(sm_page_param(i));
                 sm_turn(sm_page_param(i), k[i]);
             }
-        if (sm_page_param(4) != SM_NOPARAM)
+        if (sm_page_param(4) != SM_NOPARAM && sel) {
+            sm_filt_auto(sm_page_param(4));
             sm_turn(sm_page_param(4), sel);
+        }
     }
     sm_keys_release(now);
     sm_flush();

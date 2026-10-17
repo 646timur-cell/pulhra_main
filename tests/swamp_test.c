@@ -870,8 +870,17 @@ static int test_knob_writes_model_and_core(void)
     turn(EN_SELECT, -3);
     sm_input_poll();
     run_block();
-    bad += check("INPUT: SELECT on FILTER: HWIDTH, model and core",
-                 ksnd(0)->p[P_HWIDTH] == TP[P_HWIDTH].def - 3 && trk[0].p[P_HWIDTH] == ksnd(0)->p[P_HWIDTH]);
+    bad += check("INPUT: SELECT on FILTER (FILT OFF): LFO>FLT, model and core, FILT to LP",
+                 ksnd(0)->p[P_LD_FLT] == TP[P_LD_FLT].def - 3 && trk[0].p[P_LD_FLT] == ksnd(0)->p[P_LD_FLT] &&
+                 ksnd(0)->p[P_FLT] == 1);
+    turn(EN_K1, 4);                                       /* FILT HYB: SELECT is WIDTH */
+    sm_input_poll();
+    turn(EN_SELECT, -3);
+    sm_input_poll();
+    run_block();
+    bad += check("INPUT: SELECT on FILTER (FILT HYB): HWIDTH, model and core",
+                 ksnd(0)->p[P_FLT] == 5 && ksnd(0)->p[P_HWIDTH] == TP[P_HWIDTH].def - 3 &&
+                 trk[0].p[P_HWIDTH] == ksnd(0)->p[P_HWIDTH]);
     in_reset();
     press(B_ENV);
     sm_input_poll();
@@ -1671,7 +1680,7 @@ static int test_ring_dots(void)
         static uint8_t seen[RW * RH];
         static uint16_t stk[RW * RH];
         cv_begin(RW, RH, T_BG);
-        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, pos[k], 0, 0);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, pos[k], 0, 0, 0);
         memset(seen, 0, sizeof seen);
         for (y = 0; y < RH; y++)
             for (x = 0; x < RW; x++) {
@@ -1703,13 +1712,13 @@ static int test_ring_dots(void)
     }
     {   /* the centre: empty, a lock dot, a filled disc */
         cv_begin(RW, RH, T_BG);
-        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 0, 0);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 0, 0, 0);
         bad += check("RING: the centre is empty", cvp(SMD_RING_CX, SMD_RING_CY) == BGC);
         cv_begin(RW, RH, T_BG);
-        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 0, 1);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 0, 1, 0);
         bad += check("RING: a lock dot in the centre (3 x 3)", cvp(30, 62) == INK && cvp(29, 61) == INK && cvp(31, 63) == INK && cvp(32, 62) == BGC);
         cv_begin(RW, RH, T_BG);
-        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 1, 0);
+        sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, 100, 1, 0, 0);
         bad += check("RING: filled: a solid disc (inside the dots)", cvp(30, 62) == INK && cvp(30, 52) == INK && cvp(40, 62) == INK &&
                      cvp(22, 54) == INK && cvp(30, 62 - (SMD_RING_R - 5)) == INK && cvp(30, 62 - (SMD_RING_R - 3)) == BGC);
     }
@@ -1725,7 +1734,7 @@ static int test_ring_contained(void)
     for (pos = 0; pos <= 256u; pos += 16u)
         for (f = 0; f < 3u; f++) {
             cv_begin(180u, SMD_KNOB_H, T_BG);
-            sm_px_ring(90, SMD_RING_CY, SMD_RING_R, pos, f == 1u, f == 2u);
+            sm_px_ring(90, SMD_RING_CY, SMD_RING_R, pos, f == 1u, f == 2u, 0);
             for (y = 0; y < SMD_KNOB_H; y++)
                 for (x = 0; x < 180u; x++) {
                     if (cv_px[y * cv_w + x] == BGC)
@@ -1738,7 +1747,7 @@ static int test_ring_contained(void)
                 }
         }
     printf("  ring extent: x %u..%u (column 60..119), y %u..%u\n", left, right, top, bot);
-    bad += check("RING: no pixel outside its 60 px column (centre 30, radius 28)", out == 0 && left >= 60u && right <= 119u);
+    bad += check("RING: no pixel outside its 60 px column (centre 30, radius 24)", out == 0 && left >= 60u && right <= 119u);
     bad += check("RING: ... and inside the knob zone's rows, under the label", top >= 4u + 14u && bot < SMD_KNOB_H - 14u - 4u);
     return bad;
 }
@@ -2566,20 +2575,20 @@ static int test_lock_hold_turn(void)
     key_up(WHITE[6]);
     sm_input_poll();
     bad += check("LOCK: an EMPTY step held + turned: a REST trig (trigless lock) with both locks, base kept, no toggle",
-                 lk_val(0, 6, P_FCUT) == base + 5 && lk_val(0, 6, P_HWIDTH) == clamp(TP[P_HWIDTH].def + 2, TP[P_HWIDTH].min, TP[P_HWIDTH].max) && cpat()->step[0][6].n == 1u &&
+                 lk_val(0, 6, P_FCUT) == base + 5 && lk_val(0, 6, P_LD_FLT) == clamp(TP[P_LD_FLT].def + 2, TP[P_LD_FLT].min, TP[P_LD_FLT].max) && cpat()->step[0][6].n == 1u &&
                  cpat()->step[0][6].flags == SMF_REST && cpat()->nlock == 3u && ksnd(0)->p[P_FCUT] == base &&
-                 ksnd(0)->p[P_HWIDTH] == TP[P_HWIDTH].def);
-    key_dn(WHITE[4]);                                     /* SELECT while held: its parameter (HWIDTH) locked */
+                 ksnd(0)->p[P_LD_FLT] == TP[P_LD_FLT].def);
+    key_dn(WHITE[4]);                                     /* SELECT while held: its parameter (LFO>FLT) locked */
     sm_input_poll();
     turn(EN_SELECT, -2);
     sm_input_poll();
     key_up(WHITE[4]);
     sm_input_poll();
-    bad += check("LOCK: SELECT while held: a lock of its parameter, no toggle", lk_val(0, 4, P_HWIDTH) == TP[P_HWIDTH].def - 2 &&
+    bad += check("LOCK: SELECT while held: a lock of its parameter, no toggle", lk_val(0, 4, P_LD_FLT) == TP[P_LD_FLT].def - 2 &&
                  cpat()->step[0][4].n == 1u);
     sm_ui.held_step = 4;
-    bad += check("LOCK: SELECT shows the held step's lock, the base otherwise", smd_sel_val(P_HWIDTH) == TP[P_HWIDTH].def - 2 &&
-                 (sm_ui.held_step = 0xFFu, smd_sel_val(P_HWIDTH) == TP[P_HWIDTH].def));
+    bad += check("LOCK: SELECT shows the held step's lock, the base otherwise", smd_sel_val(P_LD_FLT) == TP[P_LD_FLT].def - 2 &&
+                 (sm_ui.held_step = 0xFFu, smd_sel_val(P_LD_FLT) == TP[P_LD_FLT].def));
     return bad;
 }
 
@@ -2838,7 +2847,10 @@ static int test_rec_records_on_trigs(void)
             any += v != LK_NONE;
     }
     bad += check("REC: playing, CUT turned: locks only on the steps with trigs", ok && any == 4);
-    bad += check("REC: ... the base did not change", ksnd(0)->p[P_FCUT] == base);
+    bad += check("REC: ... the base turned with the knob (no step held: the base, always; 02:43)", ksnd(0)->p[P_FCUT] == base - 64);
+    for (s = 0, ok = 1; s < 16u; s += 4u)                 /* (each trig: the value the knob had as it played) */
+        ok &= lk_val(0, s, P_FCUT) >= base - 64 && lk_val(0, s, P_FCUT) < base;
+    bad += check("REC: ... each trig locked the base's value as it played", ok);
     press(B_REC);
     sm_input_poll();
     bad += check("REC: the REC key again: off", sm_rec == 0u);
@@ -2997,10 +3009,15 @@ static int test_rec_preview(void)
     turn(EN_K2, 10);
     sm_input_poll();
     v = lk_val(0, 5, P_FCUT);
-    bad += check("FIX1: REC turn on step 5: lock 74, base 64", v == 74 && ksnd(0)->p[P_FCUT] == 64);
+    bad += check("FIX1: REC turn on step 5: lock 74, the base 74 too (a turn is the base, 02:43)", v == 74 && ksnd(0)->p[P_FCUT] == 74);
     run_block();
     bad += check("FIX1: ... the core has it after the next block", sm_pos[0] == 5u && trk[0].p[P_FCUT] == 74);
-    bad += check("FIX1: ... the next (unlocked) trig: the base again", run_to_step(0, 6) && trk[0].p[P_FCUT] == 64);
+    press(B_REC);                                         /* REC off: the base back to 64, step 5 keeps its 74 */
+    sm_input_poll();
+    turn(EN_K2, -10);
+    sm_input_poll();
+    bad += check("FIX1: ... REC off, K2 -10: the base 64, the lock still 74", ksnd(0)->p[P_FCUT] == 64 && lk_val(0, 5, P_FCUT) == 74);
+    bad += check("FIX1: ... the next (unlocked) trig: the base", run_to_step(0, 6) && trk[0].p[P_FCUT] == 64);
     bad += check("FIX1: ... step 5 again: its lock", run_to_step(0, 5) && trk[0].p[P_FCUT] == 74);
     return bad;
 }
@@ -5605,6 +5622,279 @@ static int test_filter_auto_lp(void)
     return bad;
 }
 
+/* ------------------------------------------------------------------------------------- hardware notes (Task 3b) --- */
+/* Tim 02:43: "the EDIT knobs (and every sound page's) do not turn at all without a step". A button tapped as the hand does it
+ * (down, a poll, 80 ms, up, a poll), the pages reached that way */
+static void hw_tap(uint32_t b)
+{
+    btn_down(b);
+    sm_input_poll();
+    ms(80);
+    btn_up(b);
+    sm_input_poll();
+    ms(5);
+}
+static void hw_page(const char *n)
+{
+    uint32_t i, b = !strncmp(n, "EDIT", 4) || !strcmp(n, "VOICE") ? B_EDIT : !strcmp(n, "AMP") || !strcmp(n, "MIX") ? B_GLO :
+                    n[0] == 'F' ? B_ENV : !strcmp(n, "STEP") ? B_SEQ : B_HOME;
+    for (i = 0; i < 12u && strcmp(sm_cur_page()->name, n); i++)
+        hw_tap(b);
+}
+/* every knob and SELECT of every sound page on track trk, with the scenario set up first: sel a step selected on STEP (held
+ * past the hold time and let go), trigs on every step, REC, PLAY. Each knob +3 (at its top: -3): the base moves, the core has
+ * it two blocks later; REC while playing: the playing step's trig holds the same value as a lock. Returns the failures */
+static int hw_knob_matrix(const char *what, uint32_t trk_n, int sel, int trigs, int rec, int play)
+{
+    static const char *const PG[7] = {"EDIT 1", "EDIT 2", "VOICE", "AMP", "MIX", "FILTER", "F.ENV"};
+    uint32_t p, k, s, n = 0, dead = 0, core = 0, lock = 0;
+    char line[160];
+    in_reset();
+    host_ticks = 1000u;
+    if (trk_n) {
+        turn(EN_ALGO, (int32_t)trk_n);
+        sm_input_poll();
+    }
+    if (trigs)
+        for (s = 0; s < 16u; s++)
+            sm_step_toggle(trk_n, s);
+    if (sel) {
+        hw_page("STEP");
+        key_dn(WHITE[5]);
+        sm_input_poll();
+        ms(500);
+        sm_input_poll();
+        key_up(WHITE[5]);
+        sm_input_poll();
+        ms(5);
+    }
+    if (rec) {
+        press(B_REC);
+        sm_input_poll();
+    }
+    if (play) {
+        press(B_PLAY);
+        sm_input_poll();
+        for (s = 0; s < 20u; s++)
+            run_block();
+    }
+    for (p = 0; p < 7u; p++) {
+        hw_page(PG[p]);
+        for (k = 0; k < 5u; k++) {
+            uint32_t id = sm_page_param(k), st;
+            int8_t b0;
+            if (id == SM_NOPARAM)
+                continue;
+            n++;
+            b0 = ksnd(trk_n)->p[id];
+            turn(k < 4u ? EN_K1 + k : EN_SELECT, 3);
+            sm_input_poll();
+            ms(2);
+            if (ksnd(trk_n)->p[id] == b0) {
+                turn(k < 4u ? EN_K1 + k : EN_SELECT, -3);
+                sm_input_poll();
+                ms(2);
+            }
+            st = *(volatile uint8_t *)&sm_pos[trk_n];
+            run_block();
+            run_block();
+            dead += ksnd(trk_n)->p[id] == b0;
+            core += trk[trk_n].p[id] != ksnd(trk_n)->p[id];
+            if (rec && play && trigs)
+                lock += lk_val(trk_n, st, id) != ksnd(trk_n)->p[id] && lk_val(trk_n, sm_pos[trk_n], id) != ksnd(trk_n)->p[id];
+        }
+    }
+    if (play) {
+        press(B_PLAY);
+        sm_input_poll();
+    }
+    if (rec) {
+        press(B_REC);
+        sm_input_poll();
+    }
+    snprintf(line, sizeof line, "KNOBS: %s: all %u knobs move the base (dead %u), core has it (%u off)%s", what, n, dead, core,
+             rec && play && trigs ? ", the trig playing locked to it" : "");
+    return check(line, n >= 30u && !dead && !core && !lock);
+}
+static int test_knobs_without_step(void)
+{
+    int bad = 0;
+    bad += hw_knob_matrix("stopped, no step", 0, 0, 0, 0, 0);
+    bad += hw_knob_matrix("stopped, a step selected on STEP", 0, 1, 1, 0, 0);
+    bad += hw_knob_matrix("playing, a step selected on STEP", 0, 1, 1, 0, 1);
+    bad += hw_knob_matrix("T2 playing, a step selected", 1, 1, 1, 0, 1);
+    bad += hw_knob_matrix("REC stopped", 0, 0, 1, 1, 0);
+    bad += hw_knob_matrix("REC playing, an empty track", 0, 0, 0, 1, 1);
+    bad += hw_knob_matrix("REC playing, trigs on every step", 0, 0, 1, 1, 1);
+    bad += hw_knob_matrix("T3 REC playing, a step selected, trigs", 2, 1, 1, 1, 1);
+    return bad;
+}
+
+/* SELECT on FILTER heard in every FILT: HYB WIDTH; OFF LP BP HP NOTCH the LFO's depth onto the cutoff (P_LD_FLT; OFF: LP
+ * first). T2 alone, a trig on every step, K1 to FILT f, SELECT turned by sel, PLAY, a bar captured */
+static int32_t hw_cap[2][CTL * 700];
+static void flt_sel_capture(int32_t f, int32_t sel, int32_t *L)
+{
+    uint32_t s, k, nl = 0;
+    in_reset();
+    host_ticks = 1000u;
+    for (k = 0; k < SM_NTRK; k++)
+        if (k != 1u)
+            ksnd(k)->p[P_LEVEL] = 0, trk[k].p[P_LEVEL] = 0;
+    for (s = 0; s < 16u; s++)
+        sm_step_toggle(1, s);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    filter_page();
+    if (f) {
+        turn(EN_K1, f);
+        sm_input_poll();
+    }
+    if (sel) {
+        turn(EN_SELECT, sel);
+        sm_input_poll();
+    }
+    press(B_PLAY);
+    sm_input_poll();
+    for (s = 0; s < 700u; s++) {
+        block_peak(L, &nl);
+        seq_clock += CTL;
+    }
+    press(B_PLAY);
+    sm_input_poll();
+}
+static int test_filter_select(void)
+{
+    static const char *const NM[6] = {"OFF", "LP", "BP", "HP", "NOTCH", "HYB"};
+    int bad = 0;
+    int32_t f;
+    uint32_t i;
+    double d, e;
+    flt_sel_capture(1, 0, hw_cap[0]);
+    flt_sel_capture(1, 0, hw_cap[1]);
+    for (i = 0, d = 0, e = 0; i < CTL * 700u; i++) {
+        double a = hw_cap[0][i], b = hw_cap[1][i];
+        d += (a - b) * (a - b);
+        e += a * a;
+    }
+    printf("  repeat: difference %.3f %% of the energy\n", e > 0 ? 100.0 * d / e : 0.0);
+    bad += check("FSEL: the same capture twice differs by < 1 % (the measure below is the knob's)", e > 0 && d / e < 0.01);
+    for (f = 0; f <= 5; f++) {
+        char line[120];
+        int32_t sel = f == 5 ? -90 : -60;                 /* (HYB: WIDTH 127 -> 37; else the LFO's depth 0 -> -60) */
+        uint32_t id;
+        flt_sel_capture(f, 0, hw_cap[0]);
+        flt_sel_capture(f, sel, hw_cap[1]);
+        id = sm_page_param(4);
+        for (i = 0, d = 0, e = 0; i < CTL * 700u; i++) {
+            double a = hw_cap[0][i], b = hw_cap[1][i];
+            d += (a - b) * (a - b);
+            e += a * a;
+        }
+        snprintf(line, sizeof line, "FSEL: FILT %-5s: SELECT is %s and is heard (difference %.0f %% of the energy)", NM[f],
+                 f == 5 ? "WIDTH" : "LFO>FLT", e > 0 ? 100.0 * d / e : 0.0);
+        bad += check(line, id == (f == 5 ? P_HWIDTH : P_LD_FLT) && e > 0 && d / e > 0.05 &&
+                           ksnd(1)->p[P_FLT] == (f ? f : 1));
+    }
+    return bad;
+}
+
+/* the strip of a track of length 8: eight places, nothing past them (Tim: "fewer dots") */
+static int test_strip_len8(void)
+{
+    int bad = 0;
+    uint32_t s;
+    draw_setup();
+    for (s = 0; s < 16u; s++)
+        smp.pat[smp.cur].step[0][s].n = 1;
+    ksnd(0)->len = 8;
+    draw_full();
+    bad += check("STRIP8: length 8: a dot on each of the 8 places", scr_count(0, 220, 8 * SMD_STEP_W, 20, INK) == 8u * 9u);
+    bad += check("STRIP8: ... nothing past them (places 9 .. 16)", scr_ink(8 * SMD_STEP_W, 220, 8 * SMD_STEP_W, 20) == 0u);
+    ksnd(0)->len = 16;
+    return bad;
+}
+
+/* the rings of K1 .. K4 side by side (each in its 60 px column): at least 4 px of ground between two neighbours, any value,
+ * filled or not */
+static int test_ring_gap(void)
+{
+    int bad = 0;
+    uint32_t pos, f, x, y, k, gap = 999;
+    sm_ux_mk1();
+    for (pos = 0; pos <= 256u; pos += 32u)
+        for (f = 0; f < 2u; f++) {
+            uint32_t lo[4], hi[4];
+            cv_begin(240u, SMD_KNOB_H, T_BG);
+            for (k = 0; k < 4u; k++)
+                sm_px_ring((int32_t)(k * SMD_KNOB_W) + SMD_RING_CX, SMD_RING_CY, SMD_RING_R, pos, (int)f, 0, 0);
+            for (k = 0; k < 4u; k++) {
+                lo[k] = 999;
+                hi[k] = 0;
+                for (y = 0; y < SMD_KNOB_H; y++)
+                    for (x = k * 60u; x < k * 60u + 60u; x++)
+                        if (cv_px[y * cv_w + x] != BGC) {
+                            lo[k] = x < lo[k] ? x : lo[k];
+                            hi[k] = x > hi[k] ? x : hi[k];
+                        }
+            }
+            for (k = 0; k + 1u < 4u; k++)
+                gap = lo[k + 1u] - hi[k] - 1u < gap ? lo[k + 1u] - hi[k] - 1u : gap;
+        }
+    printf("  ring gap: %u px\n", gap);
+    bad += check("RINGGAP: at least 4 px of ground between neighbouring rings", gap >= 4u && gap < 60u);
+    return bad;
+}
+
+/* HOME > MIXER: the four tracks' levels as rings (a muted one dim, no ink; the selected one's label inverted), and the strip
+ * shows the four tracks' steps as dots, a row each (Tim: "on the mixer show all four tracks as dots") */
+static int test_mixer_four(void)
+{
+    int bad = 0;
+    uint32_t t, r;
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("MIXER");
+    sm_ui.trk = 1;
+    smp.mute = 4u;                                        /* T3 muted */
+    for (t = 0; t < SM_NTRK; t++)
+        smp.pat[smp.cur].step[t][t].n = 1;               /* T1 step 1, T2 step 2, .. */
+    smp.pat[smp.cur].step[0][12].n = 1;
+    ksnd(3)->len = 8;
+    smp.pat[smp.cur].step[3][12].n = 1;                   /* (T4: past its length) */
+    sm_playing = 1;
+    sm_pos[0] = 4; sm_pos[1] = 5; sm_pos[2] = 6; sm_pos[3] = 7;
+    draw_full();
+    bad += check("MIXER4: rings T1 T2 T4 have ink, T3 (muted) only dim dots",
+                 scr_count(0, 48 + 20, 60, 70, INK) > 0u && scr_count(60, 48 + 20, 60, 70, INK) > 0u &&
+                 scr_count(180, 48 + 20, 60, 70, INK) > 0u && scr_count(120, 48 + 20, 60, 70, INK) == 0u &&
+                 scr_count(120, 48 + 20, 60, 70, DIMC) > 0u);
+    bad += check("MIXER4: the selected track's label (T2) inverted, the others not",
+                 SCR(60 + 17, 48 + 3) == INK && SCR(17, 48 + 3) == BGC && SCR(120 + 17, 48 + 3) == BGC);
+    for (t = 0; t < SM_NTRK; t++) {
+        uint32_t x = t * SMD_STEP_W + SMD_STEP_W / 2u, y = 220u + t * 5u;
+        r = t == 2u ? DIMC : INK;
+        bad += check("MIXER4: the strip: a row per track, its trig a 3 x 3 dot (T3 muted: dim)", box_is(x - 1u, y, 3, 3, (uint16_t)r));
+    }
+    bad += check("MIXER4: ... T1's trig on step 13 drawn, T4's (length 8) not",
+                 box_is(12u * SMD_STEP_W + 5u, 220u, 3, 3, INK) && scr_ink(8u * SMD_STEP_W, 220u + 15u, 8u * SMD_STEP_W, 5) == 0u);
+    bad += check("MIXER4: ... each row's playing step: a bar under it",
+                 SCR(4u * SMD_STEP_W + 6u, 220u + 3u) == INK && SCR(5u * SMD_STEP_W + 6u, 220u + 8u) == INK &&
+                 SCR(7u * SMD_STEP_W + 6u, 220u + 18u) == INK);
+    bad += check("MIXER4: the frame's texts inside their cells", lint_frame("MIXER4") == 0);
+    {
+        uint32_t a = smd_strip_sig();
+        smp.pat[smp.cur].step[2][9].n = 1;
+        bad += check("MIXER4: another track's trig changes the strip's signature", smd_strip_sig() != a);
+        a = smd_knob_sig(0);
+        smp.mute = 1u;
+        bad += check("MIXER4: a mute changes the ring's signature", smd_knob_sig(0) != a);
+    }
+    smp.mute = 0;
+    sm_playing = 0;
+    ksnd(3)->len = 16;
+    return bad;
+}
+
 static int test_draw_shots(void)
 {
     const char *dir = getenv("SHOTS");
@@ -5614,6 +5904,7 @@ static int test_draw_shots(void)
     for (pg = 0; pg < sm_page_count(); pg++) {
         char n[48], *c;
         draw_setup();
+        memset(host_screen, 0, sizeof host_screen);       /* (what earlier tests left between the zones: not the device's) */
         {   /* trigs, a x3 and a x2 ratchet, two RESTs on the track the shot shows */
             sm_step_t *st = smp.pat[smp.cur].step[pg % 2u];
             st[0].n = 1;
@@ -5687,6 +5978,46 @@ static int test_draw_shots(void)
             write_ppm(dir, NAME[k]);
             sm_playing = 0;
         }
+    }
+    {   /* hardware notes 3b: MIXER with the four tracks (T3 muted, T2 selected, T4 of length 8, playing), FILTER on HYB
+         * and on LP (SELECT: WIDTH / LFO>FLT), a track of length 8 on EDIT 1 */
+        uint32_t t, s;
+        draw_setup();
+        memset(host_screen, 0, sizeof host_screen);
+        for (t = 0; t < SM_NTRK; t++)
+            for (s = t; s < 16u; s += 3u + t)
+                smp.pat[smp.cur].step[t][s].n = 1;
+        smp.pat[smp.cur].step[1][6].flags = SMF_REST;
+        smp.pat[smp.cur].step[1][6].n = 1;
+        ksnd(3)->len = 8;
+        ksnd(2)->p[P_LEVEL] = 40;
+        ksnd(0)->p[P_LEVEL] = 127;
+        smp.mute = 4u;
+        sm_ui.trk = 1;
+        sm_ui.page = (uint8_t)page_by_name("MIXER");
+        sm_playing = 1;
+        sm_pos[0] = 5; sm_pos[1] = 5; sm_pos[2] = 5; sm_pos[3] = 5;
+        draw_full();
+        write_ppm(dir, "swamp_3b_mixer");
+        smp.mute = 0;
+        sm_ui.trk = 0;
+        ksnd(0)->len = 8;
+        sm_pos[0] = 3;
+        sm_ui.page = (uint8_t)page_by_name("EDIT 1");
+        draw_full();
+        write_ppm(dir, "swamp_3b_edit1_len8");
+        sm_ui.page = (uint8_t)page_by_name("FILTER");
+        ksnd(0)->p[P_FLT] = 1;
+        ksnd(0)->p[P_FCUT] = 80;
+        ksnd(0)->p[P_LD_FLT] = -24;
+        draw_full();
+        write_ppm(dir, "swamp_3b_filter_lp");
+        ksnd(0)->p[P_FLT] = 5;
+        ksnd(0)->p[P_HBASE] = 30;
+        ksnd(0)->p[P_HWIDTH] = 70;
+        draw_full();
+        write_ppm(dir, "swamp_3b_filter_hyb");
+        sm_playing = 0;
     }
     {   /* the three layer maps, over the EDIT 1 page: T1 SAW, T3 muted, T4 soloed (the header shows T1 muted), 24 steps */
         static const char *const NAME[4] = {"", "EDIT", "GLO", "SEQ"};
@@ -5839,6 +6170,11 @@ int main(void)
     bad += test_undo_other_pattern();
     bad += test_len_visible();
     bad += test_filter_auto_lp();
+    bad += test_knobs_without_step();
+    bad += test_filter_select();
+    bad += test_strip_len8();
+    bad += test_ring_gap();
+    bad += test_mixer_four();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;
