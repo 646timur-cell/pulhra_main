@@ -192,8 +192,8 @@ static void sm_seq_tool(uint32_t w, uint32_t t)
     case SM_W_COPY_TRK: sm_copy_trk(t); break;
     case SM_W_PASTE_TRK: sm_paste_trk(t); break;
     case SM_W_PASTE_PAT: sm_paste_pat(); break;
-    case SM_W_SHL: sm_shift(t, -1); break;
-    case SM_W_SHR: sm_shift(t, 1); break;
+    case SM_W_SHL: sm_shift_trk(t, -1); break;
+    case SM_W_SHR: sm_shift_trk(t, 1); break;
     case SM_W_TRN_DN: sm_trn(t, -1); break;
     case SM_W_TRN_UP: sm_trn(t, 1); break;
     default: return;

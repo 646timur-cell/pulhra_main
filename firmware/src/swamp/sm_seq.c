@@ -379,10 +379,13 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
 {
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     const sm_step_t *s = &pt->step[t][st];
+    sm_step_t e;
     uint32_t hits, vel, f, li;
     if (!s->n)                                            /* (n first: the main loop writes it last, sm_step_toggle) */
         return;
     SM_BARRIER();
+    sm_step_eff(s, &pt->kit.snd[t], &e);                  /* (the inherited fields: the track's defaults now) */
+    s = &e;
     f = s->flags;
     if (!sm_cond_ok(t, s->cond, next_pass)) {
         if (sm_slid[t])                                   /* (no note comes: the slide's notes end here) */
@@ -435,12 +438,15 @@ static void sm_seq_part(uint32_t t)
 {
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     const sm_step_t *s = &pt->step[t][sm_pos[t]];
+    sm_step_t e;
     if (!sm_rat_left[t] || !s->n || (s->flags & SMF_REST)) {
         sm_rat_left[t] = 0;
         sm_rat_q8[t] = SM_Q8_NONE;
         return;
     }
-    sm_seq_notes(t, s, sm_rat_vel[t], 0);
+    SM_BARRIER();
+    sm_step_eff(s, &pt->kit.snd[t], &e);
+    sm_seq_notes(t, &e, sm_rat_vel[t], 0);
     sm_gate[t] = (int32_t)((sm_rat_d[t] >> 8) * (uint32_t)clamp(trk[t].p[P_SGATE], 1, 127) / 128u);
     sm_rat_left[t]--;
     sm_rat_q8[t] = sm_rat_left[t] ? sm_rat_q8[t] + sm_rat_d[t] : SM_Q8_NONE;

@@ -7,8 +7,9 @@
  *    as it turns round every LED: the active ones dark, the rest lit);
  *  - the step playing is a soft running light: the MID level, never a full flash: on an empty step mid, a trig comes down
  *    to mid, a REST has mid in place of its breath; a held step is mid too (and a frame on the screen);
- *  - OCT- / OCT+ (outside a layer): the page of steps in view (OCT- 1..16, OCT+ 17..32) is lit, only while the track is longer than
- *    16; the keyboard mode: the white keys show no steps, and OCT- / OCT+ are lit while the octave is below / above 0;
+ *  - OCT- / OCT+ (outside a layer): OCT+ lit on the page of steps 17..32 (a track longer than 16; 1..16: it glows), OCT- (SHIFT)
+ *    lit while it is held; the keyboard mode: the white keys show no steps, and OCT- / OCT+ are lit while the octave is below /
+ *    above 0;
  *  - buttons: the family of the page in view lit (HOME's too), REC lit while recording, PLAY's own LED glows (dark while playing, its
  *    green one lit), the rest glow, as settings_leds (OFF / DIM LO / DIM HI / INV) says;
  *  - a layer open (sm_layer.c): its button breathes (not lit, no glow), and the keys show what they do in it instead of the
@@ -107,8 +108,9 @@ static void sm_leds(void)
     else if (sm_ui.kbd) {                                      /* the keyboard mode: the octave (the buttons' glow is below) */
         sm_led_put(nl, panel.btn[B_OCTDN], sm_ui.oct < 0);
         sm_led_put(nl, panel.btn[B_OCTUP], sm_ui.oct > 0);
-    } else if (len > 16u) {                                    /* the two pages of steps: the page in view lit */
-        sm_led_put(nl, panel.btn[bank ? B_OCTUP : B_OCTDN], 1);
+    } else {                                                   /* OCT+ the second page of steps in view, OCT- SHIFT held */
+        sm_led_put(nl, panel.btn[B_OCTUP], len > 16u && bank);
+        sm_led_put(nl, panel.btn[B_OCTDN], sm_shift != 0u);
     }
     for (k = 0; k < NB; k++) {
         sm_led_put(ng, panel.btn[k], 1);

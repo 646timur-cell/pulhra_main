@@ -31,6 +31,10 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
     s->len = 16u;
     for (i = 0; i < P_E0; i++)
         s->p[i] = (int8_t)TP[i].def;
+    s->dnote = (uint8_t)(48 + clamp(s->p[P_ROOT], 0, 11)); /* the trig defaults: C3 + the ROOT, VEL 100, LEN TRK, 100 % */
+    s->dvel = 100u;
+    s->dlen = 0;
+    s->dcond = 0;
     if (!e->npresets)
         return;
     preset %= e->npresets;
@@ -53,6 +57,21 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
     s->p[P_VOICE] = (int8_t)(pr->mono ? V_LEGATO : V_POLY);
     for (i = 0; i < 4u; i++)
         s->p[P_DIST + i] = (int8_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
+}
+
+/* step s as it plays on a track with sound d: its inherited fields (SM_INH) the track's defaults. The audio stream's at a
+ * fire (each field a byte, read once into *o); the main loop's for the screen and the STEP page's edits */
+static void sm_step_eff(const sm_step_t *s, const sm_sound_t *d, sm_step_t *o)
+{
+    *o = *s;
+    if (o->note[0] == SM_INH)
+        o->note[0] = d->dnote;
+    if (o->vel == SM_INH)
+        o->vel = d->dvel;
+    if (o->len == SM_INH)
+        o->len = d->dlen;
+    if (o->cond == SM_INH)
+        o->cond = d->dcond;
 }
 
 /* power-on: 120.0 BPM, swing 50, every step empty, 16 steps; the kit T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX (their first

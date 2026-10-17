@@ -185,24 +185,27 @@ static void sm_paste_pat(void)
 }
 
 /* SHIFT: track t's steps (and their locks) one step left (-1) or right (+1), wrapping at its length */
-static void sm_shift(uint32_t t, int32_t dir)
+static void sm_shift_trk(uint32_t t, int32_t dir)
 {
     sm_undo_snap();
     sm_put_begin(1u << (t % SM_NTRK));
     sm_put_track(t, &sm_undo_buf, t, dir < 0 ? -1 : 1, 0);   /* (the snapshot is the track as it was) */
 }
 
-/* TRN: the notes of track t's trigs d semitones (0 .. 127), in place */
+/* TRN: the notes of track t's trigs d semitones (0 .. 127), in place; the track's default NOTE too, so the trigs that inherit it
+ * (SM_INH, left as they are) move with it */
 static void sm_trn(uint32_t t, int32_t d)
 {
     sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
     uint32_t s, k;
     t %= SM_NTRK;
     sm_undo_snap();
+    p->kit.snd[t].dnote = (uint8_t)clamp((int32_t)p->kit.snd[t].dnote + d, 0, 127);   /* (a byte) */
     for (s = 0; s < SM_NSTEP; s++) {
         sm_step_t *x = &p->step[t][s];
         for (k = 0; k < x->n && k < 4u; k++)
-            x->note[k] = (uint8_t)clamp((int32_t)x->note[k] + d, 0, 127);
+            if (x->note[k] != SM_INH)
+                x->note[k] = (uint8_t)clamp((int32_t)x->note[k] + d, 0, 127);
     }
     sm_dirty = 1;
 }
@@ -219,4 +222,75 @@ static void sm_undo(void)
     smp.pat[smp.cur % SM_NPAT].mlen = sm_undo_buf.mlen;
     sm_undo_ok = 0;
     sm_msg_show(SM_MSG_UNDO);
+}
+
+/* the trig clipboard (sm_input.c: REC + a trig key copies, a trig held + OCT+ pastes): one step as it is - its fields (an
+ * inherited one stays SM_INH: the trig pasted takes the defaults of the track it lands on), flags, nudge, notes - and its
+ * live locks. A copy of an empty step copies nothing (the clipboard stays) */
+static sm_step_t sm_tclip;
+static uint8_t sm_tclip_ok, sm_tclip_nl, sm_tclip_p[P_COUNT];
+static int16_t sm_tclip_v[P_COUNT];
+
+static int sm_trig_copy(uint32_t t, uint32_t st)
+{
+    const sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t i, n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock, ts;
+    t %= SM_NTRK;
+    st %= SM_NSTEP;
+    if (!p->step[t][st].n)
+        return 0;
+    ts = (t << 5) | st;
+    sm_tclip = p->step[t][st];
+    sm_tclip_nl = 0;
+    for (i = 0; i < n && sm_tclip_nl < P_COUNT; i++)
+        if (p->lock[i].ts == ts && p->lock[i].param < P_COUNT) {
+            sm_tclip_p[sm_tclip_nl] = p->lock[i].param;
+            sm_tclip_v[sm_tclip_nl++] = p->lock[i].val;
+        }
+    sm_tclip_ok = 1;
+    return 1;
+}
+
+/* the trig copied onto step st of track t (a trig there or none: replaced whole), the order of a PASTE (sm_put_*): n = 0 first
+ * (the audio stream fires nothing of the step from here), its locks removed (tombstones; stopped: compacted) and the core's
+ * of them back to the base, the clipboard's locks (each whole before it counts), the fields (n still 0), SM_BARRIER(), n. So
+ * the interrupt sees the old trig, no trig, or the new one with all its locks. The caller takes the UNDO snapshot */
+static void sm_trig_put(uint32_t t, uint32_t st)
+{
+    sm_step_t *x, y;
+    uint32_t i, had;
+    if (!sm_tclip_ok || t >= SM_NTRK || st >= SM_NSTEP)
+        return;
+    x = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    had = x->n;
+    x->n = 0;
+    SM_BARRIER();
+    sm_lock_clear_step(t, st);
+    if (had)
+        sm_unlock_req(t, st);                             /* (its locks may be on the core) */
+    for (i = 0; i < sm_tclip_nl; i++)
+        if (!sm_lock_set(t, st, sm_tclip_p[i], sm_tclip_v[i]))
+            break;                                        /* (the pool full: LOCKS FULL, the rest not placed) */
+    y = sm_tclip;
+    y.n = 0;
+    *x = y;
+    SM_LOCK_PREEMPT();
+    SM_BARRIER();
+    x->n = sm_tclip.n;
+    sm_dirty = 1;
+}
+
+/* a trig held + OCT+: the trig copied (sm_trig_copy) onto every trig key down, one UNDO snapshot for them; the keys do not
+ * toggle at their release. Nothing copied yet: nothing */
+static void sm_paste_held(void)
+{
+    uint32_t k;
+    if (!sm_tclip_ok)
+        return;
+    sm_undo_snap();
+    for (k = 0; k < SM_NKEYS; k++)
+        if ((sm_key_arm >> k) & 1u) {
+            sm_trig_put(sm_key_trk[k], sm_key_step[k]);
+            sm_key_used |= 1u << k;
+        }
 }

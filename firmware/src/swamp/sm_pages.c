@@ -2,7 +2,8 @@
 /* SWAMP MACHINE pages: four knobs and SELECT per page, grouped in the families of the buttons EDIT / GLO / ENV / SEQ
  * (a second press of a family's button goes to its next page). The screen (sm_draw) reads sm_ui and sm_cur_page().
  * STEP (SEQ tapped) is the one page whose knobs edit a step, not the sound (sm_input.c sm_step_page): K1 NOTE, K2 VEL,
- * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
+ * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG; with no step selected (a SEQ tap drops the selection) K1..K4 are the
+ * track's trig defaults. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
  * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both */
 #define SM_NOPARAM 0xFFu
 
@@ -58,6 +59,8 @@ static void sm_page_press(uint32_t fam)
     if (first == n)
         return;
     sm_ui.page = (uint8_t)(SM_PAGES[cur].fam == fam ? (next != n ? next : first) : first);
+    if (fam == SMFAM_SEQ)                                 /* SEQ tapped: no step selected, STEP shows the track's trig defaults */
+        sm_ui.sel_step = 0xFFu;
     sm_dirty = 1;
 }
 

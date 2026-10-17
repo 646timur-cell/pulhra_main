@@ -237,17 +237,16 @@ static void sm_unlock_flush(void)
         }
 }
 
-/* the main loop: a fresh trig's fields on step st of track t (not n): C3 + the track's ROOT, vel 100, LEN TRK (the
- * track's GATE), 100 %, the flags given, no nudge */
+/* the main loop: a fresh trig's fields on step st of track t (not n): NOTE, VEL, LEN, COND inherited (SM_INH: the track's
+ * defaults, sm_sound_t dnote ..), no chord, the flags given, no nudge */
 static void sm_step_fresh(uint32_t t, uint32_t st, uint32_t flags)
 {
-    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    sm_step_t *s = &pt->step[t][st];
-    s->note[0] = (uint8_t)(48 + clamp(pt->kit.snd[t].p[P_ROOT], 0, 11));
+    sm_step_t *s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    s->note[0] = SM_INH;
     s->note[1] = s->note[2] = s->note[3] = 0;
-    s->vel = 100;
-    s->len = 0;
-    s->cond = 0;
+    s->vel = SM_INH;
+    s->len = SM_INH;
+    s->cond = SM_INH;
     s->flags = (uint8_t)flags;
     s->nudge = 0;
 }

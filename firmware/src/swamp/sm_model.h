@@ -35,6 +35,12 @@ static const uint16_t SM_LEN64[SM_NLEN] = {0, 1, 2, 4, 8, 16, 32, 48, 64, 96, 12
 static const char *const SM_LEN_N[SM_NLEN] = {"TRK", "1/64", "1/32", "1/16", "1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3",
                                               "4", "6", "8", "16", "INF"};
 
+/* a trig's NOTE (note[0]), VEL, LEN, COND hold SM_INH until they are edited on that step: the trig then takes the track's
+ * default (sm_sound_t dnote / dvel / dlen / dcond, the STEP page with no step selected), so a default changed later changes
+ * every trig that never had that field edited. 0xFF is none of their values (note 0..127, vel 1..127, len < SM_NLEN, cond <
+ * SM_COND_END). The audio stream resolves them when a trig fires (sm_step_eff), each a byte read whole */
+#define SM_INH 0xFFu
+
 typedef struct {
     uint8_t note[4], n, vel, len, cond, flags;            /* n == 0: the trig is off; n with SMF_REST: a lock trig, no note */
     int8_t nudge;                                         /* -8..+7, in 1/16 step */
@@ -48,6 +54,8 @@ typedef struct {
 
 typedef struct {
     uint8_t machine, preset, len, rsv;
+    uint8_t dnote, dvel, dlen, dcond;                     /* the track's trig defaults (SM_INH above); the sequencer's, as len:
+                                                             a preset load keeps them, a track copy carries them */
     int8_t p[P_COUNT];                                    /* as mfp_trk_t: -64..127 */
 } sm_sound_t;
 

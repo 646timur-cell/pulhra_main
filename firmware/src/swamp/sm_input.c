@@ -15,8 +15,11 @@
  * lock (a trigless lock; no toggle). No key down a turn is the base, always; REC on and playing it is also recorded: the
  * selected track's playing step, only if it has a trig, locks the new base value.
  * The STEP page (SEQ tapped): the knobs edit a step's fields, not the sound (sm_step_page): the step of the white key
- * down on the selected track (the last pressed), else the step selected last (sm_ui.sel_step); none: nothing. Field
- * writes are single bytes the audio stream reads at a fire (a step edited between two fires is whole by bytes).
+ * down on the selected track (the last pressed), else the step selected last (sm_ui.sel_step); none (a SEQ tap drops the
+ * selection): the track's trig defaults, which every field a step never had edited (SM_INH) plays. Field writes are single
+ * bytes the audio stream reads at a fire (a step edited between two fires is whole by bytes).
+ * REC on (or REC held) + a trig key: that trig copied (sm_edit.c sm_trig_copy; no toggle, no hold); a trig held + OCT+: the
+ * copy pasted onto it. OCT- outside the keyboard mode is SHIFT while held (sm_shift); SHIFT + a knob: the fine turn (sm_fine).
  * HOME (sm_home_page): MIXER's knobs are the LEVEL of T1..T4 (a base value, no locks), CLOCK's K1 the tempo and K2 the swing,
  * SELECT the tempo on both. smp.bpm10 and smp.swing are written here, in the main loop, 16 and 8 bits at once; the audio
  * stream reads each once per block (sm_seq.c). */
@@ -40,6 +43,9 @@ static uint8_t sm_oct_pend;                               /* an OCT press waitin
 static uint32_t sm_oct_t0;                                /* ... when it went down */
 static uint8_t sm_kb_note[SM_NKEYS], sm_kb_trk[SM_NKEYS]; /* keyboard mode: the note each key sounds (0xFF none) and its track */
 static uint32_t sm_kb_pend;                               /* bit per key: pressed, its note-on not pushed yet */
+static uint8_t sm_shift;                                  /* SHIFT: OCT- held outside the keyboard mode and the layers (sm_oct_poll) */
+static int8_t sm_fine_acc[5];                             /* SHIFT's fine turn: the detents not yet a step, K1..K4, SELECT */
+static uint8_t sm_rec_was, sm_rec_mod;                    /* REC before its press; a trig copied while REC was down (sm_rec_poll) */
 
 #define SM_FAST_US 80000u
 #define SM_FAST_N 4u
@@ -63,6 +69,9 @@ static void sm_input_init(void)
     sm_kb_pend = 0;
     sm_unl_pend = 0;
     sm_rec = 0;
+    sm_rec_was = sm_rec_mod = 0;
+    sm_shift = 0;
+    memset(sm_fine_acc, 0, sizeof sm_fine_acc);
     sm_msg = 0;
     sm_dirty = 1;
 }
@@ -72,6 +81,8 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
 static void sm_layer_end(void);
 static uint32_t sm_layer_busy(void);                      /* a layer open, or its button down */
 static void sm_undo(void);                                /* sm_edit.c (after this file) */
+static int sm_trig_copy(uint32_t t, uint32_t st);
+static void sm_paste_held(void);
 static void sm_edit_pat_changed(void);
 
 static sm_sound_t *sm_ui_sound(void) { return &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK]; }
@@ -188,12 +199,16 @@ static void sm_pat_poll(void)
 
 /* the selected track's whole sound from a machine's preset, then the LOAD: built here, off to the side, then copied into the
  * model with the audio interrupt off for the copy only (a LOAD still queued must not drain half a sound). The track's
- * length is the sequencer's, not the sound's: it stays. Used by the PRESETS knob and the EDIT layer */
+ * length and its trig defaults are the sequencer's, not the sound's: they stay. Used by the PRESETS knob and the EDIT layer */
 static void sm_sound_load(uint32_t machine, uint32_t preset)
 {
     sm_sound_t *sd = sm_ui_sound(), n;
     sm_sound_from_preset(&n, machine, preset);
     n.len = sd->len;
+    n.dnote = sd->dnote;                                  /* (the trig defaults are the sequencer's too) */
+    n.dvel = sd->dvel;
+    n.dlen = sd->dlen;
+    n.dcond = sd->dcond;
     fm1_irq_off();
     *sd = n;
     fm1_irq_on();
@@ -241,6 +256,11 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
             continue;
         if ((sm_key_arm >> k) & 1u)                       /* (down again before its release was seen: that release first) */
             continue;
+        if (sm_rec || ((fm1_in.buttons >> panel.btn[B_REC]) & 1u)) {   /* REC + a trig key: the trig copied, no toggle */
+            if (sm_trig_copy(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w) && ((fm1_in.buttons >> panel.btn[B_REC]) & 1u))
+                sm_rec_mod = 1;                           /* (REC held as a modifier: its release puts REC back) */
+            continue;
+        }
         sm_key_step[k] = (uint8_t)((uint32_t)sm_ui.bank * 16u + (uint32_t)w);
         sm_key_trk[k] = sm_ui.trk;
         sm_key_t0[k] = now;
@@ -275,9 +295,10 @@ static void sm_keys_release(uint32_t now)
     }
 }
 
-/* OCT- / OCT+ outside the layers. Alone: on the pages where the white keys are trigs, the page of steps 1..16 / 17..32 (only
- * on a track longer than 16); in the keyboard mode the octave -1 / +1 (-3 .. +3). Both within SM_OCT_PAIR_US: the keyboard mode
- * on or off; ARP alone does the same. So a single press waits that long for the other before it acts (a page must not flip under a chord press). */
+/* OCT- / OCT+ outside the layers. Alone, in the keyboard mode: the octave -1 / +1 (-3 .. +3). Outside it OCT- is SHIFT (held:
+ * sm_shift, nothing on its own) and OCT+ turns the page of steps round, 1..16 / 17..32 (only on a track longer than 16); a trig
+ * held + OCT+: the trig copied pastes onto it (sm_oct_poll). Both within SM_OCT_PAIR_US: the keyboard mode on or off; ARP alone
+ * does the same. So a single press waits that long for the other before it acts (a page must not flip under a chord press). */
 static void sm_oct_single(uint32_t up)
 {
     if (sm_ui.kbd) {
@@ -286,8 +307,8 @@ static void sm_oct_single(uint32_t up)
             sm_ui.oct = (int8_t)o;                        /* (notes sounding keep their pitch: the key's own note-off) */
             sm_dirty = 1;
         }
-    } else if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len > 16u && sm_ui.bank != (uint8_t)up) {
-        sm_ui.bank = (uint8_t)up;
+    } else if (up && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len > 16u) {
+        sm_ui.bank = (uint8_t)!sm_ui.bank;
         sm_dirty = 1;
     }
 }
@@ -305,7 +326,13 @@ static void sm_oct_poll(uint32_t pressed, uint32_t now)
     uint32_t dn = (pressed >> panel.btn[B_OCTDN]) & 1u, up = (pressed >> panel.btn[B_OCTUP]) & 1u;
     if (!sm_layer_busy() && ((pressed >> panel.btn[B_ARP]) & 1u))
         sm_oct_toggle();                                  /* ARP: the keyboard mode too (the arpeggiator pages come in stage 5) */
+    sm_shift = (uint8_t)(!sm_ui.kbd && !sm_layer_busy() && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u));
     if (sm_layer_busy()) {                         /* (the layers use OCT: EDIT's next page; a layer button down may open one) */
+        sm_oct_pend = 0;
+        return;
+    }
+    if (up && !sm_ui.kbd && sm_key_arm) {                 /* a trig held: OCT+ pastes (no page, no pair with OCT-: SHIFT) */
+        sm_paste_held();
         sm_oct_pend = 0;
         return;
     }
@@ -409,26 +436,104 @@ static int32_t sm_trig_held(void)
     return last < SM_NKEYS ? (int32_t)sm_key_step[last] : -1;
 }
 
-/* the STEP page's knobs onto the step edited: K1 NOTE 0..127 (C-1 .. G9), K2 VEL 1..127, K3 LEN (the list's index),
- * K4 COND (its walk), SELECT NUDGE -8..+7, PRESETS the FLAG list round (sm_step_flag). An empty step: PRESETS a REST trig, the
- * rest nothing */
+/* a STEP field f (0 NOTE 0..127, 1 VEL 1..127, 2 LEN the list's index, 3 COND its walk) from v turned by d */
+static uint32_t sm_field_turn(uint32_t f, uint32_t v, int32_t d)
+{
+    if (f == 0u)
+        return (uint32_t)clamp((int32_t)v + d, 0, 127);
+    if (f == 1u)
+        return (uint32_t)clamp((int32_t)v + d, 1, 127);
+    if (f == 2u)
+        return (uint32_t)clamp((int32_t)v + d, 0, (int32_t)SM_NLEN - 1);
+    return sm_cond_of_place((uint32_t)clamp((int32_t)sm_cond_place(v) + d, 0, (int32_t)SM_COND_PLACES - 1));
+}
+
+/* the STEP page's knobs: K1 NOTE, K2 VEL, K3 LEN, K4 COND (sm_field_turn), SELECT NUDGE -8..+7, PRESETS the FLAG list round
+ * (sm_step_flag). A step edited (sm_step_edit): a field turned starts from what the trig plays (its own, else the track's
+ * default) and is the step's own from then on (no longer SM_INH); the fields not turned keep inheriting. An empty step: PRESETS
+ * a REST trig, the rest nothing. No step selected: K1..K4 are the track's trig defaults (sm_sound_t dnote .. dcond: the new
+ * trigs' fields, and every trig's that inherits them); SELECT and PRESETS nothing. Each a byte the audio stream reads at a fire */
 static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
 {
     int32_t st = sm_step_edit();
-    uint32_t t = sm_ui.trk % SM_NTRK;
-    sm_step_t *s;
-    if (st < 0 || (!pre && !sel && !k[0] && !k[1] && !k[2] && !k[3]))
+    uint32_t t = sm_ui.trk % SM_NTRK, i;
+    sm_sound_t *sd = sm_ui_sound();
+    sm_step_t *s, e;
+    uint8_t *f[4];
+    if (!pre && !sel && !k[0] && !k[1] && !k[2] && !k[3])
         return;
-    s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
     sm_dirty = 1;
+    if (st < 0) {
+        f[0] = &sd->dnote; f[1] = &sd->dvel; f[2] = &sd->dlen; f[3] = &sd->dcond;
+        for (i = 0; i < 4u; i++)
+            if (k[i])
+                *f[i] = (uint8_t)sm_field_turn(i, *f[i], k[i]);
+        return;
+    }
+    s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
     if (!sm_step_flag(t, st, pre))
         return;
-    s->note[0] = (uint8_t)clamp((int32_t)s->note[0] + k[0], 0, 127);
-    s->vel = (uint8_t)clamp((int32_t)s->vel + k[1], 1, 127);
-    s->len = (uint8_t)clamp((int32_t)s->len + k[2], 0, (int32_t)SM_NLEN - 1);
-    if (k[3])
-        s->cond = (uint8_t)sm_cond_of_place((uint32_t)clamp((int32_t)sm_cond_place(s->cond) + k[3], 0, (int32_t)SM_COND_PLACES - 1));
-    s->nudge = (int8_t)clamp((int32_t)s->nudge + sel, -8, 7);
+    sm_step_eff(s, sd, &e);
+    f[0] = &s->note[0]; f[1] = &s->vel; f[2] = &s->len; f[3] = &s->cond;
+    for (i = 0; i < 4u; i++)
+        if (k[i])
+            *f[i] = (uint8_t)sm_field_turn(i, i == 0u ? e.note[0] : i == 1u ? e.vel : i == 2u ? e.len : e.cond, k[i]);
+    if (sel)
+        s->nudge = (int8_t)clamp((int32_t)s->nudge + sel, -8, 7);
+}
+
+/* SHIFT + a knob: the fine turn. On a wide range (a value of 64 steps or more, no list of names) four detents make a step (the
+ * model holds whole steps: a detent is one already, so fine is a quarter of it), kept per knob between polls, a turn back
+ * starting afresh; a narrow range or a list turns as ever. Without SHIFT: the detents as they are */
+static int sm_wide(uint32_t id)
+{
+    const param_desc_t *d = id == SM_NOPARAM ? 0 : sm_desc_safe(sm_engine_of(sm_ui_sound()->machine), id);
+    return d && d->fmt != F_ENUM && !d->names && d->max - d->min >= 64;
+}
+static int32_t sm_fine(uint32_t i, int32_t s, int wide)
+{
+    int32_t a, r;
+    if (!sm_shift || !wide) {
+        sm_fine_acc[i] = 0;
+        return s;
+    }
+    if (!s)
+        return 0;
+    a = sm_fine_acc[i];
+    if ((a < 0 && s > 0) || (a > 0 && s < 0))
+        a = 0;
+    a += s;
+    r = a / 4;
+    sm_fine_acc[i] = (int8_t)(a - r * 4);
+    return r;
+}
+/* knob i (0..3, 4 SELECT) of the page shown has a wide range: a sound page's parameter; STEP's NOTE and VEL (the defaults' too);
+ * MIXER's levels. CLOCK: none (SHIFT holds K1's BPM at 0.1 a detent instead: sm_home_page) */
+static int sm_knob_wide(uint32_t i)
+{
+    if (sm_page_is_step())
+        return i < 2u;
+    if (sm_page_home())
+        return sm_page_home() == SMH_MIXER && i < 4u;
+    return sm_wide(sm_page_param(i));
+}
+
+/* REC: a press turns recording on / off. Held as a modifier (a trig key copied while it was down: sm_keys_press) its release
+ * puts recording back as it was before the press */
+static void sm_rec_poll(uint32_t pressed)
+{
+    uint32_t b = panel.btn[B_REC];
+    if ((pressed >> b) & 1u) {
+        sm_rec_was = sm_rec;
+        sm_rec = (uint8_t)!sm_rec;
+        sm_rec_mod = 0;
+        sm_dirty = 1;
+    }
+    if (sm_rec_mod && !((fm1_in.buttons >> b) & 1u)) {
+        sm_rec = sm_rec_was;
+        sm_rec_mod = 0;
+        sm_dirty = 1;
+    }
 }
 
 /* the tempo turned: s units of 0.1 BPM, 30.0 .. 300.0 (the main loop's alone to write) */
@@ -471,7 +576,7 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
         for (i = 0; i < SM_NTRK; i++)
             sm_turn_base(i, P_LEVEL, k[i]);
     } else {
-        sm_bpm_turn(sm_bpm_accel(k[0], now));
+        sm_bpm_turn(sm_shift ? k[0] : sm_bpm_accel(k[0], now));   /* (SHIFT: 0.1 a detent, no flick) */
         if (k[1]) {
             int32_t v = clamp((int32_t)smp.swing + k[1], 50, 75);
             if ((uint8_t)v != smp.swing) {
@@ -550,10 +655,7 @@ static void sm_input_poll(void)
     sm_layer_end();
     sm_msg_poll(now);
     sm_save_poll(pressed, now);
-    if ((pressed >> panel.btn[B_REC]) & 1u) {
-        sm_rec = (uint8_t)!sm_rec;
-        sm_dirty = 1;
-    }
+    sm_rec_poll(pressed);
     if ((pressed >> panel.btn[B_PLAY]) & 1u)              /* (against a PLAY / STOP not pushed yet, if there is one) */
         sm_tr_pend = (uint8_t)(sm_tr_pend ? (sm_tr_pend == 1u ? 2u : 1u) : (sm_playing ? 2u : 1u));
     if (alg) {
@@ -576,6 +678,9 @@ static void sm_input_poll(void)
     }
     if (sel || k[0] || k[1] || k[2] || k[3] || (pre && sm_page_is_step()))   /* (any of them, a knob without a parameter */
         sm_key_used |= sm_key_arm;                                           /* too: no toggle) */
+    for (i = 0; i < 4; i++)                               /* SHIFT: the fine turn (after the keys saw the detents: a held key */
+        k[i] = sm_fine((uint32_t)i, k[i], sm_knob_wide((uint32_t)i));   /* turned less than a step is still used) */
+    sel = sm_fine(4u, sel, sm_knob_wide(4u));
     if (sm_page_is_step()) {
         sm_step_page(k, sel, pre);
     } else if (sm_page_home()) {

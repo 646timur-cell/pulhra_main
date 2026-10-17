@@ -6,11 +6,12 @@
  *               tempo, transport) right; while recording REC (inverted) at the right corner in place of the pattern;
  *               the lock pool full: LOCKS FULL (inverted) alone for a second
  *   y  20..47   the page and the preset: EDIT 1 . SYNC LEAD (a layer open: its name instead); STEP: STEP 05 . X3, the step
- *               edited and its FLAG (none: STEP -)
+ *               edited and its FLAG (none: STEP . DEFAULT, the track's trig defaults)
  *   y  48..159  the four knobs, a column of 60 each: the label, a ring of 16 dots, the value. A ring of a value locked on the
  *               held step is a filled disc; a dot in its centre: locked on another step
  *   y 168..187  SELECT: its label and value
- *   (STEP: the knobs NOTE VEL LEN COND, SELECT NUDGE, of the step edited; an empty one or none: "-", the rings empty)
+ *   (STEP: the knobs NOTE VEL LEN COND, SELECT NUDGE, of the step edited, a ring filled where the step holds its own value,
+ *   plain where it inherits the track's default; an empty step: "-"; none selected: the track's trig defaults)
  *   y  48..217  (a layer open: its key map over the knobs and SELECT, five rows of 34, the labels of the keys at scale 2;
  *               SEQ: the title LEN 32 large (scale 3), the grid A01 .. A16 in four rows (the one playing inverted, the one
  *               picked underlined, the one asked for framed, an empty one dim), the change mode and the master length)
@@ -269,8 +270,10 @@ static void smd_page(void)
         const sm_step_t *p = smd_step(&st);
         n = 0;
         smd_cat(b, &n, "STEP ");
-        if (!p) {
-            smd_cat(b, &n, "-");
+        if (!p) {                                         /* (none selected: the knobs are the track's trig defaults) */
+            b[n++] = '\x12'; b[n++] = ' ';
+            b[n] = 0;
+            smd_cat(b, &n, "DEFAULT");
         } else {
             smd_two(b + n, (uint32_t)st + 1u);
             n += 2;
@@ -327,12 +330,16 @@ static void smd_int(char *b, int32_t v, int plus)         /* a signed integer (p
     b[i++] = (char)('0' + a % 10u);
     b[i] = 0;
 }
-/* the STEP page's knob k: its label, the step's field (empty or none: "-", the ring at 0) */
+/* the STEP page's knob k: its label and the field the trig plays (an empty step: "-", the ring at 0). A field the step holds
+ * itself: the ring filled (as a lock); one it inherits from the track's default: the ring plain. No step selected: the
+ * track's trig defaults */
 static void smd_step_knob(uint32_t k, smd_knob_t *o)
 {
     static const char *const LAB[4] = {"NOTE", "VEL", "LEN", "COND"};
     int32_t st;
     const sm_step_t *p = smd_step(&st);
+    const sm_sound_t *d = smd_snd();
+    sm_step_t e;
     uint32_t i;
     o->on = 1;
     for (i = 0; LAB[k][i]; i++)
@@ -340,13 +347,23 @@ static void smd_step_knob(uint32_t k, smd_knob_t *o)
     o->lab[i] = 0;
     o->val[0] = '-';
     o->val[1] = 0;
-    if (!p || !p->n)
+    if (p && !p->n)
         return;
+    if (p) {
+        sm_step_eff(p, d, &e);
+        o->filled = (k == 0u ? p->note[0] : k == 1u ? p->vel : k == 2u ? p->len : p->cond) != SM_INH;
+    } else {
+        memset(&e, 0, sizeof e);
+        e.note[0] = d->dnote;
+        e.vel = d->dvel;
+        e.len = d->dlen;
+        e.cond = d->dcond;
+    }
     switch (k) {
-    case 0: smd_note(o->val, p->note[0] & 127u); o->pos = (uint32_t)(p->note[0] & 127u) * 256u / 127u; break;
-    case 1: smd_int(o->val, p->vel, 0); o->pos = (uint32_t)(p->vel > 1u ? p->vel - 1u : 0u) * 256u / 126u; break;
-    case 2: i = p->len < SM_NLEN ? p->len : 0u; smd_upper(o->val, SM_LEN_N[i], 5u); o->pos = i * 256u / (SM_NLEN - 1u); break;
-    default: sm_cond_name(p->cond, o->val); o->pos = sm_cond_place(p->cond) * 256u / (SM_COND_PLACES - 1u); break;
+    case 0: smd_note(o->val, e.note[0] & 127u); o->pos = (uint32_t)(e.note[0] & 127u) * 256u / 127u; break;
+    case 1: smd_int(o->val, e.vel, 0); o->pos = (uint32_t)(e.vel > 1u ? e.vel - 1u : 0u) * 256u / 126u; break;
+    case 2: i = e.len < SM_NLEN ? e.len : 0u; smd_upper(o->val, SM_LEN_N[i], 5u); o->pos = i * 256u / (SM_NLEN - 1u); break;
+    default: sm_cond_name(e.cond, o->val); o->pos = sm_cond_place(e.cond) * 256u / (SM_COND_PLACES - 1u); break;
     }
     o->v = (int32_t)o->pos;
 }

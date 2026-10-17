@@ -623,12 +623,17 @@ static int test_step_toggle(void)
     const sm_step_t *s = &smp.pat[0].step[2][9];
     int bad = 0;
     seq_reset();
-    smp.pat[0].kit.snd[2].p[P_ROOT] = 3;
     smp.pat[0].step[2][9] = (sm_step_t){{70, 71, 72, 73}, 0, 9, 7, 2, SMF_REST | SMF_SLIDE, 3};   /* (an old step's leftovers) */
     sm_step_toggle(2, 9);
-    bad += check("STEP: on: C3 + ROOT, vel 100, LEN 0 (the track's GATE), no flags, n 1",
-                 s->n == 1u && s->note[0] == 51u && s->vel == 100u && !s->len && !s->flags && !s->cond && !s->nudge &&
-                     !s->note[1] && !s->note[2] && !s->note[3]);
+    {
+        sm_step_t e;
+        sm_step_eff(s, &smp.pat[0].kit.snd[2], &e);
+        bad += check("STEP: on: NOTE VEL LEN COND inherited (SM_INH), no flags, no nudge, no chord, n 1",
+                     s->n == 1u && s->note[0] == SM_INH && s->vel == SM_INH && s->len == SM_INH && s->cond == SM_INH &&
+                         !s->flags && !s->nudge && !s->note[1] && !s->note[2] && !s->note[3]);
+        bad += check("STEP: ... it plays the track's defaults: C3 + ROOT, VEL 100, LEN TRK, 100 %",
+                     e.note[0] == 48u + (uint32_t)clamp(smp.pat[0].kit.snd[2].p[P_ROOT], 0, 11) && e.vel == 100u && !e.len && !e.cond);
+    }
     smp.pat[0].step[2][9].flags = SMF_REST;
     sm_step_toggle(2, 9);
     bad += check("STEP: off: n 0, no flags left (no REST shown on an empty step)", !s->n && !s->flags);
@@ -658,7 +663,7 @@ static int test_trig_while_playing(void)
     for (b = 0; b < 1000u; b++)                           /* (to step 7.5) */
         run_block();
     bad += check("SEQ: a trig while playing sets step 7 of T2",
-                 !before[1][7].n && after[1][7].n == 1u && after[1][7].note[0] == 48u + (uint32_t)trk[1].p[P_ROOT]);
+                 !before[1][7].n && after[1][7].n == 1u && after[1][7].note[0] == SM_INH);
     after[1][7] = before[1][7];
     bad += check("SEQ: ... and no other step changes", !memcmp(before, after, sizeof before) && sm_playing);
     printf("swamp: T2 note-ons %u, at %u, %u (want %u, %u)\n", on_n[1], on_at[1][0], on_at[1][1], 3u * FS / 8u,
@@ -993,10 +998,12 @@ static int test_white_key_toggles_trig(void)
     host_notes = 1u << 3;                                 /* G#3: black */
     sm_input_poll();
     bad += check("INPUT: a black key: nothing", !smp.pat[smp.cur].step[0][3].n && !smp.pat[smp.cur].step[0][19].n);
-    oct_tap(B_OCTDN);                                     /* OCT-: bank 0 */
+    oct_tap(B_OCTDN);                                     /* OCT-: SHIFT, no page */
+    bad += check("INPUT: OCT- tapped: SHIFT only, the bank stays 1", sm_ui.bank == 1u);
+    oct_tap(B_OCTUP);                                     /* OCT+ again: round to bank 0 */
     host_notes = 1u << WHITE[15];
     sm_input_poll();
-    bad += check("INPUT: OCT-: bank 0, the 16th white key: step 15", sm_ui.bank == 0u && smp.pat[smp.cur].step[0][15].n == 1u);
+    bad += check("INPUT: OCT+ again: bank 0, the 16th white key: step 15", sm_ui.bank == 0u && smp.pat[smp.cur].step[0][15].n == 1u);
     turn(EN_ALGO, 1);
     sm_input_poll();
     host_notes = 1u << WHITE[0];
@@ -1171,9 +1178,9 @@ static int test_held_step_bank_key(void)
     sm_input_poll();
     host_ticks += 400000u * FM1_TICKS_PER_US;
     sm_input_poll();
-    oct_tap(B_OCTUP);                                     /* OCT+ pressed while it is held */
-    bad += check("INPUT: OCT+ pressed while holding: held_step stays the step pressed (5)",
-                 sm_ui.bank == 1u && sm_ui.held_step == 5u);
+    oct_tap(B_OCTUP);                                     /* OCT+ pressed while it is held: a paste (nothing copied: nothing) */
+    bad += check("INPUT: OCT+ pressed while holding: no page turn (paste), held_step stays the step pressed (5)",
+                 sm_ui.bank == 0u && sm_ui.held_step == 5u && !smp.pat[smp.cur].step[0][5].n);
     ksnd(sm_ui.trk)->len = 16u;
     fm1_in.notes = 0;
     sm_input_poll();
@@ -1546,8 +1553,8 @@ static int test_seq_len(void)
     layer_let_go(B_SEQ);
     oct_tap(B_OCTUP);                                     /* OCT+: the second bank: the gate opens with the length */
     bad += check("SEQ: the length 32: OCT+ selects the bank 1", sm_ui.bank == 1u);
-    oct_tap(B_OCTDN);
-    bad += check("SEQ: ... OCT- the bank 0", sm_ui.bank == 0u);
+    oct_tap(B_OCTUP);
+    bad += check("SEQ: ... OCT+ again the bank 0 (round)", sm_ui.bank == 0u);
     sm_step_toggle(0, 20);
     sm_step_toggle(0, 31);
     seq_log_clear();
@@ -2181,18 +2188,22 @@ static int test_leds_trigs(void)
     sm_leds();
     bk &= led_of(fm1_led, 14u + 22u) == 0 && led_of(fm1_led, 14u + 25u) == 0;   /* (D#5 / F#5 are free: never lit) */
     bk &= led_of(fm1_led, panel.btn[B_OCTDN]) == 0 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0;
-    ksnd(0)->len = 32;                                    /* 32 steps: the page in view lit on OCT, the other button glowing */
+    ksnd(0)->len = 32;                                    /* 32 steps, page 1..16: OCT+ glows, not lit */
     sm_leds();
-    bk &= led_of(fm1_led, panel.btn[B_OCTDN]) == 1 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0 &&
+    bk &= led_of(fm1_led, panel.btn[B_OCTDN]) == 0 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0 &&
           led_of(fm1_led_dim, panel.btn[B_OCTUP]) == 1;
     sm_ui.bank = 1;
-    smp.pat[smp.cur].step[0][16 + 3].n = 1;               /* the second page: its steps on the white keys */
+    smp.pat[smp.cur].step[0][16 + 3].n = 1;               /* the second page: its steps on the white keys, OCT+ lit */
     sm_leds();
     bk &= led_of(fm1_led, panel.btn[B_OCTUP]) == 1 && led_of(fm1_led, panel.btn[B_OCTDN]) == 0 &&
           led_of(fm1_led_dim, panel.btn[B_OCTDN]) == 1 && wl(3) == 1 && wl(0) == 0 &&
           led_of(fm1_led, 14u + 22u) == 0 && led_of(fm1_led, 14u + 25u) == 0;
+    sm_shift = 1;                                         /* SHIFT held: OCT- lit */
+    sm_leds();
+    bk &= led_of(fm1_led, panel.btn[B_OCTDN]) == 1;
+    sm_shift = 0;
     return check("LEDS: trigs on steps 1 and 6 light white keys 1 and 6, no other white key", ok) +
-           check("LEDS: OCT- / OCT+ light the visible page of steps, only on a track longer than 16; D#5 / F#5 never", bk);
+           check("LEDS: OCT+ lit on the page 17..32 (a track longer than 16), OCT- while SHIFT; D#5 / F#5 never", bk);
 }
 static int test_leds_playhead(void)
 {
@@ -3493,7 +3504,8 @@ static int test_step_page(void)
     turn(EN_K2, 5);
     turn(EN_PRESET, 3);
     sm_input_poll();
-    bad += check("STEPPG: no step selected: the knobs do nothing", sm_step_edit() < 0 && stp(0, 3)->vel == 100u && !stp(0, 3)->flags);
+    bad += check("STEPPG: no step selected: K2 the track's default VEL (105), the trig untouched (inherits), PRESETS nothing",
+                 sm_step_edit() < 0 && ksnd(0)->dvel == 105u && stp(0, 3)->vel == SM_INH && !stp(0, 3)->flags);
     p0 = ksnd(0)->preset;
     key_dn(WHITE[3]);                                     /* held past SM_HOLD_US: selected */
     sm_input_poll();
@@ -3571,7 +3583,8 @@ static int test_step_draw(void)
     draw_setup();
     sm_ui.page = (uint8_t)page_by_name("STEP");
     draw_full();
-    bad += check("STEPDRAW: no step: STEP -", lint_has("STEP -", 0, 0));
+    bad += check("STEPDRAW: no step: STEP . DEFAULT, the track's default VEL 100", lint_has("STEP \x12 DEFAULT", 0, 0) &&
+                 lint_has("100", 0, 0));
     for (v = 0; v < 4u; v++) {                            /* the widest values in their cells */
         sm_step_t *s;
         char what[48];
@@ -3605,6 +3618,265 @@ static int test_step_draw(void)
     return bad;
 }
 
+
+/* ------------------------------------------------------------- hardware notes 3c: trig defaults, copy / paste a trig, SHIFT --- */
+static void seq_tap(void)                                 /* SEQ tapped: the STEP page, no step selected */
+{
+    btn_down(B_SEQ);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_SEQ);
+    sm_input_poll();
+}
+static int test_trig_defaults(void)
+{
+    int bad = 0;
+    uint32_t d0;
+    const seq_ev_t *a, *b, *off;
+    smd_knob_t o;
+    in_reset();
+    host_ticks = 1000u;
+    seq_tap();
+    d0 = ksnd(0)->dnote;
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
+    bad += check("DEF: the track's defaults at power-on: C3 + ROOT, VEL 100, LEN TRK, 100 %",
+                 d0 == 48u + (uint32_t)clamp(ksnd(0)->p[P_ROOT], 0, 11) && ksnd(0)->dvel == 100u && !ksnd(0)->dlen && !ksnd(0)->dcond);
+    bad += check("DEF: new trigs: NOTE VEL LEN COND inherited", stp(0, 0)->note[0] == SM_INH && stp(0, 0)->vel == SM_INH &&
+                 stp(0, 4)->len == SM_INH && stp(0, 4)->cond == SM_INH);
+    turn(EN_K1, 4);
+    turn(EN_K2, -30);
+    turn(EN_K3, 5);
+    turn(EN_K4, -1);
+    sm_input_poll();
+    bad += check("DEF: STEP, no step selected: K1..K4 the track's NOTE +4, VEL 70, LEN 1/4, COND 99 %",
+                 ksnd(0)->dnote == d0 + 4u && ksnd(0)->dvel == 70u && ksnd(0)->dlen == 5u && ksnd(0)->dcond == 99u &&
+                 stp(0, 0)->vel == SM_INH);
+    turn(EN_K4, 1);
+    sm_input_poll();
+    key_dn(WHITE[4]);                                     /* step 4 held: K2 +10 from what it plays (70): 80, its own */
+    sm_input_poll();
+    turn(EN_K2, 10);
+    sm_input_poll();
+    smd_knob_get(1, &o);
+    {
+        smd_knob_t on;
+        smd_knob_get(0, &on);
+        bad += check("DEF: a step's VEL turned: from the default (70) to 80, the step's own; its NOTE still inherits",
+                     stp(0, 4)->vel == 80u && stp(0, 4)->note[0] == SM_INH && stp(0, 4)->len == SM_INH);
+        bad += check("DEF: ... the screen: VEL's ring filled (the step's own), NOTE's plain (inherited)", o.filled && !on.filled);
+    }
+    key_up(WHITE[4]);
+    sm_input_poll();
+    bad += check("DEF: ... the key's release does not toggle", stp(0, 4)->n == 1u);
+    seq_tap();                                            /* the selection dropped: the defaults again */
+    turn(EN_K2, 20);
+    sm_input_poll();
+    bad += check("DEF: SEQ tapped: no step selected; K2: the default VEL 90", sm_step_edit() < 0 && ksnd(0)->dvel == 90u &&
+                 stp(0, 4)->vel == 80u);
+    sm_sound_load(ksnd(0)->machine, 1);
+    bad += check("DEF: a preset load keeps the trig defaults (the sequencer's)", ksnd(0)->dvel == 90u && ksnd(0)->dnote == d0 + 4u);
+    seq_log_clear();
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(6.0 * S120));
+    a = ev_nth(1, 0, 0);
+    b = ev_nth(1, 0, 1);
+    off = ev_nth(0, 0, 0);
+    bad += check("DEF: played: the untouched trig takes the new default VEL 90 and NOTE, LEN 1/4 (the default's)",
+                 a && a->vel == 90u && a->note == d0 + 4u && off && near_d(off->at - a->at, S120 / 4.0));
+    bad += check("DEF: ... the edited trig its own VEL 80, the default NOTE", b && b->vel == 80u && b->note == d0 + 4u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    seq_run(CTL);
+    sm_trn(0, 2);
+    bad += check("DEF: TRN +2 moves the default NOTE; an inheriting trig stays SM_INH", ksnd(0)->dnote == d0 + 6u &&
+                 stp(0, 0)->note[0] == SM_INH);
+    stp(0, 4)->note[0] = 60;
+    sm_trn(0, -1);
+    bad += check("DEF: ... and a step's own note moves itself", stp(0, 4)->note[0] == 59u && ksnd(0)->dnote == d0 + 5u);
+    {
+        sm_step_t e;
+        sm_step_toggle(0, 8);
+        sm_step_eff(stp(0, 8), ksnd(0), &e);
+        bad += check("DEF: a trig placed now plays the defaults", e.vel == 90u && e.len == 5u && e.note[0] == d0 + 5u);
+    }
+    return bad;
+}
+
+/* REC + a trig key copies the trig; a trig held + OCT+ pastes it (fields, flags, locks), in the order of a PASTE */
+static int test_trig_copy_paste(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 2);
+    stp(0, 2)->vel = 90;
+    stp(0, 2)->flags = SMF_ACCENT;
+    stp(0, 2)->nudge = 3;
+    sm_lock_set(0, 2, P_FCUT, 30);
+    sm_lock_set(0, 2, P_FRES, 99);
+    press(B_REC);
+    sm_input_poll();
+    lk_tap(2);
+    bad += check("TCOPY: REC on + trig key 3: copied (VEL, flags, two locks), the trig not toggled",
+                 sm_rec && stp(0, 2)->n == 1u && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip.flags == SMF_ACCENT && sm_tclip_nl == 2u);
+    lk_tap(6);
+    bad += check("TCOPY: ... an empty step: nothing copied, nothing placed", !stp(0, 6)->n && sm_tclip.vel == 90u);
+    press(B_REC);
+    sm_input_poll();
+    key_dn(WHITE[9]);                                     /* an empty step held + OCT+ */
+    sm_input_poll();
+    oct_tap(B_OCTUP);
+    key_up(WHITE[9]);
+    sm_input_poll();
+    bad += check("TCOPY: step 10 held + OCT+: the trig pasted (VEL 90, ACC, NUDGE +3, NOTE inherited), no toggle at release",
+                 stp(0, 9)->n == 1u && stp(0, 9)->vel == 90u && stp(0, 9)->flags == SMF_ACCENT && stp(0, 9)->nudge == 3 &&
+                 stp(0, 9)->note[0] == SM_INH && sm_ui.bank == 0u);
+    bad += check("TCOPY: ... with its locks", lk_val(0, 9, P_FCUT) == 30 && lk_val(0, 9, P_FRES) == 99 && lk_val(0, 2, P_FCUT) == 30);
+    sm_step_toggle(0, 11);
+    stp(0, 11)->vel = 20;
+    sm_lock_set(0, 11, P_LEVEL, 10);
+    key_dn(WHITE[11]);
+    sm_input_poll();
+    oct_tap(B_OCTUP);
+    key_up(WHITE[11]);
+    sm_input_poll();
+    bad += check("TCOPY: pasted onto a trig: replaced whole (its own lock gone)", stp(0, 11)->n == 1u && stp(0, 11)->vel == 90u &&
+                 lk_val(0, 11, P_LEVEL) == LK_NONE && lk_val(0, 11, P_FCUT) == 30);
+    sm_undo();
+    bad += check("TCOPY: UNDO: the trig before the paste (VEL 20, LEVEL locked)", stp(0, 11)->vel == 20u &&
+                 lk_val(0, 11, P_LEVEL) == 10 && lk_val(0, 11, P_FCUT) == LK_NONE);
+    btn_down(B_REC);                                      /* REC held as a modifier: on while down, back off at its release */
+    sm_input_poll();
+    lk_tap(11);
+    btn_up(B_REC);
+    sm_input_poll();
+    bad += check("TCOPY: REC held + a trig: copied (VEL 20); REC let go: recording off again, the trig kept",
+                 sm_tclip.vel == 20u && !sm_rec && stp(0, 11)->n == 1u);
+    press(B_REC);                                         /* REC tapped alone: on, and stays on */
+    sm_input_poll();
+    bad += check("TCOPY: REC tapped alone stays on", sm_rec == 1u);
+    press(B_REC);
+    sm_input_poll();
+    /* pasted while playing at 300 BPM, the audio stream preempting every store: every lock it applies is the model's, none
+     * of a trig replaced (lk_shadow: the locks each step has; a paste replaces the target's with the source's) */
+    {
+        uint32_t s, p, op, src, dst, pastes = 0;
+        in_reset();
+        smp.bpm10 = 3000u;
+        for (s = 0; s < SM_NSTEP; s++)
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[0][s][p] = LK_NONE;
+        for (s = 0; s < 16u; s++) {
+            sm_step_toggle(0, s);
+            sm_lock_set(0, s, P_FCUT, (int32_t)(s * 7u));
+            lk_shadow[0][s][P_FCUT] = (int16_t)(s * 7u);
+            if (s & 1u) {
+                sm_lock_set(0, s, P_LEVEL, (int32_t)(20u + s));
+                lk_shadow[0][s][P_LEVEL] = (int16_t)(20u + s);
+            }
+        }
+        push(SMC_PLAY, 0, 0, 0, 0);
+        run_block();
+        lk_applied = lk_bad_val = lk_bad_dead = lk_preempts = 0;
+        lk_on = 1;
+        lk_preempt_n = 2u;
+        for (op = 0; op < 600u; op++) {
+            src = lk_rand(16);
+            dst = lk_rand(16);
+            sm_trig_copy(0, src);
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[0][dst][p] = lk_shadow[0][src][p];
+            sm_trig_put(0, dst);
+            pastes++;
+            for (p = 0, src = 1u + lk_rand(160); p < src; p++)   /* (a while: up to 2.3 steps) */
+                run_block();
+        }
+        lk_on = 0;
+        lk_preempt_n = 0;
+        printf("  trig paste: %u pastes, %u locks applied, %u preempted writes\n", pastes, lk_applied, lk_preempts);
+        bad += check("TCOPY: 600 pastes at 300 BPM, the ISR between every store: every applied lock == the model's",
+                     lk_applied > 500u && lk_preempts > 100u && !lk_bad_val);
+        bad += check("TCOPY: ... no lock of a replaced trig ever applied", !lk_bad_dead);
+        {
+            int ok = 1;
+            for (s = 0; s < 16u; s++)
+                ok &= stp(0, s)->n == 1u && lk_val(0, s, P_FCUT) == lk_shadow[0][s][P_FCUT] &&
+                      lk_val(0, s, P_LEVEL) == lk_shadow[0][s][P_LEVEL];
+            bad += check("TCOPY: ... every step a trig with the locks of its source at the end", ok);
+        }
+        push(SMC_STOP, 0, 0, 0, 0);
+        run_block();
+    }
+    return bad;
+}
+
+/* OCT- is SHIFT outside the keyboard mode (held); OCT+ turns the page round; SHIFT + a knob: the fine turn */
+static int test_shift_oct(void)
+{
+    int bad = 0;
+    int32_t v0, f0;
+    uint16_t b0;
+    in_reset();
+    host_ticks = 1000u;
+    ksnd(0)->len = 32u;
+    filter_page();
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    ms(150);
+    sm_input_poll();
+    bad += check("SHIFT: OCT- held: SHIFT on, the page and the keyboard mode as they were", sm_shift && !sm_ui.bank && !sm_ui.kbd);
+    v0 = ksnd(0)->p[P_FCUT];
+    turn(EN_K2, -1); sm_input_poll();
+    turn(EN_K2, -1); sm_input_poll();
+    turn(EN_K2, -1); sm_input_poll();
+    bad += check("SHIFT: + K2 (CUT, 0..127) down: three detents, no step yet", ksnd(0)->p[P_FCUT] == v0);
+    turn(EN_K2, -1); sm_input_poll();
+    bad += check("SHIFT: ... the fourth: one step", ksnd(0)->p[P_FCUT] == v0 - 1);
+    turn(EN_K2, -8); sm_input_poll();
+    bad += check("SHIFT: ... eight more: two steps (a quarter a detent)", ksnd(0)->p[P_FCUT] == v0 - 3);
+    f0 = ksnd(0)->p[P_FLT];
+    turn(EN_K1, 1); sm_input_poll();
+    bad += check("SHIFT: + K1 (FILT, a list): a detent is a step, as ever", ksnd(0)->p[P_FLT] == f0 + 1);
+    host_pressed |= 1u << panel.btn[B_OCTUP];             /* SHIFT + OCT+ (the 100 ms of a pair long past): the page turns */
+    fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
+    sm_input_poll();
+    fm1_in.buttons &= ~(1u << panel.btn[B_OCTUP]);
+    ms(150);
+    sm_input_poll();
+    bad += check("SHIFT: SHIFT held + OCT+: the page 17..32, not the keyboard mode", sm_ui.bank == 1u && !sm_ui.kbd);
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    v0 = ksnd(0)->p[P_FCUT];
+    turn(EN_K2, -2); sm_input_poll();
+    bad += check("SHIFT: OCT- let go: SHIFT off, a detent a step again", !sm_shift && ksnd(0)->p[P_FCUT] == v0 - 2);
+    oct_tap(B_OCTUP);
+    bad += check("OCT+: round to the page 1..16", sm_ui.bank == 0u);
+    /* CLOCK: SHIFT keeps the tempo at 0.1 a detent (no flick) */
+    sm_ui.page = (uint8_t)page_by_name("CLOCK");
+    b0 = smp.bpm10;
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    turn(EN_K1, 3); sm_input_poll();
+    turn(EN_K1, 3); sm_input_poll();
+    bad += check("SHIFT: CLOCK K1 flicked: 0.1 a detent (+0.6), no x10", smp.bpm10 == b0 + 6u);
+    btn_up(B_OCTDN);
+    ms(150);
+    sm_input_poll();
+    /* the keyboard mode: OCT- is the octave down, no SHIFT */
+    press(B_ARP);
+    sm_input_poll();
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    bad += check("SHIFT: the keyboard mode: OCT- down is no SHIFT", sm_ui.kbd && !sm_shift);
+    btn_up(B_OCTDN);
+    ms(150);
+    sm_input_poll();
+    bad += check("SHIFT: ... it is the octave -1", sm_ui.oct == -1);
+    press(B_ARP);
+    sm_input_poll();
+    ksnd(0)->len = 16u;
+    return bad;
+}
 
 /* ------------------------------------------------------------------------------------------------ HOME (Task 6) --- */
 static int test_home_mixer(void)
@@ -4136,14 +4408,14 @@ static int test_oct_pages(void)
     bad += check("OCT: ... then OCT+ turns to steps 17..32", sm_ui.bank == 1u && !sm_ui.kbd);
     lk_tap(2);
     bad += check("OCT: ... a white key is then step 18 (17..32)", smp.pat[smp.cur].step[0][18].n == 1u && !smp.pat[smp.cur].step[0][2].n);
-    oct_tap(B_OCTUP);
-    bad += check("OCT: OCT+ again: still the second page", sm_ui.bank == 1u);
     oct_tap(B_OCTDN);
-    bad += check("OCT: OCT-: steps 1..16", sm_ui.bank == 0u);
+    bad += check("OCT: OCT- (SHIFT): the page stays 17..32", sm_ui.bank == 1u);
+    oct_tap(B_OCTUP);
+    bad += check("OCT: OCT+ again: round to steps 1..16", sm_ui.bank == 0u);
     leds_setup(LEDS_DIM);
     ksnd(0)->len = 32u;
     sm_leds();
-    bad += check("OCT: LEDs: page 1..16: OCT- lit, OCT+ not", led_of(fm1_led, panel.btn[B_OCTDN]) == 1 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0);
+    bad += check("OCT: LEDs: page 1..16: neither lit", led_of(fm1_led, panel.btn[B_OCTDN]) == 0 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0);
     sm_ui.bank = 1;
     sm_leds();
     bad += check("OCT: LEDs: page 17..32: OCT+ lit, OCT- not", led_of(fm1_led, panel.btn[B_OCTUP]) == 1 && led_of(fm1_led, panel.btn[B_OCTDN]) == 0);
@@ -6133,6 +6405,9 @@ int main(void)
     bad += test_flag_on_held_trig_any_page();
     bad += test_flag_shown_while_held();
     bad += test_step_draw();
+    bad += test_trig_defaults();
+    bad += test_trig_copy_paste();
+    bad += test_shift_oct();
     bad += test_home_mixer();
     bad += test_home_bpm_select();
     bad += test_home_bpm_accel();
