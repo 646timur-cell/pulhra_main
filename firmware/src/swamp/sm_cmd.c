@@ -27,6 +27,9 @@ enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD, SMC_UNLOCK, SMC_PREVIEW };
  *   stays full, seconds; never in practice).
  * SMC_PREVIEW {trk, param, val}: a lock REC just wrote, onto the core at once (playing only; stopped: ignored); the
  *   parameter counts as locked, so the next unlocked trig of the track takes the base again. */
+/* SMC_PARAM, SMC_LOAD, SMC_PREVIEW carry in `step` the pattern (smp.cur) whose model they come from: one of a pattern the audio
+ *   stream no longer plays (it switched before the main loop saw it: sm_play_pat) is dropped, never a value or a sound of the
+ *   old pattern onto the new one's tracks (the switch loaded the new kit whole) */
 typedef struct { uint8_t kind, trk, step, param; int16_t val; } sm_cmd_t;
 
 #define SM_NCMD 64u                                       /* the ring */
@@ -66,7 +69,7 @@ static int sm_ring_coalesce(sm_ring_t *r, sm_cmd_t c)
     uint8_t h = r->head, tl = r->tail, k = h;
     while (k != tl) {
         sm_cmd_t *e = &r->slot[--k & (r->size - 1u)];
-        if (e->kind == SMC_PARAM && e->trk == c.trk && e->param == c.param) {
+        if (e->kind == SMC_PARAM && e->trk == c.trk && e->param == c.param && e->step == c.step) {
             SM_CMD_PREEMPT();
             e->val = c.val;
             SM_BARRIER();
@@ -131,6 +134,8 @@ static uint8_t sm_lk_on[SM_NTRK][SM_LKB];
 static uint8_t sm_lk_step[SM_NTRK];                       /* the step whose trig set sm_lk_on (0xFF: none) */
 static uint8_t sm_gen[SM_NTRK];                           /* the track's trig fires (sm_seq_fire bumps it; the main loop reads) */
 static volatile uint8_t sm_playing;                       /* the transport (sm_seq.c writes it) */
+static volatile uint8_t sm_play_pat;                      /* the pattern playing: the audio stream's own (sm_seq.c sm_pat_switch);
+                                                             everything the audio stream reads of the model is of this one */
 static void sm_seq_unlock(uint32_t t);                    /* sm_seq.c: the locked values of track t back to the base */
 static void sm_ps_stop(uint32_t t);                       /* sm_seq.c: the PSLIDE of track t ends where it is */
 static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock);
@@ -141,7 +146,9 @@ static int sm_lk_is(uint32_t t, uint32_t p) { return p < P_COUNT && ((sm_lk_on[t
 static void sm_cmd_apply(const sm_cmd_t *c)
 {
     uint32_t t = c->trk;
-    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
+    if ((c->kind == SMC_PARAM || c->kind == SMC_LOAD || c->kind == SMC_PREVIEW) && c->step != sm_play_pat)
+        return;                                           /* (of a pattern switched away from) */
     switch (c->kind) {
     case SMC_PLAY:
         sm_seq_play();

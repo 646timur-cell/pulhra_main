@@ -33,15 +33,15 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
     for (j = 0; j < h; j++)
         memcpy(host_screen + (y + j) * 240u + x, p + j * w, w * 2u);
 }
-typedef struct { int32_t x0, y0, x1, y1; uint32_t flags; char s[16]; } lint_box_t;
+typedef struct { int32_t x0, y0, x1, y1; uint32_t flags; char s[24]; } lint_box_t;
 static lint_box_t lint_box[256];
 static uint32_t lint_n, lint_band;                       /* the boxes of a frame; those of the canvas not blitted yet start here */
 static void lint_text(int32_t x0, int32_t y0, int32_t x1, int32_t y1, const char *s, uint32_t flags)
 {
     lint_box_t *b = &lint_box[lint_n < 256u ? lint_n : 255u];
     b->x0 = x0; b->y0 = y0; b->x1 = x1; b->y1 = y1; b->flags = flags;
-    strncpy(b->s, s, 15);
-    b->s[15] = 0;
+    strncpy(b->s, s, 23);
+    b->s[23] = 0;
     lint_n++;
 }
 static void lint_blit(uint32_t x, uint32_t y)
@@ -933,8 +933,8 @@ static int test_filter_play(void)
     double b0, b1, r1;
     flt_play(0, &b0, &b1, &r1);
     printf("swamp: FILT OFF: brightness %.4f -> %.4f\n", b0, b1);
-    bad += check("FILTER: FILT OFF (the sound's default): CUT and RES are not heard (FILT is the switch)",
-                 ksnd(1)->p[P_FLT] == 0 && ksnd(1)->p[P_FCUT] < 40 && fabs(b1 - b0) < 0.05 * b0);
+    bad += check("FILTER: FILT OFF (the sound's default): CUT turned sets FILT LP first, so CUT and RES are heard (far darker)",
+                 ksnd(1)->p[P_FLT] == 1 && trk[1].p[P_FLT] == 1 && ksnd(1)->p[P_FCUT] < 40 && b1 < 0.1 * b0);
     flt_play(1, &b0, &b1, &r1);
     printf("swamp: FILT LP: brightness %.4f -> %.4f (rms %.0f)\n", b0, b1, r1);
     bad += check("FILTER: FILT LP, playing: K2 CUT -110 + K3 RES through the input: the core has them, far darker",
@@ -1519,8 +1519,8 @@ static int test_seq_len(void)
     {
         sm_sound_t before = *ksnd(0);
         before.len = 32u;
-        turn(EN_K2, 5);
         turn(EN_K3, 5);
+        turn(EN_K4, 5);
         turn(EN_SELECT, 5);
         sm_input_poll();
         bad += check("SEQ: the other knobs are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
@@ -1843,12 +1843,13 @@ typedef struct { int32_t x0, y0, x1, y1; const char *name; } zone_t;
 static const zone_t ZONES[] = {
     {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "page"},
     {0, 48, 60, 160, "knob0"}, {60, 48, 120, 160, "knob1"}, {120, 48, 180, 160, "knob2"}, {180, 48, 240, 160, "knob3"},
-    {0, 168, 240, 188, "select"},
+    {0, 168, 240, 188, "select"}, {208, 220, 240, 240, "len"},
 };
 /* an open layer: the header, the page line (its title), the five rows of the map (240 x 34 from y 48) */
 static const zone_t LZONES[] = {
     {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "title"},
     {0, 48, 240, 82, "row0"}, {0, 82, 240, 116, "row1"}, {0, 116, 240, 150, "row2"}, {0, 150, 240, 184, "row3"}, {0, 184, 240, 218, "row4"},
+    {208, 220, 240, 240, "len"},
 };
 static const zone_t *lint_zones = ZONES;
 static uint32_t lint_nz = sizeof ZONES / sizeof ZONES[0];
@@ -1987,10 +1988,10 @@ static int test_draw_playhead_snapshot(void)
     begin_hook = hook_move_pos;                               /* the first cv_begin of the frame: after the signatures */
     px = frame_px();
     bad += check("playhead: the strip shows the step the frame read (3), not the one the audio stream moved to (9)",
-                 SCR(3 * 15 + 5, 239) == INK && SCR(9 * 15 + 5, 239) == BGC && begin_hook == 0);
+                 SCR(3 * SMD_STEP_W + 5, 239) == INK && SCR(9 * SMD_STEP_W + 5, 239) == BGC && begin_hook == 0);
     px = frame_px();
     bad += check("playhead: the next frame sees the move and draws step 9",
-                 px > 0 && px <= 240u * 20u && SCR(9 * 15 + 5, 239) == INK && SCR(3 * 15 + 5, 239) == BGC);
+                 px > 0 && px <= 240u * 20u && SCR(9 * SMD_STEP_W + 5, 239) == INK && SCR(3 * SMD_STEP_W + 5, 239) == BGC);
     return bad;
 }
 /* the 4 x 4 box at x, y: all ink / all ground */
@@ -2011,6 +2012,12 @@ static uint32_t scr_ink(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             n += SCR(x + i, y + j) != BGC;
     return n;
 }
+/* the strip's geometry: the pitch of a step, the offsets in its place of a dot, a bar, a REST's outline, a beat mark */
+#define SW SMD_STEP_W
+#define DO (SW / 2u - 1u)
+#define BO (SW / 2u - 4u)
+#define RO (SW / 2u - 2u)
+#define MO (SW / 2u)
 static int test_strip_dots(void)
 {
     int bad = 0;
@@ -2025,19 +2032,19 @@ static int test_strip_dots(void)
     st[5].n = 1; st[5].flags = (uint8_t)(1u << 4);            /* x2 */
     draw_full();
     bad += check("strip: the strip is 20 px high, at the bottom of the screen", SMD_STRIP_H <= 20u && SMD_STRIP_Y + SMD_STRIP_H == 240u);
-    bad += check("strip: a trig is one filled 3 x 3 dot (the lowest place, rows 15..17)", box_is(15 + 6, 235, 3, 3, INK) && scr_ink(15, 220, 15, 20) == 9u);
+    bad += check("strip: a trig is one filled 3 x 3 dot (the lowest place, rows 15..17)", box_is(SW + DO, 235, 3, 3, INK) && scr_ink(SW, 220, SW, 20) == 9u);
     bad += check("strip: x3 is three 3 x 3 dots stacked at a pitch of 4 (a 1 px gap between)",
-                 box_is(30 + 6, 235, 3, 3, INK) && box_is(30 + 6, 231, 3, 3, INK) && box_is(30 + 6, 227, 3, 3, INK) &&
-                 scr_ink(30, 220, 15, 20) == 27u && SCR(30 + 7, 234) == BGC && SCR(30 + 7, 230) == BGC);
+                 box_is(2 * SW + DO, 235, 3, 3, INK) && box_is(2 * SW + DO, 231, 3, 3, INK) && box_is(2 * SW + DO, 227, 3, 3, INK) &&
+                 scr_ink(2 * SW, 220, SW, 20) == 27u && SCR(2 * SW + MO, 234) == BGC && SCR(2 * SW + MO, 230) == BGC);
     bad += check("strip: x4 is four dots (rows 3..17)",
-                 box_is(45 + 6, 235, 3, 3, INK) && box_is(45 + 6, 223, 3, 3, INK) && scr_ink(45, 220, 15, 20) == 36u);
-    bad += check("strip: x2 is two dots", box_is(75 + 6, 235, 3, 3, INK) && box_is(75 + 6, 231, 3, 3, INK) && scr_ink(75, 220, 15, 20) == 18u);
+                 box_is(3 * SW + DO, 235, 3, 3, INK) && box_is(3 * SW + DO, 223, 3, 3, INK) && scr_ink(3 * SW, 220, SW, 20) == 36u);
+    bad += check("strip: x2 is two dots", box_is(5 * SW + DO, 235, 3, 3, INK) && box_is(5 * SW + DO, 231, 3, 3, INK) && scr_ink(5 * SW, 220, SW, 20) == 18u);
     bad += check("strip: a REST is a hollow dot (the outline 4 x 4)",
-                 SCR(60 + 5, 234) == INK && SCR(60 + 8, 237) == INK && SCR(60 + 5, 236) == INK && SCR(60 + 8, 235) == INK &&
-                 box_is(60 + 6, 235, 2, 2, BGC) && scr_ink(60, 220, 15, 20) == 12u);
+                 SCR(4 * SW + RO, 234) == INK && SCR(4 * SW + RO + 3, 237) == INK && SCR(4 * SW + RO, 236) == INK && SCR(4 * SW + RO + 3, 235) == INK &&
+                 box_is(4 * SW + RO + 1, 235, 2, 2, BGC) && scr_ink(4 * SW, 220, SW, 20) == 12u);
     bad += check("strip: an empty step is nothing, the beats 1 5 9 13 a dim 1 x 1",
-                 scr_ink(6 * 15, 220, 15, 20) == 0 && SCR(7, 236) == DIMC && scr_ink(0, 220, 15, 20) == 1u &&
-                 scr_ink(8 * 15, 220, 15, 20) == 1u && SCR(8 * 15 + 7, 236) == DIMC && SCR(6 * 15 + 7, 236) == BGC);
+                 scr_ink(6 * SW, 220, SW, 20) == 0 && SCR(MO, 236) == DIMC && scr_ink(0, 220, SW, 20) == 1u &&
+                 scr_ink(8 * SW, 220, SW, 20) == 1u && SCR(8 * SW + MO, 236) == DIMC && SCR(6 * SW + MO, 236) == BGC);
     for (i = 0; i < 240u * 20u; i++) {                        /* nothing but the three inks */
         uint16_t c = SCR(i % 240u, 220u + i / 240u);
         if (c != INK && c != DIMC && c != BGC)
@@ -2049,21 +2056,21 @@ static int test_strip_dots(void)
     sm_dirty = 1;
     lcd_px = 0;
     sm_draw();
-    bad += check("strip: the step playing has a bar 8 x 1 under its place", box_is(15 + 3, 239, 8, 1, INK) && SCR(15 + 2, 239) == BGC &&
-                                                                          SCR(15 + 11, 239) == BGC && SCR(15 + 3, 238) == BGC);
-    bad += check("strip: the step held has a bar 8 x 2 over its place", box_is(30 + 3, 220, 8, 2, INK) && SCR(30 + 2, 220) == BGC &&
-                                                                       SCR(30 + 11, 221) == BGC && box_is(30 + 6, 227, 3, 3, INK));
+    bad += check("strip: the step playing has a bar 8 x 1 under its place", box_is(SW + BO, 239, 8, 1, INK) && SCR(SW + BO - 1, 239) == BGC &&
+                                                                          SCR(SW + BO + 8, 239) == BGC && SCR(SW + BO, 238) == BGC);
+    bad += check("strip: the step held has a bar 8 x 2 over its place", box_is(2 * SW + BO, 220, 8, 2, INK) && SCR(2 * SW + BO - 1, 220) == BGC &&
+                                                                       SCR(2 * SW + BO + 8, 221) == BGC && box_is(2 * SW + DO, 227, 3, 3, INK));
     {   /* a x4 stack keeps a 1 px gap to the bar under it (playing) and to the one over it (held) */
         uint32_t x, gap = 1, bars;
         sm_pos[0] = 3;
         sm_ui.held_step = 3;
         sm_dirty = 1;
         sm_draw();
-        for (x = 45 + 6; x < 45 + 9u; x++)
+        for (x = 3 * SW + DO; x < 3 * SW + DO + 3u; x++)
             gap &= SCR(x, 222) == BGC && SCR(x, 238) == BGC;
-        bars = box_is(45 + 3, 220, 8, 2, INK) && box_is(45 + 3, 239, 8, 1, INK);
+        bars = box_is(3 * SW + BO, 220, 8, 2, INK) && box_is(3 * SW + BO, 239, 8, 1, INK);
         bad += check("strip: x4 playing and held at once: both bars, a 1 px gap to the stack on each side (rows 2 and 18)",
-                     bars && gap && box_is(45 + 6, 223, 3, 3, INK) && box_is(45 + 6, 235, 3, 3, INK));
+                     bars && gap && box_is(3 * SW + DO, 223, 3, 3, INK) && box_is(3 * SW + DO, 235, 3, 3, INK));
         sm_pos[0] = 1;
         sm_ui.held_step = 2;
         sm_dirty = 1;
@@ -2074,11 +2081,13 @@ static int test_strip_dots(void)
     sm_dirty = 1;
     px = frame_px();
     bad += check("strip: a step change is at most 240 x 20 px", px > 0 && px <= 240u * 20u);
-    bad += check("strip: a REST with the playing bar under it", SCR(60 + 5, 234) == INK && box_is(60 + 3, 239, 8, 1, INK));
+    bad += check("strip: a REST with the playing bar under it", SCR(4 * SW + RO, 234) == INK && box_is(4 * SW + BO, 239, 8, 1, INK));
     sm_ui.bank = 1;
+    ksnd(0)->len = 32;
     sm_dirty = 1;
     sm_draw();
-    bad += check("strip: the second bank shows steps 16..31 (empty here: the four beat marks)", scr_ink(0, 220, 240, 20) == 4u);
+    bad += check("strip: the second bank shows steps 16..31 (empty here: the four beat marks)", scr_ink(0, 220, 16 * SW, 20) == 4u);
+    ksnd(0)->len = 16;
     return bad;
 }
 /* ------------------------------------------------------------- LEDs --- */
@@ -2320,8 +2329,8 @@ static int test_layer_maps(void)
     layer_draw(SML_SEQ);
     smp.pat[smp.cur].kit.snd[0].len = 24;
     layer_draw(SML_SEQ);
-    bad += check("MAP: SEQ: the length (K1 LEN 24), F3 CLEAR, the title", lint_frame("seq") == 0 && lint_has("K1 LEN 24", 0, 0) &&
-                 lint_has("F3 CLEAR", 0, 0) && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
+    bad += check("MAP: SEQ: the length (LEN 24), the pattern grid, the mode, the title", lint_frame("seq") == 0 && lint_has("LEN 24", 0, 0) &&
+                 lint_has("A01", 0, 0) && lint_has("SEQUENTIAL ML AUTO", 0, 0) && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
     sm_lay_cleared = 1;
     layer_draw(SML_SEQ);
     bad += check("MAP: SEQ: CLEARED after a clear", lint_has("CLEARED", 0, 0));
@@ -2333,9 +2342,7 @@ static int test_layer_maps(void)
         ok &= c == INK || c == DIMC || c == BGC;
     }
     bad += check("MAP: nothing but the three inks", ok);
-    lint_zones = ZONES;
-    lint_nz = sizeof ZONES / sizeof ZONES[0];
-    sm_layer = SML_NONE;
+    layer_close_draw();                                   /* (the map off the screen: the next test's picture is clean) */
     return bad;
 }
 /* the layer closed: the screen is the page's again, pixel for pixel (nothing of the map left in the bands the knobs do not cover) */
@@ -4175,6 +4182,392 @@ static void write_ppm(const char *dir, const char *name)
     fclose(f);
 }
 /* SHOTS=dir: swamp_<page>.ppm for every page, a playing pattern with some trigs (to look at, no assert) */
+/* ------------------------------------------------------------------------------------------------ patterns --- */
+/* pattern p's kit: the machines of KIT rotated by p (a different machine on every track from pattern 0's), dry */
+static void pat_kit(uint32_t p)
+{
+    static const uint8_t KIT[SM_NTRK] = {ENGI_MSAW, ENGI_MFMST, ENGI_STRING, ENGI_MBBOX};
+    uint32_t t, i;
+    for (t = 0; t < SM_NTRK; t++) {
+        sm_sound_t *s = &smp.pat[p].kit.snd[t];
+        sm_sound_from_preset(s, eng_rank(KIT[(t + p) % SM_NTRK]), 0);
+        for (i = 0; i < 4u; i++)
+            s->p[P_DIST + i] = 0;
+    }
+}
+/* a trig on step st of track t in pattern p, note n (the main loop's order: fields, then n) */
+static void pat_trig(uint32_t p, uint32_t t, uint32_t st, uint32_t note)
+{
+    sm_step_t *s = &smp.pat[p].step[t][st];
+    memset(s, 0, sizeof *s);
+    s->note[0] = (uint8_t)note;
+    s->vel = 100;
+    s->n = 1;
+}
+/* a block, then the main loop's mirror (sm_pat_poll); the clock of the block in which sm_play_pat changed to p (*at) */
+static int pat_run_until(uint32_t p, uint32_t max, uint32_t *at)
+{
+    while (max--) {
+        uint32_t c = seq_clock;
+        run_block();
+        sm_pat_poll();
+        if (sm_play_pat == p) {
+            if (at)
+                *at = c;
+            return 1;
+        }
+    }
+    return 0;
+}
+/* the first note-on of track t at or after sample c: its note (0xFF none), *at its clock */
+static uint32_t pat_on_after(uint32_t t, uint32_t c, uint32_t *at)
+{
+    uint32_t i;
+    for (i = 0; i < seq_nev && i < 1024u; i++)
+        if (seq_ev[i].on && seq_ev[i].t == t && seq_ev[i].at >= c) {
+            if (at)
+                *at = seq_ev[i].at;
+            return seq_ev[i].note;
+        }
+    return 0xFFu;
+}
+
+/* SEQUENTIAL: the pattern asked for comes at the end of the one playing (its master length; AUTO: the longest track), every
+ * track from step 1; a master length set also starts every track again at its end */
+static int test_pat_switch_boundary(void)
+{
+    int bad = 0;
+    uint32_t at = 0, on = 0, n;
+    seq_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    pat_trig(1, 0, 0, 60);
+    smp.mode = SM_PM_SEQ;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(5.5 * S120));
+    smp.next = 1;                                         /* (the main loop's request) */
+    bad += check("PAT: SEQUENTIAL: switched at the end of the 16 steps (AUTO: the longest track), +-CTL",
+                 pat_run_until(1, 3000, &at) && near_d(at, 16.0 * S120));
+    n = pat_on_after(0, at, &on);
+    bad += check("PAT: ... the new pattern's step 1 plays there (its note 60)", n == 60u && near_d(on, 16.0 * S120));
+    bad += check("PAT: ... the main loop mirrors it: smp.cur 1, the request gone", smp.cur == 1u && smp.next == SM_PAT_NONE);
+    /* AUTO with a track of 24 steps: the end is at 24 */
+    seq_reset();
+    pat_trig(0, 0, 0, 48);
+    pat_trig(1, 0, 0, 60);
+    smp.pat[0].kit.snd[1].len = 24;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(3.5 * S120));
+    smp.next = 1;
+    bad += check("PAT: AUTO: T2 24 steps long: the switch at 24 steps", pat_run_until(1, 5000, &at) && near_d(at, 24.0 * S120));
+    /* a master length of 6 */
+    seq_reset();
+    pat_trig(0, 0, 0, 48);
+    pat_trig(0, 0, 4, 50);
+    pat_trig(1, 0, 0, 60);
+    smp.pat[0].mlen = 6;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(7.5 * S120));
+    n = pat_on_after(0, (uint32_t)(5.5 * S120), &on);
+    bad += check("PAT: master length 6: every track from step 1 again at 6 (no switch asked)", n == 48u && near_d(on, 6.0 * S120));
+    smp.next = 1;
+    bad += check("PAT: ... asked: the switch at 12", pat_run_until(1, 3000, &at) && near_d(at, 12.0 * S120));
+    /* stopped: at once */
+    seq_reset();
+    smp.next = 3;
+    bad += check("PAT: stopped: at once (the next block)", pat_run_until(3, 1, 0) && smp.cur == 3u);
+    return bad;
+}
+
+/* the kits: every track's machine changes at the switch; in its first block the old engines fade with their own values (pe_old),
+ * the new values wait in p[] (never the new parameters on the old machine), then the new engines; the core is the new kit */
+static int test_pat_switch_kits(void)
+{
+    int bad = 0, fade = 1, own = 1, newp = 1, done = 1;
+    uint32_t t, s, b, at = 0;
+    int16_t pe[SM_NTRK][8];
+    seq_reset();
+    pat_kit(1);
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < 16u; s++) {
+            pat_trig(0, t, s, 48 + t);
+            pat_trig(1, t, s, 50 + t);
+            smp.pat[0].step[t][s].len = SM_LEN_INF;   /* (held: sounding at the switch) */
+        }
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(15.5 * S120));
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < 8u; s++)
+            pe[t][s] = trk[t].p[P_E0 + s];
+    smp.next = 1;
+    bad += check("PAT: kits: switched", pat_run_until(1, 100, &at));
+    for (t = 0; t < SM_NTRK; t++) {
+        fade &= trk[t].engine == eng_vis(smp.pat[0].kit.snd[t].machine) && trk[t].xf_on && trk[t].xf == XF_BLOCKS - 1u &&
+                trk[t].eng_req == eng_vis(smp.pat[1].kit.snd[t].machine) && trk[t].eng_req != trk[t].engine;
+        own &= !memcmp(trk[t].pe_old, pe[t], sizeof pe[t]);
+        for (s = 0; s < 8u; s++)
+            newp &= trk[t].p[P_E0 + s] == smp.pat[1].kit.snd[t].p[P_E0 + s];
+    }
+    bad += check("PAT: kits: the first block: all 4 tracks fade their old engine toward the new one", fade);
+    bad += check("PAT: ... the old engines render with their own values (pe_old), not the new kit's", own);
+    bad += check("PAT: ... the new kit's values are in p[]", newp);
+    {   /* a value the main loop pushed for the old pattern (before it saw the switch): dropped, the new kit's stays */
+        int16_t cut = trk[2].p[P_FCUT];
+        push(SMC_PARAM, 2, 0, P_FCUT, cut > 10 ? 3 : 90);
+        run_block();
+        bad += check("PAT: ... a value queued for the old pattern is dropped (the new kit's stays)", trk[2].p[P_FCUT] == cut);
+        push(SMC_PARAM, 2, 1, P_FCUT, cut > 10 ? 3 : 90);
+        run_block();
+        bad += check("PAT: ... one for the new pattern is taken", trk[2].p[P_FCUT] == (cut > 10 ? 3 : 90));
+        push(SMC_PARAM, 2, 1, P_FCUT, cut);
+        run_block();
+    }
+    for (b = 0; b < 8u; b++) {
+        run_block();
+        sm_pat_poll();
+    }
+    for (t = 0; t < SM_NTRK; t++)
+        done &= trk[t].engine == eng_vis(smp.pat[1].kit.snd[t].machine) && !trk[t].xf_on;
+    bad += check("PAT: ... then the new engines, the core is the new kit", done && core_is_model() && smp.cur == 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+
+/* DIRECT START: at once, every track from step 1; DIRECT JUMP: at once, the tracks where they were */
+static int test_pat_direct_start(void)
+{
+    int bad = 0;
+    uint32_t at = 0, on = 0, n;
+    seq_reset();
+    pat_trig(0, 0, 0, 48);
+    pat_trig(1, 0, 0, 60);
+    pat_trig(1, 0, 1, 61);
+    smp.mode = SM_PM_START;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(5.5 * S120));
+    smp.next = 1;
+    bad += check("PAT: DIRECT START: at once (the next block)", pat_run_until(1, 1, &at));
+    n = pat_on_after(0, at, &on);
+    bad += check("PAT: ... step 1 of the new pattern in that block", n == 60u && on == at);
+    seq_run((uint32_t)(1.5 * S120));
+    n = pat_on_after(0, at + CTL, &on);
+    bad += check("PAT: ... step 2 a step later", n == 61u && near_d(on - at, S120));
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+static int test_pat_direct_jump(void)
+{
+    int bad = 0;
+    uint32_t at = 0, on = 0, n;
+    seq_reset();
+    pat_trig(0, 0, 0, 48);
+    pat_trig(1, 0, 0, 60);
+    pat_trig(1, 0, 6, 66);
+    smp.mode = SM_PM_JUMP;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(5.5 * S120));
+    smp.next = 1;
+    bad += check("PAT: DIRECT JUMP: at once (the next block)", pat_run_until(1, 1, &at));
+    seq_run((uint32_t)S120);
+    n = pat_on_after(0, at, &on);
+    bad += check("PAT: ... the tracks go on where they were: the new pattern's step 7 on the grid (6 steps in)",
+                 n == 66u && near_d(on, 6.0 * S120) && sm_pos[0] == 6u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+
+/* 100 switches at 300 BPM, the three modes in turn, held notes, slides, ratchets on every track; then STOP: after 400 blocks
+ * nothing sounds and no voice is held */
+static int test_pat_switch_300bpm_no_hang(void)
+{   /* (the tail: what the tracks hold after their voices are gone; the same 300 BPM pattern played without switches leaves
+     * |x| ~170 at this point: it is not the switches') */
+    int bad = 0, all = 1;
+    uint32_t t, s, i, pk, held = 0;
+    seq_reset();
+    pat_kit(1);
+    pat_kit(2);
+    for (i = 0; i < 3u; i++)
+        for (t = 0; t < SM_NTRK; t++)
+            for (s = 0; s < 16u; s++) {
+                pat_trig(i, t, s, 40 + 7 * i + t);
+                smp.pat[i].step[t][s].flags = (uint8_t)(s % 4u == 1u ? SMF_SLIDE : s % 4u == 2u ? (1u << 4) : 0u);
+                smp.pat[i].step[t][s].len = (uint8_t)(s % 5u == 0u ? SM_LEN_INF : 0u);
+            }
+    smp.bpm10 = 3000;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    run_block();
+    for (i = 0; i < 100u; i++) {
+        uint32_t want = (sm_play_pat + 1u) % 3u;
+        smp.mode = (uint8_t)(i % 3u);
+        smp.next = (uint8_t)want;
+        all &= pat_run_until(want, 2000, 0);
+    }
+    bad += check("PAT: 300 BPM: 100 switches, the three modes in turn, every one came", all);
+    push(SMC_STOP, 0, 0, 0, 0);
+    for (i = 0; i < 300u; i++)
+        run_block();
+    pk = peak_of(100);
+    for (t = 0; t < SM_NTRK; t++)
+        held += notes_on_core(t) + sm_nheld[t];
+    printf("swamp: after STOP peak %u, held %u, busy %u\n", pk, held, voices_busy());
+    bad += check("PAT: ... STOP: 400 blocks later no voice left, nothing held, only the tracks' tail (|x| <= 32)",
+                 pk <= 32u && held == 0u && !voices_busy());
+    (void)peak_of(1000);
+    bad += check("PAT: ... and that tail dies away (the next 1000 blocks: |x| <= 1 at the end)", peak_of(100) <= 1u);
+    return bad;
+}
+
+/* the SEQ layer: ALGORITHM picks a pattern, letting go of SEQ asks for it; F#3 the mode round; K2 the master length */
+static int test_pat_seq_layer(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    btn_down(B_SEQ);
+    sm_input_poll();
+    turn(EN_ALGO, 2);
+    sm_input_poll();
+    bad += check("PAT: SEQ + ALGORITHM +2: the layer, pattern A03 picked, the track stays", sm_layer == SML_SEQ && sm_lay_pick == 2u &&
+                 sm_ui.trk == 0u && smp.next == SM_PAT_NONE);
+    turn(EN_ALGO, -3);
+    sm_input_poll();
+    bad += check("PAT: ... -3: wraps to A16", sm_lay_pick == 15u);
+    turn(EN_ALGO, 3);
+    sm_input_poll();
+    key_dn(1);                                            /* F#3: the mode */
+    sm_input_poll();
+    key_up(1);
+    bad += check("PAT: ... F#3: DIRECT START", smp.mode == SM_PM_START);
+    key_dn(1);
+    sm_input_poll();
+    key_up(1);
+    key_dn(1);
+    sm_input_poll();
+    key_up(1);
+    bad += check("PAT: ... F#3 twice more: SEQUENTIAL again", smp.mode == SM_PM_SEQ);
+    turn(EN_K2, 8);
+    sm_input_poll();
+    bad += check("PAT: ... K2 +8: the master length 8", smp.pat[0].mlen == 8u);
+    turn(EN_K2, -20);
+    sm_input_poll();
+    bad += check("PAT: ... K2 -20: AUTO (0)", smp.pat[0].mlen == 0u);
+    layer_let_go(B_SEQ);
+    bad += check("PAT: SEQ let go: A03 asked for", smp.next == 2u && smp.cur == 0u);
+    run_block();
+    sm_input_poll();
+    bad += check("PAT: ... stopped: the next block it plays, the main loop mirrors it", smp.cur == 2u && smp.next == SM_PAT_NONE);
+    layer_hold(B_SEQ);
+    layer_let_go(B_SEQ);
+    bad += check("PAT: SEQ held and let go without ALGORITHM: nothing asked", smp.next == SM_PAT_NONE);
+    return bad;
+}
+
+static uint32_t scr_count(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+{
+    uint32_t i, j, n = 0;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            n += SCR(x + i, y + j) == c;
+    return n;
+}
+/* the length visible: SEQ held: LEN 32 large in the title; the strip: the track's length at its right, nothing past the length */
+static int test_len_visible(void)
+{
+    int bad = 0;
+    int32_t y0 = 0, y1 = 0;
+    draw_setup();
+    lint_zones = LZONES;
+    lint_nz = sizeof LZONES / sizeof LZONES[0];
+    ksnd(0)->len = 32;
+    smp.pat[3].step[2][0].n = 1;
+    sm_play_pat = 0;
+    sm_lay_pick = 5;
+    smp.next = 3;
+    layer_draw(SML_SEQ);
+    bad += check("LEN: SEQ held: LEN 32 in the title, large (scale 3: 21 px high), the map inside its rows",
+                 lint_has("LEN 32", &y0, &y1) && y1 - y0 == 21 && lint_frame("seq len") == 0);
+    bad += check("LEN: ... the grid A01 .. A16, the mode, the master length",
+                 lint_has("A01", 0, 0) && lint_has("A16", 0, 0) && lint_has("SEQUENTIAL ML AUTO", 0, 0));
+    bad += check("LEN: ... A01 playing inverted, A04 (trigs) ink, A02 (empty) dim", SCR(12 + 2, 48 + 9) == INK &&
+                 scr_count(192, 58, 36, 14, INK) > 20u && !scr_count(192, 58, 36, 14, DIMC) &&
+                 scr_count(72, 58, 36, 14, DIMC) > 20u && !scr_count(72, 58, 36, 14, INK));
+    bad += check("LEN: ... A06 picked: a bar under it; A04 asked for: a frame", box_is(60 + 12, 82 + 28, 36, 2, INK) &&
+                 SCR(180 + 3, 48 + 16) == INK && SCR(180 + 56, 48 + 16) == INK && SCR(180 + 30, 48 + 3) == INK);
+    sm_play_pat = 0;
+    smp.next = SM_PAT_NONE;
+    sm_lay_pick = SM_PAT_NONE;
+    lint_zones = ZONES;
+    lint_nz = sizeof ZONES / sizeof ZONES[0];
+    sm_layer = SML_NONE;
+    ksnd(0)->len = 12;
+    smp.pat[0].step[0][13].n = 1;                         /* (past the length) */
+    draw_full();
+    bad += check("LEN: the strip: the length (12) at its right, inside the screen",
+                 lint_has("12", &y0, &y1) && y0 >= 220 && y1 <= 240 && lint_frame("strip len") == 0);
+    bad += check("LEN: ... nothing drawn past the length (steps 13 .. 16: no beat mark, no trig)",
+                 scr_ink(12 * SMD_STEP_W, 220, 4 * SMD_STEP_W, 20) == 0 && SCR(8 * SMD_STEP_W + SMD_STEP_W / 2, 236) == DIMC);
+    ksnd(0)->len = 16;
+    smp.pat[0].step[0][13].n = 0;
+    return bad;
+}
+
+/* FILT OFF (the sound's default): CUT, RES or ENV on FILTER, or any F.ENV knob, turned first sets FILT to LP (model and core),
+ * so the knob is heard at once; FILT itself, and FILT HYB, are left as they are */
+static int test_filter_auto_lp(void)
+{
+    int bad = 0;
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    turn(EN_K1, 0);
+    turn(EN_K2, -5);
+    sm_input_poll();
+    run_block();
+    bad += check("FILT: OFF, CUT turned: FILT LP in the model and on the core, CUT moved",
+                 ksnd(0)->p[P_FLT] == 1 && trk[0].p[P_FLT] == 1 && ksnd(0)->p[P_FCUT] != TP[P_FCUT].def);
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    turn(EN_K3, 3);
+    sm_input_poll();
+    bad += check("FILT: OFF, RES turned: LP", ksnd(0)->p[P_FLT] == 1);
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    turn(EN_K4, 3);
+    sm_input_poll();
+    bad += check("FILT: OFF, ENV turned: LP", ksnd(0)->p[P_FLT] == 1);
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("F.ENV");
+    turn(EN_K1, 3);
+    sm_input_poll();
+    run_block();
+    bad += check("FILT: OFF, F.ENV attack turned: LP (model and core)", ksnd(0)->p[P_FLT] == 1 && trk[0].p[P_FLT] == 1);
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("F.ENV");
+    turn(EN_K2, 3);
+    sm_input_poll();
+    bad += check("FILT: OFF, F.ENV decay turned: LP", ksnd(0)->p[P_FLT] == 1);
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    ksnd(0)->p[P_FLT] = 5;                                /* HYB */
+    turn(EN_K2, 3);
+    sm_input_poll();
+    bad += check("FILT: HYB: CUT (BASE) turned: stays HYB", ksnd(0)->p[P_FLT] == 5);
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    ksnd(0)->p[P_FLT] = 3;                                /* HP */
+    turn(EN_K3, 3);
+    sm_input_poll();
+    bad += check("FILT: HP: RES turned: stays HP", ksnd(0)->p[P_FLT] == 3);
+    in_reset();
+    sm_ui.page = (uint8_t)page_by_name("EDIT 1");
+    turn(EN_K1, 3);
+    sm_input_poll();
+    bad += check("FILT: another page's knob: FILT stays OFF", ksnd(0)->p[P_FLT] == 0);
+    return bad;
+}
+
 static int test_draw_shots(void)
 {
     const char *dir = getenv("SHOTS");
@@ -4383,6 +4776,14 @@ int main(void)
     bad += test_midi_vs_seq_same_note();
     bad += test_midi_mute_stop_panic();
     bad += test_midi_overflow();
+    bad += test_pat_switch_boundary();
+    bad += test_pat_switch_kits();
+    bad += test_pat_direct_start();
+    bad += test_pat_direct_jump();
+    bad += test_pat_switch_300bpm_no_hang();
+    bad += test_pat_seq_layer();
+    bad += test_len_visible();
+    bad += test_filter_auto_lp();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

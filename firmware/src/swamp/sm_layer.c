@@ -11,7 +11,9 @@
  *              eng_vis), OCT+ the next page, G5 INIT (the machine's preset 0). Loads as the PRESETS knob does
  *   GLO        black keys 1..4 (F#3 G#3 A#3 C#4) toggle the mute of T1..T4 (smp.mute); the white keys F3 .. B3 solo T1..T4
  *              while they are held (sm_solo)
- *   SEQ        K1 the selected track's length 1..32; the white key F3 clears the track's steps
+ *   SEQ        K1 the selected track's length 1..32, K2 the pattern's master length (AUTO, 1..128); the white key F3 clears
+ *              the track's steps; F#3 the pattern change's mode round (SEQUENTIAL, DIRECT START, DIRECT JUMP); ALGORITHM picks a
+ *              pattern (from the one playing), and letting go of SEQ asks for it (smp.next: sm_seq.c switches)
  * The keys and knobs of an open layer are the layer's alone (the page's knobs and the trigs do not see them); PLAY, the
  * track knob and PRESETS work as ever. The main loop is the only writer of all of it (sm_input.c's ownership). */
 
@@ -20,12 +22,14 @@ static uint32_t sm_lay_t0;                                /* when it went down (
 static uint8_t sm_lay_epage;                              /* EDIT: the page of machines in view */
 static uint8_t sm_lay_cleared;                            /* SEQ: the track was cleared since the layer opened (CLEARED) */
 static uint8_t sm_lay_void;                               /* a button with no layer (HOME) was held: its release is no tap */
+static uint8_t sm_lay_pick = SM_PAT_NONE;                 /* SEQ: the pattern ALGORITHM picked (SM_PAT_NONE: none yet) */
 
 #define SM_NLBTN 4u
 static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
     {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ}, {B_HOME, SML_NONE, SMFAM_HOME},
 };
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
+#define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
 #define SM_NEPAGE 3u
 
 static void sm_layer_init(void)
@@ -36,6 +40,7 @@ static void sm_layer_init(void)
     sm_lay_epage = 0;
     sm_lay_cleared = 0;
     sm_lay_void = 0;
+    sm_lay_pick = SM_PAT_NONE;
     sm_solo = 0;
 }
 
@@ -55,6 +60,7 @@ static void sm_layer_open(uint32_t l)
     sm_key_arm = sm_key_used = 0;                         /* (a trig key down before the layer never toggles inside it) */
     sm_layer = (uint8_t)l;
     sm_lay_cleared = 0;
+    sm_lay_pick = SM_PAT_NONE;
     if (l == SML_EDIT)                                    /* (opens on the page of the selected track's machine) */
         sm_lay_epage = (uint8_t)sm_epage_of(sm_ui_sound()->machine);
     sm_dirty = 1;
@@ -62,6 +68,9 @@ static void sm_layer_open(uint32_t l)
 
 static void sm_layer_close(void)
 {
+    if (sm_layer == SML_SEQ && sm_lay_pick < SM_NPAT)
+        smp.next = sm_lay_pick;                           /* (one byte: the audio stream reads it once a block) */
+    sm_lay_pick = SM_PAT_NONE;
     sm_layer = SML_NONE;
     sm_solo = 0;
     sm_lay_cleared = 0;
@@ -129,7 +138,7 @@ static void sm_track_clear(uint32_t t)
 }
 
 /* the open layer's keys (the white key number is its place among the white keys, F3 = 0) and knobs, this poll's edges */
-static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k)
+static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg)
 {
     uint32_t key, t = sm_ui.trk % SM_NTRK;
     if (sm_layer == SML_EDIT && ((pressed >> panel.btn[B_OCTUP]) & 1u)) {
@@ -145,6 +154,19 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k)
                 sm_ui.bank = 0;
             sm_dirty = 1;
         }
+    }
+    if (sm_layer == SML_SEQ && k[1]) {                    /* the master length: 0 AUTO, 1..128 */
+        sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+        int32_t m = clamp((int32_t)pt->mlen + k[1], 0, (int32_t)SM_MLEN_MAX);
+        if ((uint8_t)m != pt->mlen) {
+            pt->mlen = (uint8_t)m;                        /* (a byte: the audio stream reads it at a step's start) */
+            sm_dirty = 1;
+        }
+    }
+    if (sm_layer == SML_SEQ && alg) {                     /* the pattern picked, from the one playing (wraps) */
+        int32_t p = ((int32_t)(sm_lay_pick < SM_NPAT ? sm_lay_pick : smp.cur) + alg) % (int32_t)SM_NPAT;
+        sm_lay_pick = (uint8_t)(p < 0 ? p + (int32_t)SM_NPAT : p);
+        sm_dirty = 1;
     }
     if (sm_layer == SML_GLO) {                            /* solo: the white keys F3 .. B3 held */
         uint32_t held = fm1_in.notes, solo = 0, w;
@@ -178,6 +200,9 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k)
                 smp.mute ^= (uint8_t)(1u << n);
                 sm_dirty = 1;
             }
+        } else if (sm_layer == SML_SEQ && key == SM_LAY_MODE_KEY) {
+            smp.mode = (uint8_t)((smp.mode + 1u) % SM_PM_COUNT);
+            sm_dirty = 1;
         } else if (sm_layer == SML_SEQ && w == 0) {
             sm_track_clear(t);
             sm_lay_cleared = 1;

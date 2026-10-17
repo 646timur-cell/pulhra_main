@@ -57,9 +57,18 @@ typedef struct {
     sm_kit_t kit;
     sm_step_t step[SM_NTRK][SM_NSTEP];
     uint16_t nlock;
-    uint8_t mlen, mode;
+    uint8_t mlen;                                         /* master length in 1/16 steps 1..SM_MLEN_MAX, 0 AUTO (the longest track) */
+    uint8_t rsv;
     sm_lock_t lock[SM_NLOCK];
 } sm_pattern_t;
+
+/* the pattern change (smp.mode, the project's, as MONOFM's): SEQUENTIAL at the end of the pattern playing (its master length),
+ * every track from step 1; DIRECT START at once, every track from step 1; DIRECT JUMP at once, the tracks where they were.
+ * Stopped: at once. The main loop asks (smp.next); the audio stream switches (sm_seq.c sm_pat_block) and says so in its own
+ * sm_play_pat, which the main loop mirrors into smp.cur (sm_input.c sm_pat_poll) */
+enum { SM_PM_SEQ, SM_PM_START, SM_PM_JUMP, SM_PM_COUNT };
+#define SM_PAT_NONE 0xFFu
+#define SM_MLEN_MAX 128u
 
 typedef struct {
     sm_pattern_t pat[SM_NPAT];
@@ -67,4 +76,6 @@ typedef struct {
     uint8_t swing, cur, sel, nchain;
     uint8_t chain[SM_NCHAIN];
     uint8_t mute;                                         /* bit per track */
+    uint8_t mode;                                         /* SM_PM_* */
+    uint8_t next;                                         /* the pattern asked for (SM_PAT_NONE none; the main loop's) */
 } sm_project_t;

@@ -73,4 +73,6 @@ static void sm_project_init(void)
     }
     smp.bpm10 = 1200u;
     smp.swing = 50u;
+    smp.mode = SM_PM_SEQ;
+    smp.next = SM_PAT_NONE;
 }

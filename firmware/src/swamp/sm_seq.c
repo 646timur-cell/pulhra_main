@@ -27,6 +27,7 @@ static volatile uint8_t sm_fill;                          /* FILL held (Task 6: 
 static uint32_t sm_next_q8;                               /* the next step starts this many q8 samples after this block's start */
 static uint32_t sm_swd_q8;                                /* a swung step's delay (q8), from smp.swing read once at the block's start */
 static uint8_t sm_gcur;                                   /* the grid step playing is odd (the swung ones: the 2nd, 4th, ..) */
+static uint32_t sm_mstep;                                 /* the grid steps started since the pattern began (its master length's clock) */
 static uint8_t sm_pos[SM_NTRK], sm_next[SM_NTRK];         /* the step playing, the step to play next */
 static uint8_t sm_held[SM_NTRK][4], sm_nheld[SM_NTRK];    /* the notes the sequencer holds, per track */
 static int32_t sm_gate[SM_NTRK];                          /* samples left of their LEN (SM_GATE_INF: to the next trig) */
@@ -103,7 +104,7 @@ static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock
  * one, skipped. This interrupt is never preempted by the main loop, so an entry is read whole */
 static void sm_seq_locks(uint32_t t, uint32_t st)
 {
-    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint8_t now[SM_LKB];
     uint32_t i, n = pt->nlock, ts = (t << 5) | st, b;
     memset(now, 0, sizeof now);
@@ -131,7 +132,7 @@ static void sm_seq_locks(uint32_t t, uint32_t st)
 /* track t's locked values back to the model's base, the mask cleared (SMC_UNLOCK, STOP) */
 static void sm_seq_unlock(uint32_t t)
 {
-    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint32_t p;
     t %= SM_NTRK;
     for (p = 0; p < P_COUNT; p++)
@@ -177,6 +178,8 @@ static void sm_seq_init(void)
     memset(sm_pre, 0, sizeof sm_pre);
     for (t = 0; t < SM_NTRK; t++)
         sm_seq_idle(t);
+    sm_play_pat = (uint8_t)(smp.cur % SM_NPAT);
+    sm_mstep = 0;
     sm_solo = 0;
     sm_cq.head = sm_cq.tail = 0;
     sm_cov.head = sm_cov.tail = 0;
@@ -190,6 +193,7 @@ static void sm_seq_play(void)
         return;
     sm_next_q8 = 0;
     sm_gcur = 1;                                          /* (the first step's start makes it 0: the grid's first step is on time) */
+    sm_mstep = 0;
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
     memset(sm_pre, 0, sizeof sm_pre);
@@ -271,7 +275,7 @@ static int32_t sm_lock_find(const sm_pattern_t *p, uint32_t t, uint32_t s, uint3
  * after st, wrapping at the track's length, with n > 0 (st itself if no other) */
 static void sm_ps_begin(uint32_t t, uint32_t st, int32_t at, uint32_t step_q8)
 {
-    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP), j = st, k, i, n = pt->nlock, pass, m = 0;
     for (k = 1; k <= len; k++) {
         j = (st + k) % len;
@@ -354,7 +358,7 @@ static void sm_seq_notes(uint32_t t, const sm_step_t *s, uint32_t vel, uint32_t 
  * delay of the step (q8): a ratchet's parts share the step less it */
 static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, uint32_t next_pass, uint32_t sw)
 {
-    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     const sm_step_t *s = &pt->step[t][st];
     uint32_t hits, vel, f, li;
     if (!s->n)                                            /* (n first: the main loop writes it last, sm_step_toggle) */
@@ -410,7 +414,7 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
 /* a ratchet part of the step playing: its notes again (the step read again: taken off or a REST meanwhile ends them) */
 static void sm_seq_part(uint32_t t)
 {
-    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     const sm_step_t *s = &pt->step[t][sm_pos[t]];
     if (!sm_rat_left[t] || !s->n || (s->flags & SMF_REST)) {
         sm_rat_left[t] = 0;
@@ -434,7 +438,7 @@ static int32_t sm_nudge_of(const sm_step_t *s)
  * their LEN) */
 static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t muted)
 {
-    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP), i = sm_next[t], j;
     uint32_t sw = sm_gcur ? sm_swd_q8 : 0u, swn = sm_gcur ? 0u : sm_swd_q8;   /* (this step's swing delay, the next step's) */
     const sm_step_t *s;
@@ -475,6 +479,83 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
     }
 }
 
+/* the master length of pattern pt in grid steps: its mlen, AUTO (0) the longest of its tracks */
+static uint32_t sm_mlen_of(const sm_pattern_t *pt)
+{
+    uint32_t t, l = 0, x;
+    if (pt->mlen)
+        return pt->mlen < SM_MLEN_MAX ? pt->mlen : SM_MLEN_MAX;
+    for (t = 0; t < SM_NTRK; t++) {
+        x = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP);
+        l = x > l ? x : l;
+    }
+    return l;
+}
+
+/* pattern n now (the audio stream's; from sm_pat_block, before engine_block in the block, as SMC_LOAD: a machine change
+ * fades the old engine with its own values, the new values wait in p[]). Every track: the sequencer's notes let go, nothing
+ * pending (nudges, ratchets, a slide, PSLIDE), the lock masks cleared (the new kit is every value's base), the new kit's
+ * sound loaded. how: SM_PM_SEQ (at the end of the pattern: the step about to start is every track's step 1), SM_PM_START
+ * (every track's step 1 in this block: the grid starts again here, as PLAY), SM_PM_JUMP (the tracks go on where they were;
+ * the passes and PRE too). sm_play_pat last: the main loop mirrors it into smp.cur */
+static void sm_pat_switch(uint32_t n, uint32_t how)
+{
+    uint32_t t;
+    n %= SM_NPAT;
+    for (t = 0; t < SM_NTRK; t++) {
+        sm_seq_release(t);
+        sm_seq_idle(t);
+        memset(sm_lk_on[t], 0, SM_LKB);
+        sm_lk_step[t] = 0xFFu;
+        sm_track_load(t, &smp.pat[n].kit.snd[t]);
+        if (how != SM_PM_JUMP) {
+            sm_next[t] = 0;
+            sm_loop[t] = 0xFFFFu;                         /* (step 1's start counts the first pass: 1ST holds again) */
+            sm_pre[t] = 0;
+        }
+    }
+    if (how != SM_PM_JUMP)
+        sm_mstep = 0;
+    if (how == SM_PM_START) {
+        sm_next_q8 = 0;
+        sm_gcur = 1;
+    }
+    SM_BARRIER();
+    sm_play_pat = (uint8_t)n;
+}
+
+/* every block, before engine_block: the pattern asked for (smp.next, read once) comes now if stopped (or PLAY started this
+ * block, before its first step), or in DIRECT START / JUMP; in SEQUENTIAL at the end of the pattern: when the step about to
+ * start in this block (at most one: a step is >= 2205 samples, a block 32) is the first past the master length. That end
+ * with nothing asked: the master length's clock from 0 again, and a master length set (not AUTO) starts every track again
+ * from step 1 there */
+static void sm_pat_block(uint32_t nq8)
+{
+    uint32_t nx = *(volatile uint8_t *)&smp.next, mode = smp.mode;
+    const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
+    uint32_t edge = sm_playing && sm_next_q8 < nq8 && sm_mstep >= sm_mlen_of(pt), t;
+    if (nx < SM_NPAT && nx != sm_play_pat) {
+        if (!sm_playing || (!sm_mstep && !sm_next_q8)) {
+            sm_pat_switch(nx, SM_PM_START);
+            return;
+        }
+        if (mode == SM_PM_START || mode == SM_PM_JUMP) {
+            sm_pat_switch(nx, mode);
+            return;
+        }
+        if (edge) {
+            sm_pat_switch(nx, SM_PM_SEQ);
+            return;
+        }
+    }
+    if (edge) {
+        sm_mstep = 0;
+        if (pt->mlen)
+            for (t = 0; t < SM_NTRK; t++)
+                sm_next[t] = 0;
+    }
+}
+
 /* the audio block's events: the commands first (before engine_block: a machine change applied after it would render the
  * old engine with the new engine's values in this block, voice.c track_render), then panic_req, the engines' switches,
  * and the sequencer's events of the block in time order: the steps' starts, the nudged fires, the ratchet parts. MIDI IN's
@@ -484,6 +565,7 @@ static void events_block(uint32_t n)
     uint32_t t, pr;
     sm_cmd_drain();
     sm_midi_drain();                                      /* (MIDI IN notes: sm_midi.c) */
+    sm_pat_block(n << 8);                                 /* (a pattern change: its kit before engine_block, as SMC_LOAD) */
     pr = panic_req;                                       /* (the main loop sets bits; this interrupt is never preempted */
     panic_req = 0;                                        /* by it between the read and the clear) */
     for (t = 0; t < SM_NTRK; t++) {
@@ -524,6 +606,7 @@ static void events_block(uint32_t n)
                 break;
             if (kind == 1u) {
                 sm_gcur ^= 1u;
+                sm_mstep++;
                 for (t = 0; t < SM_NTRK; t++)
                     sm_seq_step(t, best, step_q8, (mute >> t) & 1u);
                 sm_next_q8 += step_q8;

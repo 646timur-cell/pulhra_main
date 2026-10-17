@@ -47,6 +47,10 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni)
     uint32_t k, w = 0, nb = 0, t = sm_ui.trk % SM_NTRK, cur = smp.pat[smp.cur % SM_NPAT].kit.snd[t].machine;
     for (k = 0; k < SM_NKEYS; k++) {
         if ((SM_BLACK_KEYS >> k) & 1u) {
+            if (sm_layer == SML_SEQ && k == SM_LAY_MODE_KEY) {   /* (SEQ: F#3 the change mode) */
+                sm_led_put(ni, 14u + k, 1);
+                sm_led_put(ng, 14u + k, 1);
+            }
             if (sm_layer == SML_GLO && nb < SM_NTRK) {
                 sm_led_put(ni, 14u + k, 1);
                 sm_led_put((smp.mute >> nb) & 1u ? nl : ng, 14u + k, 1);

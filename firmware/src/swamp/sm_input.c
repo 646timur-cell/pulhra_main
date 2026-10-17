@@ -55,7 +55,7 @@ static void sm_input_init(void)
 }
 
 static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);   /* sm_layer.c (after this file) */
-static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k);
+static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg);
 static void sm_layer_end(void);
 
 static sm_sound_t *sm_ui_sound(void) { return &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK]; }
@@ -65,7 +65,7 @@ static void sm_param_push(uint32_t t, uint32_t id)
     sm_cmd_t c;
     c.kind = SMC_PARAM;
     c.trk = (uint8_t)t;
-    c.step = 0;
+    c.step = smp.cur;                                     /* (the pattern: sm_cmd.c) */
     c.param = (uint8_t)id;
     c.val = smp.pat[smp.cur % SM_NPAT].kit.snd[t].p[id];
     if (sm_cmd_push(c))
@@ -121,13 +121,43 @@ static void sm_turn(uint32_t id, int32_t s)
     if (sm_rec && sm_playing) {                           /* (the playing step: the audio stream's byte) */
         uint32_t t = sm_ui.trk % SM_NTRK, st = *(volatile uint8_t *)&sm_pos[t];
         if (sm_lock_turn(t, st, id, s, 0)) {                 /* heard at once: the lock onto the core (a refused preview: */
-            sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, 0, (uint8_t)id, 0};   /* the step's next fire plays it) */
+            sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};   /* the step's next fire plays it) */
             c.val = smp.pat[smp.cur % SM_NPAT].lock[sm_lock_find(&smp.pat[smp.cur % SM_NPAT], t, st, id)].val;
             (void)sm_cmd_push(c);
         }
         return;
     }
     sm_turn_base(sm_ui.trk, id, s);
+}
+
+/* FILT OFF (the sound's default) makes CUT, RES, the filter envelope's ENV and its attack and decay do nothing: turning one
+ * of them on a track whose FILT is OFF first sets FILT to LP (the model, then the command), so the knob is heard at once.
+ * Another FILT (LP BP HP, HYB: K2 / K3 are BASE / RES then) is left as it is */
+static void sm_filt_auto(uint32_t id)
+{
+    sm_sound_t *sd = sm_ui_sound();
+    if (sd->p[P_FLT] || (id != P_FCUT && id != P_FRES && id != P_ED_FLT && id != P_FATK && id != P_FDEC))
+        return;
+    sd->p[P_FLT] = 1;
+    sm_param_push(sm_ui.trk % SM_NTRK, P_FLT);
+    sm_dirty = 1;
+}
+
+/* the main loop's mirror of the pattern playing (the audio stream switches: sm_seq.c sm_pat_switch): smp.cur follows
+ * sm_play_pat (the edits go to the pattern playing from here on), and the request is done once it plays */
+static void sm_pat_poll(void)
+{
+    uint8_t p = *(volatile uint8_t *)&sm_play_pat;
+    if (p != smp.cur) {
+        smp.cur = (uint8_t)(p % SM_NPAT);
+        if (smp.pat[smp.cur].kit.snd[sm_ui.trk % SM_NTRK].len <= 16u)
+            sm_ui.bank = 0;
+        sm_dirty = 1;
+    }
+    if (smp.next != SM_PAT_NONE && smp.next == p) {
+        smp.next = SM_PAT_NONE;
+        sm_dirty = 1;
+    }
 }
 
 /* the selected track's whole sound from a machine's preset, then the LOAD: built here, off to the side, then copied into the
@@ -352,7 +382,7 @@ static void sm_flush(void)
     uint32_t t, w, b;
     for (t = 0; t < SM_NTRK; t++) {
         if ((sm_ld_pend >> t) & 1u) {
-            sm_cmd_t c = {SMC_LOAD, (uint8_t)t, 0, 0, 0};
+            sm_cmd_t c = {SMC_LOAD, (uint8_t)t, smp.cur, 0, 0};
             if (sm_cmd_push(c)) {
                 sm_ld_pend &= (uint8_t)~(1u << t);
                 for (w = 0; w < 4u; w++)
@@ -380,11 +410,14 @@ static void sm_input_poll(void)
     int32_t sel = panel_enc(EN_SELECT), alg = panel_enc(EN_ALGO), pre = panel_enc(EN_PRESET), k[4], i;
     for (i = 0; i < 4; i++)
         k[i] = panel_enc(EN_K1 + (uint32_t)i);
+    sm_pat_poll();
     /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is
      * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
     sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);
     if (sm_layer) {
-        sm_layer_keys(pressed, notes, k);
+        sm_layer_keys(pressed, notes, k, alg);
+        if (sm_layer == SML_SEQ)
+            alg = 0;                                      /* (SEQ: ALGORITHM picks a pattern, not the track) */
         notes = 0;
         sel = 0;
         for (i = 0; i < 4; i++)
@@ -423,8 +456,10 @@ static void sm_input_poll(void)
     } else {
         sm_preset_turn(pre);
         for (i = 0; i < 4; i++)
-            if (sm_page_param(i) != SM_NOPARAM)
+            if (sm_page_param(i) != SM_NOPARAM && k[i]) {
+                sm_filt_auto(sm_page_param(i));
                 sm_turn(sm_page_param(i), k[i]);
+            }
         if (sm_page_param(4) != SM_NOPARAM)
             sm_turn(sm_page_param(4), sel);
     }

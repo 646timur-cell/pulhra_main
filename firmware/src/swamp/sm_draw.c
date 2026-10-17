@@ -10,9 +10,12 @@
  *               held step is a filled disc; a dot in its centre: locked on another step
  *   y 168..187  SELECT: its label and value
  *   (STEP: the knobs NOTE VEL LEN COND, SELECT NUDGE, of the step edited; an empty one or none: "-", the rings empty)
- *   y  48..217  (a layer open: its key map over the knobs and SELECT, five rows of 34, the labels of the keys at scale 2)
- *   y 220..239  the 16 steps of the bank as dots only (a trig a dot, a ratchet stacked dots, a REST a hollow dot; a bar under
- *               the one playing, over the one held); the panel LEDs carry the rest of the steps (sm_leds.c)
+ *   y  48..217  (a layer open: its key map over the knobs and SELECT, five rows of 34, the labels of the keys at scale 2;
+ *               SEQ: the title LEN 32 large (scale 3), the grid A01 .. A16 in four rows (the one playing inverted, the one
+ *               picked underlined, the one asked for framed, an empty one dim), the change mode and the master length)
+ *   y 220..239  the 16 steps of the bank as dots only, 13 px each (a trig a dot, a ratchet stacked dots, a REST a hollow dot;
+ *               a bar under the one playing, over the one held; nothing past the track's length), and right of them the
+ *               track's length; the panel LEDs carry the rest of the steps (sm_leds.c)
  * The LCD transfer is the dear part: a zone is redrawn only when what it shows changed (a signature of its inputs). */
 #define SMD_HDR_Y 0u
 #define SMD_HDR_H 20u
@@ -31,7 +34,7 @@
 #define SMD_MAP_ROWS 5u
 #define SMD_STRIP_Y 220u
 #define SMD_STRIP_H 20u
-#define SMD_STEP_W 15u
+#define SMD_STEP_W 13u                                    /* (16 x 13 = 208: the track's length right of the steps) */
 #define SMD_NZONE 8u                                      /* header, page, four knobs, SELECT, strip */
 #define SMD_Z_KNOB0 2u
 #define SMD_Z_SEL 6u
@@ -121,6 +124,27 @@ static void smd_two(char *b, uint32_t v)
     v %= 100u;
     b[0] = (char)('0' + v / 10u);
     b[1] = (char)('0' + v % 10u);
+}
+static void smd_lenstr(char *b, uint32_t v)               /* 1 .. 128 as text, no leading zero (b: 4 bytes) */
+{
+    uint32_t i = 0;
+    v %= 1000u;
+    if (v >= 100u)
+        b[i++] = (char)('0' + v / 100u);
+    if (v >= 10u)
+        b[i++] = (char)('0' + v / 10u % 10u);
+    b[i++] = (char)('0' + v % 10u);
+    b[i] = 0;
+}
+static int smd_pat_empty(uint32_t p)                      /* pattern p holds no trig on any track */
+{
+    const sm_pattern_t *pt = &smp.pat[p % SM_NPAT];
+    uint32_t t, s;
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < SM_NSTEP; s++)
+            if (pt->step[t][s].n)
+                return 0;
+    return 1;
 }
 static void smd_header(void)
 {
@@ -212,10 +236,17 @@ static void smd_page(void)
             smd_cat(b, &n, MF_PAGE_NAME[sm_lay_epage % SM_NEPAGE]);
         } else if (sm_layer == SML_GLO) {
             smd_cat(b, &n, "MUTE SOLO");
-        } else {
+        } else {                                          /* SEQ: LEN 32 large, SEQ T1 at the right */
+            char l[8] = {'L', 'E', 'N', ' ', 0, 0, 0, 0};
+            uint32_t len = smd_snd()->len % 100u;
             smd_cat(b, &n, "SEQ T");
             b[n++] = (char)('1' + sm_ui.trk % SM_NTRK);
             b[n] = 0;
+            smd_lenstr(l + 4, len);
+            sm_px_text(0, 3, 3u, l, T_TEXT, 0);
+            sm_px_text(240 - 12 * (int32_t)n, 7, 2u, b, T_TEXT, 0);
+            smd_end();
+            return;
         }
     } else if (smd_flag_held()) {                       /* FLAG ACC (the step held) */
         const sm_step_t *p = smd_held_step();
@@ -480,7 +511,7 @@ static void smd_select(void)
 /* -------------------------------------------------------- layer map --- */
 /* an open layer's map: five rows of 34 px over the knobs and SELECT (y 48 .. 217), each row either one text across (w) or four
  * cells of 60 px (c), a cell inverted for what is on (the machine of the track, a mute, a solo). The labels are scale 2 */
-typedef struct { char w[22]; char c[4][6]; uint8_t inv, cells, winv; } smd_mrow_t;
+typedef struct { char w[22]; char c[4][6]; uint8_t inv, cells, winv, dim, und, box; } smd_mrow_t;   /* (bits per cell) */
 static void smd_cell(smd_mrow_t *o, uint32_t i, const char *s, uint32_t inv)
 {
     smd_upper(o->c[i], s, 4u);
@@ -517,17 +548,30 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             o->cells = 4;
         }
     } else if (sm_layer == SML_SEQ) {
-        if (r == 0u) {
-            uint32_t len = smd_snd()->len;
-            smd_cat(o->w, &n, "K1 LEN ");
-            o->w[n++] = (char)('0' + len / 10u % 10u);
-            o->w[n++] = (char)('0' + len % 10u);
-            o->w[n] = 0;
-        } else if (r == 1u) {
-            smd_cat(o->w, &n, "F3 CLEAR");
-        } else if (r == 2u && sm_lay_cleared) {
+        if (r < 4u) {                                     /* the grid: A01 .. A16, four a row */
+            uint32_t play = smp.cur % SM_NPAT;
+            for (c = 0; c < 4u; c++) {
+                char a[4];
+                i = r * 4u + c;
+                a[0] = 'A';
+                smd_two(a + 1, i + 1u);
+                a[3] = 0;
+                smd_cell(o, c, a, i == play);
+                o->dim |= (uint8_t)((smd_pat_empty(i) ? 1u : 0u) << c);
+                o->und |= (uint8_t)((i == sm_lay_pick ? 1u : 0u) << c);
+                o->box |= (uint8_t)((i == smp.next ? 1u : 0u) << c);
+            }
+        } else if (sm_lay_cleared) {
             smd_cat(o->w, &n, "CLEARED");
             o->winv = 1;
+        } else {                                          /* the change mode, the master length */
+            static const char *const M[SM_PM_COUNT] = {"SEQUENTIAL", "DIR START", "DIR JUMP"};
+            uint32_t ml = smp.pat[smp.cur % SM_NPAT].mlen;
+            char l[4];
+            smd_cat(o->w, &n, M[smp.mode % SM_PM_COUNT]);
+            smd_cat(o->w, &n, " ML ");
+            smd_lenstr(l, ml);
+            smd_cat(o->w, &n, ml ? l : "AUTO");
         }
     }
 }
@@ -540,6 +584,7 @@ static uint32_t smd_map_sig(uint32_t r)
         h = smd_mix(h, (uint8_t)o.w[i]);
     for (i = 0; i < 24u; i++)
         h = smd_mix(h, (uint8_t)o.c[i / 6u][i % 6u]);
+    h = smd_mix(smd_mix(smd_mix(h, o.dim), o.und), o.box);
     return smd_mix(smd_mix(smd_mix(h, o.inv), o.cells), o.winv);
 }
 static void smd_map_row(uint32_t r)
@@ -550,9 +595,21 @@ static void smd_map_row(uint32_t r)
     smd_begin(0, SMD_MAP_Y + r * SMD_MAP_ROW_H, 240u, SMD_MAP_ROW_H);
     if (o.w[0])
         sm_px_text(4, 10, 2u, o.w, T_TEXT, o.winv);
-    for (c = 0; c < o.cells; c++)
-        if (o.c[c][0])
-            sm_px_text((int32_t)(c * 60u) + (60 - 12 * smd_len(o.c[c])) / 2, 10, 2u, o.c[c], T_TEXT, (o.inv >> c) & 1u);
+    for (c = 0; c < o.cells; c++) {
+        int32_t x = (int32_t)(c * 60u) + (60 - 12 * smd_len(o.c[c])) / 2, cx = (int32_t)(c * 60u);
+        uint32_t inv = (o.inv >> c) & 1u;
+        if (!o.c[c][0])
+            continue;
+        sm_px_text(x, 10, 2u, o.c[c], (uint16_t)(((o.dim >> c) & 1u) && !inv ? SM_DIM_INK : T_TEXT), (int)inv);
+        if ((o.und >> c) & 1u)                            /* picked: a bar under the label */
+            cv_rect(x, 28, 12 * smd_len(o.c[c]), 2, T_TEXT);
+        if ((o.box >> c) & 1u) {                          /* asked for: a frame round the cell */
+            cv_rect(cx + 3, 3, 54, 1, T_TEXT);
+            cv_rect(cx + 3, 30, 54, 1, T_TEXT);
+            cv_rect(cx + 3, 3, 1, 28, T_TEXT);
+            cv_rect(cx + 56, 3, 1, 28, T_TEXT);
+        }
+    }
     smd_end();
     smd_mapped = 1;
 }
@@ -585,13 +642,15 @@ static uint32_t smd_dots(const sm_step_t *st)             /* 0 empty, 1..4 a tri
 {
     return (st->flags & SMF_REST) ? 5u : st->n ? 1u + SMF_RAT(st->flags) : 0u;
 }
+static uint32_t smd_strip_len(void) { return (uint32_t)clamp(smd_snd()->len, 1, SM_NSTEP); }
 static uint32_t smd_strip_sig(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, h = 2166136261u;
     int32_t ph = smd_playhead();
     for (i = 0; i < 16u; i++)
-        h = smd_mix(h, smd_dots(&pt->step[t][b + i]));
+        h = smd_mix(h, b + i < smd_strip_len() ? smd_dots(&pt->step[t][b + i]) : 9u);
+    h = smd_mix(h, smd_strip_len());
     h = smd_mix(h, ph >= (int32_t)b && ph < (int32_t)b + 16 ? (uint32_t)ph : 0xFFu);
     h = smd_mix(h, smd_mark() >= b && smd_mark() < b + 16u ? smd_mark() : 0xFFu);
     return smd_mix(h, t * 2u + (b != 0));
@@ -601,25 +660,31 @@ static void smd_strip(void)
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, j;
     int32_t ph = smd_playhead();
+    uint32_t len = smd_strip_len();
+    char l[4];
     smd_begin(0, SMD_STRIP_Y, 240u, SMD_STRIP_H);
     for (i = 0; i < 16u; i++) {
-        int32_t x = (int32_t)(i * SMD_STEP_W);
+        int32_t x = (int32_t)(i * SMD_STEP_W) + (int32_t)(SMD_STEP_W / 2u);   /* (x: the centre of the place) */
         uint32_t s = b + i, d = smd_dots(&pt->step[t][s]);
+        if (s >= len)                                     /* past the track's length: nothing */
+            continue;
         if (d == 0) {
             if (i % 4u == 0)
-                cv_rect(x + 7, 16, 1, 1, (uint16_t)SM_DIM_INK);
+                cv_rect(x, 16, 1, 1, (uint16_t)SM_DIM_INK);
         } else if (d == 5u) {                             /* REST: a hollow dot */
-            cv_rect(x + 5, 14, 4, 4, T_TEXT);
-            cv_rect(x + 6, 15, 2, 2, T_BG);
+            cv_rect(x - 2, 14, 4, 4, T_TEXT);
+            cv_rect(x - 1, 15, 2, 2, T_BG);
         } else {
             for (j = 0; j < d; j++)                       /* (the lowest dot: rows 15..17) */
-                cv_rect(x + 6, 15 - (int32_t)j * 4, 3, 3, T_TEXT);
+                cv_rect(x - 1, 15 - (int32_t)j * 4, 3, 3, T_TEXT);
         }
         if (ph == (int32_t)s)
-            cv_rect(x + 3, 19, 8, 1, T_TEXT);
+            cv_rect(x - 4, 19, 8, 1, T_TEXT);
         if (smd_mark() == s)
-            cv_rect(x + 3, 0, 8, 2, T_TEXT);
+            cv_rect(x - 4, 0, 8, 2, T_TEXT);
     }
+    smd_lenstr(l, len);                                   /* the length, right of the steps */
+    sm_px_text(238 - 12 * smd_len(l), 3, 2u, l, T_TEXT, 0);
     smd_end();
 }
 
