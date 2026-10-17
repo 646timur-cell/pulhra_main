@@ -349,7 +349,7 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
 {
     const sm_sound_t *s = smd_snd();
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t id = sm_cur_page()->id[k & 3u], t = sm_ui.trk % SM_NTRK;
+    uint32_t id = sm_page_param(k & 3u), t = sm_ui.trk % SM_NTRK;
     const char *unit;
     o->d = 0;
     o->lab[0] = o->val[0] = 0;

@@ -877,6 +877,78 @@ static int test_knob_writes_model_and_core(void)
     return bad;
 }
 
+/* the FILTER page heard (Tim's hardware test: "the filters don't turn while playing"). The mix's brightness over n blocks:
+ * the energy of the first difference over the energy, (x[i] - x[i-1])^2 / x^2 (a high band's share) */
+static double flt_bright(uint32_t n, double *rms)
+{
+    static int32_t L[CTL * 200];
+    uint32_t nl = 0, i, b;
+    double d = 0, e = 0;
+    for (b = 0; b < n && b < 200u; b++) {
+        block_peak(L, &nl);
+        seq_clock += CTL;
+    }
+    for (i = 1; i < nl; i++) {
+        double a = L[i], p = L[i - 1];
+        d += (a - p) * (a - p);
+        e += a * a;
+    }
+    *rms = nl ? sqrt(e / nl) : 0;
+    return e > 0 ? d / e : 0;
+}
+/* T2 (FM-ST: the same note every step, the same sound every bar) alone, a trig on every step, the FILTER page, K1 (FILT)
+ * turned by filt detents, PLAY; a bar (FS / 2 at 120) before and after K2 -110 (HYB: +110) and K3 +100 through
+ * sm_input_poll. The brightness before and after */
+static void flt_play(int32_t filt, double *b0, double *b1, double *r1)
+{
+    uint32_t s, k;
+    double r0;
+    in_reset();
+    for (k = 0; k < SM_NTRK; k++)
+        if (k != 1u)
+            ksnd(k)->p[P_LEVEL] = 0, trk[k].p[P_LEVEL] = 0;
+    for (s = 0; s < 16u; s++)
+        sm_step_toggle(1, s);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    press(B_ENV);
+    sm_input_poll();
+    if (filt) {
+        turn(EN_K1, filt);
+        sm_input_poll();
+    }
+    press(B_PLAY);
+    sm_input_poll();
+    *b0 = flt_bright(FS / 2u / CTL, &r0);
+    turn(EN_K2, filt == 5 ? 110 : -110);                  /* (HYB: BASE up, the high-pass) */
+    turn(EN_K3, 100);
+    sm_input_poll();
+    *b1 = flt_bright(FS / 2u / CTL, r1);
+    press(B_PLAY);
+    sm_input_poll();
+}
+static int test_filter_play(void)
+{
+    int bad = 0;
+    double b0, b1, r1;
+    flt_play(0, &b0, &b1, &r1);
+    printf("swamp: FILT OFF: brightness %.4f -> %.4f\n", b0, b1);
+    bad += check("FILTER: FILT OFF (the sound's default): CUT and RES are not heard (FILT is the switch)",
+                 ksnd(1)->p[P_FLT] == 0 && ksnd(1)->p[P_FCUT] < 40 && fabs(b1 - b0) < 0.05 * b0);
+    flt_play(1, &b0, &b1, &r1);
+    printf("swamp: FILT LP: brightness %.4f -> %.4f (rms %.0f)\n", b0, b1, r1);
+    bad += check("FILTER: FILT LP, playing: K2 CUT -110 + K3 RES through the input: the core has them, far darker",
+                 trk[1].p[P_FLT] == 1 && trk[1].p[P_FCUT] == ksnd(1)->p[P_FCUT] && trk[1].p[P_FRES] == ksnd(1)->p[P_FRES] &&
+                 ksnd(1)->p[P_FRES] > 90 && b1 < 0.1 * b0 && r1 > 20.0);
+    flt_play(5, &b0, &b1, &r1);
+    printf("swamp: FILT HYB: brightness %.4f -> %.4f\n", b0, b1);
+    bad += check("FILTER: FILT HYB: K2 / K3 are HYBRID's BASE / RES (MONOFM's twin page), model and core",
+                 ksnd(1)->p[P_HBASE] > 90 && ksnd(1)->p[P_HRES] > 90 && trk[1].p[P_HBASE] == ksnd(1)->p[P_HBASE] &&
+                 trk[1].p[P_HRES] == ksnd(1)->p[P_HRES] && ksnd(1)->p[P_FCUT] == TP[P_FCUT].def);
+    bad += check("FILTER: ... heard, playing: BASE up high-passes T2 (brighter)", b1 > 1.5 * b0);
+    return bad;
+}
+
 static int test_white_key_toggles_trig(void)
 {
     int bad = 0;
@@ -4236,6 +4308,7 @@ int main(void)
     bad += test_alg_selects_track();
     bad += test_pages_cycle();
     bad += test_knob_writes_model_and_core();
+    bad += test_filter_play();
     bad += test_white_key_toggles_trig();
     bad += test_presets_knob_loads();
     bad += test_held_step();

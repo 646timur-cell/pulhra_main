@@ -60,6 +60,19 @@ static void sm_page_press(uint32_t fam)
     sm_dirty = 1;
 }
 
+/* the parameter on knob k (0..3; 4: SELECT) of the page shown. FILTER is MONOFM's twin page (params.c): FILT HYB (5) on
+ * the selected track's sound makes K2 / K3 HYBRID's BASE / RES (CUT / RES do nothing then: voice.c mf_filter_voice) */
+static uint32_t sm_page_param(uint32_t k)
+{
+    const sm_page_t *pg = sm_cur_page();
+    uint32_t id = k < 4u ? pg->id[k] : pg->sel;
+    if (id == P_FCUT && pg->id[0] == P_FLT && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5)
+        return P_HBASE;
+    if (id == P_FRES && pg->id[0] == P_FLT && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5)
+        return P_HRES;
+    return id;
+}
+
 static int sm_page_is_step(void) { return sm_cur_page()->fam == SMFAM_SEQ; }
 static uint32_t sm_page_home(void) { return sm_cur_page()->home; }   /* SMH_*: 0 not a HOME page */
 

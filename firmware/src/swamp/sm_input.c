@@ -423,10 +423,10 @@ static void sm_input_poll(void)
     } else {
         sm_preset_turn(pre);
         for (i = 0; i < 4; i++)
-            if (sm_cur_page()->id[i] != SM_NOPARAM)
-                sm_turn(sm_cur_page()->id[i], k[i]);
-        if (sm_cur_page()->sel != SM_NOPARAM)
-            sm_turn(sm_cur_page()->sel, sel);
+            if (sm_page_param(i) != SM_NOPARAM)
+                sm_turn(sm_page_param(i), k[i]);
+        if (sm_page_param(4) != SM_NOPARAM)
+            sm_turn(sm_page_param(4), sel);
     }
     sm_keys_release(now);
     sm_flush();
