@@ -9,17 +9,24 @@
  * sm_input_poll is called without a pause (the wait at the end of the frame), so a retry is a few hundred microseconds
  * away. A sound is written to the model with the audio interrupt off for the copy (upreset.c does the same): a LOAD
  * still queued from a turn a block ago must not drain half a sound.
+ * REC is grid record (Elektron's): REC off the white keys on the trig pages do nothing to the steps (no toggle, no lock, no
+ * step held or selected; the LEDs still show the trigs) and the knobs are the track's base. REC on:
  * Locks (sm_lock.c): a white key down holds its step; a knob or SELECT turned while it is down locks that parameter on the
  * step (from the lock's value, else the base; the base stays) and the key's release then does not toggle; a release with
  * no turn toggles the trig (taking it off removes its locks). Held on an EMPTY step a turn makes a REST trig with that
  * lock (a trigless lock; no toggle). No key down a turn is the base, always; REC on and playing it is also recorded: the
  * selected track's playing step, only if it has a trig, locks the new base value.
+ * LIVE RECORD (REC on, playing, the keyboard mode): a key plays its note and is written as a trig of the selected track at the
+ * nearest step (the audio stream picks it: sm_seq.c sm_rec_on) with its note, the keyboard's velocity and, at its release,
+ * the LEN of the SWAMP list nearest to how long it was held; notes within one step make a chord (up to 4). MIDI notes on the
+ * selected track's channel record the same way (REC on and playing, any mode). sm_lrec_poll writes them (sm_step_rec).
  * The STEP page (SEQ tapped): the knobs edit a step's fields, not the sound (sm_step_page): the step of the white key
  * down on the selected track (the last pressed), else the step selected last (sm_ui.sel_step); none (a SEQ tap drops the
  * selection): the track's trig defaults, which every field a step never had edited (SM_INH) plays. Field writes are single
  * bytes the audio stream reads at a fire (a step edited between two fires is whole by bytes).
- * REC on (or REC held) + a trig key: that trig copied (sm_edit.c sm_trig_copy; no toggle, no hold); a trig held + OCT+: the
- * copy pasted onto it. OCT- outside the keyboard mode is SHIFT while held (sm_shift); SHIFT + a knob: the fine turn (sm_fine).
+ * SHIFT (OCT- held outside the keyboard mode: sm_shift) + a trig key: that trig copied (sm_edit.c sm_trig_copy; no toggle, no
+ * hold; REC on or off); a trig held (REC on) + OCT+: the copy pasted onto it. SHIFT + a knob: the fine turn (sm_fine).
+ * The STEP page's SELECT: a step edited, its NUDGE; none, the track's own SWING (sm_sound_t swing, on top of the project's).
  * HOME (sm_home_page): MIXER's knobs are the LEVEL of T1..T4 (a base value, no locks), CLOCK's K1 the tempo and K2 the swing,
  * SELECT the tempo on both. smp.bpm10 and smp.swing are written here, in the main loop, 16 and 8 bits at once; the audio
  * stream reads each once per block (sm_seq.c). */
@@ -45,7 +52,12 @@ static uint8_t sm_kb_note[SM_NKEYS], sm_kb_trk[SM_NKEYS]; /* keyboard mode: the 
 static uint32_t sm_kb_pend;                               /* bit per key: pressed, its note-on not pushed yet */
 static uint8_t sm_shift;                                  /* SHIFT: OCT- held outside the keyboard mode and the layers (sm_oct_poll) */
 static int8_t sm_fine_acc[5];                             /* SHIFT's fine turn: the detents not yet a step, K1..K4, SELECT */
-static uint8_t sm_rec_was, sm_rec_mod;                    /* REC before its press; a trig copied while REC was down (sm_rec_poll) */
+/* LIVE RECORD, the main loop's side (sm_lrec_poll): the recorded notes still held (their trig's LEN comes at the release) and,
+ * per track, the step the last note went to and when (a note within a step of it on the same step: the chord) */
+#define SM_NRO 8u
+static struct { uint8_t on, trk, step, note, pat; uint32_t at; } sm_ro[SM_NRO];
+static uint8_t sm_rc_ok[SM_NTRK], sm_rc_step[SM_NTRK], sm_rc_pat[SM_NTRK];
+static uint32_t sm_rc_at[SM_NTRK];
 
 #define SM_FAST_US 80000u
 #define SM_FAST_N 4u
@@ -69,7 +81,8 @@ static void sm_input_init(void)
     sm_kb_pend = 0;
     sm_unl_pend = 0;
     sm_rec = 0;
-    sm_rec_was = sm_rec_mod = 0;
+    memset(sm_ro, 0, sizeof sm_ro);
+    memset(sm_rc_ok, 0, sizeof sm_rc_ok);
     sm_shift = 0;
     memset(sm_fine_acc, 0, sizeof sm_fine_acc);
     sm_msg = 0;
@@ -209,6 +222,7 @@ static void sm_sound_load(uint32_t machine, uint32_t preset)
     n.dvel = sd->dvel;
     n.dlen = sd->dlen;
     n.dcond = sd->dcond;
+    n.swing = sd->swing;                                  /* (and its swing) */
     fm1_irq_off();
     *sd = n;
     fm1_irq_on();
@@ -256,11 +270,12 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
             continue;
         if ((sm_key_arm >> k) & 1u)                       /* (down again before its release was seen: that release first) */
             continue;
-        if (sm_rec || ((fm1_in.buttons >> panel.btn[B_REC]) & 1u)) {   /* REC + a trig key: the trig copied, no toggle */
-            if (sm_trig_copy(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w) && ((fm1_in.buttons >> panel.btn[B_REC]) & 1u))
-                sm_rec_mod = 1;                           /* (REC held as a modifier: its release puts REC back) */
+        if (sm_shift) {                                   /* SHIFT + a trig key: the trig copied, no toggle */
+            (void)sm_trig_copy(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);
             continue;
         }
+        if (!sm_rec)                                      /* (REC off: the keys leave the steps alone) */
+            continue;
         sm_key_step[k] = (uint8_t)((uint32_t)sm_ui.bank * 16u + (uint32_t)w);
         sm_key_trk[k] = sm_ui.trk;
         sm_key_t0[k] = now;
@@ -373,6 +388,7 @@ static void sm_kbd_poll(uint32_t edges)
             if (sm_kb_pend & bit) {
                 sm_cmd_t c = {SMC_KEYON, (uint8_t)(sm_ui.trk % SM_NTRK), 0, SM_KEY_VEL, 0};
                 c.step = (uint8_t)clamp((int32_t)(SM_KEY_NOTE0 + k) + 12 * sm_ui.oct, 0, 127);
+                c.val = (int16_t)(sm_rec && sm_playing);  /* (live record; the audio stream checks PLAY again) */
                 if (sm_cmd_push(c)) {
                     sm_kb_note[k] = c.step;
                     sm_kb_trk[k] = c.trk;
@@ -448,11 +464,12 @@ static uint32_t sm_field_turn(uint32_t f, uint32_t v, int32_t d)
     return sm_cond_of_place((uint32_t)clamp((int32_t)sm_cond_place(v) + d, 0, (int32_t)SM_COND_PLACES - 1));
 }
 
-/* the STEP page's knobs: K1 NOTE, K2 VEL, K3 LEN, K4 COND (sm_field_turn), SELECT NUDGE -8..+7, PRESETS the FLAG list round
+/* the STEP page's knobs: K1 NOTE, K2 VEL, K3 LEN, K4 COND (sm_field_turn), SELECT NUDGE -8..+7 (no step: the track's SWING), PRESETS the FLAG list round
  * (sm_step_flag). A step edited (sm_step_edit): a field turned starts from what the trig plays (its own, else the track's
  * default) and is the step's own from then on (no longer SM_INH); the fields not turned keep inheriting. An empty step: PRESETS
  * a REST trig, the rest nothing. No step selected: K1..K4 are the track's trig defaults (sm_sound_t dnote .. dcond: the new
- * trigs' fields, and every trig's that inherits them); SELECT and PRESETS nothing. Each a byte the audio stream reads at a fire */
+ * trigs' fields, and every trig's that inherits them); SELECT the track's own SWING (0..25 on top of the
+ * project's, shown SWNG 50+n %); PRESETS nothing. Each a byte the audio stream reads at a fire (the swing once a block) */
 static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
 {
     int32_t st = sm_step_edit();
@@ -468,6 +485,8 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
         for (i = 0; i < 4u; i++)
             if (k[i])
                 *f[i] = (uint8_t)sm_field_turn(i, *f[i], k[i]);
+        if (sel)                                          /* the track's own SWING (a byte the audio stream reads once a block) */
+            sd->swing = (uint8_t)clamp((int32_t)(sd->swing < 25u ? sd->swing : 25u) + sel, 0, 25);
         return;
     }
     s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
@@ -518,21 +537,96 @@ static int sm_knob_wide(uint32_t i)
     return sm_wide(sm_page_param(i));
 }
 
-/* REC: a press turns recording on / off. Held as a modifier (a trig key copied while it was down: sm_keys_press) its release
- * puts recording back as it was before the press */
+/* REC: a press turns recording on / off. Off: the trig keys down are let go of (their release toggles nothing) and no step
+ * stays held or selected (the knobs are the base, STEP's the track's defaults). MIDI's record track published every poll */
 static void sm_rec_poll(uint32_t pressed)
 {
-    uint32_t b = panel.btn[B_REC];
-    if ((pressed >> b) & 1u) {
-        sm_rec_was = sm_rec;
+    if ((pressed >> panel.btn[B_REC]) & 1u) {
         sm_rec = (uint8_t)!sm_rec;
-        sm_rec_mod = 0;
+        if (!sm_rec) {
+            sm_key_arm = sm_key_used = 0;
+            sm_ui.held_step = sm_ui.sel_step = 0xFFu;
+        }
         sm_dirty = 1;
     }
-    if (sm_rec_mod && !((fm1_in.buttons >> b) & 1u)) {
-        sm_rec = sm_rec_was;
-        sm_rec_mod = 0;
-        sm_dirty = 1;
+    sm_rec_mtrk = (uint8_t)(sm_rec ? sm_ui.trk % SM_NTRK : 0xFFu);
+}
+
+/* the LEN list's place nearest to a hold of dt samples at step_q8 (q8 samples a step): 1/64 .. 16 (never TRK, never INF) */
+static uint32_t sm_len_nearest(uint32_t dt, uint32_t step_q8)
+{
+    uint32_t u = step_q8 >> 6, q, i, best = 1u, bd = 0xFFFFFFFFu;
+    if (dt > 0xFFFFFFu)
+        dt = 0xFFFFFFu;
+    q = (dt << 8) / (u ? u : 1u);                         /* (the hold in 1/64 steps) */
+    for (i = 1; i < SM_LEN_INF; i++) {
+        uint32_t d = q > SM_LEN64[i] ? q - SM_LEN64[i] : SM_LEN64[i] - q;
+        if (d < bd) {
+            bd = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* LIVE RECORD: the audio stream's events (sm_seq.c sm_rev) into the model. ON: a new trig on its step (the trig there before
+ * replaced, sm_step_rec), or, the track's last note having gone to the same step less than a step ago, a note more on it (the
+ * chord); OFF: the LEN of its hold on that trig. An event of a pattern no longer the current one: dropped */
+static void sm_lrec_poll(void)
+{
+    uint8_t r = sm_rev_r;
+    while (r != *(volatile uint8_t *)&sm_rev_w) {
+        sm_rev_t e;
+        uint32_t i, t, sq = sm_step_q8();
+        SM_BARRIER();
+        e = sm_rev[r % SM_NREV];
+        SM_BARRIER();
+        r++;
+        sm_rev_r = r;
+        t = e.trk % SM_NTRK;
+        if (e.kind == SM_REV_ON) {
+            uint32_t free = SM_NRO, old = 0;
+            if (e.pat != smp.cur % SM_NPAT || e.step >= SM_NSTEP)
+                continue;
+            if (!(sm_rc_ok[t] && sm_rc_step[t] == e.step && sm_rc_pat[t] == e.pat &&
+                  (uint32_t)(e.at - sm_rc_at[t]) < (sq >> 8) && sm_step_rec_add(t, e.step, e.note))) {
+                sm_step_rec(t, e.step, e.note, e.vel);
+                sm_rc_ok[t] = 1;
+                sm_rc_step[t] = e.step;
+                sm_rc_pat[t] = e.pat;
+                sm_rc_at[t] = e.at;
+            }
+            for (i = 0; i < SM_NRO; i++) {                /* (held: a free place, else the oldest's) */
+                if (!sm_ro[i].on) {
+                    free = i;
+                    break;
+                }
+                if ((int32_t)(sm_ro[i].at - sm_ro[old].at) < 0)
+                    old = i;
+            }
+            i = free < SM_NRO ? free : old;
+            sm_ro[i].on = 1;
+            sm_ro[i].trk = (uint8_t)t;
+            sm_ro[i].step = e.step;
+            sm_ro[i].note = e.note;
+            sm_ro[i].pat = e.pat;
+            sm_ro[i].at = e.at;
+            sm_dirty = 1;
+            continue;
+        }
+        for (i = 0; i < SM_NRO; i++)
+            if (sm_ro[i].on && sm_ro[i].trk == t && sm_ro[i].note == e.note) {
+                sm_step_t *s = &smp.pat[smp.cur % SM_NPAT].step[t][sm_ro[i].step % SM_NSTEP];
+                uint32_t k, has = 0;
+                sm_ro[i].on = 0;
+                for (k = 0; k < s->n && k < 4u; k++)
+                    has |= s->note[k] == e.note;
+                if (sm_ro[i].pat == smp.cur % SM_NPAT && has && !(s->flags & SMF_REST)) {
+                    s->len = (uint8_t)sm_len_nearest(e.at - sm_ro[i].at, sq);   /* (one byte the audio stream reads at a fire) */
+                    sm_dirty = 1;
+                }
+                break;
+            }
     }
 }
 
@@ -657,6 +751,7 @@ static void sm_input_poll(void)
     sm_msg_poll(now);
     sm_save_poll(pressed, now);
     sm_rec_poll(pressed);
+    sm_lrec_poll();                                       /* (live record: the notes the audio stream placed) */
     if ((pressed >> panel.btn[B_PLAY]) & 1u)              /* (against a PLAY / STOP not pushed yet, if there is one) */
         sm_tr_pend = (uint8_t)(sm_tr_pend ? (sm_tr_pend == 1u ? 2u : 1u) : (sm_playing ? 2u : 1u));
     if (alg) {

@@ -25,9 +25,10 @@ enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD, SMC_UNLOCK, SMC_PREVIEW, SMC_KEY
  *   trig). gen: the track's fire count (sm_gen) when the trig was taken off; a later fire (the step trigged again and
  *   fired before a refused unlock got through) makes it stale: ignored (8 bits: 256 fires of the track while the queue
  *   stays full, seconds; never in practice).
- * SMC_KEYON {trk, step = note, param = velocity} / SMC_KEYOFF {trk, step = note}: a key of the keyboard mode (sm_input.c); the audio
- *   stream plays it through the keyboard's own note book (sm_midi.c sm_kbd_note), which keeps it apart from the sequencer's
- *   notes and from MIDI IN's.
+ * SMC_KEYON {trk, step = note, param = velocity, val = record} / SMC_KEYOFF {trk, step = note}: a key of the keyboard mode
+ *   (sm_input.c); the audio stream plays it through the keyboard's own note book (sm_midi.c sm_kbd_note), which keeps it apart
+ *   from the sequencer's notes and from MIDI IN's. val 1 (REC on while playing): also recorded (sm_seq.c sm_rec_on); a KEYOFF
+ *   ends a recorded note (sm_rec_off).
  * SMC_PREVIEW {trk, param, val}: a lock REC just wrote, onto the core at once (playing only; stopped: ignored); the
  *   parameter counts as locked, so the next unlocked trig of the track takes the base again. */
 /* SMC_PARAM, SMC_LOAD, SMC_PREVIEW carry in `step` the pattern (smp.cur) whose model they come from: one of a pattern the audio
@@ -130,6 +131,8 @@ static void sm_seq_play(void);
 static void sm_seq_stop(void);
 static void sm_lock_clear_step(uint32_t t, uint32_t s);  /* sm_lock.c */
 static void sm_kbd_note(uint32_t t, uint32_t note, uint32_t vel);   /* sm_midi.c: vel 0 lets the note go */
+static void sm_rec_on(uint32_t t, uint32_t note, uint32_t vel);     /* sm_seq.c: live record */
+static void sm_rec_off(uint32_t t, uint32_t note);
 
 /* the sequencer's (the audio stream's) own: bit per parameter, the parameters the last trig fired on each track locked
  * (sm_seq.c sm_seq_locks). While a bit is set, trk[t].p holds the lock's value, not the model's base */
@@ -179,9 +182,12 @@ static void sm_cmd_apply(const sm_cmd_t *c)
         break;
     case SMC_KEYON:
         sm_kbd_note(t, c->step, c->param ? c->param : 1u);
+        if (c->val)
+            sm_rec_on(t, c->step, c->param ? c->param : 1u);
         break;
     case SMC_KEYOFF:
         sm_kbd_note(t, c->step, 0);
+        sm_rec_off(t, c->step);
         break;
     case SMC_LOAD:
         if (t < SM_NTRK) {
@@ -249,6 +255,48 @@ static void sm_step_fresh(uint32_t t, uint32_t st, uint32_t flags)
     s->cond = SM_INH;
     s->flags = (uint8_t)flags;
     s->nudge = 0;
+}
+
+/* the main loop, LIVE RECORD: step st of track t becomes a trig of note at vel (LEN inherited until the key is let go), the
+ * trig there before replaced: its n 0 first (the audio stream fires nothing of it from here), its locks removed (tombstones;
+ * stopped: compacted) and the core's of them back to the base (SMC_UNLOCK), then the fields, a barrier, n. So the interrupt
+ * sees the old trig, no trig, or the new one, never the new note with an old lock */
+static void sm_step_rec(uint32_t t, uint32_t st, uint32_t note, uint32_t vel)
+{
+    sm_step_t *s;
+    uint32_t had;
+    if (t >= SM_NTRK || st >= SM_NSTEP)
+        return;
+    s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    had = s->n;
+    s->n = 0;
+    SM_BARRIER();
+    sm_lock_clear_step(t, st);
+    if (had)
+        sm_unlock_req(t, st);
+    sm_step_fresh(t, st, 0);
+    s->note[0] = (uint8_t)(note & 0x7Fu);
+    s->vel = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);
+    SM_BARRIER();
+    s->n = 1;
+}
+/* ... a note more on the trig of step st (a chord recorded within the step, up to 4): its byte first, then n. 0: full / there */
+static int sm_step_rec_add(uint32_t t, uint32_t st, uint32_t note)
+{
+    sm_step_t *s;
+    uint32_t k;
+    if (t >= SM_NTRK || st >= SM_NSTEP)
+        return 0;
+    s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    if (!s->n || s->n >= 4u || (s->flags & SMF_REST))
+        return 0;
+    for (k = 0; k < s->n; k++)
+        if (s->note[k] == note)
+            return 0;
+    s->note[s->n] = (uint8_t)(note & 0x7Fu);
+    SM_BARRIER();
+    s->n = (uint8_t)(s->n + 1u);
+    return 1;
 }
 
 /* the main loop: toggle the trig of step st on track t in the current pattern. On: a fresh trig (sm_step_fresh, no

@@ -59,7 +59,10 @@ typedef struct {
 } sm_lock_t;
 
 typedef struct {
-    uint8_t machine, preset, len, rsv;
+    uint8_t machine, preset, len;
+    uint8_t swing;                                        /* the track's own swing on top of the project's (smp.swing): 0..25
+                                                             percent more, 0 none (the STEP page's SELECT with no step: SWNG
+                                                             50+swing %); the sequencer's, as len (a preset load keeps it) */
     uint8_t dnote, dvel, dlen, dcond;                     /* the track's trig defaults (SM_INH above); the sequencer's, as len:
                                                              a preset load keeps them, a track copy carries them */
     int8_t p[P_COUNT];                                    /* as mfp_trk_t: -64..127 */

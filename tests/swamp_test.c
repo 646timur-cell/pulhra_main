@@ -999,6 +999,7 @@ static int test_white_key_toggles_trig(void)
 {
     int bad = 0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_notes = 1u << WHITE[2];
     sm_input_poll();
     bad += check("INPUT: the 3rd white key: step 2 of the selected track on", smp.pat[smp.cur].step[0][2].n == 1u);
@@ -1064,6 +1065,7 @@ static int test_held_step(void)
 {
     int bad = 0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     host_notes = 1u << WHITE[5];
     fm1_in.notes = 1u << WHITE[5];
@@ -1193,6 +1195,7 @@ static int test_held_step_bank_key(void)
 {
     int bad = 0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     ksnd(sm_ui.trk)->len = 32u;                           /* (a bank key works on a 32-step track) */
     host_ticks = 1000u;
     host_notes = 1u << WHITE[5];
@@ -2730,6 +2733,7 @@ static int test_lock_hold_turn(void)
     int8_t base;
     smd_knob_t o;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     filter_page();
     base = ksnd(0)->p[P_FCUT] = 100;
@@ -2814,6 +2818,7 @@ static int test_lock_during_play_300bpm(void)
     int bad = 0, ok = 1;
     uint32_t s, p, i, b;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     filter_page();
     smp.bpm10 = 3000u;
@@ -2978,6 +2983,7 @@ static int test_retrig_clears_locks(void)
 {
     int bad = 0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     lk_tap(0);
     sm_lock_set(0, 0, P_FCUT, 10);
@@ -3054,6 +3060,7 @@ static int test_lock_long_hold(void)
 {
     int bad = 0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     sm_step_toggle(0, 3);
     sm_lock_set(0, 3, P_FCUT, 33);
@@ -3086,6 +3093,7 @@ static int test_lock_press_turn_same_poll(void)
 {
     int bad = 0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     filter_page();
     sm_step_toggle(0, 6);
@@ -3121,6 +3129,7 @@ static int test_lock_unlock_on_remove(void)
     int bad = 0;
     uint32_t i;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     set_param(0, P_FCUT, 100);
     sm_step_toggle(0, 4);
@@ -3302,6 +3311,7 @@ static int test_flag_on_held_trig_any_page(void)
     int bad = 0;
     uint32_t p0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     sm_step_toggle(0, 3);
     sm_input_poll();
@@ -3337,6 +3347,7 @@ static int test_flag_shown_while_held(void)
 {
     int bad = 0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     sm_step_toggle(0, 3);
     while (strcmp(sm_cur_page()->name, "FILTER") && sm_ui.page < 63u)
@@ -3586,6 +3597,7 @@ static int test_step_fix1(void)
     bad += check("FIX5: x4 ratchet, muted after the first part: no more note-ons", on_n[0] == 1u && !sm_rat_left[0]);
     /* PSLIDE trig taken off mid-glide: the base comes back and stays */
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     set_param(0, P_FCUT, 60);
     sm_step_toggle(0, 0);
@@ -3673,6 +3685,7 @@ static int test_step_page(void)
     sm_step_t *s;
     uint32_t p0;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     btn_down(B_SEQ);
     sm_input_poll();
@@ -3815,6 +3828,7 @@ static int test_trig_defaults(void)
     const seq_ev_t *a, *b, *off;
     smd_knob_t o;
     in_reset();
+    sm_rec = 1;                                           /* (grid record: the trig keys edit the steps) */
     host_ticks = 1000u;
     seq_tap();
     d0 = ksnd(0)->dnote;
@@ -3894,14 +3908,19 @@ static int test_trig_copy_paste(void)
     stp(0, 2)->nudge = 3;
     sm_lock_set(0, 2, P_FCUT, 30);
     sm_lock_set(0, 2, P_FRES, 99);
-    press(B_REC);
+    btn_down(B_OCTDN);                                    /* SHIFT held */
+    sm_input_poll();
+    ms(150);
     sm_input_poll();
     lk_tap(2);
-    bad += check("TCOPY: REC on + trig key 3: copied (VEL, flags, two locks), the trig not toggled",
-                 sm_rec && stp(0, 2)->n == 1u && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip.flags == SMF_ACCENT && sm_tclip_nl == 2u);
+    bad += check("TCOPY: SHIFT + trig key 3: copied (VEL, flags, two locks), the trig not toggled",
+                 sm_shift && stp(0, 2)->n == 1u && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip.flags == SMF_ACCENT && sm_tclip_nl == 2u);
     lk_tap(6);
     bad += check("TCOPY: ... an empty step: nothing copied, nothing placed", !stp(0, 6)->n && sm_tclip.vel == 90u);
-    press(B_REC);
+    btn_up(B_OCTDN);
+    ms(150);
+    sm_input_poll();
+    press(B_REC);                                         /* (grid record: a trig held + OCT+ pastes) */
     sm_input_poll();
     key_dn(WHITE[9]);                                     /* an empty step held + OCT+ */
     sm_input_poll();
@@ -3925,18 +3944,13 @@ static int test_trig_copy_paste(void)
     sm_undo();
     bad += check("TCOPY: UNDO: the trig before the paste (VEL 20, LEVEL locked)", stp(0, 11)->vel == 20u &&
                  lk_val(0, 11, P_LEVEL) == 10 && lk_val(0, 11, P_FCUT) == LK_NONE);
-    btn_down(B_REC);                                      /* REC held as a modifier: on while down, back off at its release */
-    sm_input_poll();
+    btn_down(B_REC);                                      /* REC is no modifier any more: a press toggles recording, a key */
+    sm_input_poll();                                      /* with it down toggles the trig (REC was on: now off, nothing) */
     lk_tap(11);
     btn_up(B_REC);
     sm_input_poll();
-    bad += check("TCOPY: REC held + a trig: copied (VEL 20); REC let go: recording off again, the trig kept",
-                 sm_tclip.vel == 20u && !sm_rec && stp(0, 11)->n == 1u);
-    press(B_REC);                                         /* REC tapped alone: on, and stays on */
-    sm_input_poll();
-    bad += check("TCOPY: REC tapped alone stays on", sm_rec == 1u);
-    press(B_REC);
-    sm_input_poll();
+    bad += check("TCOPY: REC pressed (on -> off) + a trig key: no copy (VEL still 90), REC stays off, the trig kept",
+                 sm_tclip.vel == 90u && !sm_rec && stp(0, 11)->n == 1u);
     /* pasted while playing at 300 BPM, the audio stream preempting every store: every lock it applies is the model's, none
      * of a trig replaced (lk_shadow: the locks each step has; a paste replaces the target's with the source's) */
     {
@@ -4586,6 +4600,7 @@ static int test_oct_pages(void)
     host_ticks += 150000u;
     sm_input_poll();
     bad += check("OCT: ... then OCT+ turns to steps 17..32", sm_ui.bank == 1u && !sm_ui.kbd);
+    sm_rec = 1;                                           /* (grid record) */
     lk_tap(2);
     bad += check("OCT: ... a white key is then step 18 (17..32)", smp.pat[smp.cur].step[0][18].n == 1u && !smp.pat[smp.cur].step[0][2].n);
     oct_tap(B_OCTDN);
@@ -4703,9 +4718,10 @@ static int test_keyboard_mode(void)
                  !sm_ui.kbd && notes_on_core(1) == 0u && ev_count(0, 1) == 1u);
     fm1_in.notes = 0;
     sm_input_poll();
+    sm_rec = 1;                                           /* (grid record, stopped) */
     kb_key(WHITE[0], 1);
     kb_key(WHITE[0], 0);
-    bad += check("KEYS: ... and a key is a trig again", smp.pat[smp.cur].step[1][0].n == 1u && on_n[1] == 1u);
+    bad += check("KEYS: ... and a key is a trig again (REC on)", smp.pat[smp.cur].step[1][0].n == 1u && on_n[1] == 1u);
     /* the pair window: 150 ms apart is two single presses */
     in_reset();
     host_ticks = 1000u;
@@ -4773,9 +4789,10 @@ static int test_arp_keyboard(void)
     press(B_ARP);
     sm_input_poll();
     bad += check("ARP: again: the mode is off, no hung note", !sm_ui.kbd && notes_on_core(0) == 0u);
+    sm_rec = 1;                                           /* (grid record) */
     kb_key(WHITE[2], 1);
     kb_key(WHITE[2], 0);
-    bad += check("ARP: ... and the key is a trig again", smp.pat[smp.cur].step[0][2].n == 1u);
+    bad += check("ARP: ... and the key is a trig again (REC on)", smp.pat[smp.cur].step[0][2].n == 1u);
     press(B_ARP);
     sm_input_poll();
     oct_pair(0);
@@ -6964,6 +6981,371 @@ static int test_bank_flash_map(void)
                  SM_FL_DATA + SM_BANK_BYTES <= SM_FL_SPAN);
 }
 
+/* ------------------------------------------------------------- Task 5b: REC = grid record, SHIFT copy, live record, STEP SELECT --- */
+static uint32_t ev_notes(uint32_t t, uint32_t note)       /* note-ons of `note` on track t so far */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < seq_nev && i < 1024u; i++)
+        n += seq_ev[i].on && seq_ev[i].t == t && seq_ev[i].note == note;
+    return n;
+}
+static void blocks_of(double steps)                       /* run that many 1/16 steps at 120 BPM (whole blocks) */
+{
+    uint32_t n = (uint32_t)(steps * S120 / CTL + 0.5);
+    while (n--)
+        run_block();
+}
+static void into_step(uint32_t t, uint32_t s, double frac) /* track t's step s just started, then frac of a step on */
+{
+    run_to_step(t, s);
+    blocks_of(frac);
+}
+
+static int test_rec_grid(void)
+{
+    int bad = 0;
+    int8_t base;
+    in_reset();
+    host_ticks = 1000u;
+    filter_page();
+    sm_step_toggle(0, 3);
+    lk_tap(2);
+    lk_tap(3);
+    bad += check("RECGRID: REC off: a white key toggles nothing (step 3 empty stays empty, step 4 stays on)",
+                 !sm_rec && !stp(0, 2)->n && stp(0, 3)->n == 1u);
+    base = ksnd(0)->p[P_FCUT];
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    turn(EN_K2, -5);
+    sm_input_poll();
+    key_up(WHITE[3]);
+    sm_input_poll();
+    key_dn(WHITE[6]);                                     /* an empty step held + a turn: no REST trig either */
+    sm_input_poll();
+    turn(EN_K2, -2);
+    sm_input_poll();
+    key_up(WHITE[6]);
+    sm_input_poll();
+    bad += check("RECGRID: REC off: trig held + a knob: no lock, the base moved, no REST trig on an empty step",
+                 lk_val(0, 3, P_FCUT) == LK_NONE && lk_val(0, 6, P_FCUT) == LK_NONE && !stp(0, 6)->n &&
+                 ksnd(0)->p[P_FCUT] != base && stp(0, 3)->n == 1u && !lk_count_live());
+    bad += check("RECGRID: REC off: no step held or selected", sm_ui.held_step == 0xFFu && sm_ui.sel_step == 0xFFu);
+    press(B_REC);
+    sm_input_poll();
+    lk_tap(2);
+    bad += check("RECGRID: REC on: a key toggles the trig on", sm_rec == 1u && stp(0, 2)->n == 1u);
+    lk_tap(2);
+    bad += check("RECGRID: ... and off", !stp(0, 2)->n);
+    base = ksnd(0)->p[P_FCUT];
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    turn(EN_K2, 4);
+    sm_input_poll();
+    key_up(WHITE[3]);
+    sm_input_poll();
+    bad += check("RECGRID: REC on: trig held + a knob: the step's lock, the base kept, the trig kept",
+                 lk_val(0, 3, P_FCUT) != LK_NONE && ksnd(0)->p[P_FCUT] == base && stp(0, 3)->n == 1u);
+    key_dn(WHITE[5]);                                     /* REC turned off with a key down: its release toggles nothing */
+    sm_input_poll();
+    press(B_REC);
+    sm_input_poll();
+    key_up(WHITE[5]);
+    sm_input_poll();
+    bad += check("RECGRID: REC off while a key is down: its release toggles nothing", !sm_rec && !stp(0, 5)->n);
+    return bad;
+}
+
+static int test_shift_trig_copy(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 2);
+    stp(0, 2)->vel = 90;
+    sm_lock_set(0, 2, P_FCUT, 30);
+    btn_down(B_OCTDN);                                    /* SHIFT held (REC off) */
+    sm_input_poll();
+    ms(150);
+    sm_input_poll();
+    lk_tap(2);
+    bad += check("SHCOPY: SHIFT + trig key 3 (REC off): copied (VEL 90, its lock), the trig not toggled",
+                 sm_shift && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip_nl == 1u && stp(0, 2)->n == 1u);
+    lk_tap(6);
+    bad += check("SHCOPY: ... SHIFT + an empty step: nothing copied, nothing toggled", !stp(0, 6)->n && sm_tclip.vel == 90u);
+    btn_up(B_OCTDN);
+    ms(150);
+    sm_input_poll();
+    press(B_REC);
+    sm_input_poll();
+    stp(0, 2)->vel = 70;
+    btn_down(B_OCTDN);                                    /* SHIFT with REC on: a copy, no toggle either */
+    sm_input_poll();
+    ms(150);
+    sm_input_poll();
+    lk_tap(2);
+    btn_up(B_OCTDN);
+    ms(150);
+    sm_input_poll();
+    bad += check("SHCOPY: SHIFT + trig with REC on: copied (VEL 70), not toggled", sm_tclip.vel == 70u && stp(0, 2)->n == 1u &&
+                 !sm_ui.kbd);
+    lk_tap(4);
+    bad += check("SHCOPY: REC on + a trig key alone: a toggle now, not a copy", stp(0, 4)->n == 1u && sm_tclip.vel == 70u);
+    key_dn(WHITE[9]);
+    sm_input_poll();
+    oct_tap(B_OCTUP);
+    key_up(WHITE[9]);
+    sm_input_poll();
+    bad += check("SHCOPY: trig held + OCT+: pasted (VEL 70, FCUT 30), no toggle at release",
+                 stp(0, 9)->n == 1u && stp(0, 9)->vel == 70u && lk_val(0, 9, P_FCUT) == 30);
+    return bad;
+}
+
+/* REC + PLAY + the keyboard mode: the keys write trigs at the nearest step (120 BPM, T1 16 steps) */
+static int test_live_rec_keys(void)
+{
+    int bad = 0;
+    uint32_t p;
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    press(B_REC);
+    sm_input_poll();
+    oct_pair(0);
+    sm_step_toggle(0, 12);                                /* a trig with a lock, to be replaced */
+    sm_lock_set(0, 12, P_FCUT, 30);
+    sm_step_toggle(0, 9);                                 /* a trig (NOTE 40) with a lock on step 10, to be replaced before it plays */
+    stp(0, 9)->note[0] = 40;
+    sm_lock_set(0, 9, P_FRES, 77);
+    press(B_PLAY);
+    sm_input_poll();
+    into_step(0, 4, 0.10);                                /* 10 % into step 5: that step */
+    kb_key(WHITE[0], 1);                                  /* F3 = 53 */
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC: pressed at 10 % of step 5: the note at once, a trig on step 5 (NOTE 53, VEL 100)",
+                 ev_notes(0, 53) == 1u && stp(0, 4)->n == 1u && stp(0, 4)->note[0] == 53u && stp(0, 4)->vel == SM_KEY_VEL);
+    blocks_of(3.0);
+    kb_key(WHITE[0], 0);
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC: ... held 3 steps: LEN 3", stp(0, 4)->len < SM_NLEN && SM_LEN64[stp(0, 4)->len] == 192u);
+    into_step(0, 8, 0.60);                                /* 60 % into step 9: step 10 (the trig with a lock there) */
+    lk_on = 1;                                            /* from here no lock of a replaced trig may ever apply */
+    {
+        uint32_t t, s;
+        for (t = 0; t < SM_NTRK; t++)
+            for (s = 0; s < SM_NSTEP; s++)
+                for (p = 0; p < P_COUNT; p++)
+                    lk_shadow[t][s][p] = LK_NONE;
+    }
+    lk_shadow[0][12][P_FCUT] = 30;                        /* (step 13's lock is still the model's until it is replaced) */
+    lk_bad_dead = lk_bad_val = 0;
+    lk_preempt_n = 1;                                     /* the audio stream inside every store of the record */
+    kb_key(WHITE[1], 1);                                  /* G3 = 55 */
+    run_block();
+    sm_input_poll();
+    lk_preempt_n = 0;
+    bad += check("LIVEREC: pressed at 60 % of step 9: step 10 (NOTE 55), the old trig's lock gone",
+                 stp(0, 9)->n == 1u && stp(0, 9)->note[0] == 55u && lk_val(0, 9, P_FRES) == LK_NONE && !stp(0, 8)->n);
+    blocks_of(1.0);
+    kb_key(WHITE[1], 0);
+    run_block();
+    sm_input_poll();
+    blocks_of(0.2);
+    bad += check("LIVEREC: ... step 10 started: no second note-on of 55 on the recording pass, the old NOTE 40 not played",
+                 ev_notes(0, 55) == 1u && ev_notes(0, 40) == 0u && sm_pos[0] == 9u);
+    bad += check("LIVEREC: ... held about one step: LEN 1", stp(0, 9)->len < SM_NLEN && SM_LEN64[stp(0, 9)->len] == 64u);
+    into_step(0, 12, 0.10);                               /* replace the locked trig on step 13 while it plays */
+    kb_key(WHITE[2], 1);                                  /* A3 = 57 */
+    run_block();
+    lk_shadow[0][12][P_FCUT] = LK_NONE;
+    lk_preempt_n = 1;
+    sm_input_poll();
+    lk_preempt_n = 0;
+    kb_key(WHITE[2], 0);
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC: step 13 (locked) replaced while playing: NOTE 57, its lock gone",
+                 stp(0, 12)->note[0] == 57u && lk_val(0, 12, P_FCUT) == LK_NONE);
+    into_step(0, 13, 0.10);                               /* a chord of 3 on step 14: two keys in one poll, one a block later */
+    key_dn(WHITE[4]);                                     /* C4 60 */
+    key_dn(WHITE[6]);                                     /* E4 64 */
+    sm_input_poll();
+    run_block();
+    kb_key(WHITE[5], 1);                                  /* D4 62 */
+    run_block();
+    sm_input_poll();
+    {
+        sm_step_t *s = stp(0, 13);
+        uint32_t m = 0, k;
+        for (k = 0; k < s->n && k < 4u; k++)
+            m |= (s->note[k] == 60u) << 0 | (s->note[k] == 64u) << 1 | (s->note[k] == 62u) << 2;
+        bad += check("LIVEREC: a chord of 3 within the step: one trig with 3 notes", s->n == 3u && m == 7u);
+    }
+    key_up(WHITE[4]);
+    key_up(WHITE[5]);
+    key_up(WHITE[6]);
+    sm_input_poll();
+    run_block();
+    sm_input_poll();
+    {
+        uint32_t n55 = ev_notes(0, 55), n53 = ev_notes(0, 53), n57 = ev_notes(0, 57), n60 = ev_notes(0, 60);
+        run_to_step(0, 0);
+        into_step(0, 15, 0.5);                            /* the next pass, whole */
+        bad += check("LIVEREC: the next pass plays every recorded trig once (53, 55, 57, the chord)",
+                     ev_notes(0, 53) == n53 + 1u && ev_notes(0, 55) == n55 + 1u && ev_notes(0, 57) == n57 + 1u &&
+                     ev_notes(0, 60) == n60 + 1u && ev_notes(0, 40) == 0u);
+        bad += check("LIVEREC: ... and no lock of a replaced trig ever applied", !lk_bad_dead);
+    }
+    lk_on = 0;
+    /* REC off, playing, the keyboard mode: nothing written */
+    press(B_REC);
+    sm_input_poll();
+    into_step(0, 1, 0.10);
+    kb_key(WHITE[3], 1);
+    run_block();
+    sm_input_poll();
+    kb_key(WHITE[3], 0);
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC: REC off: a key plays, writes nothing", !stp(0, 1)->n && !stp(0, 2)->n);
+    /* stopped + REC: nothing */
+    press(B_REC);
+    sm_input_poll();
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    kb_key(WHITE[3], 1);
+    run_block();
+    sm_input_poll();
+    kb_key(WHITE[3], 0);
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC: stopped + REC: a key plays, writes nothing", !sm_playing && sm_rec && !stp(0, 0)->n && !stp(0, 1)->n);
+    return bad;
+}
+
+/* MIDI notes on the selected track's channel record as the keys do (REC + PLAY; no keyboard mode needed) */
+static int test_live_rec_midi(void)
+{
+    int bad = 0;
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    press(B_REC);
+    sm_input_poll();
+    press(B_PLAY);
+    sm_input_poll();
+    into_step(0, 5, 0.10);
+    midi_on(0, 70, 90);
+    midi_on(1, 71, 90);                                   /* T2's channel: T2 is not selected */
+    run_block();
+    sm_input_poll();
+    bad += check("MIDIREC: ch 1 (T1 selected) at 10 % of step 6: a trig there, NOTE 70 VEL 90; it sounded once",
+                 stp(0, 5)->n == 1u && stp(0, 5)->note[0] == 70u && stp(0, 5)->vel == 90u && ev_notes(0, 70) == 1u);
+    bad += check("MIDIREC: ... ch 2: plays T2, records nothing", ev_notes(1, 71) == 1u && !stp(1, 5)->n && !stp(1, 6)->n);
+    blocks_of(2.0);
+    midi_off(0, 70);
+    midi_off(1, 71);
+    run_block();
+    sm_input_poll();
+    bad += check("MIDIREC: ... held 2 steps: LEN 2", stp(0, 5)->len < SM_NLEN && SM_LEN64[stp(0, 5)->len] == 128u);
+    into_step(0, 9, 0.70);
+    midi_on(0, 72, 50);
+    run_block();
+    sm_input_poll();
+    midi_off(0, 72);
+    run_block();
+    sm_input_poll();
+    blocks_of(0.6);
+    bad += check("MIDIREC: at 70 % of step 10: step 11, no second note on the recording pass",
+                 stp(0, 10)->n == 1u && stp(0, 10)->note[0] == 72u && ev_notes(0, 72) == 1u && sm_pos[0] == 10u);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    midi_on(0, 74, 90);
+    run_block();
+    sm_input_poll();
+    midi_off(0, 74);
+    run_block();
+    sm_input_poll();
+    {
+        uint32_t s, n = 0;
+        for (s = 0; s < SM_NSTEP; s++)
+            n += stp(0, s)->n && stp(0, s)->note[0] == 74u;
+        bad += check("MIDIREC: stopped + REC: nothing recorded", !sm_playing && !n);
+    }
+    return bad;
+}
+
+/* the STEP page's SELECT: no step selected the track's SWING (on top of the global), a step selected its NUDGE */
+static int test_step_select_swing(void)
+{
+    int bad = 0;
+    const seq_ev_t *e;
+    uint32_t k, ok = 1;
+    in_reset();
+    host_ticks = 1000u;
+    seq_tap();
+    turn(EN_SELECT, 8);
+    sm_input_poll();
+    bad += check("STEPSEL: no step: SELECT is the track's SWING (+8: 58 %), no step touched",
+                 ksnd(0)->swing == 8u && sm_step_edit() < 0 && smp.swing == 50u);
+    turn(EN_SELECT, 40);
+    sm_input_poll();
+    bad += check("STEPSEL: ... up to 75 % at most", ksnd(0)->swing == 25u);
+    turn(EN_SELECT, -17);
+    sm_input_poll();
+    sm_ux_mk1();
+    draw_full();
+    bad += check("STEPSEL: ... the label SWNG 58%", lint_has("SWNG", 0, 0) && lint_has("58%", 0, 0) && !lint_has("NUDGE", 0, 0));
+    sm_sound_load(ksnd(0)->machine, 1);
+    bad += check("STEPSEL: a preset load keeps the track's swing (the sequencer's)", ksnd(0)->swing == 8u);
+    press(B_REC);
+    sm_input_poll();
+    sm_step_toggle(0, 3);
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    turn(EN_SELECT, 3);
+    sm_input_poll();
+    bad += check("STEPSEL: a step held: SELECT is its NUDGE (+3), the swing kept", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
+    draw_full();
+    bad += check("STEPSEL: ... the label NUDGE +3", lint_has("NUDGE", 0, 0) && lint_has("+3", 0, 0) && !lint_has("SWNG", 0, 0));
+    key_up(WHITE[3]);
+    sm_input_poll();
+    turn(EN_SELECT, 1);
+    sm_input_poll();
+    bad += check("STEPSEL: ... let go, still selected: NUDGE +4", stp(0, 3)->nudge == 4 && ksnd(0)->swing == 8u);
+    /* the sequencer: T1's own 58 % on the global 50, T2 none; then the global 60: T1 68 %, T2 60 % */
+    seq_reset();
+    ksnd(0)->swing = 8u;
+    for (k = 0; k < 4u; k++) {
+        sm_step_toggle(0, k);
+        sm_step_toggle(1, k);
+    }
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(4.9 * S120));
+    for (k = 0; k < 4u; k++) {
+        ok &= (e = ev_nth(1, 0, k)) != 0 && near_d(e->at, ((double)k + (k & 1u ? 0.16 : 0.0)) * S120);
+        ok &= (e = ev_nth(1, 1, k)) != 0 && near_d(e->at, (double)k * S120);
+    }
+    bad += check("STEPSEL: T1 SWNG 58 % on the global 50: its odd steps 0.16 late, T2 on the grid", ok);
+    seq_reset();
+    ksnd(0)->swing = 8u;
+    smp.swing = 60u;
+    for (k = 0; k < 2u; k++) {
+        sm_step_toggle(0, k);
+        sm_step_toggle(1, k);
+    }
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(2.9 * S120));
+    bad += check("STEPSEL: global 60 + T1's 8: T1 0.36 late, T2 0.2", near_d(ev_nth(1, 0, 1)->at, 1.36 * S120) &&
+                 near_d(ev_nth(1, 1, 1)->at, 1.2 * S120));
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -7104,6 +7486,11 @@ int main(void)
     bad += test_bank_roundtrip();
     bad += test_bank_autosave();
     bad += test_bank_flash_map();
+    bad += test_rec_grid();
+    bad += test_shift_trig_copy();
+    bad += test_live_rec_keys();
+    bad += test_live_rec_midi();
+    bad += test_step_select_swing();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

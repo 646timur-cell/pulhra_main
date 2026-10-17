@@ -109,11 +109,16 @@ static void sm_midi_drain(void)
         if ((hi != 0x80u && hi != 0x90u) || (pkt & 0x0Fu) != hi >> 4 || ch >= SM_NTRK)
             continue;                                     /* (a SysEx byte, realtime, CC .., another channel) */
         if (hi == 0x90u && vel) {
+            if (ch == sm_rec_mtrk)                        /* (REC on, the selected track's channel: recorded while playing) */
+                sm_rec_on(ch, note, vel);
             if ((mute >> ch) & 1u)
                 continue;
             sm_mn[ch][note >> 5] |= 1u << (note & 31u);
             trk_note_on(&trk[ch], note, vel);
-        } else if (sm_mn_has(ch, note)) {
+            continue;
+        }
+        sm_rec_off(ch, note);
+        if (sm_mn_has(ch, note)) {
             sm_mn[ch][note >> 5] &= ~(1u << (note & 31u));
             if (!sm_seq_has(ch, note) && !sm_kn_has(ch, note))
                 trk_note_off(&trk[ch], note);

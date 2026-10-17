@@ -10,7 +10,7 @@
  *   y  48..159  the four knobs, a column of 60 each: the label, a ring of 16 dots, the value. A ring of a value locked on the
  *               held step is a filled disc; a dot in its centre: locked on another step
  *   y 168..187  SELECT: its label and value
- *   (STEP: the knobs NOTE VEL LEN COND, SELECT NUDGE, of the step edited, a ring filled where the step holds its own value,
+ *   (STEP: the knobs NOTE VEL LEN COND, SELECT NUDGE (NUDGE +3; no step edited: the track's SWNG 58%), of the step edited, a ring filled where the step holds its own value,
  *   plain where it inherits the track's default; an empty step: "-"; none selected: the track's trig defaults)
  *   y  48..217  (a layer open: its key map over the knobs and SELECT, five rows of 34, the labels of the keys at scale 2;
  *               SEQ: the title LEN 32 large (scale 3), the grid A01 .. A16 in four rows (the one playing inverted, the one
@@ -489,16 +489,26 @@ static int32_t smd_sel_val(uint32_t id)                  /* SELECT's value: the 
     int32_t li = sm_ui.held_step < SM_NSTEP ? sm_lock_find(pt, sm_ui.trk % SM_NTRK, sm_ui.held_step, id) : -1;
     return li >= 0 ? pt->lock[li].val : smd_snd()->p[id];
 }
-static void smd_step_nudge(char *b)                       /* the STEP page's SELECT: the step's NUDGE, "-" none */
+/* the STEP page's SELECT: a step edited, NUDGE and its value ("-" an empty step); none, SWNG and the track's swing ("58%");
+ * returns the label */
+static const char *smd_step_nudge(char *b)
 {
     int32_t st;
     const sm_step_t *p = smd_step(&st);
-    if (p && p->n)
+    if (!p) {
+        uint32_t w = smd_snd()->swing;
+        smd_int(b, 50 + (int32_t)(w < 25u ? w : 25u), 0);
+        b[2] = '%';
+        b[3] = 0;
+        return "SWNG";
+    }
+    if (p->n)
         smd_int(b, p->nudge, 1);
     else {
         b[0] = '-';
         b[1] = 0;
     }
+    return "NUDGE";
 }
 static uint32_t smd_sel_sig(void)
 {
@@ -508,7 +518,7 @@ static uint32_t smd_sel_sig(void)
     if (sm_page_is_step()) {
         char b[8];
         uint32_t i;
-        smd_step_nudge(b);
+        h = smd_mix(h, (uint8_t)smd_step_nudge(b)[0]);
         for (i = 0; b[i]; i++)
             h = smd_mix(h, (uint8_t)b[i]);
         return h;
@@ -526,8 +536,8 @@ static void smd_select(void)
     if (sm_page_is_step()) {
         char val[8];
         int32_t x;
-        smd_step_nudge(val);
-        x = sm_px_text(4, 2, 2u, "NUDGE", T_TEXT, 0) + 4 + 12;
+        const char *lab = smd_step_nudge(val);
+        x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
     } else if (sm_page_home()) {                          /* HOME: SELECT is the tempo */
         char val[8];

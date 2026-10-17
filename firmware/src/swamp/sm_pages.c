@@ -3,7 +3,7 @@
  * (a second press of a family's button goes to its next page). The screen (sm_draw) reads sm_ui and sm_cur_page().
  * STEP (SEQ tapped) is the one page whose knobs edit a step, not the sound (sm_input.c sm_step_page): K1 NOTE, K2 VEL,
  * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG; with no step selected (a SEQ tap drops the selection) K1..K4 are the
- * track's trig defaults. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
+ * track's trig defaults and SELECT the track's own SWING. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
  * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both */
 #define SM_NOPARAM 0xFFu
 
@@ -38,7 +38,8 @@ static const sm_page_t SM_PAGES[] = {
 static struct { uint8_t page, trk, held_step, bank, sel_step, kbd; int8_t oct; } sm_ui;
 enum { SML_NONE, SML_EDIT, SML_GLO, SML_SEQ };
 static uint8_t sm_layer;                                  /* the layer open while its button is held (sm_layer.c; the screen and the LEDs read it) */
-static volatile uint8_t sm_rec;                           /* recording (the REC key): knob turns while playing lock the playing trig */
+static volatile uint8_t sm_rec;                           /* recording (the REC key): grid record (the trig keys edit the steps only
+                                                             then), knob turns while playing lock the playing trig, live record */
 static uint8_t sm_dirty;                                  /* the screen must redraw (sm_draw clears it) */
 
 static uint32_t sm_page_count(void) { return sizeof SM_PAGES / sizeof SM_PAGES[0]; }
