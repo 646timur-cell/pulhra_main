@@ -1419,6 +1419,155 @@ static int test_edit_layer_backpressure(void)
     return bad;
 }
 
+/* the owner's crash (build 1130f70): EDIT held + a white key, every machine onto every track through the real layer path,
+ * stopped and playing, a note sounding through the switch; the screen drawn, every page's knobs turned on the new machine,
+ * 400 blocks rendered. Run sanitized (-fsanitize=address,undefined) an out-of-bounds read fails loudly */
+/* the crash itself: T1 plays DRIFT (its voices' s[3] a random seed, up to 2^31), EDIT + the CHAOS key; CHAOS's note-on
+ * does not set s[2] / s[3] (its TONE SVF), so with the voices' state left by DRIFT the SVF starts at ~1e9, soft_knee's
+ * (|y| - k) * 2 overflows and softclip indexes TANH_Q15 megabytes before the table (a bus fault on the unit; a SIGSEGV
+ * in chaos_render at -O2 on the host, with the right leftover). An engine switch must leave the voices as at power-on
+ * (as eng_mem_claim leaves the part's memory): checked directly, since which leftover faults depends on the seeds */
+/* the voices as at power-on (zeros): sm_core_init's sm_kit_boot sets the engines directly, so between the cases of a test
+ * the voices would keep another engine's state, which the unit never has at power-on */
+static void voices_power_on(void)
+{
+    uint32_t t;
+    for (t = 0; t < SM_NTRK; t++)
+        memset(trk[t].v, 0, sizeof trk[t].v);
+}
+static int test_switch_voice_state(void)
+{
+    uint32_t b, i, k, z = 1, peak = 0, from;
+    int bad = 0;
+    static const uint8_t FROM[] = {ENGI_DRIFT, ENGI_MSAW, ENGI_LYRA, ENGI_STRING, ENGI_MBBOX};
+    for (from = 0; from < sizeof FROM; from++) {
+        in_reset();
+        voices_power_on();
+        host_ticks = 1000u;
+        sm_sound_load(eng_rank(FROM[from]), 0);
+        sm_input_poll();
+        run_block();
+        for (k = 0; k < 8u; k++)
+            trk_note_on(&trk[0], 40u + 5u * k, 120);
+        for (b = 0; b < 30u; b++)
+            run_block();
+        layer_hold(B_EDIT);
+        while (sm_lay_epage != sm_epage_of(eng_rank(ENGI_CHAOS))) {
+            press(B_OCTUP);
+            sm_input_poll();
+        }
+        k = WHITE[eng_rank(ENGI_CHAOS) - sm_epage_first(sm_lay_epage)];
+        key_dn(k);
+        sm_input_poll();
+        key_up(k);
+        layer_let_go(B_EDIT);
+        for (b = 0; b < 8u; b++)
+            run_block();
+        for (k = 0; k < NVOICE; k++)
+            for (i = 0; i < 8u; i++)
+                z &= trk[0].engine == ENGI_CHAOS && !trk[0].v[k].active && trk[0].v[k].s[i] == 0;
+        for (k = 0; k < 8u; k++)
+            trk_note_on(&trk[0], 40u + 5u * k, 120);
+        for (b = 0; b < 100u; b++) {
+            uint32_t a = block_peak(0, 0);
+            peak = a > peak ? a : peak;
+        }
+        trk_all_off(&trk[0]);
+    }
+    printf("swamp: switch to CHAOS: peak %u\n", peak);
+    bad += check("SWITCH: after an engine switch every voice's state is as at power-on (s[] 0)", z);
+    bad += check("SWITCH: CHAOS after DRIFT / SAW / LYRA / STRING / BBOX plays (no fault, peak in range)", peak > 200u && peak <= 32767u);
+    return bad;
+}
+
+static void trigs_play(void);
+static void draw_setup(void);
+static int test_edit_layer_every_machine(void)
+{
+    uint32_t play, t, m, b, pg, k, ok = 1, peak = 0;
+    for (play = 0; play < 2u; play++)
+        for (t = 0; t < SM_NTRK; t++)
+            for (m = 0; m < SM_NMACHINE; m++) {
+                in_reset();
+                voices_power_on();
+                host_ticks = 1000u;
+                draw_setup();
+                if (play)
+                    trigs_play();
+                sm_ui.trk = (uint8_t)t;
+                trk_note_on(&trk[t], 60, 100);
+                for (b = 0; b < 8u; b++)
+                    run_block();
+                layer_hold(B_EDIT);
+                for (k = 0; k < 3u && sm_lay_epage != sm_epage_of(m); k++) {
+                    press(B_OCTUP);
+                    sm_input_poll();
+                }
+                key_dn(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                sm_input_poll();
+                key_up(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                sm_draw();
+                layer_let_go(B_EDIT);
+                trk_note_on(&trk[t], 64, 100);            /* (during the fade: xp_note) */
+                for (b = 0; b < 400u; b++) {
+                    uint32_t a = block_peak(0, 0);
+                    seq_clock += CTL;
+                    peak = a > peak ? a : peak;
+                    if (b % 50u == 0u)
+                        sm_draw();
+                }
+                ok &= ksnd(t)->machine == m && trk[t].engine == sm_engine_of(m) && !trk[t].xf_on;
+                for (pg = 0; pg < sm_page_count(); pg++) {   /* every page of the new machine drawn, its knobs turned */
+                    sm_ui.page = (uint8_t)pg;
+                    for (k = EN_K1; k <= EN_K4; k++)
+                        turn(k, (pg & 1u) ? -40 : 40);
+                    turn(EN_SELECT, 30);
+                    sm_input_poll();
+                    sm_dirty = 1;
+                    sm_draw();
+                    for (b = 0; b < 4u; b++)
+                        run_block();
+                }
+                trk_all_off(&trk[t]);
+                if (play) {
+                    press(B_PLAY);
+                    sm_input_poll();
+                }
+            }
+    for (t = 0; t < SM_NTRK; t++)                             /* every machine to every machine, notes on through the switch */
+        for (pg = 0; pg < SM_NMACHINE; pg++)
+            for (m = 0; m < SM_NMACHINE; m++) {
+                in_reset();
+                voices_power_on();
+                host_ticks = 1000u;
+                sm_ui.trk = (uint8_t)t;
+                sm_sound_load(pg, 0);
+                sm_input_poll();
+                for (b = 0; b < 4u; b++)
+                    run_block();
+                trk_note_on(&trk[t], 60, 100);
+                trk_note_on(&trk[t], 67, 90);
+                for (b = 0; b < 6u; b++)
+                    run_block();
+                layer_hold(B_EDIT);
+                for (k = 0; k < 3u && sm_lay_epage != sm_epage_of(m); k++) {
+                    press(B_OCTUP);
+                    sm_input_poll();
+                }
+                key_dn(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                sm_input_poll();
+                key_up(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                layer_let_go(B_EDIT);
+                trk_note_on(&trk[t], 64, 100);
+                for (b = 0; b < 60u; b++)
+                    run_block();
+                ok &= trk[t].engine == sm_engine_of(m);
+                trk_all_off(&trk[t]);
+            }
+    printf("swamp: every machine through the EDIT layer: peak %u\n", peak);
+    return check("EDIT: every machine onto T1..T4 by the EDIT layer, stopped and playing: the engine switches, no fault", ok);
+}
+
 /* T1 and T2 with a trig on every step, PLAY; the note-ons of a second of play */
 static void trigs_play(void)
 {
@@ -6846,6 +6995,8 @@ int main(void)
     bad += test_cmd_e8_guard();
     bad += test_held_step_bank_key();
     bad += test_tap_vs_hold();
+    bad += test_switch_voice_state();
+    bad += test_edit_layer_every_machine();
     bad += test_edit_layer_loads_machine();
     bad += test_edit_layer_backpressure();
     bad += test_glo_mute();

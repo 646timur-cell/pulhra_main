@@ -485,6 +485,15 @@ static void engine_block(track_t *t)
             v->active = v->gate = 0;
             v->stage = 0;
             v->env = v->env_out = 0;
+#if FELUCCA_MONOFM
+            /* MONOFM (and SWAMP): the new engine's voices as at power-on, as eng_mem_claim leaves the part's memory.
+             * Left as they were, the old engine's state (a seed, a phase) is read as the new one's: CHAOS's TONE SVF
+             * (s[2], s[3], which its note-on never sets) from another machine's seed starts at ~1e9, soft_knee's
+             * (|y| - k) * 2 overflows and softclip indexes TANH_Q15 megabytes before the table: the unit's fault on a
+             * machine change (SWAMP 1130f70). Felucca's own engines keep 1.4's switches (tests/union_test.c) */
+            memset(v->s, 0, sizeof v->s);
+            memset(v->ph, 0, sizeof v->ph);
+#endif
         }
         t->engine = eng_idx(t->eng_req);
         eng_mem_claim(t);                               /* its state region, before the waiting notes */
