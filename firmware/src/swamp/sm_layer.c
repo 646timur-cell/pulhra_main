@@ -13,7 +13,11 @@
  *              while they are held (sm_solo)
  *   SEQ        K1 the selected track's length 1..32, K2 the pattern's master length (AUTO, 1..128); the white key F3 clears
  *              the track's steps; F#3 the pattern change's mode round (SEQUENTIAL, DIRECT START, DIRECT JUMP); ALGORITHM picks a
- *              pattern (from the one playing), and letting go of SEQ asks for it (smp.next: sm_seq.c switches)
+ *              pattern (from the one playing), and letting go of SEQ asks for it (smp.next: sm_seq.c switches);
+ *              OCT+ adds the picked pattern (none picked: the one playing) to the chain being built (up to 16, repeats too),
+ *              OCT- throws away what was built (and the pick); letting go of SEQ with two links or more: that chain plays
+ *              (smp.chain, sm_chain_set), one link: that pattern is asked for; G#3 turns the chain off (the pattern
+ *              playing plays on). Asking for one pattern turns a chain off too (MONOFM's)
  * The keys and knobs of an open layer are the layer's alone (the page's knobs and the trigs do not see them); PLAY, the
  * track knob and PRESETS work as ever. The main loop is the only writer of all of it (sm_input.c's ownership). */
 
@@ -23,6 +27,7 @@ static uint8_t sm_lay_epage;                              /* EDIT: the page of m
 static uint8_t sm_lay_cleared;                            /* SEQ: the track was cleared since the layer opened (CLEARED) */
 static uint8_t sm_lay_void;                               /* a button with no layer (HOME) was held: its release is no tap */
 static uint8_t sm_lay_pick = SM_PAT_NONE;                 /* SEQ: the pattern ALGORITHM picked (SM_PAT_NONE: none yet) */
+static uint8_t sm_lay_chain[SM_NCHAIN], sm_lay_nch;       /* SEQ: the chain being built (OCT+), its links */
 
 #define SM_NLBTN 4u
 static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
@@ -30,6 +35,7 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
 };
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
+#define SM_LAY_CHOFF_KEY 3u                               /* SEQ: G#3 (key 3), the chain off */
 #define SM_NEPAGE 3u
 
 static void sm_layer_init(void)
@@ -41,6 +47,7 @@ static void sm_layer_init(void)
     sm_lay_cleared = 0;
     sm_lay_void = 0;
     sm_lay_pick = SM_PAT_NONE;
+    sm_lay_nch = 0;
     sm_solo = 0;
 }
 
@@ -63,16 +70,49 @@ static void sm_layer_open(uint32_t l)
     sm_layer = (uint8_t)l;
     sm_lay_cleared = 0;
     sm_lay_pick = SM_PAT_NONE;
+    sm_lay_nch = 0;
     if (l == SML_EDIT)                                    /* (opens on the page of the selected track's machine) */
         sm_lay_epage = (uint8_t)sm_epage_of(sm_ui_sound()->machine);
     sm_dirty = 1;
 }
 
+/* the chain c[0 .. n-1] (2 .. 16 links) published for the audio stream: the old one off first (nchain 0: the audio stream
+ * reads no link), the links, a new generation (the link playing is link 1 again), link 1 asked for, then nchain. Each a
+ * byte store with a barrier between: whatever block runs in between sees no chain, or this whole one */
+static void sm_chain_set(const uint8_t *c, uint32_t n)
+{
+    uint32_t i;
+    smp.nchain = 0;
+    SM_BARRIER();
+    for (i = 0; i < n && i < SM_NCHAIN; i++)
+        smp.chain[i] = (uint8_t)(c[i] % SM_NPAT);
+    SM_BARRIER();
+    sm_chain_gen = (uint8_t)(sm_chain_gen + 1u);
+    SM_BARRIER();
+    smp.next = smp.chain[0];
+    SM_BARRIER();
+    smp.nchain = (uint8_t)(n < SM_NCHAIN ? n : SM_NCHAIN);
+}
+
+/* SEQ let go: the chain built (two links or more), else its one link or the pattern picked, asked for (the chain off) */
+static void sm_seq_commit(void)
+{
+    uint32_t p = sm_lay_nch == 1u ? sm_lay_chain[0] : sm_lay_pick;
+    if (sm_lay_nch >= 2u) {
+        sm_chain_set(sm_lay_chain, sm_lay_nch);
+    } else if (p < SM_NPAT) {
+        smp.nchain = 0;
+        SM_BARRIER();
+        smp.next = (uint8_t)p;                            /* (one byte: the audio stream reads it once a block) */
+    }
+}
+
 static void sm_layer_close(void)
 {
-    if (sm_layer == SML_SEQ && sm_lay_pick < SM_NPAT)
-        smp.next = sm_lay_pick;                           /* (one byte: the audio stream reads it once a block) */
+    if (sm_layer == SML_SEQ)
+        sm_seq_commit();
     sm_lay_pick = SM_PAT_NONE;
+    sm_lay_nch = 0;
     sm_layer = SML_NONE;
     sm_solo = 0;
     sm_lay_cleared = 0;
@@ -165,6 +205,15 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_dirty = 1;
         }
     }
+    if (sm_layer == SML_SEQ && ((pressed >> panel.btn[B_OCTUP]) & 1u) && sm_lay_nch < SM_NCHAIN) {
+        sm_lay_chain[sm_lay_nch++] = (uint8_t)(sm_lay_pick < SM_NPAT ? sm_lay_pick : smp.cur % SM_NPAT);
+        sm_dirty = 1;
+    }
+    if (sm_layer == SML_SEQ && ((pressed >> panel.btn[B_OCTDN]) & 1u)) {   /* what was built (and the pick) thrown away */
+        sm_lay_nch = 0;
+        sm_lay_pick = SM_PAT_NONE;
+        sm_dirty = 1;
+    }
     if (sm_layer == SML_SEQ && alg) {                     /* the pattern picked, from the one playing (wraps) */
         int32_t p = ((int32_t)(sm_lay_pick < SM_NPAT ? sm_lay_pick : smp.cur) + alg) % (int32_t)SM_NPAT;
         sm_lay_pick = (uint8_t)(p < 0 ? p + (int32_t)SM_NPAT : p);
@@ -204,6 +253,10 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             }
         } else if (sm_layer == SML_SEQ && key == SM_LAY_MODE_KEY) {
             smp.mode = (uint8_t)((smp.mode + 1u) % SM_PM_COUNT);
+            sm_dirty = 1;
+        } else if (sm_layer == SML_SEQ && key == SM_LAY_CHOFF_KEY) {   /* the chain off (and the one being built) */
+            smp.nchain = 0;
+            sm_lay_nch = 0;
             sm_dirty = 1;
         } else if (sm_layer == SML_SEQ && w == 0) {
             sm_track_clear(t);

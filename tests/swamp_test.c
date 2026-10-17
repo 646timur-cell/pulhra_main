@@ -4848,6 +4848,190 @@ static int test_pat_seq_layer(void)
     return bad;
 }
 
+/* ------------------------------------------------------------------------------------------------ chains --- */
+/* SEQ held: OCT+ adds the picked pattern (none picked: the one playing) to the chain being built, repeats too */
+static void chain_seq_oct(uint32_t b)
+{
+    host_pressed |= 1u << panel.btn[b];
+    sm_input_poll();
+}
+static int test_chain_build(void)
+{
+    int bad = 0;
+    smd_mrow_t o;
+    in_reset();
+    host_ticks = 1000u;
+    layer_hold(B_SEQ);
+    chain_seq_oct(B_OCTUP);                               /* A01 (nothing picked: the one playing) */
+    chain_seq_oct(B_OCTUP);                               /* A01 again */
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    chain_seq_oct(B_OCTUP);                               /* A02 */
+    bad += check("CHAIN: SEQ + OCT+ x2, ALGORITHM +1, OCT+: A01 A01 A02 built", sm_lay_nch == 3u && sm_lay_chain[0] == 0u &&
+                 sm_lay_chain[1] == 0u && sm_lay_chain[2] == 1u && smp.nchain == 0u);
+    bad += check("CHAIN: ... the page did not move (OCT is the layer's), no keyboard", sm_ui.bank == 0u && !sm_ui.kbd);
+    smd_map_get(4, &o);
+    bad += check("CHAIN: ... the map shows it: + 01 01 02", !strcmp(o.w, "+ 01 01 02"));
+    layer_let_go(B_SEQ);
+    bad += check("CHAIN: SEQ let go: the model holds the chain A01 A01 A02, link 1 asked for", smp.nchain == 3u &&
+                 smp.chain[0] == 0u && smp.chain[1] == 0u && smp.chain[2] == 1u && smp.next == 0u);
+    run_block();
+    sm_input_poll();
+    bad += check("CHAIN: ... the audio stream's link is link 1 (index 0)", sm_cpos == 0u && smp.cur == 0u);
+    smp.cur = 0;
+    sm_layer = SML_SEQ;
+    smd_map_get(4, &o);
+    sm_layer = SML_NONE;
+    bad += check("CHAIN: the map (SEQ held) with nothing built: CHAIN 1/3 NEXT A01", !strcmp(o.w, "CHAIN 1/3 NEXT A01"));
+    {                                                     /* sixteen links at most */
+        uint32_t i;
+        layer_hold(B_SEQ);
+        for (i = 0; i < 20u; i++)
+            chain_seq_oct(B_OCTUP);
+        bad += check("CHAIN: OCT+ x20: 16 links, no more", sm_lay_nch == SM_NCHAIN);
+        layer_let_go(B_SEQ);
+        bad += check("CHAIN: ... 16 in the model", smp.nchain == SM_NCHAIN);
+    }
+    {                                                     /* one link: that pattern asked for, the chain off */
+        layer_hold(B_SEQ);
+        turn(EN_ALGO, 3);
+        sm_input_poll();
+        chain_seq_oct(B_OCTUP);
+        layer_let_go(B_SEQ);
+        bad += check("CHAIN: one link: A04 asked for, no chain", smp.nchain == 0u && smp.next == 3u);
+        run_block();
+        sm_input_poll();
+    }
+    return bad;
+}
+
+/* the links play each to its own end, round: A01 (master length 6) A01 A02 (master length 10), A01's trigs on steps 1 and 6
+ * (notes 48, 49), A02's on step 1 (60): T1's note-ons at 0 5 | 6 11 | 12 | 22 27 | 28 33 | 34 | 44 .. */
+static int test_chain_plays_links(void)
+{
+    static const uint8_t WANT_N[] = {48, 49, 48, 49, 60, 48, 49, 48, 49, 60, 48};
+    static const uint8_t WANT_AT[] = {0, 5, 6, 11, 12, 22, 27, 28, 33, 34, 44};
+    int bad = 0, ok = 1;
+    uint32_t i, at, c = 0, sw = 0, last = 0;
+    static const uint8_t CH[3] = {0, 0, 1};
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    pat_trig(0, 0, 5, 49);
+    pat_trig(0, 1, 2, 70);                                /* (T2: 16 steps; a link restarts it too) */
+    pat_trig(1, 0, 0, 60);
+    smp.pat[0].mlen = 6;
+    smp.pat[1].mlen = 10;
+    sm_chain_set(CH, 3);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    for (i = 0; i < 46u * (uint32_t)S120 / CTL + 2u; i++) {
+        run_block();
+        sm_input_poll();
+        if (sm_play_pat != last)
+            sw++, last = sm_play_pat;
+    }
+    for (i = 0; i < sizeof WANT_N; i++) {
+        const seq_ev_t *e = ev_nth(1, 0, i);
+        ok &= e && e->note == WANT_N[i] && near_d(e->at, WANT_AT[i] * S120);
+        if (!(e && e->note == WANT_N[i] && near_d(e->at, WANT_AT[i] * S120)) && c++ < 3u)
+            printf("  link note %u: got %u at %.2f, want %u at %u\n", i, e ? e->note : 0u, e ? e->at / S120 : -1.0, WANT_N[i], WANT_AT[i]);
+    }
+    bad += check("CHAIN: A01(6) A01 A02(10): each link to its own end, round (T1's notes and times, +-CTL)", ok);
+    bad += check("CHAIN: ... the switches A01 -> A02 -> A01 -> A02 -> A01 seen", sw == 4u);
+    at = 0;
+    ok = 1;
+    for (i = 0; i < 4u; i++) {                            /* T2's trig on step 3 of every A01 link: 2 8 | 24 30 */
+        static const uint8_t T2AT[4] = {2, 8, 24, 30};
+        const seq_ev_t *e = ev_nth(1, 1, i);
+        ok &= e && near_d(e->at, T2AT[i] * S120);
+    }
+    bad += check("CHAIN: ... a repeated link starts every track again from step 1 (T2 at 2 8 24 30)", ok);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    (void)at;
+    return bad;
+}
+
+/* G#3 in the SEQ layer: the chain off, the pattern playing plays on (no switch at its end) */
+static int test_chain_off(void)
+{
+    int bad = 0;
+    uint32_t i, sw = 0;
+    static const uint8_t CH[2] = {0, 1};
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    pat_trig(1, 0, 0, 60);
+    smp.pat[0].mlen = 4;
+    smp.pat[1].mlen = 4;
+    sm_chain_set(CH, 2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    while (sm_play_pat != 1u && sw++ < 5000u) {
+        run_block();
+        sm_input_poll();
+    }
+    bad += check("CHAIN/OFF: the chain plays: A02 comes", sm_play_pat == 1u && smp.cur == 1u);
+    layer_hold(B_SEQ);
+    key_dn(3);                                            /* G#3 */
+    sm_input_poll();
+    key_up(3);
+    layer_let_go(B_SEQ);
+    bad += check("CHAIN/OFF: SEQ + G#3: nchain 0, nothing asked", smp.nchain == 0u && smp.next == SM_PAT_NONE);
+    sw = 0;
+    for (i = 0; i < 20u * (uint32_t)S120 / CTL; i++) {
+        run_block();
+        sm_input_poll();
+        sw += sm_play_pat != 1u;
+    }
+    bad += check("CHAIN/OFF: ... A02 plays on, 5 of its ends later", !sw && smp.cur == 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+
+/* OCT- in the SEQ layer throws away the chain being built (and the pick): SEQ let go asks for nothing; a chain playing
+ * stays. A chain built anew while one plays: link 1 again */
+static int test_chain_reset(void)
+{
+    int bad = 0;
+    uint32_t i;
+    static const uint8_t CH[3] = {2, 3, 4};
+    in_reset();
+    host_ticks = 1000u;
+    sm_chain_set(CH, 3);
+    run_block();
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    turn(EN_ALGO, 5);
+    sm_input_poll();
+    chain_seq_oct(B_OCTUP);
+    chain_seq_oct(B_OCTUP);
+    chain_seq_oct(B_OCTDN);
+    bad += check("CHAIN/RESET: OCT+ x2 then OCT-: nothing built, nothing picked", sm_lay_nch == 0u && sm_lay_pick == SM_PAT_NONE);
+    layer_let_go(B_SEQ);
+    bad += check("CHAIN/RESET: SEQ let go: nothing asked, the chain playing (A03 A04 A05) stays", smp.next == SM_PAT_NONE &&
+                 smp.nchain == 3u && smp.chain[0] == 2u && smp.cur == 2u);
+    smp.pat[2].mlen = smp.pat[3].mlen = smp.pat[4].mlen = 2;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    for (i = 0; i < 3u * (uint32_t)S120 / CTL; i++) {
+        run_block();
+        sm_input_poll();
+    }
+    bad += check("CHAIN/RESET: playing: link 2 (A04)", sm_cpos == 1u && smp.cur == 3u);
+    sm_chain_set(CH, 3);
+    run_block();
+    sm_input_poll();
+    bad += check("CHAIN/RESET: the chain published anew: link 1 again (A03 asked for)", sm_cpos == 0u);
+    for (i = 0; i < 2u * (uint32_t)S120 / CTL; i++) {
+        run_block();
+        sm_input_poll();
+    }
+    bad += check("CHAIN/RESET: ... A03 at the end of A04", smp.cur == 2u && sm_cpos == 0u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+
 static uint32_t scr_count(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 {
     uint32_t i, j, n = 0;
@@ -5170,6 +5354,10 @@ int main(void)
     bad += test_pat_switch_300bpm_no_hang();
     bad += test_pat_switch_clears_locks();
     bad += test_pat_seq_layer();
+    bad += test_chain_build();
+    bad += test_chain_plays_links();
+    bad += test_chain_off();
+    bad += test_chain_reset();
     bad += test_len_visible();
     bad += test_filter_auto_lp();
     bad += test_draw_shots();

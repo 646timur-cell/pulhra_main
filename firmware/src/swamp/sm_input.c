@@ -156,9 +156,14 @@ static void sm_filt_auto(uint32_t id)
 
 /* the main loop's mirror of the pattern playing (the audio stream switches: sm_seq.c sm_pat_switch): smp.cur follows
  * sm_play_pat (the edits go to the pattern playing from here on), and the request is done once it plays */
+static uint8_t sm_cpos_seen;                              /* the chain's link last drawn (a link of the same pattern: no switch seen) */
 static void sm_pat_poll(void)
 {
-    uint8_t p = *(volatile uint8_t *)&sm_play_pat;
+    uint8_t p = *(volatile uint8_t *)&sm_play_pat, c = sm_cpos;
+    if (c != sm_cpos_seen) {
+        sm_cpos_seen = c;
+        sm_dirty = 1;
+    }
     if (p != smp.cur) {
         smp.cur = (uint8_t)(p % SM_NPAT);
         if (smp.pat[smp.cur].kit.snd[sm_ui.trk % SM_NTRK].len <= 16u)

@@ -28,6 +28,12 @@ static uint32_t sm_next_q8;                               /* the next step start
 static uint32_t sm_swd_q8;                                /* a swung step's delay (q8), from smp.swing read once at the block's start */
 static uint8_t sm_gcur;                                   /* the grid step playing is odd (the swung ones: the 2nd, 4th, ..) */
 static uint32_t sm_mstep;                                 /* the grid steps started since the pattern began (its master length's clock) */
+/* the chain (smp.chain[0 .. smp.nchain-1], the model's, the main loop's to write; on with nchain >= 2): the link playing is the
+ * audio stream's own (sm_cpos), moved on at the end of each link (sm_pat_block). A chain the main loop publishes anew bumps
+ * sm_chain_gen (its byte; this side's copy sm_chain_seen): the link playing is link 1 again (index 0) */
+static volatile uint8_t sm_cpos;
+static volatile uint8_t sm_chain_gen;
+static uint8_t sm_chain_seen;
 static uint8_t sm_pos[SM_NTRK], sm_next[SM_NTRK];         /* the step playing, the step to play next */
 static uint8_t sm_held[SM_NTRK][4], sm_nheld[SM_NTRK];    /* the notes the sequencer holds, per track */
 static int32_t sm_gate[SM_NTRK];                          /* samples left of their LEN (SM_GATE_INF: to the next trig) */
@@ -182,6 +188,8 @@ static void sm_seq_init(void)
     }
     sm_play_pat = (uint8_t)(smp.cur % SM_NPAT);
     sm_mstep = 0;
+    sm_cpos = 0;
+    sm_chain_seen = sm_chain_gen;
     sm_solo = 0;
     sm_cq.head = sm_cq.tail = 0;
     sm_cov.head = sm_cov.tail = 0;
@@ -529,13 +537,20 @@ static void sm_pat_switch(uint32_t n, uint32_t how)
 /* every block, before engine_block: the pattern asked for (smp.next, read once) comes now if stopped (or PLAY started this
  * block, before its first step), or in DIRECT START / JUMP; in SEQUENTIAL at the end of the pattern: when the step about to
  * start in this block (at most one: a step is >= 2205 samples, a block 32) is the first past the master length. That end
- * with nothing asked: the master length's clock from 0 again, and a master length set (not AUTO) starts every track again
- * from step 1 there */
+ * with nothing asked: a chain on (smp.nchain >= 2, read once) goes to its next link, every track from step 1, whatever the
+ * mode (each link plays to its own end; a link of the pattern playing, A1 A1, is that pattern again from step 1); no chain:
+ * the master length's clock from 0 again, and a master length set (not AUTO) starts every track again from step 1 there.
+ * The main loop writes smp.chain only while nchain is 0 (sm_layer.c sm_chain_set), so a chain read here is whole */
 static void sm_pat_block(uint32_t nq8)
 {
-    uint32_t nx = *(volatile uint8_t *)&smp.next, mode = smp.mode;
+    uint32_t nx = *(volatile uint8_t *)&smp.next, mode = smp.mode, nc = *(volatile uint8_t *)&smp.nchain;
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint32_t edge = sm_playing && sm_next_q8 < nq8 && sm_mstep >= sm_mlen_of(pt), t;
+    uint8_t g = sm_chain_gen;
+    if (g != sm_chain_seen) {                             /* a chain published anew: link 1 (asked for in smp.next) */
+        sm_chain_seen = g;
+        sm_cpos = 0;
+    }
     if (nx < SM_NPAT && nx != sm_play_pat) {
         if (!sm_playing || (!sm_mstep && !sm_next_q8)) {
             sm_pat_switch(nx, SM_PM_START);
@@ -549,6 +564,12 @@ static void sm_pat_block(uint32_t nq8)
             sm_pat_switch(nx, SM_PM_SEQ);
             return;
         }
+    }
+    if (edge && nc >= 2u && nc <= SM_NCHAIN) {
+        uint32_t c = (sm_cpos + 1u) % nc;
+        sm_cpos = (uint8_t)c;
+        sm_pat_switch(smp.chain[c], SM_PM_SEQ);
+        return;
     }
     if (edge) {
         sm_mstep = 0;

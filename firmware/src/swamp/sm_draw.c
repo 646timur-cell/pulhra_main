@@ -118,7 +118,7 @@ static uint32_t smd_hdr_sig(void)
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, smp.cur);
     h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_lock_msg);
-    h = smd_mix(h, sm_ui.kbd);
+    h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
     return smd_mix(h, smd_rec);
 }
 static void smd_two(char *b, uint32_t v)
@@ -182,7 +182,7 @@ static void smd_header(void)
     if (rec)
         sm_px_text(240 - 36, 2, 2u, "REC", T_TEXT, 1);
     else
-        sm_px_text(x - 6 - 36, 2, 2u, a, T_TEXT, 0);
+        sm_px_text(x - 6 - 36, 2, 2u, a, T_TEXT, smp.nchain >= 2u);   /* (a chain plays: the pattern inverted) */
     smd_end();
 }
 
@@ -570,6 +570,28 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
         } else if (sm_lay_cleared) {
             smd_cat(o->w, &n, "CLEARED");
             o->winv = 1;
+        } else if (sm_lay_nch) {                          /* the chain being built: + 01 01 02 (its last six links) */
+            char l[4];
+            smd_cat(o->w, &n, "+");
+            for (i = sm_lay_nch > 6u ? sm_lay_nch - 6u : 0u; i < sm_lay_nch; i++) {
+                smd_two(l, sm_lay_chain[i] + 1u);
+                l[2] = 0;
+                smd_cat(o->w, &n, " ");
+                smd_cat(o->w, &n, l);
+            }
+        } else if (smp.nchain >= 2u) {                    /* the chain playing: CHAIN 2/3 NEXT A02 */
+            uint32_t nc = smp.nchain <= SM_NCHAIN ? smp.nchain : SM_NCHAIN, cp = sm_cpos % nc;
+            char l[4];
+            smd_cat(o->w, &n, "CHAIN ");
+            smd_lenstr(l, cp + 1u);
+            smd_cat(o->w, &n, l);
+            smd_cat(o->w, &n, "/");
+            smd_lenstr(l, nc);
+            smd_cat(o->w, &n, l);
+            smd_cat(o->w, &n, " NEXT A");
+            smd_two(l, smp.chain[(cp + 1u) % nc] % SM_NPAT + 1u);
+            l[2] = 0;
+            smd_cat(o->w, &n, l);
         } else {                                          /* the change mode, the master length */
             static const char *const M[SM_PM_COUNT] = {"SEQUENTIAL", "DIR START", "DIR JUMP"};
             uint32_t ml = smp.pat[smp.cur % SM_NPAT].mlen;
