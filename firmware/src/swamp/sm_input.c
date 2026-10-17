@@ -640,6 +640,7 @@ static void sm_input_poll(void)
     for (i = 0; i < 4; i++)
         k[i] = panel_enc(EN_K1 + (uint32_t)i);
     sm_pat_poll();
+    sm_bank_poll(now);                                    /* (a bank brought in, a request served, SAVE at STOP, the autosave) */
     /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is
      * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
     sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);

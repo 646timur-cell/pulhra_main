@@ -10,12 +10,16 @@
  *   EDIT       white keys from F3: the machines of the page (MONO 13, SOMA 9, SLICE 5: engines.c MF_PAGE, in the order of
  *              eng_vis), OCT+ the next page, G5 INIT (the machine's preset 0). Loads as the PRESETS knob does
  *   GLO        black keys 1..4 (F#3 G#3 A#3 C#4) toggle the mute of T1..T4 (smp.mute); the white keys F3 .. B3 solo T1..T4
- *              while they are held (sm_solo)
+ *              while they are held (sm_solo); the banks and patterns (sm_bank.c sm_glo_poll): the black G#4 A#4 C#5 D#5 F#5 put
+ *              bank A..E in view, the white C4 D4 E4 F4 G4 A4 B4 C5 are its patterns 1..8: a tap on a used one asks for it (as
+ *              SEQ + ALGORITHM), on an empty one saves the current pattern into it (kit and all), a hold (0.8 s) saves the
+ *              current pattern into it again (no switch)
  *   SEQ        K1 the selected track's length 1..32, K2 the pattern's master length (AUTO, 1..128); the white keys (MONOFM's
  *              tools, sm_edit.c): F3 CLEAR the track's trigs and locks (held 0.8 s: all four tracks; the kit stays), G3 COPY
  *              the pattern, A3 COPY the track (its sound, steps, locks), B3 PASTE the track, D4 PASTE the pattern, E4 / F4
  *              SHIFT the track's steps < >, B4 / C5 TRN its notes - +; F#3 the pattern change's mode round (SEQUENTIAL, DIRECT START, DIRECT JUMP); ALGORITHM picks a
- *              pattern (from the one playing), and letting go of SEQ asks for it (smp.next: sm_seq.c switches);
+ *              pattern of all 40 (from the one playing), and letting go of SEQ asks for it (sm_bank.c sm_ask: its bank into RAM,
+ *              then smp.next: sm_seq.c switches); F#5 held 0.8 s SAVE (sm_bank.c: at STOP while playing);
  *              OCT+ adds the picked pattern (none picked: the one playing) to the chain being built (up to 16, repeats too),
  *              OCT- throws away what was built (and the pick); letting go of SEQ with two links or more: that chain plays
  *              (smp.chain, sm_chain_set), one link: that pattern is asked for; G#3 turns the chain off (the pattern
@@ -85,23 +89,27 @@ static void sm_layer_open(uint32_t l)
     sm_lay_clr = 0;
     if (l == SML_EDIT)                                    /* (opens on the page of the selected track's machine) */
         sm_lay_epage = (uint8_t)sm_epage_of(sm_ui_sound()->machine);
+    if (l == SML_GLO)
+        sm_glo_open();                                    /* (the grid: the current pattern's bank) */
+    sm_fsave_dn = 0;
     sm_dirty = 1;
 }
 
-/* the chain c[0 .. n-1] (2 .. 16 links) published for the audio stream: the old one off first (nchain 0: the audio stream
- * reads no link), the links, a new generation (the link playing is link 1 again), link 1 asked for, then nchain. Each a
- * byte store with a barrier between: whatever block runs in between sees no chain, or this whole one */
+/* the chain c[0 .. n-1] (2 .. 16 links, pattern ids 0..39) published for the audio stream: the old one off first (nchain 0:
+ * the audio stream reads no link), the links, a new generation (the link playing is link 1 again), link 1 asked for (its
+ * RAM slot: sm_bank.c publishes a chain once link 1's bank is in RAM), then nchain. Each a byte store with a barrier between:
+ * whatever block runs in between sees no chain, or this whole one */
 static void sm_chain_set(const uint8_t *c, uint32_t n)
 {
     uint32_t i;
     smp.nchain = 0;
     SM_BARRIER();
     for (i = 0; i < n && i < SM_NCHAIN; i++)
-        smp.chain[i] = (uint8_t)(c[i] % SM_NPAT);
+        smp.chain[i] = (uint8_t)(c[i] % SM_NGPAT);
     SM_BARRIER();
     sm_chain_gen = (uint8_t)(sm_chain_gen + 1u);
     SM_BARRIER();
-    smp.next = smp.chain[0];
+    smp.next = (uint8_t)sm_slot_of(smp.chain[0]);
     SM_BARRIER();
     smp.nchain = (uint8_t)(n < SM_NCHAIN ? n : SM_NCHAIN);
 }
@@ -110,13 +118,10 @@ static void sm_chain_set(const uint8_t *c, uint32_t n)
 static void sm_seq_commit(void)
 {
     uint32_t p = sm_lay_nch == 1u ? sm_lay_chain[0] : sm_lay_pick;
-    if (sm_lay_nch >= 2u) {
-        sm_chain_set(sm_lay_chain, sm_lay_nch);
-    } else if (p < SM_NPAT) {
-        smp.nchain = 0;
-        SM_BARRIER();
-        smp.next = (uint8_t)p;                            /* (one byte: the audio stream reads it once a block) */
-    }
+    if (sm_lay_nch >= 2u)
+        sm_chain_ask(sm_lay_chain, sm_lay_nch);          /* (published once link 1's bank is in RAM: sm_bank.c) */
+    else if (p < SM_NGPAT)
+        sm_ask(p);                                        /* (its bank brought in, then smp.next: sm_bank.c) */
 }
 
 static void sm_layer_close(void)
@@ -130,6 +135,8 @@ static void sm_layer_close(void)
     sm_fill = 0;
     sm_lay_clr = 0;
     sm_lay_cleared = 0;
+    sm_glo_key = 0xFFu;
+    sm_fsave_dn = 0;
     sm_dirty = 1;
 }
 
@@ -228,7 +235,7 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         }
     }
     if (sm_layer == SML_SEQ && ((pressed >> panel.btn[B_OCTUP]) & 1u) && sm_lay_nch < SM_NCHAIN) {
-        sm_lay_chain[sm_lay_nch++] = (uint8_t)(sm_lay_pick < SM_NPAT ? sm_lay_pick : smp.cur % SM_NPAT);
+        sm_lay_chain[sm_lay_nch++] = (uint8_t)(sm_lay_pick < SM_NGPAT ? sm_lay_pick : sm_gid_of(smp.cur) % SM_NGPAT);
         sm_dirty = 1;
     }
     if (sm_layer == SML_SEQ && ((pressed >> panel.btn[B_OCTDN]) & 1u)) {   /* what was built (and the pick) thrown away */
@@ -236,11 +243,15 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         sm_lay_pick = SM_PAT_NONE;
         sm_dirty = 1;
     }
-    if (sm_layer == SML_SEQ && alg) {                     /* the pattern picked, from the one playing (wraps) */
-        int32_t p = ((int32_t)(sm_lay_pick < SM_NPAT ? sm_lay_pick : smp.cur) + alg) % (int32_t)SM_NPAT;
-        sm_lay_pick = (uint8_t)(p < 0 ? p + (int32_t)SM_NPAT : p);
+    if (sm_layer == SML_SEQ && alg) {                     /* the pattern picked (all 40, A01..E08), from the one playing (wraps) */
+        int32_t p = ((int32_t)(sm_lay_pick < SM_NGPAT ? sm_lay_pick : sm_gid_of(smp.cur) % SM_NGPAT) + alg) % (int32_t)SM_NGPAT;
+        sm_lay_pick = (uint8_t)(p < 0 ? p + (int32_t)SM_NGPAT : p);
         sm_dirty = 1;
     }
+    if (sm_layer == SML_SEQ)
+        sm_fsave_poll(notes, fm1_ticks());                /* (F#5 held 0.8 s: SAVE) */
+    if (sm_layer == SML_GLO)
+        sm_glo_poll(notes, fm1_ticks());                  /* (the bank / pattern grid) */
     if (sm_layer == SML_GLO) {                            /* solo: the white keys F3 .. B3 held */
         uint32_t held = fm1_in.notes, solo = 0, w;
         for (key = 0, w = 0; key < SM_NKEYS && w < SM_NTRK; key++) {
@@ -276,7 +287,8 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             else if (w >= 0 && (uint32_t)w < sm_epage_n(sm_lay_epage))
                 sm_sound_load(sm_epage_first(sm_lay_epage) + (uint32_t)w, 0);
         } else if (sm_layer == SML_GLO) {
-            uint32_t b, n = 0;                            /* the black key's place among the black keys, 0 .. 3: T1 .. T4 */
+            uint32_t b, n = 0;                            /* the black key's place among the black keys, 0 .. 3: T1 .. T4 (the
+                                                             banks' keys: sm_glo_poll) */
             if (w >= 0)
                 continue;
             for (b = 0; b < key; b++)
@@ -290,6 +302,7 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_dirty = 1;
         } else if (sm_layer == SML_SEQ && key == SM_LAY_CHOFF_KEY) {   /* the chain off (and the one being built) */
             smp.nchain = 0;
+            sm_chain_npend = 0;
             sm_lay_nch = 0;
             sm_dirty = 1;
         } else if (sm_layer == SML_SEQ && w >= 0) {

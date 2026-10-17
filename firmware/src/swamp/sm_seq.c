@@ -215,10 +215,11 @@ static void sm_seq_play(void)
         sm_seq_idle(t);
     }
     if (nc >= 2u && nc <= SM_NCHAIN) {
-        sm_chain_seen = sm_chain_gen;                     /* (link 1 now: a new chain's reset is done too) */
-        sm_cpos = 0;
-        if (smp.chain[0] % SM_NPAT != sm_play_pat)
-            sm_pat_switch(smp.chain[0], SM_PM_START);
+        uint32_t s = sm_slot_of(smp.chain[0]);           /* (its bank not in RAM: the pattern playing plays; the main loop */
+        sm_chain_seen = sm_chain_gen;                     /* keeps link 1's bank in RAM while stopped, sm_bank.c) */
+        sm_cpos = 0;                                      /* (link 1 now: a new chain's reset is done too) */
+        if (s < SM_NPAT && s != sm_play_pat)
+            sm_pat_switch(s, SM_PM_START);
     }
     sm_playing = 1;
 }
@@ -556,7 +557,9 @@ static void sm_pat_switch(uint32_t n, uint32_t how)
  * mode (each link plays to its own end); a link of the pattern playing (A1 A1) is that pattern again with every track from
  * step 1, nothing else (no sound loaded again, no note let go: as a master length's end); no chain: the master length's
  * clock from 0 again, and a master length set (not AUTO) starts every track again from step 1 there.
- * The main loop writes smp.chain only while nchain is 0 (sm_layer.c sm_chain_set), so a chain read here is whole */
+ * The main loop writes smp.chain only while nchain is 0 (sm_layer.c sm_chain_set), so a chain read here is whole. A link is a
+ * pattern id (any bank): its RAM slot through smp.hbank (sm_slot_of); a bank the main loop is loading has no half (hbank
+ * SM_BANK_NONE while it is written), so a link of it is not ready: the switch waits, the link playing goes round again */
 static void sm_pat_block(uint32_t nq8)
 {
     uint32_t nx = *(volatile uint8_t *)&smp.next, mode = smp.mode, nc = *(volatile uint8_t *)&smp.nchain;
@@ -582,10 +585,11 @@ static void sm_pat_block(uint32_t nq8)
         }
     }
     if (edge && nc >= 2u && nc <= SM_NCHAIN) {
-        uint32_t c = (sm_cpos + 1u) % nc;
-        sm_cpos = (uint8_t)c;
-        if (smp.chain[c] % SM_NPAT != sm_play_pat) {
-            sm_pat_switch(smp.chain[c], SM_PM_SEQ);
+        uint32_t c = (sm_cpos + 1u) % nc, s = sm_slot_of(smp.chain[c]);
+        if (s < SM_NPAT)                                  /* (the link's bank not in RAM yet: the switch waits, the link */
+            sm_cpos = (uint8_t)c;                         /* playing goes round again from step 1; sm_bank.c loads it) */
+        if (s < SM_NPAT && s != sm_play_pat) {
+            sm_pat_switch(s, SM_PM_SEQ);
             return;
         }
         sm_mstep = 0;                                     /* (the same pattern again: every track from step 1) */

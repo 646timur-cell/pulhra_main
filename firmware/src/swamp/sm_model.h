@@ -1,10 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* SWAMP MACHINE project model: 16 patterns of 4 tracks x 32 steps, the kit (the four sounds) in every pattern, parameter
- * locks per pattern. Ownership: the main loop is the ONLY writer of the model (smp: parameters, steps, lengths, tempo,
+/* SWAMP MACHINE project model: 5 banks A..E of 8 patterns (40, A01..E08) of 4 tracks x 32 steps, the kit (the four sounds)
+ * in every pattern, parameter locks per pattern. Two banks live in RAM (smp.pat: two halves of 8, smp.hbank says which bank
+ * each half holds), the rest in the flash (sm_bank.c). Ownership: the main loop is the ONLY writer of the model (smp: parameters, steps, lengths, tempo,
  * the current pattern, everything); the audio stream only reads it (the steps it plays, a sound on SMC_LOAD) and owns
  * trk[], the transport and the sequencer's state (sm_cmd.c, sm_seq.c). */
 #define SM_NTRK 4u
-#define SM_NPAT 16u
+#define SM_NBANK 5u                                       /* banks A..E */
+#define SM_BPAT 8u                                        /* patterns per bank */
+#define SM_NGPAT (SM_NBANK * SM_BPAT)                     /* the pattern ids 0..39 (A01..E08: bank * 8 + place) */
+#define SM_NHALF 2u                                       /* banks in RAM */
+#define SM_NPAT (SM_NHALF * SM_BPAT)                      /* RAM slots of smp.pat: half * 8 + place */
+#define SM_BANK_NONE 0xFFu
 #define SM_NSTEP 32u
 #define SM_NLOCK 192u                                     /* parameter locks per pattern */
 #define SM_NCHAIN 16u
@@ -78,8 +84,12 @@ enum { SM_PM_SEQ, SM_PM_START, SM_PM_JUMP, SM_PM_COUNT };
 #define SM_PAT_NONE 0xFFu
 #define SM_MLEN_MAX 128u
 
+/* smp.cur, smp.next, sm_play_pat: RAM slots (0..15); smp.chain: pattern ids (0..39, any bank: the audio stream finds a link's
+ * slot through smp.hbank, sm_slot_of; a link whose bank is not in RAM waits) */
 typedef struct {
     sm_pattern_t pat[SM_NPAT];
+    uint8_t hbank[SM_NHALF];                              /* the bank each RAM half holds (SM_BANK_NONE: none); the main loop's,
+                                                             the audio stream reads it (a link's slot) */
     uint16_t bpm10;                                       /* 1200 = 120.0 */
     uint8_t swing, cur, sel, nchain;
     uint8_t chain[SM_NCHAIN];

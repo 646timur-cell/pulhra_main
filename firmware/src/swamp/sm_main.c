@@ -2,7 +2,8 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* SWAMP boot and main loop, after main.c: the same boot order (WDT first, boot-loop guard, fatal vectors, guards; then
  * LCD, input (TIMER5 IRQ, 10 kHz), audio (ALNK0 IRQ)), the same UBOOT and M-UPGRADE paths, a 15 ms loop of
- * sm_input_poll / sm_draw (swamp/sm_app.c). No web editor, no console, no autosave, no project slots. */
+ * sm_input_poll / sm_draw (swamp/sm_app.c). No web editor, no console. The banks and the project: sm_bank.c (loaded at boot,
+ * SAVE, the autosave from sm_input_poll). */
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[];
 extern uint32_t _pool_start[], _pool_end[], _rt_start[], _rt_end[], _rt_load[];
 
@@ -146,6 +147,7 @@ static void fm1_main(void)
     fm1_adc_init();
     panel_init();
     sm_core_init();
+    sm_store_boot();                                    /* (the banks and the project from the flash: sm_bank.c) */
     master_boot();
     audio_init();
     usb_start();

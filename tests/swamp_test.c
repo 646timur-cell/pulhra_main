@@ -64,14 +64,34 @@ static void fm1_led_key(unsigned k, int on) { (void)k; (void)on; }
 static void settings_save(void) {}
 #include "../firmware/src/settings_persist.c"
 static uint8_t nor[0x100000], flash_ok = 1;
+/* the power cut (the banks test): the flash takes nor_budget more bytes (an erase counts 1) and then nothing; -1 no cut.
+ * nor_writes counts every erase and program (nothing is written while playing) */
+static int32_t nor_budget = -1;
+static uint32_t nor_writes;
+static int nor_take(void)
+{
+    nor_writes++;
+    if (nor_budget < 0)
+        return 1;
+    if (!nor_budget)
+        return 0;
+    nor_budget--;
+    return 1;
+}
 static int st_read(uint32_t off, void *dst, uint32_t n) { memcpy(dst, nor + off, n); return 0; }
-static int st_erase(uint32_t off) { memset(nor + off, 0xFF, 4096); return 0; }
+static int st_erase(uint32_t off)
+{
+    if (nor_take())
+        memset(nor + off, 0xFF, 4096);
+    return 0;
+}
 static int st_prog(uint32_t off, const void *src, uint32_t n)
 {
     const uint8_t *s = src;
     uint32_t i;
     for (i = 0; i < n; i++)
-        nor[off + i] &= s[i];
+        if (nor_take())
+            nor[off + i] &= s[i];
     return 0;
 }
 #include "../firmware/src/storage.c"
@@ -136,6 +156,8 @@ static int midi_enqueue(uint32_t pkt, uint32_t source)
 #define trk_note_off seq_note_off
 static void lock_applied(uint32_t t, uint32_t s, uint32_t p, int32_t v);   /* the locks test: every lock the ISR applies */
 static void lock_preempt(void);                                            /* ... and the ISR's moment inside a lock write */
+static void store_preempt(void);                                           /* the banks test: the audio stream inside a bank load */
+#define SM_STORE_PREEMPT() store_preempt()
 #define SM_LOCK_APPLIED(t, s, p, v) lock_applied(t, s, p, v)
 #define SM_LOCK_PREEMPT() lock_preempt()
 #include "../firmware/src/swamp/sm_app.c"
@@ -2342,16 +2364,25 @@ static int test_layer_maps(void)
     layer_draw(SML_EDIT);
     bad += check("MAP: EDIT page 2: the 9 SOMA machines", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == 9u);
     layer_draw(SML_GLO);
-    bad += check("MAP: GLO: MUTE and SOLO rows, T1..T4 in each", lint_frame("glo") == 0 && lint_has("MUTE", 0, 0) && lint_has("SOLO", 0, 0) &&
-                 lint_has("T1", 0, 0) && lint_has("T4", 0, 0) && lint_has("MUTE SOLO", 0, 0));
-    bad += check("MAP: ... nothing muted: no cell inverted", SCR(16, 90) == BGC && SCR(16, 192) == BGC);
+    bad += check("MAP: GLO: the bank's patterns A1..A8, the banks A..E, the M and S rows with T1..T4, the title",
+                 lint_frame("glo") == 0 && lint_has("A1", 0, 0) && lint_has("A8", 0, 0) && lint_has("E", 0, 0) &&
+                 lint_has("M", 0, 0) && lint_has("S", 0, 0) && lint_has("T1", 0, 0) && lint_has("T4", 0, 0) &&
+                 lint_has("BANK A MUTE SOLO", 0, 0));
+    bad += check("MAP: ... nothing muted: no T cell inverted", SCR(62, 159) == BGC && SCR(62, 193) == BGC);
+    bad += check("MAP: ... the current pattern A1 inverted, A2 not", SCR(20, 57) == INK && SCR(80, 57) == BGC);
     smp.mute = 1;
     sm_solo = 4;
     sm_dirty = 1;
     lcd_px = 0;
     sm_draw();
-    bad += check("MAP: ... T1 muted: its mute cell inverted, T2's not; T3 soloed: its solo cell", SCR(16, 90) == INK && SCR(76, 90) == BGC &&
-                 SCR(136, 192) == INK && SCR(16, 192) == BGC);
+    {
+        smd_mrow_t o3, o4;
+        smd_map_get(3, &o3);
+        smd_map_get(4, &o4);
+        bad += check("MAP: ... T1 muted: its M cell inverted, T2's not; T3 soloed: its S cell",
+                     o3.inv == 2u && o4.inv == 8u && o3.cols == 5u && SCR(62, 159) == INK && SCR(110, 159) == BGC &&
+                     SCR(158, 193) == INK && SCR(62, 193) == BGC);
+    }
     bad += check("MAP: ... a mute toggled redraws the rows that changed only (<= 3 rows)", lcd_px > 0 && lcd_px <= 3u * 240u * SMD_MAP_ROW_H + 240u * 20u);
     smp.mute = 0;
     sm_solo = 0;
@@ -5106,7 +5137,7 @@ static int test_pat_seq_layer(void)
                  sm_ui.trk == 0u && smp.next == SM_PAT_NONE);
     turn(EN_ALGO, -3);
     sm_input_poll();
-    bad += check("PAT: ... -3: wraps to A16", sm_lay_pick == 15u);
+    bad += check("PAT: ... -3: wraps to E08 (all 40 patterns)", sm_lay_pick == 39u);
     turn(EN_ALGO, 3);
     sm_input_poll();
     key_dn(1);                                            /* F#3: the mode */
@@ -5160,7 +5191,7 @@ static int test_chain_build(void)
                  sm_lay_chain[1] == 0u && sm_lay_chain[2] == 1u && smp.nchain == 0u);
     bad += check("CHAIN: ... the page did not move (OCT is the layer's), no keyboard", sm_ui.bank == 0u && !sm_ui.kbd);
     smd_map_get(4, &o);
-    bad += check("CHAIN: ... the map shows it: + 01 01 02", !strcmp(o.w, "+ 01 01 02"));
+    bad += check("CHAIN: ... the map shows it: + A01 A01 A02", !strcmp(o.w, "+ A01 A01 A02"));
     layer_let_go(B_SEQ);
     bad += check("CHAIN: SEQ let go: the model holds the chain A01 A01 A02, link 1 asked for", smp.nchain == 3u &&
                  smp.chain[0] == 0u && smp.chain[1] == 0u && smp.chain[2] == 1u && smp.next == 0u);
@@ -5815,8 +5846,9 @@ static int test_len_visible(void)
     layer_draw(SML_SEQ);
     bad += check("LEN: SEQ held: LEN 32 in the title, large (scale 3: 21 px high), the map inside its rows",
                  lint_has("LEN 32", &y0, &y1) && y1 - y0 == 21 && lint_frame("seq len") == 0);
-    bad += check("LEN: ... the grid A01 .. A16, the mode, the master length",
-                 lint_has("A01", 0, 0) && lint_has("A16", 0, 0) && lint_has("SEQUENTIAL ML AUTO", 0, 0));
+    bad += check("LEN: ... the grid A01 .. A08 (the bank of the pick), the banks A .. E, the mode, the master length",
+                 lint_has("A01", 0, 0) && lint_has("A08", 0, 0) && !lint_has("A09", 0, 0) && lint_has("E", 0, 0) &&
+                 lint_has("SEQUENTIAL ML AUTO", 0, 0));
     bad += check("LEN: ... A01 playing inverted, A04 (trigs) ink, A02 (empty) dim", SCR(12 + 2, 48 + 9) == INK &&
                  scr_count(192, 58, 36, 14, INK) > 20u && !scr_count(192, 58, 36, 14, DIMC) &&
                  scr_count(72, 58, 36, 14, DIMC) > 20u && !scr_count(72, 58, 36, 14, INK));
@@ -6319,6 +6351,470 @@ static int test_draw_shots(void)
     return 0;
 }
 
+/* ------------------------------------------------------------------------------------------------ banks (Task 4) --- */
+static uint32_t store_pre_n;                              /* blocks the audio stream runs in the middle of a bank load */
+static uint32_t store_pre_hits;
+static void store_preempt(void)
+{
+    uint32_t i;
+    if (!store_pre_n)
+        return;
+    store_pre_hits++;
+    for (i = 0; i < store_pre_n; i++) {
+        events_block(CTL);
+        seq_clock += CTL;
+    }
+}
+static void nor_wipe(void)
+{
+    memset(nor + SM_FL_LO, 0xFF, SM_FL_HI - SM_FL_LO);
+    nor_budget = -1;
+}
+/* the power off and on: RAM gone, the firmware's boot (sm_core_init, then the flash) */
+static void bank_reboot(void)
+{
+    memset(&smp, 0x5A, sizeof smp);
+    memset(sm_used, 0x5A, sizeof sm_used);
+    sm_core_init();
+    sm_store_boot();
+    sm_input_init();
+}
+static uint32_t gslot(uint32_t g) { return sm_slot_of(g); }
+static void glo_key_tap(uint32_t k)
+{
+    key_dn(k);
+    sm_input_poll();
+    ms(100);
+    key_up(k);
+    sm_input_poll();
+}
+/* the main loop and the audio stream for n samples: a block each time, a poll every 20 blocks (~15 ms, a frame) */
+static void bank_play(uint32_t n)
+{
+    uint32_t end = seq_clock + n, b = 0;
+    while (seq_clock < end) {
+        events_block(CTL);
+        seq_clock += CTL;
+        if (++b % 20u == 0u) {
+            host_ticks += 15000u * FM1_TICKS_PER_US;
+            sm_input_poll();
+        }
+    }
+}
+static void seq_f5_save(void)                             /* SEQ + F#5 held 0.9 s */
+{
+    layer_hold(B_SEQ);
+    key_dn(25);
+    sm_input_poll();
+    ms(900);
+    sm_input_poll();
+    key_up(25);
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+}
+
+/* the GLO grid: a tap on an empty place saves the current pattern into it (no switch), a tap on a used one asks for it, a hold
+ * (0.8 s) saves the current one into a used place again (no switch); the bank keys put a bank in view; the LEDs and the map */
+static int test_bank_glo_grid(void)
+{
+    int bad = 0;
+    smd_mrow_t o;
+    uint32_t w0;
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    smp.pat[0].kit.snd[0].p[P_FCUT] = 33;
+    layer_hold(B_GLO);
+    smd_map_get(0, &o);
+    bad += check("BANK/GLO: the layer shows bank A: A1 (current) inverted, A2 dim (empty)", sm_glo_bank == 0u && !strcmp(o.c[0], "A1") &&
+                 (o.inv & 1u) && (o.dim & 2u) && !(o.dim & 1u));
+    glo_key_tap(11);                                      /* E4: A3, empty */
+    bad += check("BANK/GLO: a tap on an empty place (E4, A3): the current pattern saved into it, kit and all; no switch",
+                 !memcmp(&smp.pat[2], &smp.pat[0], sizeof smp.pat[0]) && smp.pat[2].kit.snd[0].p[P_FCUT] == 33 &&
+                 (sm_used[0] & 4u) && smp.cur == 0u && smp.next == SM_PAT_NONE && sm_want == SM_PAT_NONE);
+    glo_key_tap(11);
+    bad += check("BANK/GLO: a tap on it again (used): asked for", smp.next == 2u);
+    run_block();
+    sm_input_poll();
+    bad += check("BANK/GLO: ... stopped: it plays at once (A3 current)", smp.cur == 2u && smp.next == SM_PAT_NONE);
+    pat_trig(2, 1, 4, 60);                                /* (an edit of A3) */
+    key_dn(7);                                            /* C4: A1, held */
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    bad += check("BANK/GLO: C4 held 0.5 s: nothing yet", smp.pat[0].step[1][4].n == 0u);
+    ms(400);
+    sm_input_poll();
+    bad += check("BANK/GLO: ... 0.9 s: A3 saved into A1 again (no switch)", !memcmp(&smp.pat[0], &smp.pat[2], sizeof smp.pat[0]) &&
+                 smp.cur == 2u && smp.next == SM_PAT_NONE);
+    key_up(7);
+    sm_input_poll();
+    bad += check("BANK/GLO: ... let go after the hold: no tap (nothing asked)", smp.next == SM_PAT_NONE && smp.cur == 2u);
+    glo_key_tap(17);                                      /* A#4: bank B in view */
+    bad += check("BANK/GLO: A#4: bank B in view (the title BANK B)", sm_glo_bank == 1u);
+    settings_leds = LEDS_DIM;
+    sm_leds();
+    bad += check("BANK/GLO: LEDs: bank B's key lit, A's (G#4) breathes; B's patterns all empty: dark",
+                 led_of(fm1_led, 14u + 17u) == 1 && led_of(fm1_led_breath, 14u + 15u) == 1 && led_of(fm1_led, 14u + 15u) == 0 &&
+                 !led_of(fm1_led, 14u + 7u) && !led_of(fm1_led_breath, 14u + 7u) && !led_of(fm1_led_breath, 14u + 9u));
+    glo_key_tap(9);                                       /* D4: B2, empty: A3 saved into it */
+    bad += check("BANK/GLO: a tap on B2 (empty, bank B in RAM): A3 saved into it",
+                 !memcmp(&smp.pat[gslot(9)], &smp.pat[2], sizeof smp.pat[0]) && gslot(9) == 9u && (sm_used[1] & 2u));
+    glo_key_tap(15);                                      /* G#4: bank A again */
+    sm_leds();
+    bad += check("BANK/GLO: LEDs, bank A: A3 (current) lit, A1 (used) breathes, A2 (empty) dark",
+                 led_of(fm1_led, 14u + 11u) == 1 && led_of(fm1_led_breath, 14u + 7u) == 1 && !led_of(fm1_led, 14u + 9u) &&
+                 !led_of(fm1_led_breath, 14u + 9u));
+    /* a save into bank D (not in RAM): the free half holds B, edited (B2): stopped, B goes to the flash first, then D comes in */
+    w0 = nor_writes;
+    glo_key_tap(22);                                      /* D#5: bank D in view */
+    glo_key_tap(7);                                       /* C4: D1, empty */
+    bad += check("BANK/GLO: a tap on D1 (bank D not in RAM, stopped): B written to the flash, D brought in, A3 saved into D1",
+                 smp.hbank[1] == 3u && sm_fs_top[1] < SM_FL_NSLOT && nor_writes > w0 && !memcmp(&smp.pat[8], &smp.pat[2], sizeof smp.pat[0]) &&
+                 (sm_used[3] & 1u) && smp.cur == 2u);
+    layer_let_go(B_GLO);
+    sm_layer = SML_NONE;
+    return bad;
+}
+
+/* 300 BPM, A1 playing (T1 on every step, note 50); C1 (in the flash only, note 70) asked for: bank C is read into the other
+ * half while A1 plays (the audio stream runs in the middle of the load), then the switch at A1's end: every step sounds, one
+ * step apart, none skipped, none doubled */
+static int test_bank_switch_playing(void)
+{
+    int bad = 0, even = 1;
+    uint32_t s, i, n50 = 0, n70 = 0, first70 = 0xFFFFu, prev = 0;
+    double step = (double)FS * 60.0 / (300.0 * 4.0);
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    smp.hbank[1] = 2;                                     /* (bank C made in half 1, saved, then B back in its place) */
+    for (s = 0; s < 16u; s++)
+        pat_trig(8, 0, s, 70);
+    bad += check("BANK/PLAY: bank C written to the flash", sm_bank_save(1) == 0 && sm_fs_top[2] < SM_FL_NSLOT);
+    sm_bank_fill(1, 1);
+    bad += check("BANK/PLAY: ... B back in half 1 (empty)", smp.hbank[1] == 1u && smp.pat[8].step[0][0].n == 0u);
+    for (s = 0; s < 16u; s++)
+        pat_trig(0, 0, s, 50);
+    kit_dry();
+    smp.bpm10 = 3000;
+    smp.mode = SM_PM_SEQ;
+    seq_log_clear();
+    push(SMC_PLAY, 0, 0, 0, 0);
+    bank_play((uint32_t)(5.5 * step));
+    sm_ask(2u * SM_BPAT);                                 /* C1 */
+    bad += check("BANK/PLAY: C1 asked for: its bank not in RAM, the request waits for the load", sm_want == 16u && smp.next == SM_PAT_NONE);
+    store_pre_n = 3;                                      /* (the audio stream runs 3 blocks in the middle of the load, twice) */
+    store_pre_hits = 0;
+    nor_writes = 0;
+    bank_play((uint32_t)(40.0 * step));
+    store_pre_n = 0;
+    bad += check("BANK/PLAY: ... C read into half 1 while A1 played (the stream ran inside the load), no flash write",
+                 smp.hbank[1] == 2u && store_pre_hits >= 2u && nor_writes == 0u);
+    bad += check("BANK/PLAY: ... switched to C1 (slot 8)", sm_play_pat == 8u && smp.cur == 8u && sm_gid_of(smp.cur) == 16u);
+    for (i = 0; i < 45u; i++) {
+        const seq_ev_t *e = ev_nth(1, 0, i);
+        if (!e)
+            break;
+        if (e->note == 50)
+            n50++;
+        if (e->note == 70) {
+            n70++;
+            if (first70 == 0xFFFFu)
+                first70 = i;
+        }
+        if (i)
+            even &= near_d(e->at - prev, step);
+        prev = e->at;
+    }
+    printf("swamp: bank switch: %u x 50 then %u x 70, the first 70 is note-on %u\n", n50, n70, first70);
+    bad += check("BANK/PLAY: 300 BPM: every step a note-on, one step apart (+-CTL): none skipped, none doubled", even && i == 45u);
+    bad += check("BANK/PLAY: ... A1 to its end (16 steps from step 6), then C1's notes", first70 == 16u && n50 == 16u && n70 == 29u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    return bad;
+}
+
+/* a chain across banks: A1 B1 C1 (C in the flash only, master length 4 each). Bank A edited and not saved: playing, C cannot
+ * take A's half (A's edits would be lost: the flash is written only while stopped): the switch to C1 waits, B1 goes round
+ * again, nothing is lost. SAVE at STOP; PLAY again: A1 B1 C1 A1 .. each link 4 steps, C brought in on B1, A again on C1 */
+static int test_bank_chain_across(void)
+{
+    static const uint8_t CH[3] = {0, 8, 16};
+    int bad = 0, ok = 1;
+    uint32_t i;
+    static const uint8_t WANT[7] = {50, 60, 70, 50, 60, 70, 50};
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    smp.hbank[1] = 2;
+    pat_trig(8, 0, 0, 70);
+    smp.pat[8].mlen = 4;
+    bad += check("CHAIN/BANKS: C1 in the flash", sm_bank_save(1) == 0);
+    sm_bank_fill(1, 1);
+    pat_trig(0, 0, 0, 50);
+    smp.pat[0].mlen = 4;
+    pat_trig(8, 0, 0, 60);
+    smp.pat[8].mlen = 4;
+    kit_dry();
+    sm_chain_set(CH, 3);
+    bad += check("CHAIN/BANKS: the chain A01 B01 C01 (pattern ids 0 8 16)", smp.nchain == 3u && smp.chain[2] == 16u);
+    seq_log_clear();
+    push(SMC_PLAY, 0, 0, 0, 0);
+    bank_play((uint32_t)(20.0 * S120));
+    for (i = 0; i < 5u; i++) {
+        const seq_ev_t *e = ev_nth(1, 0, i);
+        ok &= e && e->note == (i ? 60u : 50u) && near_d(e->at, i * 4.0 * S120);
+    }
+    bad += check("CHAIN/BANKS: A dirty, playing: C1 waits, B1 goes round (50 at 0, 60 at 4 8 12 16), A stays in RAM",
+                 ok && smp.hbank[0] == 0u && smp.hbank[1] == 1u && smp.pat[0].step[0][0].n == 1u && sm_cpos == 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    sm_save_ask();
+    sm_input_poll();
+    bad += check("CHAIN/BANKS: STOP, SAVE: A and B in the flash", sm_msg == SM_MSG_SAVED && sm_fs_top[0] < SM_FL_NSLOT &&
+                 sm_fs_top[1] < SM_FL_NSLOT && !sm_half_dirty(0) && !sm_half_dirty(1));
+    seq_log_clear();
+    push(SMC_PLAY, 0, 0, 0, 0);
+    bank_play((uint32_t)(27.0 * S120));
+    ok = 1;
+    for (i = 0; i < 7u; i++) {
+        const seq_ev_t *e = ev_nth(1, 0, i);
+        ok &= e && e->note == WANT[i] && near_d(e->at, i * 4.0 * S120);
+        if (!(e && e->note == WANT[i] && near_d(e->at, i * 4.0 * S120)))
+            printf("  chain/banks note %u: %u at %.2f\n", i, e ? e->note : 0u, e ? e->at / S120 : -1.0);
+    }
+    bad += check("CHAIN/BANKS: saved: A1 B1 C1 A1 B1 C1 A1, each 4 steps, in time (C loaded on B1, A on C1, B on A1)", ok);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    /* a pattern of a third bank asked for while playing with the other half dirty: it waits; STOP brings it (B written first) */
+    sm_chain_set(CH, 0);
+    smp.nchain = 0;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    bank_play((uint32_t)(2.0 * S120));
+    {
+        uint32_t other = (sm_play_pat / SM_BPAT) ^ 1u, ob = smp.hbank[other];
+        pat_trig((uint8_t)(other * SM_BPAT + 3u), 2, 2, 72);   /* (the other half edited) */
+        sm_ask(3u * SM_BPAT + 4u);                        /* D5 */
+        bank_play((uint32_t)(10.0 * S120));
+        bad += check("CHAIN/BANKS: D5 asked for, playing, the other half edited: it waits (the half and its edit stay)",
+                     sm_want == 3u * SM_BPAT + 4u && smp.hbank[other] == ob && smp.pat[other * SM_BPAT + 3u].step[2][2].n == 1u);
+        push(SMC_STOP, 0, 0, 0, 0);
+        run_block();
+        sm_input_poll();
+        run_block();
+        sm_input_poll();
+        bad += check("CHAIN/BANKS: ... STOP: the edited bank written, D brought in, D5 plays", sm_want == SM_PAT_NONE &&
+                     smp.hbank[other] == 3u && sm_gid_of(smp.cur) == 3u * SM_BPAT + 4u && !sm_half_dirty(other ^ 1u));
+    }
+    return bad;
+}
+
+/* a power cut in the middle of a bank's write (into its older copy): the newest whole copy is loaded at power-on; a cut in the
+ * project's write: the bank written, the project's older copy loaded */
+static int test_bank_power_cut(void)
+{
+    static const int32_t CUT[5] = {0, 1, 5 + 3000, 5 + (int32_t)SM_BANK_BYTES, 5 + (int32_t)SM_BANK_BYTES + 20};
+    int bad = 0, ok = 1;
+    uint32_t i;
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    sm_save_ask();
+    sm_input_poll();
+    pat_trig(0, 0, 1, 49);                                /* Y: the newest whole copy */
+    smp.bpm10 = 1300;
+    sm_save_ask();
+    sm_input_poll();
+    bad += check("CUT: A saved twice (two places), the project twice", sm_msg == SM_MSG_SAVED && sm_fp_ok[0] && sm_fp_ok[1]);
+    for (i = 0; i < 5u; i++) {
+        pat_trig(0, 0, 2, 50);                            /* Z: cut while written into A's older copy */
+        smp.bpm10 = 1500;
+        nor_budget = CUT[i];
+        sm_save_ask();
+        sm_input_poll();
+        nor_budget = -1;
+        ok &= sm_msg == SM_MSG_FLASH;
+        bank_reboot();
+        ok &= smp.pat[0].step[0][0].n && smp.pat[0].step[0][1].n && !smp.pat[0].step[0][2].n && smp.bpm10 == 1300u && smp.cur == 0u;
+        if (!(smp.pat[0].step[0][1].n && !smp.pat[0].step[0][2].n))
+            printf("  cut %d: steps %u %u %u\n", CUT[i], smp.pat[0].step[0][0].n, smp.pat[0].step[0][1].n, smp.pat[0].step[0][2].n);
+    }
+    bad += check("CUT: cut at the erase, mid payload, at the header (5 points): FLASH ERROR, power-on loads Y (the newest whole)", ok);
+    pat_trig(0, 0, 2, 50);
+    smp.bpm10 = 1500;
+    nor_budget = 5 + (int32_t)SM_BANK_BYTES + 32 + 1 + 10;   /* (the bank whole, the project cut) */
+    sm_save_ask();
+    sm_input_poll();
+    nor_budget = -1;
+    bank_reboot();
+    bad += check("CUT: cut in the project's write: the bank's new copy (Z) and the project's older copy (120 -> 130.0 BPM) load",
+                 smp.pat[0].step[0][2].n == 1u && smp.bpm10 == 1300u);
+    sm_save_ask();
+    sm_input_poll();
+    bank_reboot();
+    bad += check("CUT: ... and the next SAVE goes through", sm_msg == SM_MSG_NONE && smp.pat[0].step[0][2].n == 1u && smp.bpm10 == 1300u);
+    return bad;
+}
+
+/* SAVE (SEQ + F#5 held), the power off and on: the kits, trigs (every field), locks, lengths, master lengths, BPM, swing,
+ * mutes, change mode, the chain, the current pattern; banks not in RAM come back from the flash too */
+static int test_bank_roundtrip(void)
+{
+    static sm_pattern_t a[SM_BPAT], b[SM_BPAT], c[SM_BPAT];
+    static const uint8_t CH[3] = {1, 20, 9};
+    int bad = 0;
+    sm_step_t *st;
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    sm_ask(1);                                            /* A02 current */
+    run_block();
+    sm_input_poll();
+    sm_sound_from_preset(&smp.pat[1].kit.snd[0], 5, 2);
+    smp.pat[1].kit.snd[0].p[P_FCUT] = -12;
+    smp.pat[1].kit.snd[1].len = 24;
+    smp.pat[1].kit.snd[2].dvel = 77;
+    smp.pat[1].mlen = 12;
+    pat_trig(1, 0, 3, 61);
+    st = &smp.pat[1].step[0][3];
+    st->flags = SMF_ACCENT | (2u << 4);
+    st->len = 9;
+    st->cond = SM_COND_1ST;
+    st->nudge = -3;
+    pat_trig(1, 1, 23, 40);
+    smp.pat[1].step[1][23].vel = SM_INH;
+    sm_lock_set(0, 3, P_FCUT, 90);
+    sm_lock_set(1, 23, P_LRATE, 5);
+    pat_trig(8 + 1, 2, 7, 66);                            /* B02 (half 1) */
+    smp.pat[9].kit.snd[3].p[P_LEVEL] = 11;
+    memcpy(b, &smp.pat[8], sizeof b);
+    smp.bpm10 = 1374;
+    smp.swing = 61;
+    smp.mute = 5;
+    smp.mode = SM_PM_START;
+    sm_chain_set(CH, 3);
+    smp.next = SM_PAT_NONE;
+    memcpy(a, &smp.pat[0], sizeof a);
+    seq_f5_save();
+    bad += check("ROUND: SEQ + F#5 held: SAVED", sm_msg == SM_MSG_SAVED && !sm_half_dirty(0) && !sm_half_dirty(1));
+    /* bank C (not in RAM at the reboot): brought in (B, clean now, gives way), C04 edited, saved */
+    bad += check("ROUND: C brought into half 1 (B saved, clean)", sm_bank_bring(2) == SM_BR_OK && smp.hbank[1] == 2u);
+    pat_trig(8 + 3, 3, 0, 90);
+    smp.pat[11].kit.snd[3].len = 7;
+    memcpy(c, &smp.pat[8], sizeof c);
+    sm_save_ask();
+    sm_input_poll();
+    bank_reboot();
+    bad += check("ROUND: power on: bank A in half 0, every byte of its 8 patterns (kits, trigs, locks, lengths)",
+                 smp.hbank[0] == 0u && !memcmp(&smp.pat[0], a, sizeof a));
+    bad += check("ROUND: ... the current pattern A02, its kit on the tracks (T1's machine and CUT)", smp.cur == 1u &&
+                 trk[0].engine == sm_engine_of(5) && trk[0].p[P_FCUT] == -12 && sm_play_pat == 1u);
+    bad += check("ROUND: ... BPM 137.4, swing 61, mutes T1 T3, DIRECT START, the chain A02 C05 B02",
+                 smp.bpm10 == 1374u && smp.swing == 61u && smp.mute == 5u && smp.mode == SM_PM_START && smp.nchain == 3u &&
+                 smp.chain[0] == 1u && smp.chain[1] == 20u && smp.chain[2] == 9u);
+    bad += check("ROUND: ... the used bits: A01 A02, B02, C04", (sm_used[0] & 3u) == 3u && sm_used[1] == 2u && sm_used[2] == 8u);
+    bad += check("ROUND: ... B and C from the flash, every byte", sm_bank_bring(1) == SM_BR_OK && !memcmp(&smp.pat[8], b, sizeof b) &&
+                 sm_bank_bring(2) == SM_BR_OK && !memcmp(&smp.pat[8], c, sizeof c));
+    {   /* the locks play after the power-on: A02's T1 step 4 locks CUT 90 */
+        int lk;
+        smp.nchain = 0;
+        smp.mute = 0;
+        smp.swing = 50;                                   /* (step 4 is a swung one) */
+        push(SMC_PLAY, 0, 0, 0, 0);
+        lk = run_to_step(0, 3) && trk[0].p[P_FCUT] == 90;
+
+        bad += check("ROUND: ... PLAY: the lock of A02 T1 step 4 (CUT 90) applies", lk);
+        push(SMC_STOP, 0, 0, 0, 0);
+        run_block();
+    }
+    return bad;
+}
+
+/* SAVE while playing: done at STOP (no flash write while playing); the autosave: 8 s of quiet, stopped, never while playing */
+static int test_bank_autosave(void)
+{
+    int bad = 0;
+    uint32_t w0, i;
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    kit_dry();
+    push(SMC_PLAY, 0, 0, 0, 0);
+    run_block();
+    w0 = nor_writes;
+    seq_f5_save();
+    for (i = 0; i < 60u; i++) {                           /* 12 s playing */
+        ms(200);
+        run_block();
+        sm_input_poll();
+    }
+    bad += check("SAVE: asked while playing: nothing written while playing (12 s), not even the autosave", nor_writes == w0 && sm_save_pend);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    sm_input_poll();
+    bad += check("SAVE: ... at STOP: written, SAVED", !sm_playing && nor_writes > w0 && sm_msg == SM_MSG_SAVED && !sm_half_dirty(0));
+    pat_trig(0, 0, 5, 53);                                /* an edit, stopped */
+    w0 = nor_writes;
+    for (i = 0; i < 39u; i++) {                           /* 7.8 s */
+        ms(200);
+        sm_input_poll();
+    }
+    bad += check("AUTOSAVE: 7.8 s after an edit: not yet", nor_writes == w0);
+    for (i = 0; i < 3u; i++) {
+        ms(200);
+        sm_input_poll();
+    }
+    bad += check("AUTOSAVE: ... 8 s of quiet: written (no message)", nor_writes > w0 && !sm_half_dirty(0) && sm_msg != SM_MSG_FLASH);
+    w0 = nor_writes;
+    for (i = 0; i < 60u; i++) {
+        ms(200);
+        sm_input_poll();
+    }
+    bad += check("AUTOSAVE: ... nothing changed since: nothing written again", nor_writes == w0);
+    pat_trig(0, 0, 6, 54);                                /* an edit, then a note held on the keys (MIDI, keyboard mode) */
+    trk[1].p[P_SUS] = 127;
+    trk_note_on(&trk[1], 60, 100);
+    for (i = 0; i < 60u; i++) {
+        ms(200);
+        run_block();
+        sm_input_poll();
+    }
+    bad += check("AUTOSAVE: an edit, then a note sounding for 12 s: not written over it", nor_writes == w0 && voices_busy());
+    trk_all_off(&trk[1]);
+    for (i = 0; i < 400u; i++)
+        run_block();
+    for (i = 0; i < 45u; i++) {
+        ms(200);
+        sm_input_poll();
+    }
+    bad += check("AUTOSAVE: ... the note gone, 8 s on: written", nor_writes > w0 && !sm_half_dirty(0));
+    bank_reboot();
+    bad += check("AUTOSAVE: ... the power off and on: the edit is there", smp.pat[0].step[0][5].n == 1u);
+    return bad;
+}
+
+/* the flash map: SWAMP's objects inside 0xB4000 .. 0xDC000, none overlapping (also pinned by _Static_assert) */
+static int test_bank_flash_map(void)
+{
+    uint32_t i, ok = 1;
+    for (i = 0; i < SM_FL_NSLOT; i++)
+        ok &= sm_slot_addr(i) >= SM_FL_PROJ + 2u * SM_FL_SEC && sm_slot_addr(i) + SM_FL_SPAN <= 0xDC000u &&
+              (i == 0u || sm_slot_addr(i) == sm_slot_addr(i - 1u) + SM_FL_SPAN);
+    printf("swamp: flash: project 0x%X 0x%X, banks 0x%X .. 0x%X (7 x 0x%X), a bank %u B; RAM: smp %u B\n", SM_FL_PROJ,
+           SM_FL_PROJ + SM_FL_SEC, SM_FL_SLOT0, SM_FL_SLOT0 + SM_FL_NSLOT * SM_FL_SPAN, SM_FL_SPAN, (unsigned)SM_BANK_BYTES,
+           (unsigned)sizeof smp);
+    return check("BANK: the flash map inside 0xB4000 .. 0xDC000, the places in a row, a bank fits its place", ok &&
+                 SM_FL_DATA + SM_BANK_BYTES <= SM_FL_SPAN);
+}
+
 int main(void)
 {
     int bad = 0;
@@ -6450,6 +6946,13 @@ int main(void)
     bad += test_strip_len8();
     bad += test_ring_gap();
     bad += test_mixer_four();
+    bad += test_bank_glo_grid();
+    bad += test_bank_switch_playing();
+    bad += test_bank_chain_across();
+    bad += test_bank_power_cut();
+    bad += test_bank_roundtrip();
+    bad += test_bank_autosave();
+    bad += test_bank_flash_map();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

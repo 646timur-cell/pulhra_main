@@ -13,8 +13,12 @@
  *  - buttons: the family of the page in view lit (HOME's too), REC lit while recording, PLAY's own LED glows (dark while playing, its
  *    green one lit), the rest glow, as settings_leds (OFF / DIM LO / DIM HI / INV) says;
  *  - a layer open (sm_layer.c): its button breathes (not lit, no glow), and the keys show what they do in it instead of the
- *    steps: EDIT the machines of the page glow, the track's own lit; GLO the mutes (black keys 1..4, lit = muted) and the
- *    solo keys F3 .. B3 (lit while held); SEQ F3 (CLEAR) glows. */
+ *    steps: EDIT the machines of the page glow, the track's own lit; GLO the mutes (black keys 1..4, lit = muted), the
+ *    solo keys F3 .. B3 (lit while held), the patterns C4 .. C5 of the bank in view (the current one lit, the used ones
+ *    breathe, the empty dark) and the banks G#4 A#4 C#5 D#5 F#5 (the one in view lit, the others breathe); SEQ F3 (CLEAR)
+ *    glows. */
+#define SM_GLO_PAT0 4u                                    /* GLO: the white key of pattern 1 (C4) */
+#define SM_GLO_BANK0 6u                                   /* GLO: the black key of bank A (G#4), among the black keys */
 #define LED_PLAY_GREEN ((8u << 3) | 1u)                   /* PLAY's second, green LED: column 8, row bit 1 (ui_input.c) */
 
 static uint8_t sm_led_pos[41];                            /* (col << 3) | row bit of a key id (0..13 buttons, 14.. keys) */
@@ -44,9 +48,10 @@ static void sm_led_clear(uint8_t *nl, uint32_t id)
 }
 
 /* the keys of the open layer: the white keys by their number (F3 = 0), the black keys 1..4 for the mutes */
-static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni)
+static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
 {
     uint32_t k, w = 0, nb = 0, t = sm_ui.trk % SM_NTRK, cur = smp.pat[smp.cur % SM_NPAT].kit.snd[t].machine;
+    uint32_t gcur = sm_gid_of(smp.cur);
     for (k = 0; k < SM_NKEYS; k++) {
         if ((SM_BLACK_KEYS >> k) & 1u) {
             if (sm_layer == SML_SEQ && k == SM_LAY_MODE_KEY) {   /* (SEQ: F#3 the change mode) */
@@ -56,6 +61,10 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni)
             if (sm_layer == SML_GLO && nb < SM_NTRK) {
                 sm_led_put(ni, 14u + k, 1);
                 sm_led_put((smp.mute >> nb) & 1u ? nl : ng, 14u + k, 1);
+            }
+            if (sm_layer == SML_GLO && nb >= SM_GLO_BANK0 && nb < SM_GLO_BANK0 + SM_NBANK) {   /* the banks: the one in view lit */
+                sm_led_put(ni, 14u + k, 1);
+                sm_led_put(nb - SM_GLO_BANK0 == sm_glo_bank ? nl : nbr, 14u + k, 1);
             }
             nb++;
             continue;
@@ -68,6 +77,12 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni)
                 sm_led_put(sm_epage_first(sm_lay_epage) + w == cur ? nl : ng, 14u + k, 1);
         } else if (sm_layer == SML_GLO && w < SM_NTRK) {
             sm_led_put((sm_solo >> w) & 1u ? nl : ng, 14u + k, 1);
+        } else if (sm_layer == SML_GLO && w >= SM_GLO_PAT0 && w < SM_GLO_PAT0 + SM_BPAT) {   /* the patterns of the bank in view: */
+            uint32_t g = sm_glo_bank * SM_BPAT + w - SM_GLO_PAT0;                            /* the current lit, used ones breathe */
+            if (g == gcur)
+                sm_led_put(nl, 14u + k, 1);
+            else if (sm_pat_used(g))
+                sm_led_put(nbr, 14u + k, 1);
         } else if (sm_layer == SML_SEQ && w == 0u) {
             sm_led_put(ng, 14u + k, 1);
         }
@@ -104,7 +119,7 @@ static void sm_leds(void)
             sm_led_put(nl, 14u + k, 1);
     }
     if (sm_layer)
-        sm_leds_layer(nl, ng, ni);
+        sm_leds_layer(nl, ng, ni, nb);
     else if (sm_ui.kbd) {                                      /* the keyboard mode: the octave (the buttons' glow is below) */
         sm_led_put(nl, panel.btn[B_OCTDN], sm_ui.oct < 0);
         sm_led_put(nl, panel.btn[B_OCTUP], sm_ui.oct > 0);

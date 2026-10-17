@@ -121,7 +121,7 @@ static uint32_t smd_hdr_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t h = 2166136261u;
-    h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, smp.cur);
+    h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, sm_gid_of(smp.cur));
     h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg);
     h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
     return smd_mix(h, smd_rec);
@@ -131,6 +131,19 @@ static void smd_two(char *b, uint32_t v)
     v %= 100u;
     b[0] = (char)('0' + v / 10u);
     b[1] = (char)('0' + v % 10u);
+}
+/* pattern id g as A01 .. E08 (b: 4 bytes); short: A1 .. E8 (the GLO grid) */
+static void smd_gname(char *b, uint32_t g, int short_)
+{
+    g %= SM_NGPAT;
+    b[0] = (char)('A' + g / SM_BPAT);
+    if (short_) {
+        b[1] = (char)('1' + g % SM_BPAT);
+        b[2] = 0;
+        return;
+    }
+    smd_two(b + 1, g % SM_BPAT + 1u);
+    b[3] = 0;
 }
 static void smd_lenstr(char *b, uint32_t v)               /* 1 .. 128 as text, no leading zero (b: 4 bytes) */
 {
@@ -142,16 +155,6 @@ static void smd_lenstr(char *b, uint32_t v)               /* 1 .. 128 as text, n
         b[i++] = (char)('0' + v / 10u % 10u);
     b[i++] = (char)('0' + v % 10u);
     b[i] = 0;
-}
-static int smd_pat_empty(uint32_t p)                      /* pattern p holds no trig on any track */
-{
-    const sm_pattern_t *pt = &smp.pat[p % SM_NPAT];
-    uint32_t t, s;
-    for (t = 0; t < SM_NTRK; t++)
-        for (s = 0; s < SM_NSTEP; s++)
-            if (pt->step[t][s].n)
-                return 0;
-    return 1;
 }
 static void smd_header(void)
 {
@@ -180,7 +183,7 @@ static void smd_header(void)
     }
     /* right, from the right edge: A01 120.0 >   (while recording: 120.0 > REC, the pattern gives way) */
     fmt_fix(t, smp.bpm10, 1);
-    a[0] = 'A'; smd_two(a + 1, (uint32_t)smp.cur % SM_NPAT + 1u); a[3] = 0;
+    smd_gname(a, sm_gid_of(smp.cur), 0);
     x = 240 - (rec ? 12 * 3 + 6 : 0) - 12;
     sm_px_text(x, 2, 2u, smd_play ? "\x10" : "\x11", T_TEXT, 0);
     x -= 6 + 12 * smd_len(t);
@@ -226,7 +229,7 @@ static uint32_t smd_page_sig(void)
     if (smd_flag_held())                                  /* (a trig held on a sound page: its FLAG is the line) */
         h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
     if (sm_layer)                                         /* (the title of the layer: its page of machines, the track's length) */
-        h = smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk);
+        h = smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank);
     return h;
 }
 static void smd_cat(char *d, uint32_t *n, const char *s)   /* s appended (upper case) at d[*n] */
@@ -246,8 +249,11 @@ static void smd_page(void)
         if (sm_layer == SML_EDIT) {
             smd_cat(b, &n, "MACHINE ");
             smd_cat(b, &n, MF_PAGE_NAME[sm_lay_epage % SM_NEPAGE]);
-        } else if (sm_layer == SML_GLO) {
-            smd_cat(b, &n, "MUTE SOLO");
+        } else if (sm_layer == SML_GLO) {                 /* BANK A MUTE SOLO (the bank in view) */
+            char bn[2] = {(char)('A' + sm_glo_bank % SM_NBANK), 0};
+            smd_cat(b, &n, "BANK ");
+            smd_cat(b, &n, bn);
+            smd_cat(b, &n, " MUTE SOLO");
         } else {                                          /* SEQ: LEN 32 large, SEQ T1 at the right */
             char l[8] = {'L', 'E', 'N', ' ', 0, 0, 0, 0};
             uint32_t len = smd_snd()->len % 100u;
@@ -544,12 +550,26 @@ static void smd_select(void)
 /* -------------------------------------------------------- layer map --- */
 /* an open layer's map: five rows of 34 px over the knobs and SELECT (y 48 .. 217), each row either one text across (w) or four
  * cells of 60 px (c), a cell inverted for what is on (the machine of the track, a mute, a solo). The labels are scale 2 */
-typedef struct { char w[22]; char c[4][6]; uint8_t inv, cells, winv, dim, und, box; } smd_mrow_t;   /* (bits per cell) */
+typedef struct { char w[22]; char c[5][6]; uint8_t inv, cells, winv, dim, und, box, cols; } smd_mrow_t;   /* (bits per cell;
+                                                                                         cols: 4, or 5 cells of 48 px) */
 static void smd_cell(smd_mrow_t *o, uint32_t i, const char *s, uint32_t inv)
 {
     smd_upper(o->c[i], s, 4u);
     o->inv |= (uint8_t)((inv ? 1u : 0u) << i);
     o->cells = (uint8_t)(i + 1u > o->cells ? i + 1u : o->cells);
+}
+/* the pattern asked for (its id), SM_PAT_NONE none */
+static uint32_t smd_next_g(void) { return smp.next < SM_NPAT ? sm_gid_of(smp.next) : SM_PAT_NONE; }
+/* the banks A .. E, five cells, the bank in view vb inverted, the current pattern's bank underlined */
+static void smd_bank_row(smd_mrow_t *o, uint32_t vb)
+{
+    static const char *const BN[SM_NBANK] = {"A", "B", "C", "D", "E"};
+    uint32_t b, cur = sm_gid_of(smp.cur);
+    o->cols = 5;
+    for (b = 0; b < SM_NBANK; b++) {
+        smd_cell(o, b, BN[b], b == vb);
+        o->und |= (uint8_t)((cur < SM_NGPAT && cur / SM_BPAT == b ? 1u : 0u) << b);
+    }
 }
 static void smd_map_get(uint32_t r, smd_mrow_t *o)
 {
@@ -571,38 +591,50 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
                 smd_cell(o, c, ENGINES[sm_engine_of(sm_epage_first(pg) + i)]->name, sm_epage_first(pg) + i == s->machine);
         }
         o->cells = 4;
-    } else if (sm_layer == SML_GLO) {
-        if (r == 0u || r == 3u) {
-            smd_cat(o->w, &n, r ? "SOLO" : "MUTE");
-        } else if (r == 1u || r == 4u) {
-            uint32_t on = r == 1u ? smp.mute : sm_solo;
-            for (c = 0; c < 4u; c++)
-                smd_cell(o, c, TN[c], (on >> c) & 1u);
-            o->cells = 4;
-        }
-    } else if (sm_layer == SML_SEQ) {
-        if (r < 4u) {                                     /* the grid: A01 .. A16, four a row */
-            uint32_t play = smp.cur % SM_NPAT;
+    } else if (sm_layer == SML_GLO) {                     /* the bank in view: patterns 1..8 (two rows), the banks, mute, solo */
+        if (r < 2u) {
+            uint32_t cur = sm_gid_of(smp.cur);
             for (c = 0; c < 4u; c++) {
                 char a[4];
-                i = r * 4u + c;
-                a[0] = 'A';
-                smd_two(a + 1, i + 1u);
-                a[3] = 0;
-                smd_cell(o, c, a, i == play);
-                o->dim |= (uint8_t)((smd_pat_empty(i) ? 1u : 0u) << c);
-                o->und |= (uint8_t)((i == sm_lay_pick ? 1u : 0u) << c);
-                o->box |= (uint8_t)((i == smp.next ? 1u : 0u) << c);
+                uint32_t g = sm_glo_bank * SM_BPAT + r * 4u + c;
+                smd_gname(a, g, 1);
+                smd_cell(o, c, a, g == cur);
+                o->dim |= (uint8_t)((sm_pat_used(g) ? 0u : 1u) << c);
+                o->und |= (uint8_t)((sm_glo_key == r * 4u + c ? 1u : 0u) << c);
+                o->box |= (uint8_t)((g == sm_want || g == smd_next_g() ? 1u : 0u) << c);
             }
+        } else if (r == 2u) {
+            smd_bank_row(o, sm_glo_bank);
+        } else {
+            uint32_t on = r == 3u ? smp.mute : sm_solo;
+            o->cols = 5;
+            smd_cell(o, 0, r == 3u ? "M" : "S", 0);
+            for (c = 0; c < 4u; c++)
+                smd_cell(o, c + 1u, TN[c], (on >> c) & 1u);
+        }
+    } else if (sm_layer == SML_SEQ) {
+        uint32_t play = sm_gid_of(smp.cur), vb = (sm_lay_pick < SM_NGPAT ? sm_lay_pick : play % SM_NGPAT) / SM_BPAT;
+        if (r < 2u) {                                     /* the grid: the bank of the pick (none: of the one playing), A01 .. A08 */
+            for (c = 0; c < 4u; c++) {
+                char a[4];
+                i = vb * SM_BPAT + r * 4u + c;
+                smd_gname(a, i, 0);
+                smd_cell(o, c, a, i == play);
+                o->dim |= (uint8_t)((sm_pat_used(i) ? 0u : 1u) << c);
+                o->und |= (uint8_t)((i == sm_lay_pick ? 1u : 0u) << c);
+                o->box |= (uint8_t)((i == sm_want || i == smd_next_g() ? 1u : 0u) << c);
+            }
+        } else if (r == 2u) {
+            smd_bank_row(o, vb);
+        } else if (r == 3u) {
         } else if (sm_lay_cleared) {
             smd_cat(o->w, &n, "CLEARED");
             o->winv = 1;
-        } else if (sm_lay_nch) {                          /* the chain being built: + 01 01 02 (its last six links) */
+        } else if (sm_lay_nch) {                          /* the chain being built: + A01 A01 B02 (its last four links) */
             char l[4];
             smd_cat(o->w, &n, "+");
-            for (i = sm_lay_nch > 6u ? sm_lay_nch - 6u : 0u; i < sm_lay_nch; i++) {
-                smd_two(l, sm_lay_chain[i] + 1u);
-                l[2] = 0;
+            for (i = sm_lay_nch > 4u ? sm_lay_nch - 4u : 0u; i < sm_lay_nch; i++) {
+                smd_gname(l, sm_lay_chain[i], 0);
                 smd_cat(o->w, &n, " ");
                 smd_cat(o->w, &n, l);
             }
@@ -615,9 +647,8 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             smd_cat(o->w, &n, "/");
             smd_lenstr(l, nc);
             smd_cat(o->w, &n, l);
-            smd_cat(o->w, &n, " NEXT A");
-            smd_two(l, smp.chain[(cp + 1u) % nc] % SM_NPAT + 1u);
-            l[2] = 0;
+            smd_cat(o->w, &n, " NEXT ");
+            smd_gname(l, smp.chain[(cp + 1u) % nc], 0);
             smd_cat(o->w, &n, l);
         } else {                                          /* the change mode, the master length */
             static const char *const M[SM_PM_COUNT] = {"SEQUENTIAL", "DIR START", "DIR JUMP"};
@@ -637,21 +668,22 @@ static uint32_t smd_map_sig(uint32_t r)
     smd_map_get(r, &o);
     for (i = 0; o.w[i]; i++)
         h = smd_mix(h, (uint8_t)o.w[i]);
-    for (i = 0; i < 24u; i++)
+    for (i = 0; i < 30u; i++)
         h = smd_mix(h, (uint8_t)o.c[i / 6u][i % 6u]);
-    h = smd_mix(smd_mix(smd_mix(h, o.dim), o.und), o.box);
+    h = smd_mix(smd_mix(smd_mix(smd_mix(h, o.dim), o.und), o.box), o.cols);
     return smd_mix(smd_mix(smd_mix(h, o.inv), o.cells), o.winv);
 }
 static void smd_map_row(uint32_t r)
 {
     smd_mrow_t o;
-    uint32_t c;
+    uint32_t c, cw;
     smd_map_get(r, &o);
+    cw = o.cols == 5u ? 48u : 60u;
     smd_begin(0, SMD_MAP_Y + r * SMD_MAP_ROW_H, 240u, SMD_MAP_ROW_H);
     if (o.w[0])
         sm_px_text(4, 10, 2u, o.w, T_TEXT, o.winv);
     for (c = 0; c < o.cells; c++) {
-        int32_t x = (int32_t)(c * 60u) + (60 - 12 * smd_len(o.c[c])) / 2, cx = (int32_t)(c * 60u);
+        int32_t x = (int32_t)(c * cw) + ((int32_t)cw - 12 * smd_len(o.c[c])) / 2, cx = (int32_t)(c * cw);
         uint32_t inv = (o.inv >> c) & 1u;
         if (!o.c[c][0])
             continue;
@@ -659,10 +691,10 @@ static void smd_map_row(uint32_t r)
         if ((o.und >> c) & 1u)                            /* picked: a bar under the label */
             cv_rect(x, 28, 12 * smd_len(o.c[c]), 2, T_TEXT);
         if ((o.box >> c) & 1u) {                          /* asked for: a frame round the cell */
-            cv_rect(cx + 3, 3, 54, 1, T_TEXT);
-            cv_rect(cx + 3, 30, 54, 1, T_TEXT);
+            cv_rect(cx + 3, 3, (int32_t)cw - 6, 1, T_TEXT);
+            cv_rect(cx + 3, 30, (int32_t)cw - 6, 1, T_TEXT);
             cv_rect(cx + 3, 3, 1, 28, T_TEXT);
-            cv_rect(cx + 56, 3, 1, 28, T_TEXT);
+            cv_rect(cx + (int32_t)cw - 4, 3, 1, 28, T_TEXT);
         }
     }
     smd_end();

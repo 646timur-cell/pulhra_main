@@ -22,8 +22,8 @@
 
 /* the header's messages (the only ones: LOCKS FULL, CLEARED, UNDO; SAVED and the flash's error come with the storage), each
  * for SM_MSG_US, the header inverted */
-enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_COUNT };
-static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEARED", "UNDO"};
+enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_SAVED, SM_MSG_FLASH, SM_MSG_COUNT };
+static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEARED", "UNDO", "SAVED", "FLASH ERROR"};
 static uint8_t sm_msg;                                    /* the message in the header (since sm_msg_t0), SM_MSG_NONE none */
 static uint32_t sm_msg_t0;
 

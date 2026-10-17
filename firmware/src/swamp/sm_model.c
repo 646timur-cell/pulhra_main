@@ -74,22 +74,58 @@ static void sm_step_eff(const sm_step_t *s, const sm_sound_t *d, sm_step_t *o)
         o->cond = d->dcond;
 }
 
-/* power-on: 120.0 BPM, swing 50, every step empty, 16 steps; the kit T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX (their first
- * presets) in all 16 patterns */
-static void sm_project_init(void)
+/* the slot in RAM of pattern id g (0..39), SM_PAT_NONE when its bank is in neither half; the audio stream's too (a chain's link:
+ * each hbank byte read once) */
+static uint32_t sm_slot_of(uint32_t g)
+{
+    uint32_t h, b = g / SM_BPAT;
+    if (g >= SM_NGPAT)
+        return SM_PAT_NONE;
+    for (h = 0; h < SM_NHALF; h++)
+        if (*(volatile uint8_t *)&smp.hbank[h] == b)
+            return h * SM_BPAT + g % SM_BPAT;
+    return SM_PAT_NONE;
+}
+/* the pattern id of RAM slot s (SM_PAT_NONE: its half holds no bank) */
+static uint32_t sm_gid_of(uint32_t s)
+{
+    uint32_t b = smp.hbank[(s % SM_NPAT) / SM_BPAT];
+    return b < SM_NBANK ? b * SM_BPAT + s % SM_BPAT : SM_PAT_NONE;
+}
+
+/* the patterns that hold something (sm_bank.c, the GLO grid): bit per place, per bank. A bit is set by a save into the place
+ * (GLO), and when its bank is written to the flash for every pattern with a trig; kept in the bank's flash header */
+static uint8_t sm_used[SM_NBANK];
+
+/* the power-on kit: T1 SAW, T2 FM-ST, T3 STRING, T4 BBOX (their first presets) */
+static void sm_kit_default(sm_kit_t *kit)
 {
     static const uint8_t KIT[SM_NTRK] = {ENGI_MSAW, ENGI_MFMST, ENGI_STRING, ENGI_MBBOX};
+    uint32_t t;
+    for (t = 0; t < SM_NTRK; t++)
+        sm_sound_from_preset(&kit->snd[t], eng_rank(KIT[t]), 0);
+}
+/* an empty pattern with kit k: no trig, no lock, master length AUTO */
+static void sm_pat_blank(sm_pattern_t *p, const sm_kit_t *k)
+{
+    memset(p, 0, sizeof *p);
+    p->kit = *k;
+}
+
+/* power-on: 120.0 BPM, swing 50, every step empty, 16 steps; the default kit in every pattern; banks A and B in RAM, the
+ * current pattern A01 (the only one used) */
+static void sm_project_init(void)
+{
     sm_kit_t kit;
-    uint32_t t, pp, m;
+    uint32_t pp;
     memset(&smp, 0, sizeof smp);
-    for (t = 0; t < SM_NTRK; t++) {
-        m = eng_rank(KIT[t]);
-        sm_sound_from_preset(&kit.snd[t], m, 0);
-    }
-    for (pp = 0; pp < SM_NPAT; pp++) {
-        smp.pat[pp].kit = kit;
-        smp.pat[pp].mlen = 0;
-    }
+    sm_kit_default(&kit);
+    for (pp = 0; pp < SM_NPAT; pp++)
+        sm_pat_blank(&smp.pat[pp], &kit);
+    smp.hbank[0] = 0;
+    smp.hbank[1] = 1;
+    memset(sm_used, 0, sizeof sm_used);
+    sm_used[0] = 1u;
     smp.bpm10 = 1200u;
     smp.swing = 50u;
     smp.mode = SM_PM_SEQ;
