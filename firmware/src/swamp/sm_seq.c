@@ -372,7 +372,7 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
     sm_rat_q8[t] = SM_Q8_NONE;
     sm_ps[t].n = 0;
     sm_seq_locks(t, st);                                  /* (before the notes: they start with the step's values) */
-    if (f & SMF_PSLIDE)
+    if ((f & SMF_PSLIDE) && pt->nlock)                    /* (no locks: nothing to glide) */
         sm_ps_begin(t, st, (int32_t)at, step_q8);
     if (f & SMF_REST) {                                   /* a lock trig: no note; a note held sounds on (with the locks) */
         if (sm_slid[t])

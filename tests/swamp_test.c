@@ -3515,7 +3515,7 @@ static int test_home_bpm_select(void)
     bad += check("HOME: K1 slowly (2 detents): 0.1 BPM each", smp.bpm10 == 1212u);
     turn(EN_K1, -5);
     sm_input_poll();
-    bad += check("HOME: K1 fast (5 detents in one poll): 1.0 BPM each", smp.bpm10 == 1162u);
+    bad += check("HOME: K1 -5 in one poll (a new turn): 3 x 0.1, then 2 x 1.0", smp.bpm10 == 1212u - 23u);
     turn(EN_K1, -5000);
     sm_input_poll();
     bad += check("HOME: K1 far down: 30.0 BPM", smp.bpm10 == 300u);
@@ -3551,6 +3551,50 @@ static int test_home_bpm_select(void)
     b = on_n[0];
     bad += check("HOME: 150.0 BPM from SELECT: the trig on step 4 at 4 steps of that tempo",
                  smp.bpm10 == 1500u && b == 2u && near_d(on_at[0][1], 4.0 * S));
+    return bad;
+}
+
+/* K1's BPM turn as the device gives it: one detent a poll, the polls a few ms apart (a flick) or 150 ms (a slow turn) */
+static int test_home_bpm_accel(void)
+{
+    int bad = 0;
+    uint32_t k;
+    in_reset();
+    host_ticks = 1000000u;
+    press(B_HOME);
+    sm_input_poll();
+    press(B_HOME);
+    sm_input_poll();                                      /* CLOCK */
+    for (k = 0; k < 6u; k++) {
+        turn(EN_K1, 1);
+        sm_input_poll();
+        ms(150);
+    }
+    bad += check("HOME: K1 a slow turn (a detent every 150 ms, one a poll): 0.1 each, 120.6", smp.bpm10 == 1206u);
+    ms(300);
+    for (k = 0; k < 8u; k++) {
+        turn(EN_K1, 1);
+        sm_input_poll();
+        ms(10);
+    }
+    bad += check("HOME: K1 a flick (8 detents, one a poll, 10 ms apart): the first three 0.1, then 1.0 each: +5.3", smp.bpm10 == 1206u + 3u + 50u);
+    ms(300);
+    turn(EN_K1, 1);
+    sm_input_poll();
+    bad += check("HOME: ... after a pause the next detent is 0.1 again", smp.bpm10 == 1206u + 3u + 50u + 1u);
+    for (k = 0; k < 6u; k++) {
+        turn(EN_K1, -1);
+        sm_input_poll();
+        ms(10);
+    }
+    bad += check("HOME: a reversal starts a new turn: 3 x 0.1 then 3 x 1.0 down", smp.bpm10 == 1206u + 3u + 50u + 1u - 3u - 30u);
+    ms(300);
+    for (k = 0; k < 12u; k++) {                           /* a turn at 60 ms a detent: 4 in 240 ms, never 4 in 80 ms */
+        turn(EN_K1, 1);
+        sm_input_poll();
+        ms(60);
+    }
+    bad += check("HOME: a medium turn (60 ms a detent): 0.1 each", smp.bpm10 == 1206u + 3u + 50u + 1u - 3u - 30u + 12u);
     return bad;
 }
 
@@ -4180,6 +4224,7 @@ int main(void)
     bad += test_step_draw();
     bad += test_home_mixer();
     bad += test_home_bpm_select();
+    bad += test_home_bpm_accel();
     bad += test_home_draw();
     bad += test_swing();
     bad += test_swing_with_nudge_ratchet();

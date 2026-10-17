@@ -35,6 +35,8 @@ static void sm_midi_forget(uint32_t t) { memset(sm_mn[t % SM_NTRK], 0, sizeof sm
 static void sm_midi_release(uint32_t t)
 {
     uint32_t note;
+    if (!(sm_mn[t][0] | sm_mn[t][1] | sm_mn[t][2] | sm_mn[t][3]))
+        return;
     for (note = 0; note < 128u; note++)
         if (sm_midi_has(t, note) && !sm_seq_has(t, note))
             trk_note_off(&trk[t], note);
@@ -52,7 +54,7 @@ static void sm_midi_drain(void)
         midi_in_overflow = 0;
     }
     for (t = 0; t < SM_NTRK; t++)
-        if (((mute >> t) & 1u))
+        if ((mute >> t) & 1u)
             sm_midi_release(t);
     while (mi_r != mi_w) {
         uint32_t pkt = midi_in_q[mi_r % MQ], status = (pkt >> 8) & 0xFFu, hi = status & 0xF0u, ch = status & 0x0Fu;

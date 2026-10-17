@@ -34,8 +34,15 @@ static uint8_t sm_key_step[SM_NKEYS];                     /* the step each of th
 static uint8_t sm_key_trk[SM_NKEYS];                      /* ... and the track */
 static uint32_t sm_key_used;                              /* bit per key: a knob turned while it was down (a lock, no toggle) */
 
+#define SM_FAST_US 80000u
+#define SM_FAST_N 4u
+static uint32_t sm_fast_t0, sm_fast_n;                    /* K1's BPM turn: its window (sm_bpm_accel) */
+static int8_t sm_fast_dir;
+
 static void sm_input_init(void)
 {
+    sm_fast_n = 0;
+    sm_fast_dir = 0;
     memset(&sm_ui, 0, sizeof sm_ui);
     sm_ui.held_step = sm_ui.sel_step = 0xFFu;
     memset(sm_pdirty, 0, sizeof sm_pdirty);
@@ -276,16 +283,37 @@ static void sm_bpm_turn(int32_t s)
     }
 }
 
-/* the HOME pages' knobs. MIXER: K1..K4 the LEVEL of T1..T4. CLOCK: K1 BPM (0.1 a detent, 1.0 a detent when four or more come
- * in one poll: a quick turn), K2 SWING 50 .. 75 %. SELECT: the tempo, 0.1 a detent. */
-static void sm_home_page(const int32_t *k, int32_t sel)
+/* K1's BPM turn is timed (the poll runs back to back, so detents seldom pile up inside one poll): the detents of a turn in
+ * one direction are counted in a window that opens at the first of them and lasts SM_FAST_US; from the 4th detent in it
+ * each detent is 1.0 BPM (x10, a flick); before that, and in a slow turn (the window runs out between detents), 0.1.
+ * A reversal opens a new window. */
+static int32_t sm_bpm_accel(int32_t s, uint32_t now)
+{
+    int8_t dir = (int8_t)(s < 0 ? -1 : 1);
+    uint32_t a = (uint32_t)(s < 0 ? -s : s), slow;
+    if (!s)
+        return 0;
+    if (dir != sm_fast_dir || (uint32_t)(now - sm_fast_t0) > SM_FAST_US * FM1_TICKS_PER_US) {
+        sm_fast_dir = dir;
+        sm_fast_t0 = now;
+        sm_fast_n = 0;
+    }
+    slow = sm_fast_n < SM_FAST_N - 1u ? SM_FAST_N - 1u - sm_fast_n : 0u;   /* (the detents that bring the count to 3 stay 0.1) */
+    slow = slow > a ? a : slow;
+    sm_fast_n += a;
+    return dir * (int32_t)(slow + (a - slow) * 10u);
+}
+
+/* the HOME pages' knobs. MIXER: K1..K4 the LEVEL of T1..T4. CLOCK: K1 BPM (0.1 a detent, 1.0 in a quick turn:
+ * sm_bpm_accel), K2 SWING 50 .. 75 %. SELECT: the tempo, 0.1 a detent. */
+static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
 {
     uint32_t i;
     if (sm_page_home() == SMH_MIXER) {
         for (i = 0; i < SM_NTRK; i++)
             sm_turn_base(i, P_LEVEL, k[i]);
     } else {
-        sm_bpm_turn(k[0] >= 4 || k[0] <= -4 ? k[0] * 10 : k[0]);
+        sm_bpm_turn(sm_bpm_accel(k[0], now));
         if (k[1]) {
             int32_t v = clamp((int32_t)smp.swing + k[1], 50, 75);
             if ((uint8_t)v != smp.swing) {
@@ -362,7 +390,7 @@ static void sm_input_poll(void)
         sm_step_page(k, sel, pre);
     } else if (sm_page_home()) {
         sm_preset_turn(pre);
-        sm_home_page(k, sel);
+        sm_home_page(k, sel, now);
     } else {
         sm_preset_turn(pre);
         for (i = 0; i < 4; i++)
