@@ -164,6 +164,20 @@ static const sm_step_t *smd_step(int32_t *st)
     *st = i;
     return i < 0 ? 0 : &smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][i];
 }
+/* a trig held (shown: past the hold time, or turned) on a sound page that is not STEP / HOME / a layer: PRESETS is its FLAG */
+static int smd_flag_held(void)
+{
+    return !sm_layer && !sm_page_is_step() && !sm_page_home() && sm_ui.held_step < SM_NSTEP && sm_trig_held() >= 0;
+}
+static const sm_step_t *smd_held_step(void)
+{
+    return &smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][sm_ui.held_step % SM_NSTEP];
+}
+static uint32_t smd_held_flags(void)
+{
+    const sm_step_t *p = smd_held_step();
+    return p->n ? 0x100u + p->flags : 0u;
+}
 static uint32_t smd_page_sig(void)
 {
     const sm_sound_t *s = smd_snd();
@@ -173,6 +187,8 @@ static uint32_t smd_page_sig(void)
         const sm_step_t *p = smd_step(&st);
         h = smd_mix(smd_mix(smd_mix(h, (uint32_t)st), p ? p->n : 0u), p ? p->flags : 0u);
     }
+    if (smd_flag_held())                                  /* (a trig held on a sound page: its FLAG is the line) */
+        h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
     if (sm_layer)                                         /* (the title of the layer: its page of machines, the track's length) */
         h = smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk);
     return h;
@@ -201,6 +217,11 @@ static void smd_page(void)
             b[n++] = (char)('1' + sm_ui.trk % SM_NTRK);
             b[n] = 0;
         }
+    } else if (smd_flag_held()) {                       /* FLAG ACC (the step held) */
+        const sm_step_t *p = smd_held_step();
+        n = 0;
+        smd_cat(b, &n, "FLAG ");
+        smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");
     } else if (sm_page_is_step()) {                     /* STEP 05 . X3 (the step edited, its FLAG); STEP - none */
         int32_t st;
         const sm_step_t *p = smd_step(&st);
@@ -281,7 +302,7 @@ static void smd_step_knob(uint32_t k, smd_knob_t *o)
     switch (k) {
     case 0: smd_note(o->val, p->note[0] & 127u); o->pos = (uint32_t)(p->note[0] & 127u) * 256u / 127u; break;
     case 1: smd_int(o->val, p->vel, 0); o->pos = (uint32_t)(p->vel > 1u ? p->vel - 1u : 0u) * 256u / 126u; break;
-    case 2: i = p->len < MF_NLEN ? p->len : 0u; smd_upper(o->val, MF_LEN_N[i], 5u); o->pos = i * 256u / (MF_NLEN - 1u); break;
+    case 2: i = p->len < SM_NLEN ? p->len : 0u; smd_upper(o->val, SM_LEN_N[i], 5u); o->pos = i * 256u / (SM_NLEN - 1u); break;
     default: sm_cond_name(p->cond, o->val); o->pos = sm_cond_place(p->cond) * 256u / (SM_COND_PLACES - 1u); break;
     }
     o->v = (int32_t)o->pos;

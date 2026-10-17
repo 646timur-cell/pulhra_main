@@ -398,11 +398,11 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
         sm_gate[t] = SM_GATE_INF;
         return;
     }
-    li = s->len < MF_NLEN ? s->len : 0u;
-    if (li == MF_LEN_INF)
+    li = s->len < SM_NLEN ? s->len : 0u;
+    if (li == SM_LEN_INF)
         sm_gate[t] = SM_GATE_INF;
     else if (li)
-        sm_gate[t] = (int32_t)(step_q8 / 8u * MF_LEN8[li] >> 8);
+        sm_gate[t] = (int32_t)((step_q8 >> 6) * SM_LEN64[li] >> 8)   /* (q8 samples: 1/64 of a step is the finest) */;
     else
         sm_gate[t] = (int32_t)((step_q8 >> 8) * (uint32_t)clamp(trk[t].p[P_SGATE], 1, 127) / 128u);
 }

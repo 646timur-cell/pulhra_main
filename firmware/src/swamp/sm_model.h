@@ -27,8 +27,13 @@
 #define SM_COND_NFILL 105u
 #define SM_COND_AB0 106u                                  /* 1:2; 35 of them, B = 2..8 */
 #define SM_COND_END (SM_COND_AB0 + 35u)
-/* a step's len: an index into MONOFM's LEN list (core.h MF_LEN8 / MF_LEN_N: TRK 1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 16 INF) */
-#define SM_LEN_INF MF_LEN_INF
+/* a step's len: an index into SWAMP's own LEN list (not core.h's: MONOFM / Felucca keep theirs): TRK 1/64 1/32 1/16 1/8 1/4
+ * 1/2 3/4 1 1.5 2 3 4 6 8 16 INF. SM_LEN64: the gate in 1/64 steps (0: TRK = the track's GATE, INF = held to the next trig) */
+#define SM_NLEN 17u
+#define SM_LEN_INF 16u
+static const uint16_t SM_LEN64[SM_NLEN] = {0, 1, 2, 4, 8, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 1024, 0};
+static const char *const SM_LEN_N[SM_NLEN] = {"TRK", "1/64", "1/32", "1/16", "1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3",
+                                              "4", "6", "8", "16", "INF"};
 
 typedef struct {
     uint8_t note[4], n, vel, len, cond, flags;            /* n == 0: the trig is off; n with SMF_REST: a lock trig, no note */

@@ -240,9 +240,41 @@ static int32_t sm_step_edit(void)
     return sm_ui.sel_step < SM_NSTEP ? (int32_t)sm_ui.sel_step : -1;
 }
 
+/* the FLAG list turned by pre places on step st of track t (the STEP page, and a held trig on any other sound page). An empty
+ * step: PRESETS makes it a REST trig (sm_step_toggle's order: fields, barrier, n; the place REST). Returns 1 if the step is a trig */
+static int sm_step_flag(uint32_t t, int32_t st, int32_t pre)
+{
+    sm_step_t *s = &smp.pat[smp.cur % SM_NPAT].step[t % SM_NTRK][st];
+    if (!s->n) {
+        if (pre) {
+            sm_lock_clear_step(t, (uint32_t)st);
+            sm_step_fresh(t, (uint32_t)st, SMF_REST);
+            SM_BARRIER();
+            s->n = 1;
+        }
+        return 0;
+    }
+    if (pre) {
+        int32_t q = ((int32_t)sm_flag_place(s->flags) + pre) % (int32_t)SM_NFLAG;
+        s->flags = SM_FLAGV[q < 0 ? q + (int32_t)SM_NFLAG : q];
+    }
+    return 1;
+}
+
+/* a trig held on this track (the pressed last): its step, -1 none. Not the selected step: only a key down */
+static int32_t sm_trig_held(void)
+{
+    uint32_t k, last = SM_NKEYS;
+    for (k = 0; k < SM_NKEYS; k++)
+        if (((sm_key_arm >> k) & 1u) && sm_key_trk[k] == sm_ui.trk &&
+            (last == SM_NKEYS || (int32_t)(sm_key_t0[k] - sm_key_t0[last]) >= 0))
+            last = k;
+    return last < SM_NKEYS ? (int32_t)sm_key_step[last] : -1;
+}
+
 /* the STEP page's knobs onto the step edited: K1 NOTE 0..127 (C-1 .. G9), K2 VEL 1..127, K3 LEN (the list's index),
- * K4 COND (its walk), SELECT NUDGE -8..+7, PRESETS the FLAG list round. An empty step: PRESETS makes it a REST trig
- * (sm_step_toggle's order: fields, barrier, n; the place REST), the rest nothing */
+ * K4 COND (its walk), SELECT NUDGE -8..+7, PRESETS the FLAG list round (sm_step_flag). An empty step: PRESETS a REST trig, the
+ * rest nothing */
 static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
 {
     int32_t st = sm_step_edit();
@@ -252,22 +284,11 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
         return;
     s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
     sm_dirty = 1;
-    if (!s->n) {
-        if (pre) {
-            sm_lock_clear_step(t, (uint32_t)st);
-            sm_step_fresh(t, (uint32_t)st, SMF_REST);
-            SM_BARRIER();
-            s->n = 1;
-        }
+    if (!sm_step_flag(t, st, pre))
         return;
-    }
-    if (pre) {
-        int32_t q = ((int32_t)sm_flag_place(s->flags) + pre) % (int32_t)SM_NFLAG;
-        s->flags = SM_FLAGV[q < 0 ? q + (int32_t)SM_NFLAG : q];
-    }
     s->note[0] = (uint8_t)clamp((int32_t)s->note[0] + k[0], 0, 127);
     s->vel = (uint8_t)clamp((int32_t)s->vel + k[1], 1, 127);
-    s->len = (uint8_t)clamp((int32_t)s->len + k[2], 0, (int32_t)MF_NLEN - 1);
+    s->len = (uint8_t)clamp((int32_t)s->len + k[2], 0, (int32_t)SM_NLEN - 1);
     if (k[3])
         s->cond = (uint8_t)sm_cond_of_place((uint32_t)clamp((int32_t)sm_cond_place(s->cond) + k[3], 0, (int32_t)SM_COND_PLACES - 1));
     s->nudge = (int8_t)clamp((int32_t)s->nudge + sel, -8, 7);
@@ -384,6 +405,14 @@ static void sm_input_poll(void)
         sm_dirty = 1;
     }
     sm_keys_press(notes, now);
+    if (pre && !sm_page_is_step() && !sm_page_home() && sm_trig_held() >= 0) {   /* a trig held on a sound page: PRESETS is its FLAG */
+        int32_t hs = sm_trig_held();
+        sm_key_used |= sm_key_arm;
+        sm_step_flag(sm_ui.trk % SM_NTRK, hs, pre);
+        sm_ui.held_step = sm_ui.sel_step = (uint8_t)hs;
+        sm_dirty = 1;
+        pre = 0;
+    }
     if (sel || k[0] || k[1] || k[2] || k[3] || (pre && sm_page_is_step()))   /* (any of them, a knob without a parameter */
         sm_key_used |= sm_key_arm;                                           /* too: no toggle) */
     if (sm_page_is_step()) {

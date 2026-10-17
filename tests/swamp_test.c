@@ -2972,7 +2972,7 @@ static int test_step_len(void)
     int bad = 0;
     seq_reset();
     sm_step_toggle(0, 0);
-    stp(0, 0)->len = 2;                                   /* 1/4 */
+    stp(0, 0)->len = 5;                                   /* 1/4 */
     sm_step_toggle(1, 0);
     sm_step_toggle(1, 8);
     stp(1, 0)->len = SM_LEN_INF;
@@ -2986,8 +2986,83 @@ static int test_step_len(void)
     off = ev_nth(0, 1, 0);
     bad += check("STEP: LEN INF: held to the next trig (step 8), no note-off before",
                  off && near_d(off->at, 8.0 * S120) && ev_count(1, 1) == 2u);
-    bad += check("STEP: sm_seq_len8: TRK 0, 1/8 1, 1 8, 16 128 (the MONOFM list)",
-                 SM_LEN_INF == 13u && MF_LEN8[0] == 0u && MF_LEN8[1] == 1u && MF_LEN8[5] == 8u && MF_LEN8[12] == 128u);
+    seq_reset();                                          /* LEN 1/32: below 1/8, the finer q8 gate */
+    sm_step_toggle(0, 0);
+    stp(0, 0)->len = 2;
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(3.0 * S120));
+    on = ev_nth(1, 0, 0);
+    off = ev_nth(0, 0, 0);
+    bad += check("STEP: LEN 1/32: the note-off a 1/32 step after the note-on (+-CTL)",
+                 on && off && near_d(off->at - on->at, S120 / 32.0));
+    bad += check("STEP: SM_LEN64: TRK 0, 1/64 1, 1 64, 16 1024 (SWAMP list), INF 16",
+                 SM_LEN_INF == 16u && SM_LEN64[0] == 0u && SM_LEN64[1] == 1u && SM_LEN64[8] == 64u && SM_LEN64[15] == 1024u);
+    return bad;
+}
+
+/* a trig held on a sound page (FILTER): PRESETS is the step's FLAG, not the track's preset */
+static int test_flag_on_held_trig_any_page(void)
+{
+    int bad = 0;
+    uint32_t p0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 3);
+    sm_input_poll();
+    while (strcmp(sm_cur_page()->name, "FILTER") && sm_ui.page < 63u)
+        sm_ui.page++;
+    bad += check("FLAGHELD: on the FILTER page", !strcmp(sm_cur_page()->name, "FILTER"));
+    p0 = ksnd(0)->preset;
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    bad += check("FLAGHELD: PRESETS +1: ACC, the track's preset unchanged", stp(0, 3)->flags == SMF_ACCENT && ksnd(0)->preset == p0);
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    bad += check("FLAGHELD: +1 again: SLD", stp(0, 3)->flags == SMF_SLIDE);
+    key_up(WHITE[3]);
+    sm_input_poll();
+    bad += check("FLAGHELD: the release does not toggle the trig", stp(0, 3)->n == 1u);
+    key_dn(WHITE[6]);
+    sm_input_poll();
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    key_up(WHITE[6]);
+    sm_input_poll();
+    bad += check("FLAGHELD: an empty step: a REST trig, kept on the release", stp(0, 6)->n == 1u && stp(0, 6)->flags == SMF_REST);
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    bad += check("FLAGHELD: no key down: PRESETS is the track's preset again", ksnd(0)->preset == p0 + 1u && stp(0, 3)->flags == SMF_SLIDE);
+    return bad;
+}
+
+static int test_flag_shown_while_held(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 3);
+    while (strcmp(sm_cur_page()->name, "FILTER") && sm_ui.page < 63u)
+        sm_ui.page++;
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    bad += check("FLAGSHOWN: held trig: the page line is FLAG ACC", smd_flag_held() && stp(0, 3)->flags == SMF_ACCENT);
+    {
+        char b[24];
+        uint32_t n = 0;
+        const char *nm = SM_FLAGN[sm_flag_place(smd_held_step()->flags)];
+        smd_cat(b, &n, "FLAG ");
+        smd_cat(b, &n, nm);
+        bad += check("FLAGSHOWN: the text", !strcmp(b, "FLAG ACC"));
+    }
+    key_up(WHITE[3]);
+    sm_input_poll();
+    bad += check("FLAGSHOWN: released: the line is the page's", !smd_flag_held());
     return bad;
 }
 
@@ -3337,7 +3412,7 @@ static int test_step_page(void)
     bad += check("STEPPG: ... up to 127", s->vel == 127u);
     turn(EN_K3, 2);
     sm_input_poll();
-    bad += check("STEPPG: K3 LEN +2: 1/4", s->len == 2u);
+    bad += check("STEPPG: K3 LEN +2: 1/32", s->len == 2u);
     turn(EN_K3, 100);
     sm_input_poll();
     bad += check("STEPPG: ... up to INF", s->len == SM_LEN_INF);
@@ -3850,7 +3925,7 @@ static int test_midi_vs_seq_same_note(void)
     midi_reset();
     sm_step_toggle(0, 0);
     stp(0, 0)->note[0] = 60;
-    stp(0, 0)->len = MF_LEN_INF;
+    stp(0, 0)->len = SM_LEN_INF;
     push(SMC_PLAY, 0, 0, 0, 0);
     mix_blocks(4);
     bad += check("MIDI+SEQ: the sequencer's C4 (LEN INF) sounds", ev_count(1, 0) == 1u && notes_on_core(0) == 1u);
@@ -3890,7 +3965,7 @@ static int test_midi_vs_seq_same_note(void)
     for (k = 0; k < 16u; k++) {
         sm_step_toggle(0, k);
         stp(0, k)->note[0] = 60;
-        stp(0, k)->len = (uint8_t)(k & 1u ? MF_LEN_INF : 1u);
+        stp(0, k)->len = (uint8_t)(k & 1u ? SM_LEN_INF : 1u);
     }
     midi_on(0, 60, 100);
     push(SMC_PLAY, 0, 0, 0, 0);
@@ -3905,7 +3980,7 @@ static int test_midi_vs_seq_same_note(void)
     midi_reset();
     sm_step_toggle(0, 0);
     stp(0, 0)->note[0] = 60;
-    stp(0, 0)->len = MF_LEN_INF;
+    stp(0, 0)->len = SM_LEN_INF;
     push(SMC_PLAY, 0, 0, 0, 0);
     mix_blocks(4);
     midi_off(0, 60);
@@ -3991,7 +4066,7 @@ static int test_midi_overflow(void)
     bad += check("MIDI: a note held on T1", notes_on_core(0) == 1u);
     sm_step_toggle(1, 0);                                 /* the sequencer's own notes are not MIDI's to drop */
     stp(1, 0)->note[0] = 62;
-    stp(1, 0)->len = MF_LEN_INF;
+    stp(1, 0)->len = SM_LEN_INF;
     push(SMC_PLAY, 0, 0, 0, 0);
     mix_blocks(2);
     for (k = 0; k < MQ + 4u; k++)                         /* the main producer outruns the audio stream: the ring fills */
@@ -4221,6 +4296,8 @@ int main(void)
     bad += test_step_carried();
     bad += test_step_fix1();
     bad += test_step_page();
+    bad += test_flag_on_held_trig_any_page();
+    bad += test_flag_shown_while_held();
     bad += test_step_draw();
     bad += test_home_mixer();
     bad += test_home_bpm_select();
