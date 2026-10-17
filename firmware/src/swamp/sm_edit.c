@@ -4,8 +4,9 @@
  *  - the clipboard (sm_clip): a pattern (everything of it), or a track (its sound - the kit's, its length too - its steps and
  *    its locks, kept as track 0 of the clipboard). PASTE track takes the track copied, or, a pattern copied, its track of the
  *    same number; PASTE pattern needs a pattern copied;
- *  - UNDO: one snapshot (sm_undo_buf) of the current pattern, taken before each CLEAR, PASTE, SHIFT, TRN (CLEAR held on to all
- *    four tracks keeps the one its tap took); UNDO puts it back once; a pattern switch forgets it.
+ *  - UNDO: one level, one snapshot (sm_undo_buf) of the current pattern, taken anew before each CLEAR, PASTE, SHIFT, TRN (each
+ *    replaces the one before; CLEAR held on to all four tracks keeps the one its tap took); UNDO puts it back once; a pattern
+ *    switch forgets it.
  * A track rewritten while the audio stream plays it (sm_put_begin, then sm_put_track): every step of the track first made
  * invisible (n = 0: the audio stream reads n first, sm_seq_fire / sm_seq_part / sm_ps_begin), its locks removed (tombstones,
  * one byte each; stopped: the pool compacted), SMC_UNLOCK pushed (a lock of it on the core goes back to the base); then the
@@ -19,9 +20,11 @@
 #define SM_CLEAR_ALL_US 800000u                           /* SEQ + F3 held this long: every track */
 enum { SM_CLIP_NONE, SM_CLIP_TRK, SM_CLIP_PAT };
 
-static sm_pattern_t sm_clip;                              /* COPY / PASTE */
+/* the two buffers in .noinit (app.ld NOINIT: RAM the .bss does not pay for; sm_main.c checks they fit with the rest of it):
+ * garbage after a power-on or a reset, so each is read only while its flag (zeroed by sm_edit_init) says it was written */
+static sm_pattern_t sm_clip __attribute__((section(".noinit")));        /* COPY / PASTE */
 static uint8_t sm_clip_kind;                              /* SM_CLIP_* */
-static sm_pattern_t sm_undo_buf;                          /* UNDO: the pattern before the last edit */
+static sm_pattern_t sm_undo_buf __attribute__((section(".noinit")));    /* UNDO: the pattern before the last edit */
 static uint8_t sm_undo_ok, sm_undo_pat;                   /* ... there is one, of this pattern */
 
 static void sm_edit_init(void)

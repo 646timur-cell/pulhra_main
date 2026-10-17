@@ -4946,9 +4946,70 @@ static int test_chain_plays_links(void)
         ok &= e && near_d(e->at, T2AT[i] * S120);
     }
     bad += check("CHAIN: ... a repeated link starts every track again from step 1 (T2 at 2 8 24 30)", ok);
+    for (i = 0; i < 20000u && sm_play_pat != 1u; i++) {   /* STOP in A02 (link 3), PLAY: from link 1 */
+        run_block();
+        sm_input_poll();
+    }
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    bad += check("CHAIN: STOP in link 3 (A02)", !sm_playing && sm_play_pat == 1u && sm_cpos == 2u);
+    seq_log_clear();
+    push(SMC_PLAY, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    bad += check("CHAIN: PLAY: link 1 again (A01 at once, the main loop mirrors it)", sm_cpos == 0u && sm_play_pat == 0u && smp.cur == 0u);
+    for (i = 0; i < 13u * (uint32_t)S120 / CTL; i++) {
+        run_block();
+        sm_input_poll();
+    }
+    ok = 1;
+    for (i = 0; i < 5u; i++) {
+        const seq_ev_t *e = ev_nth(1, 0, i);
+        ok &= e && e->note == WANT_N[i] && near_d(e->at, WANT_AT[i] * S120);
+    }
+    bad += check("CHAIN: ... then A01 A01 A02 as from the start (48 49 48 49 60 at 0 5 6 11 12)", ok);
     push(SMC_STOP, 0, 0, 0, 0);
     run_block();
     (void)at;
+    return bad;
+}
+
+/* a link of the pattern playing (A01 A01): the tracks from step 1 only; no sound loaded again (a value the core holds stays),
+ * no engine fade, a LEN INF note not let go at the link's end (only by the next trig, as in a loop) */
+static int test_chain_repeat_no_reload(void)
+{
+    int bad = 0, ok = 1, fade = 0;
+    uint32_t i;
+    static const uint8_t CH[2] = {0, 0};
+    const seq_ev_t *e;
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    pat_trig(0, 1, 4, 60);
+    smp.pat[0].step[1][4].len = SM_LEN_INF;
+    smp.pat[0].mlen = 6;
+    sm_chain_set(CH, 2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    run_block();
+    trk[2].p[P_LRATE] = 77;                               /* (the core's own: a sound loaded again would overwrite it) */
+    for (i = 0; i < 13u * (uint32_t)S120 / CTL; i++) {
+        run_block();
+        sm_input_poll();
+        fade |= trk[0].xf || trk[1].xf || trk[2].xf || trk[3].xf;
+    }
+    bad += check("CHAIN/REPEAT: A01 A01: link 2 reached (sm_cpos moved), no switch", sm_cpos == 0u && sm_play_pat == 0u);
+    bad += check("CHAIN/REPEAT: ... no sound loaded again, no engine fade", trk[2].p[P_LRATE] == 77 && !fade);
+    for (i = 0; i < 3u; i++) {
+        e = ev_nth(1, 0, i);
+        ok &= e && near_d(e->at, i * 6.0 * S120);
+    }
+    bad += check("CHAIN/REPEAT: ... T1 at 0 6 12 (every link from step 1)", ok);
+    e = ev_nth(0, 1, 0);
+    bad += check("CHAIN/REPEAT: ... T2's LEN INF note (step 5) let go by its next trig (10), not at the link's end (6)",
+                 e && e->note == 60u && near_d(e->at, 10.0 * S120));
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
     return bad;
 }
 
@@ -5765,6 +5826,7 @@ int main(void)
     bad += test_pat_seq_layer();
     bad += test_chain_build();
     bad += test_chain_plays_links();
+    bad += test_chain_repeat_no_reload();
     bad += test_chain_off();
     bad += test_chain_reset();
     bad += test_clear_track();

@@ -53,6 +53,12 @@ void fm1_timer5_irq(void)
 }
 extern void isr_timer5(void);
 
+/* everything the SWAMP build puts in .noinit (app.ld NOINIT, 0x3D50 B): the panel table and the settings (panel.c), the crash
+ * record (fm1_irq.h), the boot guard (core.h), felucca_dbg (audio.c), and sm_edit.c's clipboard and UNDO snapshot; 16 B a
+ * piece for the linker's alignment. A new .noinit object of SWAMP's goes in this sum */
+_Static_assert(sizeof panel + sizeof settings + sizeof fm1_crash + sizeof bootguard + sizeof felucca_dbg + sizeof sm_clip +
+               sizeof sm_undo_buf + 7u * 16u <= 0x3D50u, "SWAMP's .noinit fits app.ld's NOINIT");
+
 static void timer5_start(void)                 /* OSC /4 = 6 MHz, PRD 600 -> 10 kHz */
 {
     fm1_timer5_start(isr_timer5, 4);   /* above ALNK0 (3): the scan nests into the render (see fm1_timer5_irq) */

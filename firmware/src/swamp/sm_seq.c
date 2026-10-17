@@ -195,10 +195,13 @@ static void sm_seq_init(void)
     sm_cov.head = sm_cov.tail = 0;
 }
 
-/* SMC_PLAY: from step 0 of every track, in this block (playing already: nothing); the passes from 0 */
+static void sm_pat_switch(uint32_t n, uint32_t how);
+
+/* SMC_PLAY: from step 0 of every track, in this block (playing already: nothing); the passes from 0. A chain on (nchain >= 2):
+ * from its link 1 (sm_cpos 0, its pattern now, as DIRECT START) */
 static void sm_seq_play(void)
 {
-    uint32_t t;
+    uint32_t t, nc = *(volatile uint8_t *)&smp.nchain;
     if (sm_playing)
         return;
     sm_next_q8 = 0;
@@ -210,6 +213,12 @@ static void sm_seq_play(void)
     for (t = 0; t < SM_NTRK; t++) {
         sm_loop[t] = 0xFFFFu;                             /* (step 0's start counts it to 0) */
         sm_seq_idle(t);
+    }
+    if (nc >= 2u && nc <= SM_NCHAIN) {
+        sm_chain_seen = sm_chain_gen;                     /* (link 1 now: a new chain's reset is done too) */
+        sm_cpos = 0;
+        if (smp.chain[0] % SM_NPAT != sm_play_pat)
+            sm_pat_switch(smp.chain[0], SM_PM_START);
     }
     sm_playing = 1;
 }
@@ -538,8 +547,9 @@ static void sm_pat_switch(uint32_t n, uint32_t how)
  * block, before its first step), or in DIRECT START / JUMP; in SEQUENTIAL at the end of the pattern: when the step about to
  * start in this block (at most one: a step is >= 2205 samples, a block 32) is the first past the master length. That end
  * with nothing asked: a chain on (smp.nchain >= 2, read once) goes to its next link, every track from step 1, whatever the
- * mode (each link plays to its own end; a link of the pattern playing, A1 A1, is that pattern again from step 1); no chain:
- * the master length's clock from 0 again, and a master length set (not AUTO) starts every track again from step 1 there.
+ * mode (each link plays to its own end); a link of the pattern playing (A1 A1) is that pattern again with every track from
+ * step 1, nothing else (no sound loaded again, no note let go: as a master length's end); no chain: the master length's
+ * clock from 0 again, and a master length set (not AUTO) starts every track again from step 1 there.
  * The main loop writes smp.chain only while nchain is 0 (sm_layer.c sm_chain_set), so a chain read here is whole */
 static void sm_pat_block(uint32_t nq8)
 {
@@ -568,7 +578,13 @@ static void sm_pat_block(uint32_t nq8)
     if (edge && nc >= 2u && nc <= SM_NCHAIN) {
         uint32_t c = (sm_cpos + 1u) % nc;
         sm_cpos = (uint8_t)c;
-        sm_pat_switch(smp.chain[c], SM_PM_SEQ);
+        if (smp.chain[c] % SM_NPAT != sm_play_pat) {
+            sm_pat_switch(smp.chain[c], SM_PM_SEQ);
+            return;
+        }
+        sm_mstep = 0;                                     /* (the same pattern again: every track from step 1) */
+        for (t = 0; t < SM_NTRK; t++)
+            sm_next[t] = 0;
         return;
     }
     if (edge) {
