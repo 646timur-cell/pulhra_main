@@ -11,13 +11,16 @@
  *              eng_vis), OCT+ the next page, G5 INIT (the machine's preset 0). Loads as the PRESETS knob does
  *   GLO        black keys 1..4 (F#3 G#3 A#3 C#4) toggle the mute of T1..T4 (smp.mute); the white keys F3 .. B3 solo T1..T4
  *              while they are held (sm_solo)
- *   SEQ        K1 the selected track's length 1..32, K2 the pattern's master length (AUTO, 1..128); the white key F3 clears
- *              the track's steps; F#3 the pattern change's mode round (SEQUENTIAL, DIRECT START, DIRECT JUMP); ALGORITHM picks a
+ *   SEQ        K1 the selected track's length 1..32, K2 the pattern's master length (AUTO, 1..128); the white keys (MONOFM's
+ *              tools, sm_edit.c): F3 CLEAR the track's trigs and locks (held 0.8 s: all four tracks; the kit stays), G3 COPY
+ *              the pattern, A3 COPY the track (its sound, steps, locks), B3 PASTE the track, D4 PASTE the pattern, E4 / F4
+ *              SHIFT the track's steps < >, B4 / C5 TRN its notes - +; F#3 the pattern change's mode round (SEQUENTIAL, DIRECT START, DIRECT JUMP); ALGORITHM picks a
  *              pattern (from the one playing), and letting go of SEQ asks for it (smp.next: sm_seq.c switches);
  *              OCT+ adds the picked pattern (none picked: the one playing) to the chain being built (up to 16, repeats too),
  *              OCT- throws away what was built (and the pick); letting go of SEQ with two links or more: that chain plays
  *              (smp.chain, sm_chain_set), one link: that pattern is asked for; G#3 turns the chain off (the pattern
  *              playing plays on). Asking for one pattern turns a chain off too (MONOFM's)
+ *   GLO + G5   FILL while held (sm_fill: COND FILL / !FILL)
  * The keys and knobs of an open layer are the layer's alone (the page's knobs and the trigs do not see them); PLAY, the
  * track knob and PRESETS work as ever. The main loop is the only writer of all of it (sm_input.c's ownership). */
 
@@ -28,6 +31,8 @@ static uint8_t sm_lay_cleared;                            /* SEQ: the track was 
 static uint8_t sm_lay_void;                               /* a button with no layer (HOME) was held: its release is no tap */
 static uint8_t sm_lay_pick = SM_PAT_NONE;                 /* SEQ: the pattern ALGORITHM picked (SM_PAT_NONE: none yet) */
 static uint8_t sm_lay_chain[SM_NCHAIN], sm_lay_nch;       /* SEQ: the chain being built (OCT+), its links */
+static uint8_t sm_lay_clr;                                /* SEQ: F3 down since sm_lay_clr_t0 (1), its hold cleared all (2) */
+static uint32_t sm_lay_clr_t0;
 
 #define SM_NLBTN 4u
 static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
@@ -36,6 +41,10 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
 #define SM_LAY_CHOFF_KEY 3u                               /* SEQ: G#3 (key 3), the chain off */
+#define SM_LAY_F3_KEY 0u                                  /* SEQ: F3 (key 0), CLEAR (held: all) */
+#define SM_LAY_FILL_KEY 26u                               /* GLO: G5 (key 26), FILL while held */
+enum { SM_W_CLEAR = 0, SM_W_COPY_PAT = 1, SM_W_COPY_TRK = 2, SM_W_PASTE_TRK = 3, SM_W_PASTE_PAT = 5, SM_W_SHL = 6, SM_W_SHR = 7,
+       SM_W_TRN_DN = 10, SM_W_TRN_UP = 11 };             /* SEQ: the white keys of the tools (F3 = 0) */
 #define SM_NEPAGE 3u
 
 static void sm_layer_init(void)
@@ -48,7 +57,9 @@ static void sm_layer_init(void)
     sm_lay_void = 0;
     sm_lay_pick = SM_PAT_NONE;
     sm_lay_nch = 0;
+    sm_lay_clr = 0;
     sm_solo = 0;
+    sm_fill = 0;
 }
 
 static uint32_t sm_layer_busy(void) { return sm_layer || sm_lay_arm; }
@@ -71,6 +82,7 @@ static void sm_layer_open(uint32_t l)
     sm_lay_cleared = 0;
     sm_lay_pick = SM_PAT_NONE;
     sm_lay_nch = 0;
+    sm_lay_clr = 0;
     if (l == SML_EDIT)                                    /* (opens on the page of the selected track's machine) */
         sm_lay_epage = (uint8_t)sm_epage_of(sm_ui_sound()->machine);
     sm_dirty = 1;
@@ -115,6 +127,8 @@ static void sm_layer_close(void)
     sm_lay_nch = 0;
     sm_layer = SML_NONE;
     sm_solo = 0;
+    sm_fill = 0;
+    sm_lay_clr = 0;
     sm_lay_cleared = 0;
     sm_dirty = 1;
 }
@@ -164,19 +178,27 @@ static void sm_layer_end(void)
     }
 }
 
-/* the selected track's steps all off (n first: the audio stream reads n before the rest of a step) and no REST, then the
- * track's locks of the pattern (no step of it fires any more while they are removed) */
-static void sm_track_clear(uint32_t t)
+/* SEQ + a white key w (F3 = 0): the tools on the selected track t / the pattern */
+static void sm_seq_tool(uint32_t w, uint32_t t)
 {
-    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t s;
-    for (s = 0; s < SM_NSTEP; s++) {
-        pt->step[t % SM_NTRK][s].n = 0;
-        pt->step[t % SM_NTRK][s].flags = 0;
+    switch (w) {
+    case SM_W_CLEAR:
+        sm_edit_clear(1u << t, 1);
+        sm_lay_cleared = 1;
+        sm_lay_clr = 1;                                   /* (held on: all four tracks) */
+        sm_lay_clr_t0 = fm1_ticks();
+        break;
+    case SM_W_COPY_PAT: sm_copy_pat(); break;
+    case SM_W_COPY_TRK: sm_copy_trk(t); break;
+    case SM_W_PASTE_TRK: sm_paste_trk(t); break;
+    case SM_W_PASTE_PAT: sm_paste_pat(); break;
+    case SM_W_SHL: sm_shift(t, -1); break;
+    case SM_W_SHR: sm_shift(t, 1); break;
+    case SM_W_TRN_DN: sm_trn(t, -1); break;
+    case SM_W_TRN_UP: sm_trn(t, 1); break;
+    default: return;
     }
-    for (s = 0; s < SM_NSTEP; s++)
-        sm_lock_clear_step(t % SM_NTRK, s);
-    sm_unlock_req(t % SM_NTRK, 0xFFu);                    /* (a lock on the core: back to the base) */
+    sm_dirty = 1;
 }
 
 /* the open layer's keys (the white key number is its place among the white keys, F3 = 0) and knobs, this poll's edges */
@@ -230,6 +252,18 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_solo = (uint8_t)solo;
             sm_dirty = 1;
         }
+        if (((held >> SM_LAY_FILL_KEY) & 1u) != sm_fill) {
+            sm_fill = (uint8_t)((held >> SM_LAY_FILL_KEY) & 1u);   /* (a byte: the audio stream reads it at a COND) */
+            sm_dirty = 1;
+        }
+    }
+    if (sm_layer == SML_SEQ && sm_lay_clr == 1u) {       /* F3 held on: all four tracks at 0.8 s (the tap's UNDO snapshot) */
+        if (!((fm1_in.notes >> SM_LAY_F3_KEY) & 1u))
+            sm_lay_clr = 0;
+        else if ((uint32_t)(fm1_ticks() - sm_lay_clr_t0) >= SM_CLEAR_ALL_US * FM1_TICKS_PER_US) {
+            sm_edit_clear((1u << SM_NTRK) - 1u, 0);
+            sm_lay_clr = 2;
+        }
     }
     for (key = 0; key < SM_NKEYS; key++) {
         int32_t w;
@@ -258,10 +292,8 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             smp.nchain = 0;
             sm_lay_nch = 0;
             sm_dirty = 1;
-        } else if (sm_layer == SML_SEQ && w == 0) {
-            sm_track_clear(t);
-            sm_lay_cleared = 1;
-            sm_dirty = 1;
+        } else if (sm_layer == SML_SEQ && w >= 0) {
+            sm_seq_tool((uint32_t)w, t);
         }
     }
 }

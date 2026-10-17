@@ -117,7 +117,7 @@ static uint32_t smd_hdr_sig(void)
     const sm_sound_t *s = smd_snd();
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, smp.cur);
-    h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_lock_msg);
+    h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg);
     h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
     return smd_mix(h, smd_rec);
 }
@@ -155,8 +155,9 @@ static void smd_header(void)
     int32_t x;
     const sm_sound_t *s = smd_snd();
     smd_begin(0, SMD_HDR_Y, 240u, SMD_HDR_H);
-    if (sm_lock_msg) {                                    /* the pool full: LOCKS FULL, inverted, the whole header for 1 s */
-        sm_px_text((240 - 12 * 10) / 2, 2, 2u, "LOCKS FULL", T_TEXT, 1);
+    if (sm_msg) {                                         /* a message (LOCKS FULL, CLEARED, UNDO), inverted, the whole header for 1 s */
+        const char *m = SM_MSG_TEXT[sm_msg % SM_MSG_COUNT];
+        sm_px_text((240 - 12 * smd_len(m)) / 2, 2, 2u, m, T_TEXT, 1);
         smd_end();
         return;
     }

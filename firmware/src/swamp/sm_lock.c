@@ -15,13 +15,17 @@
  * trig (Elektron's trigless lock: n 1 with SMF_REST, its locks fire, no note) after the lock is written; taking a trig
  * off removes its locks. */
 #define SM_LOCK_DEAD 0xFFu
-#define SM_LOCK_MSG_US 1000000u                           /* LOCKS FULL: 1 s in the header */
+#define SM_MSG_US 1000000u                                /* a message: 1 s in the header */
 #ifndef SM_LOCK_PREEMPT
 #define SM_LOCK_PREEMPT() ((void)0)                       /* (the host test runs an audio block here: the interrupt's moment) */
 #endif
 
-static uint8_t sm_lock_msg;                               /* LOCKS FULL is in the header (since sm_lock_msg_t0) */
-static uint32_t sm_lock_msg_t0;
+/* the header's messages (the only ones: LOCKS FULL, CLEARED, UNDO; SAVED and the flash's error come with the storage), each
+ * for SM_MSG_US, the header inverted */
+enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_COUNT };
+static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEARED", "UNDO"};
+static uint8_t sm_msg;                                    /* the message in the header (since sm_msg_t0), SM_MSG_NONE none */
+static uint32_t sm_msg_t0;
 
 /* the index in p->lock[] of the lock of (track t, step s, parameter param), -1: none */
 static int32_t sm_lock_find(const sm_pattern_t *p, uint32_t t, uint32_t s, uint32_t param)
@@ -52,19 +56,20 @@ static int sm_param_locked_any(uint32_t t, uint32_t param)
     return 0;
 }
 
-/* LOCKS FULL for a second (the only message of the locks) */
-static void sm_lock_full_msg(void)
+/* a message for a second (a newer one takes its place) */
+static void sm_msg_show(uint32_t id)
 {
-    sm_lock_msg = 1;
-    sm_lock_msg_t0 = fm1_ticks();
+    sm_msg = (uint8_t)(id < SM_MSG_COUNT ? id : SM_MSG_NONE);
+    sm_msg_t0 = fm1_ticks();
     sm_dirty = 1;
 }
+static void sm_lock_full_msg(void) { sm_msg_show(SM_MSG_LOCKS); }   /* (the only message of the locks) */
 
 /* every poll: the message gone after its second */
-static void sm_lock_msg_poll(uint32_t now)
+static void sm_msg_poll(uint32_t now)
 {
-    if (sm_lock_msg && (uint32_t)(now - sm_lock_msg_t0) >= SM_LOCK_MSG_US * FM1_TICKS_PER_US) {
-        sm_lock_msg = 0;
+    if (sm_msg && (uint32_t)(now - sm_msg_t0) >= SM_MSG_US * FM1_TICKS_PER_US) {
+        sm_msg = SM_MSG_NONE;
         sm_dirty = 1;
     }
 }

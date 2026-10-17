@@ -30,6 +30,8 @@
 static uint32_t sm_pdirty[SM_NTRK][4];                    /* bit per parameter (P_COUNT <= 127): pushed again */
 static uint8_t sm_ld_pend;                                /* bit per track: a LOAD still to push */
 static uint8_t sm_tr_pend;                                /* 0 none, 1 PLAY, 2 STOP still to push */
+static uint8_t sm_save_st;                                /* SAVE: 0 up, 1 down (since sm_save_t0), 2 held: UNDO done */
+static uint32_t sm_save_t0;
 static uint32_t sm_key_t0[SM_NKEYS], sm_key_arm;          /* press time of the white keys down, bit per key */
 static uint8_t sm_key_step[SM_NKEYS];                     /* the step each of them was pressed on (a bank key may move on) */
 static uint8_t sm_key_trk[SM_NKEYS];                      /* ... and the track */
@@ -52,6 +54,7 @@ static void sm_input_init(void)
     sm_ui.held_step = sm_ui.sel_step = 0xFFu;
     memset(sm_pdirty, 0, sizeof sm_pdirty);
     sm_ld_pend = sm_tr_pend = 0;
+    sm_save_st = 0;
     sm_key_arm = sm_key_used = 0;
     sm_oct_pend = 0;
     sm_oct_t0 = 0;
@@ -60,7 +63,7 @@ static void sm_input_init(void)
     sm_kb_pend = 0;
     sm_unl_pend = 0;
     sm_rec = 0;
-    sm_lock_msg = 0;
+    sm_msg = 0;
     sm_dirty = 1;
 }
 
@@ -68,6 +71,8 @@ static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);   /* 
 static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg);
 static void sm_layer_end(void);
 static uint32_t sm_layer_busy(void);                      /* a layer open, or its button down */
+static void sm_undo(void);                                /* sm_edit.c (after this file) */
+static void sm_edit_pat_changed(void);
 
 static sm_sound_t *sm_ui_sound(void) { return &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK]; }
 
@@ -166,6 +171,7 @@ static void sm_pat_poll(void)
     }
     if (p != smp.cur) {
         smp.cur = (uint8_t)(p % SM_NPAT);
+        sm_edit_pat_changed();                            /* (UNDO's snapshot was of the pattern before) */
         if (smp.pat[smp.cur].kit.snd[sm_ui.trk % SM_NTRK].len <= 16u)
             sm_ui.bank = 0;
         sm_dirty = 1;
@@ -473,6 +479,23 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
     sm_bpm_turn(sel);
 }
 
+/* SAVE held (HOLD_MS, as a layer's hold): UNDO, once a hold (a tap: the SAVE page, a later stage) */
+static void sm_save_poll(uint32_t pressed, uint32_t now)
+{
+    uint32_t b = panel.btn[B_SAVE];
+    if ((pressed >> b) & 1u) {
+        sm_save_st = 1;
+        sm_save_t0 = now;
+    }
+    if (!((fm1_in.buttons >> b) & 1u)) {
+        sm_save_st = 0;
+    } else if (sm_save_st == 1u &&
+               (uint32_t)(now - sm_save_t0) >= (uint32_t)HOLD_MS[settings_hold % 4u] * 1000u * FM1_TICKS_PER_US) {
+        sm_save_st = 2;
+        sm_undo();
+    }
+}
+
 /* everything the queue refused so far, again */
 static void sm_flush(void)
 {
@@ -521,7 +544,8 @@ static void sm_input_poll(void)
             k[i] = 0;
     }
     sm_layer_end();
-    sm_lock_msg_poll(now);
+    sm_msg_poll(now);
+    sm_save_poll(pressed, now);
     if ((pressed >> panel.btn[B_REC]) & 1u) {
         sm_rec = (uint8_t)!sm_rec;
         sm_dirty = 1;

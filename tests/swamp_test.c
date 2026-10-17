@@ -2738,8 +2738,8 @@ static int test_lock_full(void)
             sm_step_toggle(t, s);
     for (i = 0; i < SM_NLOCK; i++)                        /* 192 distinct locks: 4 tracks x 16 steps x 3 */
         ok &= sm_lock_set(i % 4u, i / 4u % 16u, PRM[i / 64u], (int32_t)(i % 100u)) == 1;
-    bad += check("LOCK/FULL: 192 locks set, no message", ok && cpat()->nlock == SM_NLOCK && !sm_lock_msg);
-    bad += check("LOCK/FULL: the 193rd refused, LOCKS FULL", sm_lock_set(0, 0, PRM[4], 5) == 0 && sm_lock_msg);
+    bad += check("LOCK/FULL: 192 locks set, no message", ok && cpat()->nlock == SM_NLOCK && !sm_msg);
+    bad += check("LOCK/FULL: the 193rd refused, LOCKS FULL", sm_lock_set(0, 0, PRM[4], 5) == 0 && sm_msg);
     ok = 1;
     for (i = 0; i < SM_NLOCK; i++)
         ok &= lk_val(i % 4u, i / 4u % 16u, PRM[i / 64u]) == (int32_t)(i % 100u);
@@ -2762,14 +2762,14 @@ static int test_lock_full(void)
     }
     ms(900);
     sm_input_poll();
-    bad += check("LOCK/FULL: ... still at 0.9 s", sm_lock_msg);
+    bad += check("LOCK/FULL: ... still at 0.9 s", sm_msg);
     ms(200);
     sm_input_poll();
     lint_n = lint_band = 0;
     sm_draw();
     {
         int32_t y0, y1;
-        bad += check("LOCK/FULL: ... gone after 1 s (the header redrawn without it)", !sm_lock_msg && !lint_has("LOCKS FULL", &y0, &y1));
+        bad += check("LOCK/FULL: ... gone after 1 s (the header redrawn without it)", !sm_msg && !lint_has("LOCKS FULL", &y0, &y1));
     }
     return bad;
 }
@@ -5032,6 +5032,415 @@ static int test_chain_reset(void)
     return bad;
 }
 
+/* ------------------------------------------------------------------------------------------------ edits --- */
+/* a white key of the open layer tapped: down (a poll), up (a poll) */
+static void lay_key(uint32_t key)
+{
+    key_dn(key);
+    sm_input_poll();
+    key_up(key);
+    sm_input_poll();
+}
+/* the live locks of track t in pattern p, by step and parameter (LK_NONE none) */
+static int32_t ed_lock(const sm_pattern_t *p, uint32_t t, uint32_t s, uint32_t prm)
+{
+    int32_t i = sm_lock_find(p, t, s, prm);
+    return i < 0 ? LK_NONE : p->lock[i].val;
+}
+static uint32_t ed_live(const sm_pattern_t *p, uint32_t t)  /* the live locks of track t (t 4: all) */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < p->nlock && i < SM_NLOCK; i++)
+        n += p->lock[i].param != 0xFFu && (t >= SM_NTRK || (uint32_t)(p->lock[i].ts >> 5) == t);
+    return n;
+}
+static uint32_t ed_trigs(const sm_pattern_t *p, uint32_t t)
+{
+    uint32_t s, n = 0;
+    for (s = 0; s < SM_NSTEP; s++)
+        n += p->step[t][s].n != 0u;
+    return n;
+}
+/* pattern p's track t: trigs on steps 0 4 8 12 (notes 48 + step), CUT locked on 4 (20 + t) and RES on 8 (30 + t) */
+static void ed_track(uint32_t t)
+{
+    uint32_t s;
+    for (s = 0; s < 16u; s += 4u) {
+        sm_step_toggle(t, s);
+        stp(t, s)->note[0] = (uint8_t)(48 + s);
+    }
+    sm_lock_set(t, 4, P_FCUT, 20 + (int32_t)t);
+    sm_lock_set(t, 8, P_FRES, 30 + (int32_t)t);
+}
+static void save_hold(void)                               /* SAVE held past HOLD_MS, let go */
+{
+    btn_down(B_SAVE);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    btn_up(B_SAVE);
+    sm_input_poll();
+}
+
+static int test_clear_track(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t t;
+    sm_kit_t kit;
+    in_reset();
+    host_ticks = 1000u;
+    for (t = 0; t < SM_NTRK; t++)
+        ed_track(t);
+    kit = cpat()->kit;
+    layer_hold(B_SEQ);
+    lay_key(WHITE[0]);                                    /* F3 tapped */
+    bad += check("EDIT/CLEAR: SEQ + F3: T1's trigs and locks gone", !ed_trigs(cpat(), 0) && !ed_live(cpat(), 0));
+    for (t = 1; t < SM_NTRK; t++)
+        ok &= ed_trigs(cpat(), t) == 4u && ed_live(cpat(), t) == 2u && ed_lock(cpat(), t, 4, P_FCUT) == 20 + (int32_t)t;
+    bad += check("EDIT/CLEAR: ... T2..T4 untouched, the kit kept", ok && !memcmp(&kit, &cpat()->kit, sizeof kit));
+    bad += check("EDIT/CLEAR: ... CLEARED in the header, the pool compacted (stopped)", sm_msg == SM_MSG_CLEARED &&
+                 cpat()->nlock == 6u);
+    ms(900);
+    sm_input_poll();
+    bad += check("EDIT/CLEAR: ... still at 0.9 s, the key let go: no clear of all", sm_msg == SM_MSG_CLEARED && ed_trigs(cpat(), 1) == 4u);
+    ms(200);
+    sm_input_poll();
+    bad += check("EDIT/CLEAR: ... gone after 1 s", sm_msg == SM_MSG_NONE);
+    layer_let_go(B_SEQ);
+    return bad;
+}
+
+static int test_clear_all_hold(void)
+{
+    int bad = 0;
+    uint32_t t;
+    sm_kit_t kit;
+    in_reset();
+    host_ticks = 1000u;
+    for (t = 0; t < SM_NTRK; t++)
+        ed_track(t);
+    kit = cpat()->kit;
+    turn(EN_ALGO, 2);                                     /* T3 selected */
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    bad += check("EDIT/CLEAR ALL: F3 down: the selected track (T3) cleared at once", !ed_trigs(cpat(), 2) && ed_trigs(cpat(), 0) == 4u);
+    ms(700);
+    sm_input_poll();
+    bad += check("EDIT/CLEAR ALL: ... held 0.7 s: the others still there", ed_trigs(cpat(), 0) == 4u && ed_live(cpat(), 4) == 6u);
+    ms(150);
+    sm_input_poll();
+    bad += check("EDIT/CLEAR ALL: ... held 0.85 s: all 4 tracks, trigs and locks", !ed_trigs(cpat(), 0) && !ed_trigs(cpat(), 1) &&
+                 !ed_trigs(cpat(), 3) && !ed_live(cpat(), 4) && cpat()->nlock == 0u);
+    bad += check("EDIT/CLEAR ALL: ... the kit kept, CLEARED", !memcmp(&kit, &cpat()->kit, sizeof kit) && sm_msg == SM_MSG_CLEARED);
+    key_up(WHITE[0]);
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+    save_hold();
+    bad += check("EDIT/CLEAR ALL: UNDO: all 4 tracks back (the snapshot before the first clear)", ed_trigs(cpat(), 0) == 4u &&
+                 ed_trigs(cpat(), 2) == 4u && ed_live(cpat(), 4) == 8u && ed_lock(cpat(), 2, 8, P_FRES) == 32 && sm_msg == SM_MSG_UNDO);
+    return bad;
+}
+
+/* CLEAR all while playing at 300 BPM, then UNDO: the trigs and locks come back, the pool whole; the audio stream (run inside the
+ * writes, lock_preempt) never applies a lock of a wiped step nor a wrong value */
+static int test_undo_after_clear_while_playing(void)
+{
+    static const uint8_t PRM[4] = {P_FCUT, P_FRES, P_PAN, P_DEC};
+    int bad = 0, ok = 1;
+    uint32_t t, s, p, i, n0, on;
+    static sm_pattern_t before;
+    in_reset();
+    host_ticks = 1000u;
+    smp.bpm10 = 3000u;
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < SM_NSTEP; s++)
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[t][s][p] = LK_NONE;
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < 16u; s++)
+            sm_step_toggle(t, s);
+    for (i = 0; i < 400u; i++) {                          /* a pool near full */
+        const param_desc_t *d;
+        int32_t v;
+        t = lk_rand(SM_NTRK);
+        s = lk_rand(16);
+        p = PRM[lk_rand(4)];
+        d = sm_desc_safe(sm_engine_of(ksnd(t)->machine), p);
+        v = d->min + (int32_t)lk_rand((uint32_t)(d->max - d->min + 1));
+        if (sm_lock_set(t, s, p, v))
+            lk_shadow[t][s][p] = (int16_t)v;
+    }
+    sm_msg = SM_MSG_NONE;
+    for (i = 0; i < 40u; i++) {                           /* a few removed (tombstones in the pool while playing) */
+        t = lk_rand(SM_NTRK);
+        s = lk_rand(16);
+        if (ed_live(cpat(), 4) > 150u) {
+            sm_lock_clear_step(t, s);
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[t][s][p] = LK_NONE;
+        }
+    }
+    n0 = ed_live(cpat(), 4);
+    before = *cpat();
+    press(B_PLAY);
+    sm_input_poll();
+    play_blocks(300);
+    lk_applied = lk_bad_val = lk_bad_dead = lk_preempts = 0;
+    lk_on = 1;
+    lk_preempt_n = 2u;
+    layer_hold(B_SEQ);
+    for (s = 0; s < SM_NSTEP; s++)                        /* (the model to come: T1 nothing locked, the tap) */
+        for (p = 0; p < P_COUNT; p++)
+            lk_shadow[0][s][p] = LK_NONE;
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    bad += check("EDIT/UNDO: playing: F3 tapped: T1 empty, T2 not yet", !ed_trigs(cpat(), 0) && !ed_live(cpat(), 0) &&
+                 ed_trigs(cpat(), 1) == 16u && !lk_bad_dead && !lk_bad_val);
+    for (t = 0; t < SM_NTRK; t++)                         /* (... then all: held 0.8 s) */
+        for (s = 0; s < SM_NSTEP; s++)
+            for (p = 0; p < P_COUNT; p++)
+                lk_shadow[t][s][p] = LK_NONE;
+    ms(900);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+    bad += check("EDIT/UNDO: playing: CLEAR all (held): no trig, no live lock", !ed_trigs(cpat(), 0) && !ed_trigs(cpat(), 3) &&
+                 !ed_live(cpat(), 4) && cpat()->nlock <= SM_NLOCK);
+    seq_log_clear();
+    play_blocks(400);
+    on = on_n[0] + on_n[1] + on_n[2] + on_n[3];
+    bad += check("EDIT/UNDO: ... silence: no note-on, no lock applied", !on && !lk_bad_dead && !lk_bad_val);
+    for (t = 0; t < SM_NTRK; t++)                         /* (the model to come: the locks before) */
+        for (s = 0; s < SM_NSTEP; s++)
+            for (p = 0; p < 4u; p++)
+                lk_shadow[t][s][PRM[p]] = (int16_t)ed_lock(&before, t, s, PRM[p]);
+    btn_down(B_SAVE);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    bad += check("EDIT/UNDO: SAVE held: UNDO in the header", sm_msg == SM_MSG_UNDO);
+    btn_up(B_SAVE);
+    sm_input_poll();
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < SM_NSTEP; s++) {
+            ok &= !memcmp(&before.step[t][s], &cpat()->step[t][s], sizeof before.step[t][s]);
+            for (p = 0; p < 4u; p++)
+                ok &= ed_lock(&before, t, s, PRM[p]) == ed_lock(cpat(), t, s, PRM[p]);
+        }
+    bad += check("EDIT/UNDO: ... every step and every lock as before the clear", ok);
+    bad += check("EDIT/UNDO: ... the pool whole: as many live locks, nlock <= 192", ed_live(cpat(), 4) == n0 && cpat()->nlock <= SM_NLOCK);
+    lk_applied = 0;
+    seq_log_clear();
+    play_blocks(2400);                                    /* (35 steps at 300 BPM: every step twice) */
+    lk_on = 0;
+    lk_preempt_n = 0;
+    printf("  undo: %u preempted writes, %u locks applied after the undo, %u live; on %u %u, bad %u %u\n", lk_preempts, lk_applied, n0, on_n[0], on_n[3], lk_bad_val, lk_bad_dead);
+    bad += check("EDIT/UNDO: ... the trigs play again, their locks applied, each == the model's, none of a wiped step",
+                 on_n[0] >= 30u && on_n[3] >= 30u && lk_applied > 250u && !lk_bad_val && !lk_bad_dead && lk_preempts > 0u);
+    save_hold();
+    bad += check("EDIT/UNDO: a second UNDO: nothing (one snapshot)", ed_live(cpat(), 4) == n0 && ed_trigs(cpat(), 0) == 16u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+
+static int test_copy_paste_track(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t s;
+    sm_sound_t t1;
+    in_reset();
+    host_ticks = 1000u;
+    sm_sound_from_preset(ksnd(0), eng_rank(ENGI_MFMST), 2);
+    ksnd(0)->len = 12;
+    ksnd(0)->p[P_FCUT] = 77;
+    push(SMC_LOAD, 0, 0, 0, 0);
+    run_block();
+    ed_track(0);
+    ed_track(2);
+    sm_lock_set(2, 0, P_PAN, 5);
+    t1 = *ksnd(0);
+    layer_hold(B_SEQ);
+    lay_key(WHITE[2]);                                    /* A3: COPY the track (T1) */
+    layer_let_go(B_SEQ);
+    bad += check("EDIT/COPY: A3 copies, changes nothing", !memcmp(&t1, ksnd(0), sizeof t1) && sm_msg == SM_MSG_NONE);
+    turn(EN_ALGO, 2);                                     /* T3 */
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    lay_key(WHITE[3]);                                    /* B3: PASTE the track */
+    layer_let_go(B_SEQ);
+    bad += check("EDIT/PASTE: B3 on T3: T1's sound (machine, preset, values, length)", !memcmp(&t1, ksnd(2), sizeof t1));
+    for (s = 0; s < SM_NSTEP; s++)
+        ok &= !memcmp(stp(0, s), stp(2, s), sizeof(sm_step_t));
+    bad += check("EDIT/PASTE: ... T1's steps", ok);
+    bad += check("EDIT/PASTE: ... T1's locks, T3's own gone", ed_live(cpat(), 2) == 2u && ed_lock(cpat(), 2, 4, P_FCUT) == 20 &&
+                 ed_lock(cpat(), 2, 8, P_FRES) == 30 && ed_lock(cpat(), 2, 0, P_PAN) == LK_NONE && ed_live(cpat(), 0) == 2u);
+    bad += check("EDIT/PASTE: ... the LOAD pushed (pattern tag)", (sm_ld_pend & 4u) == 0u && sm_cq.head != sm_cq.tail &&
+                 sm_cq.slot[(uint8_t)(sm_cq.head - 1u) & (SM_NCMD - 1u)].kind == SMC_LOAD &&
+                 sm_cq.slot[(uint8_t)(sm_cq.head - 1u) & (SM_NCMD - 1u)].trk == 2u);
+    run_block();
+    bad += check("EDIT/PASTE: ... the core: T3 on T1's machine, CUT 77", trk[2].eng_req == trk[0].eng_req && trk[2].p[P_FCUT] == 77);
+    save_hold();
+    bad += check("EDIT/PASTE: UNDO: T3's own steps, locks and sound back", ed_lock(cpat(), 2, 0, P_PAN) == 5 && ed_live(cpat(), 2) == 3u &&
+                 ksnd(2)->machine != t1.machine && ksnd(2)->len == 16u);
+    run_block();
+    bad += check("EDIT/PASTE: ... and on the core", trk[2].eng_req != trk[0].eng_req);
+    return bad;
+}
+
+static int test_copy_paste_pattern(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t t, s;
+    in_reset();
+    host_ticks = 1000u;
+    pat_kit(0);
+    for (t = 0; t < SM_NTRK; t++)
+        ed_track(t);
+    cpat()->mlen = 12;
+    layer_hold(B_SEQ);
+    lay_key(WHITE[3]);                                    /* B3 PASTE track with nothing copied: nothing */
+    bad += check("EDIT/PASTE: nothing copied: PASTE does nothing", ed_trigs(cpat(), 0) == 4u && !sm_undo_ok);
+    lay_key(WHITE[1]);                                    /* G3: COPY the pattern */
+    turn(EN_ALGO, 4);                                     /* A05 picked */
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+    run_block();
+    sm_input_poll();
+    bad += check("EDIT/PASTE: A05 now (empty)", smp.cur == 4u && !ed_trigs(cpat(), 0));
+    layer_hold(B_SEQ);
+    lay_key(WHITE[5]);                                    /* D4: PASTE the pattern */
+    layer_let_go(B_SEQ);
+    for (t = 0; t < SM_NTRK; t++) {
+        ok &= !memcmp(&smp.pat[0].kit.snd[t], &smp.pat[4].kit.snd[t], sizeof(sm_sound_t));
+        for (s = 0; s < SM_NSTEP; s++)
+            ok &= !memcmp(&smp.pat[0].step[t][s], &smp.pat[4].step[t][s], sizeof(sm_step_t)) &&
+                  ed_lock(&smp.pat[0], t, s, P_FCUT) == ed_lock(&smp.pat[4], t, s, P_FCUT) &&
+                  ed_lock(&smp.pat[0], t, s, P_FRES) == ed_lock(&smp.pat[4], t, s, P_FRES);
+    }
+    bad += check("EDIT/PASTE: D4 on A05: A01's kit, steps, locks, master length", ok && smp.pat[4].mlen == 12u &&
+                 ed_live(&smp.pat[4], 4) == 8u);
+    run_block();
+    run_block();
+    bad += check("EDIT/PASTE: ... the kit on the core", core_is_model());
+    layer_hold(B_SEQ);
+    turn(EN_ALGO, 1);                                     /* A06 */
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+    run_block();
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    lay_key(WHITE[3]);                                    /* PASTE track with a pattern copied: that track of it */
+    layer_let_go(B_SEQ);
+    bad += check("EDIT/PASTE: a pattern copied, B3 on A06's T1: A01's T1", smp.cur == 5u && ed_trigs(cpat(), 0) == 4u &&
+                 ed_lock(cpat(), 0, 4, P_FCUT) == 20 && !ed_trigs(cpat(), 1));
+    return bad;
+}
+
+static int test_shift_trn(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 0);
+    stp(0, 0)->note[0] = 48;
+    sm_step_toggle(0, 3);
+    stp(0, 3)->note[0] = 50;
+    stp(0, 3)->n = 2;
+    stp(0, 3)->note[1] = 127;
+    sm_lock_set(0, 3, P_FCUT, 11);
+    sm_step_toggle(1, 5);
+    layer_hold(B_SEQ);
+    lay_key(WHITE[6]);                                    /* E4: SHIFT < */
+    bad += check("EDIT/SHIFT: E4: T1's trigs one step left, wrapping (0 -> 15, 3 -> 2), the lock with its trig",
+                 stp(0, 15)->n && stp(0, 15)->note[0] == 48 && stp(0, 2)->n == 2u && !stp(0, 0)->n && !stp(0, 3)->n &&
+                 ed_lock(cpat(), 0, 2, P_FCUT) == 11 && ed_live(cpat(), 0) == 1u && stp(1, 5)->n);
+    lay_key(WHITE[7]);                                    /* F4: SHIFT > twice */
+    lay_key(WHITE[7]);
+    bad += check("EDIT/SHIFT: F4 x2: one step right of where they were (1, 4)", stp(0, 1)->n && stp(0, 4)->n == 2u &&
+                 ed_lock(cpat(), 0, 4, P_FCUT) == 11 && !stp(0, 15)->n);
+    lay_key(WHITE[10]);                                   /* B4: TRN - */
+    bad += check("EDIT/TRN: B4: the notes a semitone down (47; 49, the chord's 126)", stp(0, 1)->note[0] == 47 &&
+                 stp(0, 4)->note[0] == 49 && stp(0, 4)->note[1] == 126);
+    lay_key(WHITE[11]);                                   /* C5: TRN + twice */
+    lay_key(WHITE[11]);
+    bad += check("EDIT/TRN: C5 x2: up two (49; 51, 127 stays at the top)", stp(0, 1)->note[0] == 49 && stp(0, 4)->note[0] == 51 &&
+                 stp(0, 4)->note[1] == 127);
+    layer_let_go(B_SEQ);
+    save_hold();
+    bad += check("EDIT/TRN: UNDO: the last edit undone (one up)", stp(0, 1)->note[0] == 48 && stp(0, 4)->note[0] == 50 &&
+                 stp(0, 4)->note[1] == 127);
+    ksnd(0)->len = 8;                                     /* a track of 8: the steps past it stay */
+    sm_step_toggle(0, 12);
+    layer_hold(B_SEQ);
+    lay_key(WHITE[6]);
+    layer_let_go(B_SEQ);
+    bad += check("EDIT/SHIFT: length 8: wraps at 8 (1 -> 0, 4 -> 3), step 13 stays", stp(0, 0)->n && stp(0, 3)->n == 2u &&
+                 stp(0, 12)->n && ed_lock(cpat(), 0, 3, P_FCUT) == 11);
+    return bad;
+}
+
+/* GLO + G5: FILL while held: a COND FILL trig plays only then; !FILL the other way */
+static int test_fill_glo_g5(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 0);
+    stp(0, 0)->cond = SM_COND_FILL;
+    sm_step_toggle(1, 0);
+    stp(1, 0)->cond = SM_COND_NFILL;
+    ksnd(0)->len = ksnd(1)->len = 1;
+    press(B_PLAY);
+    sm_input_poll();
+    seq_log_clear();
+    play_blocks(4u * (uint32_t)S120 / CTL);
+    bad += check("EDIT/FILL: not held: FILL never, !FILL every step", on_n[0] == 0u && on_n[1] >= 3u && !sm_fill);
+    layer_hold(B_GLO);
+    key_dn(26);                                           /* G5 */
+    sm_input_poll();
+    seq_log_clear();
+    play_blocks(4u * (uint32_t)S120 / CTL);
+    bad += check("EDIT/FILL: GLO + G5 held: FILL plays, !FILL not", sm_fill && on_n[0] >= 3u && on_n[1] == 0u && !sm_solo);
+    key_up(26);
+    sm_input_poll();
+    seq_log_clear();
+    play_blocks(4u * (uint32_t)S120 / CTL);
+    bad += check("EDIT/FILL: G5 let go: FILL off", !sm_fill && on_n[0] == 0u);
+    key_dn(26);
+    sm_input_poll();
+    layer_let_go(B_GLO);
+    bad += check("EDIT/FILL: GLO let go with G5 down: FILL off", !sm_fill);
+    key_up(26);
+    sm_input_poll();
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+
+/* UNDO is of the pattern it was taken on: after a switch to another pattern it does nothing */
+static int test_undo_other_pattern(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    ed_track(0);
+    layer_hold(B_SEQ);
+    lay_key(WHITE[0]);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+    run_block();
+    sm_input_poll();
+    save_hold();
+    bad += check("EDIT/UNDO: on another pattern: nothing (A02 empty, A01 still cleared)", smp.cur == 1u && !ed_trigs(cpat(), 0) &&
+                 !ed_trigs(&smp.pat[0], 0) && sm_msg != SM_MSG_UNDO);
+    return bad;
+}
+
 static uint32_t scr_count(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 {
     uint32_t i, j, n = 0;
@@ -5191,7 +5600,7 @@ static int test_draw_shots(void)
         sm_lock_full_msg();
         draw_full();
         write_ppm(dir, "swamp_locks_full");
-        sm_lock_msg = 0;
+        sm_msg = 0;
         sm_rec = 0;
         sm_playing = 0;
     }
@@ -5358,6 +5767,14 @@ int main(void)
     bad += test_chain_plays_links();
     bad += test_chain_off();
     bad += test_chain_reset();
+    bad += test_clear_track();
+    bad += test_clear_all_hold();
+    bad += test_undo_after_clear_while_playing();
+    bad += test_copy_paste_track();
+    bad += test_copy_paste_pattern();
+    bad += test_shift_trn();
+    bad += test_fill_glo_g5();
+    bad += test_undo_other_pattern();
     bad += test_len_visible();
     bad += test_filter_auto_lp();
     bad += test_draw_shots();

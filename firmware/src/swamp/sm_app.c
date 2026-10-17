@@ -17,6 +17,7 @@ static volatile uint8_t panic_req;
 #include "sm_pages.c"                                     /* the pages, sm_ui */
 #include "sm_lock.c"                                      /* the parameter locks: the pool, its writers (the main loop's) */
 #include "sm_input.c"                                     /* sm_input_poll: the knobs and keys into the model */
+#include "sm_edit.c"                                      /* CLEAR, COPY / PASTE, SHIFT, TRN, UNDO: tracks and patterns rewritten */
 #include "sm_layer.c"                                     /* the button holds: tap or hold, the EDIT, GLO and SEQ layers */
 
 #include "sm_font.c"                                      /* the 5 x 7 pixel font */
@@ -44,6 +45,7 @@ static void sm_core_init(void)
     sm_seq_init();
     sm_input_init();
     sm_layer_init();
+    sm_edit_init();
     song.master_q12 = 2048;                   /* (master_boot replaces it with the pot's level before the audio starts) */
 }
 
