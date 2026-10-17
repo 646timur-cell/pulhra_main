@@ -138,3 +138,17 @@
 
 - [ ] Tests: `test_project_page_lists_patterns`, `test_user_preset_save_load` (машина и все параметры, после перезагрузки), `test_user_preset_power_cut`.
 - [ ] Implement, run, commit + push, CI зелёный, `SOURCE_COMMIT` установщика = HEAD. `"SWAMP: SAVE pages — project, user presets; stage 3 notes"`
+
+
+---
+
+### Task 6: Арпеджиатор (Тим 04:08 — поднят из этапа 5)
+
+**Files:** `sm_arp.c` (новый, ISR), `sm_pages.c` (семейство ARP: ARP, ARP 2), `sm_input.c` (тап ARP: режим клавиатуры + страницы ARP; повторный тап — следующая страница), `sm_draw.c`, `sm_leds.c`, тесты, `SWAMP.md`.
+
+- Параметры трека (в ките, `p[]` — использовать существующие P_AMODE, P_ARATE, P_AOCT, P_AGATE, P_AORDER, P_ASWING, P_APROB, P_AHOLD, если есть в TP; иначе свои): **ARP** — MODE (OFF, UP, DOWN, UP-DOWN, RANDOM, AS PLAYED, CHORD), RATE (1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32), OCT 1–4, GATE; SELECT — ORDER. **ARP 2** — SWING, PROB, LATCH (вкл: ноты держатся после отпускания; новое нажатие после отпускания всех — новый набор).
+- Арп в ISR от клока секвенсора (играет и на стопе от своего внутреннего клока по BPM), вход — набор нот клавиатуры/MIDI выбранного трека (книга нот клавиатуры), выход — ноты трека через ту же книгу (не мешает нотам секвенсора); ARP OFF — клавиатура играет напрямую.
+- REC + игра: ноты арпа записываются в триги (через запись с клавиатуры, задача REC).
+- Главный цикл — единственный писатель набора нот (публикация с барьером); мьют уважает.
+- [ ] Tests: UP/DOWN/UP-DOWN порядок, RATE 1/16 при 120 BPM, OCT 2, GATE 50 %, LATCH держит после отпускания и заменяет при новом нажатии, PROB 0 — тишина, без зависших нот после OFF/STOP, мьют.
+- [ ] Implement, run, commit + push.
