@@ -32,8 +32,9 @@ static const sm_page_t SM_PAGES[] = {
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
  * held on a white key (0..31, 0xFF: none; its knobs show and edit the step's locks), the bank of 16 steps, the step
- * selected last (a key held past SM_HOLD_US or turned on; 0xFF none; the STEP page edits it when no key is down) */
-static struct { uint8_t page, trk, held_step, bank, sel_step; } sm_ui;
+ * selected last (a key held past SM_HOLD_US or turned on; 0xFF none; the STEP page edits it when no key is down), the keyboard
+ * mode (the keys play the selected track: sm_input.c) and its octave -3 .. +3 */
+static struct { uint8_t page, trk, held_step, bank, sel_step, kbd; int8_t oct; } sm_ui;
 enum { SML_NONE, SML_EDIT, SML_GLO, SML_SEQ };
 static uint8_t sm_layer;                                  /* the layer open while its button is held (sm_layer.c; the screen and the LEDs read it) */
 static volatile uint8_t sm_rec;                           /* recording (the REC key): knob turns while playing lock the playing trig */

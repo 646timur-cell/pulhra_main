@@ -7,7 +7,8 @@
  *    as it turns round every LED: the active ones dark, the rest lit);
  *  - the step playing is a soft running light: the MID level, never a full flash: on an empty step mid, a trig comes down
  *    to mid, a REST has mid in place of its breath; a held step is mid too (and a frame on the screen);
- *  - D#5 / F#5: the page of steps in view is lit (only while the track is longer than 16), the other page glows;
+ *  - OCT- / OCT+ (outside a layer): the page of steps in view (OCT- 1..16, OCT+ 17..32) is lit, only while the track is longer than
+ *    16; the keyboard mode: the white keys show no steps, and OCT- / OCT+ are lit while the octave is below / above 0;
  *  - buttons: the family of the page in view lit (HOME's too), REC lit while recording, PLAY's own LED glows (dark while playing, its
  *    green one lit), the rest glow, as settings_leds (OFF / DIM LO / DIM HI / INV) says;
  *  - a layer open (sm_layer.c): its button breathes (not lit, no glow), and the keys show what they do in it instead of the
@@ -86,7 +87,7 @@ static void sm_leds(void)
     }
     len = pt->kit.snd[t].len;
     len = len < 1u ? 1u : len > SM_NSTEP ? SM_NSTEP : len;
-    for (k = 0; k < SM_NKEYS && !sm_layer; k++) {
+    for (k = 0; k < SM_NKEYS && !sm_layer && !sm_ui.kbd; k++) {
         const sm_step_t *st;
         uint32_t s;
         if ((SM_BLACK_KEYS >> k) & 1u)
@@ -103,11 +104,11 @@ static void sm_leds(void)
     }
     if (sm_layer)
         sm_leds_layer(nl, ng, ni);
-    else if (len > 16u) {                                      /* the two pages of steps: the one in view lit, the other glows */
-        sm_led_put(nl, 14u + (bank ? SM_KEY_BANK1 : SM_KEY_BANK0), 1);
-        sm_led_put(ng, 14u + (bank ? SM_KEY_BANK0 : SM_KEY_BANK1), 1);
-        sm_led_put(ni, 14u + SM_KEY_BANK0, 1);
-        sm_led_put(ni, 14u + SM_KEY_BANK1, 1);
+    else if (sm_ui.kbd) {                                      /* the keyboard mode: the octave (the buttons' glow is below) */
+        sm_led_put(nl, panel.btn[B_OCTDN], sm_ui.oct < 0);
+        sm_led_put(nl, panel.btn[B_OCTUP], sm_ui.oct > 0);
+    } else if (len > 16u) {                                    /* the two pages of steps: the page in view lit */
+        sm_led_put(nl, panel.btn[bank ? B_OCTUP : B_OCTDN], 1);
     }
     for (k = 0; k < NB; k++) {
         sm_led_put(ng, panel.btn[k], 1);
@@ -115,6 +116,7 @@ static void sm_leds(void)
     }
     sm_led_put(nl, panel.btn[sm_cur_page()->fam == SMFAM_EDIT ? B_EDIT : sm_cur_page()->fam == SMFAM_GLO ? B_GLO :
                              sm_cur_page()->fam == SMFAM_SEQ ? B_SEQ : sm_cur_page()->fam == SMFAM_HOME ? B_HOME : B_ENV], 1);
+    sm_led_put(nl, panel.btn[B_ARP], sm_ui.kbd != 0u);   /* ARP: lit while the keyboard mode is on */
     if (sm_layer)                                         /* the open layer's button breathes: masked out of lit and glow below */
         sm_led_put(nb, panel.btn[sm_layer_button(sm_layer)], 1);
     sm_led_put(nl, panel.btn[B_REC], *(volatile uint8_t *)&sm_rec != 0u);

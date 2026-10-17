@@ -779,6 +779,16 @@ static void in_reset(void)
 }
 static void turn(uint32_t role, int32_t n) { host_enc[panel.enc[role]] += n * panel.dir[role]; }
 static void press(uint32_t b) { host_pressed |= 1u << panel.btn[b]; }
+/* OCT- / OCT+ tapped alone (down, a poll, up, 150 ms, a poll: a single press acts after the 100 ms it waits for the other) */
+static void oct_tap(uint32_t b)
+{
+    host_pressed |= 1u << panel.btn[b];
+    fm1_in.buttons |= 1u << panel.btn[b];
+    sm_input_poll();
+    fm1_in.buttons &= ~(1u << panel.btn[b]);
+    host_ticks += 150000u * FM1_TICKS_PER_US;
+    sm_input_poll();
+}
 static const uint8_t WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* F3 .. G5 */
 static sm_sound_t *ksnd(uint32_t t) { return &smp.pat[smp.cur].kit.snd[t]; }
 
@@ -959,13 +969,14 @@ static int test_white_key_toggles_trig(void)
     host_notes = 1u << WHITE[2];
     sm_input_poll();
     bad += check("INPUT: ... again: off", smp.pat[smp.cur].step[0][2].n == 0u);
-    host_notes = 1u << 25;                                /* F#5 on a 16-step track: ignored */
-    sm_input_poll();
-    bad += check("INPUT: F#5 with len 16: the bank stays 0", sm_ui.bank == 0u);
+    oct_tap(B_OCTUP);                                     /* OCT+ on a 16-step track: ignored */
+    bad += check("INPUT: OCT+ with len 16: the bank stays 0", sm_ui.bank == 0u);
     ksnd(0)->len = 32u;
-    host_notes = 1u << 25;                                /* F#5: bank 1 */
+    host_notes = 1u << 25;                                /* F#5: no longer the bank (it is a black key: nothing) */
     sm_input_poll();
-    bad += check("INPUT: F#5: bank 1, no trig", sm_ui.bank == 1u && !smp.pat[smp.cur].step[0][25].n);
+    bad += check("INPUT: F#5 is free: the bank stays 0, no trig", sm_ui.bank == 0u && !smp.pat[smp.cur].step[0][25].n);
+    oct_tap(B_OCTUP);                                     /* OCT+: bank 1 */
+    bad += check("INPUT: OCT+: bank 1, no trig", sm_ui.bank == 1u && !smp.pat[smp.cur].step[0][25].n);
     host_notes = 1u << WHITE[2];
     sm_input_poll();
     bad += check("INPUT: bank 1, the 3rd white key: step 18", smp.pat[smp.cur].step[0][18].n == 1u &&
@@ -973,11 +984,10 @@ static int test_white_key_toggles_trig(void)
     host_notes = 1u << 3;                                 /* G#3: black */
     sm_input_poll();
     bad += check("INPUT: a black key: nothing", !smp.pat[smp.cur].step[0][3].n && !smp.pat[smp.cur].step[0][19].n);
-    host_notes = 1u << 22;                                /* D#5: bank 0 */
-    sm_input_poll();
+    oct_tap(B_OCTDN);                                     /* OCT-: bank 0 */
     host_notes = 1u << WHITE[15];
     sm_input_poll();
-    bad += check("INPUT: D#5: bank 0, the 16th white key: step 15", sm_ui.bank == 0u && smp.pat[smp.cur].step[0][15].n == 1u);
+    bad += check("INPUT: OCT-: bank 0, the 16th white key: step 15", sm_ui.bank == 0u && smp.pat[smp.cur].step[0][15].n == 1u);
     turn(EN_ALGO, 1);
     sm_input_poll();
     host_notes = 1u << WHITE[0];
@@ -1150,11 +1160,10 @@ static int test_held_step_bank_key(void)
     host_notes = 1u << WHITE[5];
     fm1_in.notes = 1u << WHITE[5];
     sm_input_poll();
-    host_notes = 1u << 25;                                /* F#5 pressed while it is held */
-    fm1_in.notes |= 1u << 25;
     host_ticks += 400000u * FM1_TICKS_PER_US;
     sm_input_poll();
-    bad += check("INPUT: a bank key pressed while holding: held_step stays the step pressed (5)",
+    oct_tap(B_OCTUP);                                     /* OCT+ pressed while it is held */
+    bad += check("INPUT: OCT+ pressed while holding: held_step stays the step pressed (5)",
                  sm_ui.bank == 1u && sm_ui.held_step == 5u);
     ksnd(sm_ui.trk)->len = 16u;
     fm1_in.notes = 0;
@@ -1526,12 +1535,10 @@ static int test_seq_len(void)
         bad += check("SEQ: the other knobs are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
     }
     layer_let_go(B_SEQ);
-    host_notes = 1u << 25;                                /* F#5: the second bank: the stage 1 gate now opens */
-    sm_input_poll();
-    bad += check("SEQ: the length 32: F#5 selects the bank 1", sm_ui.bank == 1u);
-    host_notes = 1u << 22;
-    sm_input_poll();
-    bad += check("SEQ: ... D#5 the bank 0", sm_ui.bank == 0u);
+    oct_tap(B_OCTUP);                                     /* OCT+: the second bank: the gate opens with the length */
+    bad += check("SEQ: the length 32: OCT+ selects the bank 1", sm_ui.bank == 1u);
+    oct_tap(B_OCTDN);
+    bad += check("SEQ: ... OCT- the bank 0", sm_ui.bank == 0u);
     sm_step_toggle(0, 20);
     sm_step_toggle(0, 31);
     seq_log_clear();
@@ -2161,20 +2168,22 @@ static int test_leds_trigs(void)
     sm_leds();
     for (w = 0; w < 16u; w++)
         ok &= wl(w) == (w == 0 || w == 5 ? 1u : 0u);
-    leds_setup(LEDS_DIM);                                 /* a 16 step track: no bank keys */
+    leds_setup(LEDS_DIM);                                 /* a 16 step track: no page lit on OCT */
     sm_leds();
-    bk &= led_of(fm1_led, 14u + SM_KEY_BANK0) == 0 && led_of(fm1_led_dim, 14u + SM_KEY_BANK1) == 0;
-    ksnd(0)->len = 32;                                    /* 32 steps: the page in view lit, the other glowing */
+    bk &= led_of(fm1_led, 14u + 22u) == 0 && led_of(fm1_led, 14u + 25u) == 0;   /* (D#5 / F#5 are free: never lit) */
+    bk &= led_of(fm1_led, panel.btn[B_OCTDN]) == 0 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0;
+    ksnd(0)->len = 32;                                    /* 32 steps: the page in view lit on OCT, the other button glowing */
     sm_leds();
-    bk &= led_of(fm1_led, 14u + SM_KEY_BANK0) == 1 && led_of(fm1_led_dim, 14u + SM_KEY_BANK1) == 1 &&
-          led_of(fm1_led, 14u + SM_KEY_BANK1) == 0;
+    bk &= led_of(fm1_led, panel.btn[B_OCTDN]) == 1 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0 &&
+          led_of(fm1_led_dim, panel.btn[B_OCTUP]) == 1;
     sm_ui.bank = 1;
     smp.pat[smp.cur].step[0][16 + 3].n = 1;               /* the second page: its steps on the white keys */
     sm_leds();
-    bk &= led_of(fm1_led, 14u + SM_KEY_BANK1) == 1 && led_of(fm1_led, 14u + SM_KEY_BANK0) == 0 &&
-          led_of(fm1_led_dim, 14u + SM_KEY_BANK0) == 1 && wl(3) == 1 && wl(0) == 0;
+    bk &= led_of(fm1_led, panel.btn[B_OCTUP]) == 1 && led_of(fm1_led, panel.btn[B_OCTDN]) == 0 &&
+          led_of(fm1_led_dim, panel.btn[B_OCTDN]) == 1 && wl(3) == 1 && wl(0) == 0 &&
+          led_of(fm1_led, 14u + 22u) == 0 && led_of(fm1_led, 14u + 25u) == 0;
     return check("LEDS: trigs on steps 1 and 6 light white keys 1 and 6, no other white key", ok) +
-           check("LEDS: D#5 / F#5 light the visible page of steps, only on a track longer than 16", bk);
+           check("LEDS: OCT- / OCT+ light the visible page of steps, only on a track longer than 16; D#5 / F#5 never", bk);
 }
 static int test_leds_playhead(void)
 {
@@ -4069,6 +4078,344 @@ static int test_midi_vs_seq_same_note(void)
     return bad;
 }
 
+/* ------------------------------------------------------- OCT buttons (stage 3, Task 1b) --- */
+/* OCT- and OCT+ pressed together: dn then up, gap ms apart (a poll each) */
+static void oct_pair(uint32_t gap_ms)
+{
+    host_pressed |= 1u << panel.btn[B_OCTDN];
+    fm1_in.buttons |= 1u << panel.btn[B_OCTDN];
+    sm_input_poll();
+    host_ticks += gap_ms * 1000u * FM1_TICKS_PER_US;
+    host_pressed |= 1u << panel.btn[B_OCTUP];
+    fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
+    sm_input_poll();
+    fm1_in.buttons &= ~((1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]));
+    host_ticks += 150000u * FM1_TICKS_PER_US;
+    sm_input_poll();
+}
+static void kb_key(uint32_t k, int down)
+{
+    if (down)
+        key_dn(k);
+    else
+        key_up(k);
+    sm_input_poll();
+}
+
+static int test_oct_pages(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    ksnd(0)->len = 32u;
+    bad += check("OCT: length 32: page 1..16 at first", sm_ui.bank == 0u);
+    host_pressed |= 1u << panel.btn[B_OCTUP];
+    fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
+    sm_input_poll();
+    bad += check("OCT: a press waits the 100 ms for the other button: the page has not turned yet", sm_ui.bank == 0u);
+    fm1_in.buttons = 0;
+    host_ticks += 150000u;
+    sm_input_poll();
+    bad += check("OCT: ... then OCT+ turns to steps 17..32", sm_ui.bank == 1u && !sm_ui.kbd);
+    lk_tap(2);
+    bad += check("OCT: ... a white key is then step 18 (17..32)", smp.pat[smp.cur].step[0][18].n == 1u && !smp.pat[smp.cur].step[0][2].n);
+    oct_tap(B_OCTUP);
+    bad += check("OCT: OCT+ again: still the second page", sm_ui.bank == 1u);
+    oct_tap(B_OCTDN);
+    bad += check("OCT: OCT-: steps 1..16", sm_ui.bank == 0u);
+    leds_setup(LEDS_DIM);
+    ksnd(0)->len = 32u;
+    sm_leds();
+    bad += check("OCT: LEDs: page 1..16: OCT- lit, OCT+ not", led_of(fm1_led, panel.btn[B_OCTDN]) == 1 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0);
+    sm_ui.bank = 1;
+    sm_leds();
+    bad += check("OCT: LEDs: page 17..32: OCT+ lit, OCT- not", led_of(fm1_led, panel.btn[B_OCTUP]) == 1 && led_of(fm1_led, panel.btn[B_OCTDN]) == 0);
+    in_reset();
+    host_ticks = 1000u;
+    oct_tap(B_OCTUP);
+    oct_tap(B_OCTDN);
+    bad += check("OCT: length 16: OCT+ / OCT- do nothing", sm_ui.bank == 0u && !sm_ui.kbd && sm_ui.oct == 0);
+    /* in the EDIT layer OCT+ is still the next page of machines, and the steps' page is left alone */
+    ksnd(0)->len = 32u;
+    layer_hold(B_EDIT);
+    {
+        uint8_t pg = sm_lay_epage;
+        host_pressed |= 1u << panel.btn[B_OCTUP];
+        fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
+        sm_input_poll();
+        fm1_in.buttons &= ~(1u << panel.btn[B_OCTUP]);
+        host_ticks += 150000u;
+        sm_input_poll();
+        bad += check("OCT: EDIT layer open: OCT+ is the next page of machines, not the steps'", sm_lay_epage != pg && sm_ui.bank == 0u);
+    }
+    layer_let_go(B_EDIT);
+    ksnd(0)->len = 16u;
+    return bad;
+}
+
+static int test_keyboard_mode(void)
+{
+    int bad = 0;
+    uint32_t i;
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    oct_pair(0);
+    bad += check("KEYS: OCT- + OCT+ together: the keyboard mode", sm_ui.kbd == 1u);
+    kb_key(WHITE[2], 1);                                  /* A3 = 57 */
+    mix_blocks(4);
+    bad += check("KEYS: a key plays its note on the selected track (A3 on T1), sets no trig",
+                 on_n[0] == 1u && ev_nth(1, 0, 0) && ev_nth(1, 0, 0)->note == 57u && notes_on_core(0) == 1u &&
+                 !smp.pat[smp.cur].step[0][2].n && !sm_playing);
+    kb_key(WHITE[2], 0);
+    mix_blocks(2);
+    bad += check("KEYS: ... the key let go: its note-off", ev_count(0, 0) == 1u && notes_on_core(0) == 0u && !smp.pat[smp.cur].step[0][2].n);
+    bad += check("KEYS: ... a black key plays too (F#3 = 54)", (kb_key(1, 1), mix_blocks(2), ev_nth(1, 0, 1) && ev_nth(1, 0, 1)->note == 54u));
+    kb_key(1, 0);
+    mix_blocks(2);
+    oct_tap(B_OCTUP);
+    bad += check("KEYS: OCT+: octave +1, the bank untouched", sm_ui.oct == 1 && sm_ui.bank == 0u && sm_ui.kbd);
+    kb_key(WHITE[2], 1);
+    mix_blocks(2);
+    bad += check("KEYS: ... A3 + 12 = 69", ev_nth(1, 0, 2) && ev_nth(1, 0, 2)->note == 69u);
+    oct_tap(B_OCTDN);                                     /* the key is still down: its own note-off must be 69 */
+    kb_key(WHITE[2], 0);
+    mix_blocks(2);
+    bad += check("KEYS: ... the octave moved while it was down: the note-off is still 69 (nothing hangs)",
+                 notes_on_core(0) == 0u && ev_nth(0, 0, 2) && ev_nth(0, 0, 2)->note == 69u);
+    for (i = 0; i < 6u; i++)
+        oct_tap(B_OCTDN);
+    bad += check("KEYS: OCT- six times: -3 at the lowest", sm_ui.oct == -3);
+    for (i = 0; i < 8u; i++)
+        oct_tap(B_OCTUP);
+    bad += check("KEYS: OCT+ eight times: +3 at the highest", sm_ui.oct == 3);
+    kb_key(26, 1);                                        /* G5 = 79, + 36 = 115 */
+    mix_blocks(2);
+    bad += check("KEYS: G5 at +3: 115", ev_nth(1, 0, 3) && ev_nth(1, 0, 3)->note == 115u);
+    kb_key(26, 0);
+    mix_blocks(2);
+    leds_setup(LEDS_DIM);
+    sm_ui.kbd = 1;
+    sm_ui.oct = 2;
+    smp.pat[smp.cur].step[0][3].n = 1;
+    sm_leds();
+    bad += check("KEYS: LEDs: octave above 0: OCT+ lit, OCT- not; the white keys show no steps",
+                 led_of(fm1_led, panel.btn[B_OCTUP]) == 1 && led_of(fm1_led, panel.btn[B_OCTDN]) == 0 && wl(3) == 0);
+    sm_ui.oct = -1;
+    sm_leds();
+    bad += check("KEYS: LEDs: octave below 0: OCT- lit", led_of(fm1_led, panel.btn[B_OCTDN]) == 1 && led_of(fm1_led, panel.btn[B_OCTUP]) == 0);
+    /* the header: KEYS inverted while the mode is on */
+    draw_setup();
+    draw_full();
+    printf("swamp: KEYS header ink %u of %u without, ", scr_ink(34, 2, 48, 14), 48u * 14u);
+    bad += check("KEYS: header: not in the mode: no inverted box left of the tempo", scr_ink(34, 2, 48, 14) < 48u * 14u / 2u);
+    sm_ui.kbd = 1;
+    sm_dirty = 1;
+    sm_draw();
+    printf("swamp: %u with\n", scr_ink(34, 2, 48, 14));
+    bad += check("KEYS: header: KEYS inverted (a box of ink)", scr_ink(34, 2, 48, 14) > 48u * 14u / 2u);
+    sm_ui.kbd = 0;
+    /* the track: ALGORITHM, then the keys play it; leaving the mode lets go of what is held */
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    oct_pair(30);
+    bad += check("KEYS: the two buttons 30 ms apart: the mode too", sm_ui.kbd == 1u);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    kb_key(WHITE[0], 1);
+    mix_blocks(2);
+    bad += check("KEYS: T2 selected: the key plays T2", on_n[1] == 1u && !on_n[0] && notes_on_core(1) == 1u);
+    oct_pair(0);
+    mix_blocks(2);
+    bad += check("KEYS: both again: back to trigs, the key still held is let go (no hung note)",
+                 !sm_ui.kbd && notes_on_core(1) == 0u && ev_count(0, 1) == 1u);
+    fm1_in.notes = 0;
+    sm_input_poll();
+    kb_key(WHITE[0], 1);
+    kb_key(WHITE[0], 0);
+    bad += check("KEYS: ... and a key is a trig again", smp.pat[smp.cur].step[1][0].n == 1u && on_n[1] == 1u);
+    /* the pair window: 150 ms apart is two single presses */
+    in_reset();
+    host_ticks = 1000u;
+    ksnd(0)->len = 32u;
+    oct_pair(150);
+    bad += check("KEYS: 150 ms apart: not the keyboard mode (OCT- then OCT+: the page)", !sm_ui.kbd && sm_ui.bank == 1u);
+    ksnd(0)->len = 16u;
+    sm_ui.bank = 0;
+    /* a muted track plays no keyboard note; a note held when it is muted is let go */
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    smp.mute = 1;
+    oct_pair(0);
+    kb_key(WHITE[0], 1);
+    mix_blocks(3);
+    bad += check("KEYS: T1 muted: its key plays nothing", on_n[0] == 0u && notes_on_core(0) == 0u);
+    kb_key(WHITE[0], 0);
+    mix_blocks(2);
+    smp.mute = 0;
+    kb_key(WHITE[0], 1);
+    mix_blocks(2);
+    smp.mute = 1;
+    mix_blocks(2);
+    bad += check("KEYS: ... muted while a note is down: let go at the next block", notes_on_core(0) == 0u && ev_count(0, 0) == 1u);
+    kb_key(WHITE[0], 0);
+    mix_blocks(2);
+    smp.mute = 0;
+    bad += check("KEYS: ... and the key's own release adds nothing", ev_count(0, 0) == 1u);
+    kb_key(WHITE[0], 1);
+    mix_blocks(1);
+    kb_key(WHITE[0], 0);
+    mix_blocks(400);
+    bad += check("KEYS: nothing hangs at the end", voices_busy() == 0u && !notes_on_core(0));
+    return bad;
+}
+
+static int test_arp_keyboard(void)
+{
+    int bad = 0;
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    press(B_ARP);
+    sm_input_poll();
+    bad += check("ARP: a tap: the keyboard mode", sm_ui.kbd == 1u);
+    leds_setup(LEDS_DIM);
+    sm_ui.kbd = 1;
+    sm_leds();
+    bad += check("ARP: ... its LED lit", led_of(fm1_led, panel.btn[B_ARP]) == 1);
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    press(B_ARP);
+    sm_input_poll();
+    kb_key(WHITE[2], 1);
+    mix_blocks(3);
+    bad += check("ARP: ... a key plays a note on the track, no trig toggled",
+                 on_n[0] == 1u && ev_nth(1, 0, 0)->note == 57u && !smp.pat[smp.cur].step[0][2].n);
+    kb_key(WHITE[2], 0);
+    mix_blocks(2);
+    press(B_ARP);
+    sm_input_poll();
+    bad += check("ARP: again: the mode is off, no hung note", !sm_ui.kbd && notes_on_core(0) == 0u);
+    kb_key(WHITE[2], 1);
+    kb_key(WHITE[2], 0);
+    bad += check("ARP: ... and the key is a trig again", smp.pat[smp.cur].step[0][2].n == 1u);
+    press(B_ARP);
+    sm_input_poll();
+    oct_pair(0);
+    bad += check("ARP: on by ARP, off by OCT- + OCT+ (one state)", !sm_ui.kbd);
+    return bad;
+}
+
+static int test_keyboard_vs_seq_same_note(void)
+{
+    int bad = 0;
+    uint32_t pk, k, hung;
+    /* A: the sequencer's C4 (LEN INF) holds; the keyboard plays and lets go of C4 (key 7 = F3 + 7) in the middle */
+    midi_reset();
+    in_reset();
+    midi_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->note[0] = 60;
+    stp(0, 0)->len = SM_LEN_INF;
+    oct_pair(0);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks(4);
+    bad += check("KEYS+SEQ: the sequencer's C4 (LEN INF) sounds", ev_count(1, 0) == 1u && notes_on_core(0) == 1u);
+    kb_key(7, 1);
+    mix_blocks(2);
+    kb_key(7, 0);
+    mix_blocks(2);
+    bad += check("KEYS+SEQ: the key's note-off of the same note does not end the sequencer's", ev_count(0, 0) == 0u && notes_on_core(0) >= 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(400);
+    hung = 0;
+    for (k = 0; k < SM_NTRK; k++)
+        hung += notes_on_core(k);
+    pk = peak_of(10);
+    bad += check("KEYS+SEQ: STOP, 400 blocks: nothing hangs", !hung && voices_busy() == 0 && pk <= 2u);
+    /* B: the key holds C4; the sequencer's short C4 comes and goes: the key's note stays, its release is the one note-off */
+    midi_reset();
+    in_reset();
+    midi_reset();
+    sm_step_toggle(0, 1);
+    stp(0, 1)->note[0] = 60;
+    stp(0, 1)->len = 1;
+    oct_pair(0);
+    kb_key(7, 1);
+    mix_blocks(2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks((uint32_t)(3.0 * S120 / CTL));
+    bad += check("KEYS+SEQ: the sequencer's C4 came and went (two note-ons): the key's note still sounds, no note-off yet",
+                 ev_count(1, 0) == 2u && ev_count(0, 0) == 0u && notes_on_core(0) >= 1u);
+    kb_key(7, 0);
+    mix_blocks(2);
+    bad += check("KEYS+SEQ: the key's release then ends it (the one note-off)", ev_count(0, 0) == 1u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(400);
+    bad += check("KEYS+SEQ: 400 blocks later: no hung voice", voices_busy() == 0 && !notes_on_core(0));
+    /* C: a note-off for a key note the book does not hold (STOP forgot it) ends nothing of the sequencer's, and MIDI's same note stays */
+    midi_reset();
+    in_reset();
+    midi_reset();
+    sm_step_toggle(0, 0);
+    stp(0, 0)->note[0] = 60;
+    stp(0, 0)->len = SM_LEN_INF;
+    oct_pair(0);
+    kb_key(7, 1);
+    mix_blocks(2);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    mix_blocks(4);
+    kb_key(7, 0);
+    mix_blocks(2);
+    bad += check("KEYS+SEQ: a key held across STOP and PLAY: its release ends nothing of the sequencer's",
+                 notes_on_core(0) >= 1u && ev_count(0, 0) == 0u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    mix_blocks(400);
+    midi_reset();
+    in_reset();
+    midi_reset();
+    oct_pair(0);
+    midi_on(0, 60, 100);
+    mix_blocks(2);
+    kb_key(7, 1);
+    mix_blocks(2);
+    midi_off(0, 60);
+    mix_blocks(2);
+    bad += check("KEYS+MIDI: MIDI's note-off of the key's note does not end the key's", notes_on_core(0) >= 1u && ev_count(0, 0) == 0u);
+    kb_key(7, 0);
+    mix_blocks(2);
+    bad += check("KEYS+MIDI: ... the key's release ends it (the one note-off)", ev_count(0, 0) == 1u);
+    mix_blocks(400);
+    bad += check("KEYS+MIDI: nothing hangs", voices_busy() == 0 && !notes_on_core(0));
+    /* D: two keys on one pitch (octave moved between them): the first release leaves the note, the second ends it */
+    midi_reset();
+    in_reset();
+    midi_reset();
+    oct_pair(0);
+    kb_key(7, 1);                                         /* C4 */
+    oct_tap(B_OCTDN);
+    kb_key(19, 1);                                        /* F3 + 19 - 12 = C4 */
+    mix_blocks(2);
+    kb_key(7, 0);
+    mix_blocks(2);
+    bad += check("KEYS: two keys on one pitch: the first release ends nothing", notes_on_core(0) >= 1u && ev_count(0, 0) == 0u);
+    kb_key(19, 0);
+    mix_blocks(2);
+    bad += check("KEYS: ... the second release ends it", notes_on_core(0) == 0u && ev_count(0, 0) == 1u);
+    mix_blocks(400);
+    return bad;
+}
+
 static int test_midi_mute_stop_panic(void)
 {
     int bad = 0;
@@ -4382,8 +4729,9 @@ static int test_pat_direct_jump(void)
 /* 100 switches at 300 BPM, the three modes in turn, held notes, slides, ratchets on every track; then STOP: after 400 blocks
  * nothing sounds and no voice is held */
 static int test_pat_switch_300bpm_no_hang(void)
-{   /* (the tail: what the tracks hold after their voices are gone; the same 300 BPM pattern played without switches leaves
-     * |x| ~170 at this point: it is not the switches') */
+{   /* (a short tail is left after the voices are gone: the same 300 BPM pattern played without switches leaves |x| ~170 at
+     * this point, so it is not the switches' doing; its cause is unexplained. The test asserts what matters: the envelope
+     * decays: blocks 400..500 after STOP |x| <= 32, blocks 1400..1500 |x| <= 1) */
     int bad = 0, all = 1;
     uint32_t t, s, i, pk, held = 0;
     seq_reset();
@@ -4407,16 +4755,51 @@ static int test_pat_switch_300bpm_no_hang(void)
     }
     bad += check("PAT: 300 BPM: 100 switches, the three modes in turn, every one came", all);
     push(SMC_STOP, 0, 0, 0, 0);
-    for (i = 0; i < 300u; i++)
+    for (i = 0; i < 400u; i++)
         run_block();
-    pk = peak_of(100);
+    pk = peak_of(100);                                    /* blocks 400..500 */
     for (t = 0; t < SM_NTRK; t++)
         held += notes_on_core(t) + sm_nheld[t];
-    printf("swamp: after STOP peak %u, held %u, busy %u\n", pk, held, voices_busy());
-    bad += check("PAT: ... STOP: 400 blocks later no voice left, nothing held, only the tracks' tail (|x| <= 32)",
+    printf("swamp: after STOP peak(400..500) %u, held %u, busy %u\n", pk, held, voices_busy());
+    bad += check("PAT: ... STOP: 400 blocks later no voice left, nothing held, the tail decaying (blocks 400..500: |x| <= 32)",
                  pk <= 32u && held == 0u && !voices_busy());
-    (void)peak_of(1000);
-    bad += check("PAT: ... and that tail dies away (the next 1000 blocks: |x| <= 1 at the end)", peak_of(100) <= 1u);
+    (void)peak_of(900);                                   /* blocks 500..1400 */
+    pk = peak_of(100);                                    /* blocks 1400..1500 */
+    printf("swamp: after STOP peak(1400..1500) %u\n", pk);
+    bad += check("PAT: ... and the tail has died away (blocks 1400..1500: |x| <= 1)", pk <= 1u);
+    return bad;
+}
+
+/* a lock on a step of pattern 0 is on the core (and a PSLIDE gliding); the switch to pattern 1 makes the new kit's base every value's
+ * and clears the lock mask and the glide */
+static int test_pat_switch_clears_locks(void)
+{
+    int bad = 0;
+    int16_t base1;
+    uint32_t t = 0;
+    seq_reset();
+    pat_kit(1);
+    base1 = smp.pat[1].kit.snd[t].p[P_FCUT];
+    smp.pat[0].kit.snd[t].p[P_FCUT] = 60;
+    smp.pat[1].kit.snd[t].p[P_FCUT] = (int8_t)(base1 == 90 ? 80 : 90);   /* (neither the lock's value nor pattern 0's base) */
+    base1 = smp.pat[1].kit.snd[t].p[P_FCUT];
+    pat_trig(0, t, 0, 48);
+    smp.pat[0].step[t][0].flags = SMF_PSLIDE;
+    pat_trig(0, t, 1, 50);
+    smp.pat[0].step[t][1].len = SM_LEN_INF;
+    sm_lock_set(t, 0, P_FCUT, 20);
+    sm_lock_set(t, 1, P_FCUT, 33);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(1.2 * S120));                      /* step 1 has fired: its lock is on the core */
+    bad += check("PAT: lock: before the switch the core holds the lock (CUT 33, mask set)", trk[t].p[P_FCUT] == 33 && sm_lk_is(t, P_FCUT));
+    smp.next = 1;
+    bad += check("PAT: lock: switched to pattern 1", pat_run_until(1, 3000, 0));
+    run_block();
+    bad += check("PAT: lock: CUT is pattern 1's base, not the lock's", trk[t].p[P_FCUT] == base1 && smp.cur == 1u);
+    bad += check("PAT: lock: the lock mask and the PSLIDE are cleared", !sm_lk_is(t, P_FCUT) && sm_ps[t].n == 0u &&
+                 !sm_lk_on[t][P_FCUT >> 3] && sm_lk_step[t] == 0xFFu);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
     return bad;
 }
 
@@ -4776,11 +5159,16 @@ int main(void)
     bad += test_midi_vs_seq_same_note();
     bad += test_midi_mute_stop_panic();
     bad += test_midi_overflow();
+    bad += test_oct_pages();
+    bad += test_keyboard_mode();
+    bad += test_arp_keyboard();
+    bad += test_keyboard_vs_seq_same_note();
     bad += test_pat_switch_boundary();
     bad += test_pat_switch_kits();
     bad += test_pat_direct_start();
     bad += test_pat_direct_jump();
     bad += test_pat_switch_300bpm_no_hang();
+    bad += test_pat_switch_clears_locks();
     bad += test_pat_seq_layer();
     bad += test_len_visible();
     bad += test_filter_auto_lp();

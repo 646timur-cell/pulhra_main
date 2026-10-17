@@ -44,6 +44,8 @@ static void sm_layer_init(void)
     sm_solo = 0;
 }
 
+static uint32_t sm_layer_busy(void) { return sm_layer || sm_lay_arm; }
+
 /* the button of layer l */
 static uint32_t sm_layer_button(uint32_t l)
 {

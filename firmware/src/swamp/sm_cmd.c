@@ -19,12 +19,15 @@
  *  - SMC_PARAM with the ring full and no pending value of its {trk, param}: a second small ring of values only (sm_cov),
  *    drained after the main one and coalesced the same way. While it holds anything the main ring takes nothing (a later
  *    command must not overtake an earlier value), the values go on into sm_cov; anything else is refused (0). */
-enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD, SMC_UNLOCK, SMC_PREVIEW };
+enum { SMC_PLAY, SMC_STOP, SMC_PARAM, SMC_LOAD, SMC_UNLOCK, SMC_PREVIEW, SMC_KEYON, SMC_KEYOFF };
 /* SMC_UNLOCK {trk, step, val = gen}: the trig of step (0xFF: every step, SEQ CLEAR) was taken off; if the values locked on
  *   the core came from it, they go back to the model's base (a removed trig's lock must not stay on the core till the next
  *   trig). gen: the track's fire count (sm_gen) when the trig was taken off; a later fire (the step trigged again and
  *   fired before a refused unlock got through) makes it stale: ignored (8 bits: 256 fires of the track while the queue
  *   stays full, seconds; never in practice).
+ * SMC_KEYON {trk, step = note, param = velocity} / SMC_KEYOFF {trk, step = note}: a key of the keyboard mode (sm_input.c); the audio
+ *   stream plays it through the keyboard's own note book (sm_midi.c sm_kbd_note), which keeps it apart from the sequencer's
+ *   notes and from MIDI IN's.
  * SMC_PREVIEW {trk, param, val}: a lock REC just wrote, onto the core at once (playing only; stopped: ignored); the
  *   parameter counts as locked, so the next unlocked trig of the track takes the base again. */
 /* SMC_PARAM, SMC_LOAD, SMC_PREVIEW carry in `step` the pattern (smp.cur) whose model they come from: one of a pattern the audio
@@ -126,6 +129,7 @@ static int sm_cmd_push(sm_cmd_t c)
 static void sm_seq_play(void);
 static void sm_seq_stop(void);
 static void sm_lock_clear_step(uint32_t t, uint32_t s);  /* sm_lock.c */
+static void sm_kbd_note(uint32_t t, uint32_t note, uint32_t vel);   /* sm_midi.c: vel 0 lets the note go */
 
 /* the sequencer's (the audio stream's) own: bit per parameter, the parameters the last trig fired on each track locked
  * (sm_seq.c sm_seq_locks). While a bit is set, trk[t].p holds the lock's value, not the model's base */
@@ -172,6 +176,12 @@ static void sm_cmd_apply(const sm_cmd_t *c)
             sm_seq_pset(t, c->param, c->val, 0, 0);
             sm_lk_on[t][c->param >> 3] |= (uint8_t)(1u << (c->param & 7u));
         }
+        break;
+    case SMC_KEYON:
+        sm_kbd_note(t, c->step, c->param ? c->param : 1u);
+        break;
+    case SMC_KEYOFF:
+        sm_kbd_note(t, c->step, 0);
         break;
     case SMC_LOAD:
         if (t < SM_NTRK) {

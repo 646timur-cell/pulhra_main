@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* SWAMP MACHINE screen, Elektron mk1 look: one ink (white) on black, a 5 x 7 pixel font at scale 2, no smoothing, no grain;
  * a selection is an inversion. 240 x 240, every band its own canvas:
- *   y   0..19   header: T1 SAW 03 (track, machine, preset) left, the track inverted while it is muted; A01 120.0 > (pattern,
+ *   y   0..19   header: T1 SAW 03 (track, machine, preset) left, the track inverted while it is muted (the keyboard mode: T1 KEYS,
+ *               KEYS inverted, in place of the machine and preset); A01 120.0 > (pattern,
  *               tempo, transport) right; while recording REC (inverted) at the right corner in place of the pattern;
  *               the lock pool full: LOCKS FULL (inverted) alone for a second
  *   y  20..47   the page and the preset: EDIT 1 . SYNC LEAD (a layer open: its name instead); STEP: STEP 05 . X3, the step
@@ -117,6 +118,7 @@ static uint32_t smd_hdr_sig(void)
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, smp.cur);
     h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_lock_msg);
+    h = smd_mix(h, sm_ui.kbd);
     return smd_mix(h, smd_rec);
 }
 static void smd_two(char *b, uint32_t v)
@@ -161,11 +163,15 @@ static void smd_header(void)
     /* left: T1 SAW 03 - track, machine (four letters), preset; pieces a half pitch (6 px) apart */
     l[0] = 'T'; l[1] = (char)('1' + sm_ui.trk % SM_NTRK); l[2] = 0;
     x = sm_px_text(2, 2, 2u, l, T_TEXT, (int)smd_muted()) + 2 + 6;   /* (a muted track: inverted) */
-    smd_upper(nm, ENGINES[sm_engine_of(s->machine)]->name, 4u);
-    x += sm_px_text(x, 2, 2u, nm, T_TEXT, 0) + 6;
-    smd_two(l, (uint32_t)s->preset + 1u);
-    l[2] = 0;
-    sm_px_text(x, 2, 2u, l, T_TEXT, 0);
+    if (sm_ui.kbd) {                                      /* the keyboard mode: KEYS, inverted, where the machine and preset are */
+        sm_px_text(x, 2, 2u, "KEYS", T_TEXT, 1);
+    } else {
+        smd_upper(nm, ENGINES[sm_engine_of(s->machine)]->name, 4u);
+        x += sm_px_text(x, 2, 2u, nm, T_TEXT, 0) + 6;
+        smd_two(l, (uint32_t)s->preset + 1u);
+        l[2] = 0;
+        sm_px_text(x, 2, 2u, l, T_TEXT, 0);
+    }
     /* right, from the right edge: A01 120.0 >   (while recording: 120.0 > REC, the pattern gives way) */
     fmt_fix(t, smp.bpm10, 1);
     a[0] = 'A'; smd_two(a + 1, (uint32_t)smp.cur % SM_NPAT + 1u); a[3] = 0;

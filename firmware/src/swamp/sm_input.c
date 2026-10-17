@@ -22,9 +22,10 @@
  * stream reads each once per block (sm_seq.c). */
 #define SM_HOLD_US 350000u                                /* a key held longer is a select, not a tap */
 #define SM_BLACK_KEYS 0x252A52Au                          /* the black keys of F3 .. G5, bit n = key n (ui_input.c) */
-#define SM_KEY_BANK0 22u                                  /* D#5: steps 0..15 */
-#define SM_KEY_BANK1 25u                                  /* F#5: steps 16..31 */
 #define SM_NKEYS 27u
+#define SM_OCT_PAIR_US 100000u                            /* OCT- and OCT+ pressed within this: both together (keyboard mode) */
+#define SM_KEY_NOTE0 53u                                  /* F3, the first key's MIDI note (C4 = 60) */
+#define SM_KEY_VEL 100u
 
 static uint32_t sm_pdirty[SM_NTRK][4];                    /* bit per parameter (P_COUNT <= 127): pushed again */
 static uint8_t sm_ld_pend;                                /* bit per track: a LOAD still to push */
@@ -33,6 +34,10 @@ static uint32_t sm_key_t0[SM_NKEYS], sm_key_arm;          /* press time of the w
 static uint8_t sm_key_step[SM_NKEYS];                     /* the step each of them was pressed on (a bank key may move on) */
 static uint8_t sm_key_trk[SM_NKEYS];                      /* ... and the track */
 static uint32_t sm_key_used;                              /* bit per key: a knob turned while it was down (a lock, no toggle) */
+static uint8_t sm_oct_pend;                               /* an OCT press waiting for the other one: 0 none, 1 OCT-, 2 OCT+ */
+static uint32_t sm_oct_t0;                                /* ... when it went down */
+static uint8_t sm_kb_note[SM_NKEYS], sm_kb_trk[SM_NKEYS]; /* keyboard mode: the note each key sounds (0xFF none) and its track */
+static uint32_t sm_kb_pend;                               /* bit per key: pressed, its note-on not pushed yet */
 
 #define SM_FAST_US 80000u
 #define SM_FAST_N 4u
@@ -48,6 +53,11 @@ static void sm_input_init(void)
     memset(sm_pdirty, 0, sizeof sm_pdirty);
     sm_ld_pend = sm_tr_pend = 0;
     sm_key_arm = sm_key_used = 0;
+    sm_oct_pend = 0;
+    sm_oct_t0 = 0;
+    memset(sm_kb_note, 0xFF, sizeof sm_kb_note);
+    memset(sm_kb_trk, 0, sizeof sm_kb_trk);
+    sm_kb_pend = 0;
     sm_unl_pend = 0;
     sm_rec = 0;
     sm_lock_msg = 0;
@@ -57,6 +67,7 @@ static void sm_input_init(void)
 static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);   /* sm_layer.c (after this file) */
 static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg);
 static void sm_layer_end(void);
+static uint32_t sm_layer_busy(void);                      /* a layer open, or its button down */
 
 static sm_sound_t *sm_ui_sound(void) { return &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK]; }
 
@@ -189,7 +200,7 @@ static void sm_preset_turn(int32_t s)
     sm_sound_load(sd->machine, (uint32_t)p);
 }
 
-/* the keys: a white key is a step of the bank (F3 .. G5, the 16 white keys), D#5 / F#5 the bank. Pressed: armed (before
+/* the keys: a white key is a step of the bank (F3 .. G5, the 16 white keys; OCT- / OCT+ the bank: sm_oct_poll). Pressed: armed (before
  * the knobs of the poll, so a turn in the same poll is a lock of it). Let go: the trig toggles only if it was down at most
  * SM_HOLD_US and no knob or SELECT turned meanwhile (a hold is a look at the step's locks, not a toggle); a key held past
  * SM_HOLD_US, or turned, is the step shown (held_step) */
@@ -210,13 +221,6 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
         int32_t w;
         if (!((notes >> k) & 1u))
             continue;
-        if (k == SM_KEY_BANK0 || k == SM_KEY_BANK1) {
-            if (smp.pat[smp.cur].kit.snd[sm_ui.trk].len <= 16u)
-                continue;                                 /* (no second page of steps while the track is 16 long) */
-            sm_ui.bank = (uint8_t)(k == SM_KEY_BANK1);
-            sm_dirty = 1;
-            continue;
-        }
         w = sm_white_of(k);
         if (w < 0)
             continue;
@@ -253,6 +257,94 @@ static void sm_keys_release(uint32_t now)
         if (hs < SM_NSTEP)
             sm_ui.sel_step = (uint8_t)hs;
         sm_dirty = 1;
+    }
+}
+
+/* OCT- / OCT+ outside the layers. Alone: on the pages where the white keys are trigs, the page of steps 1..16 / 17..32 (only
+ * on a track longer than 16); in the keyboard mode the octave -1 / +1 (-3 .. +3). Both within SM_OCT_PAIR_US: the keyboard mode
+ * on or off; ARP alone does the same. So a single press waits that long for the other before it acts (a page must not flip under a chord press). */
+static void sm_oct_single(uint32_t up)
+{
+    if (sm_ui.kbd) {
+        int32_t o = clamp((int32_t)sm_ui.oct + (up ? 1 : -1), -3, 3);
+        if ((int8_t)o != sm_ui.oct) {
+            sm_ui.oct = (int8_t)o;                        /* (notes sounding keep their pitch: the key's own note-off) */
+            sm_dirty = 1;
+        }
+    } else if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len > 16u && sm_ui.bank != (uint8_t)up) {
+        sm_ui.bank = (uint8_t)up;
+        sm_dirty = 1;
+    }
+}
+
+static void sm_oct_toggle(void)
+{
+    sm_ui.kbd = (uint8_t)!sm_ui.kbd;
+    sm_key_arm = sm_key_used = 0;                         /* (a trig key down at the switch never toggles a trig) */
+    sm_ui.held_step = sm_ui.sel_step = 0xFFu;
+    sm_dirty = 1;
+}
+
+static void sm_oct_poll(uint32_t pressed, uint32_t now)
+{
+    uint32_t dn = (pressed >> panel.btn[B_OCTDN]) & 1u, up = (pressed >> panel.btn[B_OCTUP]) & 1u;
+    if (!sm_layer_busy() && ((pressed >> panel.btn[B_ARP]) & 1u))
+        sm_oct_toggle();                                  /* ARP: the keyboard mode too (the arpeggiator pages come in stage 5) */
+    if (sm_layer_busy()) {                         /* (the layers use OCT: EDIT's next page; a layer button down may open one) */
+        sm_oct_pend = 0;
+        return;
+    }
+    if (sm_oct_pend && (uint32_t)(now - sm_oct_t0) > SM_OCT_PAIR_US * FM1_TICKS_PER_US) {
+        sm_oct_single(sm_oct_pend == 2u);                 /* (nobody came with it) */
+        sm_oct_pend = 0;
+    }
+    if (dn && up) {
+        sm_oct_toggle();
+        sm_oct_pend = 0;
+    } else if (dn || up) {
+        uint8_t which = (uint8_t)(dn ? 1u : 2u);
+        if (sm_oct_pend && sm_oct_pend != which) {
+            sm_oct_toggle();
+            sm_oct_pend = 0;
+        } else {
+            if (sm_oct_pend)
+                sm_oct_single(sm_oct_pend == 2u);         /* (the same button twice inside the window) */
+            sm_oct_pend = which;
+            sm_oct_t0 = now;
+        }
+    }
+}
+
+/* the keyboard mode: a key pressed plays its note (F3 + the key + 12 octaves) on the track selected then, released lets it go;
+ * out of the mode every note still sounding is let go. The commands are pushed from the state each poll, so a refused one
+ * (queue full) goes again on the next. edges: this poll's presses (none in a layer) */
+static void sm_kbd_poll(uint32_t edges)
+{
+    uint32_t k, held = fm1_in.notes;
+    for (k = 0; k < SM_NKEYS; k++) {
+        uint32_t bit = 1u << k;
+        if (sm_ui.kbd && (edges & bit))
+            sm_kb_pend |= bit;
+        if (!sm_ui.kbd)
+            sm_kb_pend &= ~bit;
+        if (sm_kb_note[k] == 0xFFu) {
+            if (sm_kb_pend & bit) {
+                sm_cmd_t c = {SMC_KEYON, (uint8_t)(sm_ui.trk % SM_NTRK), 0, SM_KEY_VEL, 0};
+                c.step = (uint8_t)clamp((int32_t)(SM_KEY_NOTE0 + k) + 12 * sm_ui.oct, 0, 127);
+                if (sm_cmd_push(c)) {
+                    sm_kb_note[k] = c.step;
+                    sm_kb_trk[k] = c.trk;
+                    sm_kb_pend &= ~bit;
+                }
+            }
+        } else if (!sm_ui.kbd || !(held & bit)) {
+            sm_cmd_t c = {SMC_KEYOFF, sm_kb_trk[k], sm_kb_note[k], 0, 0};
+            uint32_t j, same = 0;
+            for (j = 0; j < SM_NKEYS; j++)               /* (another key sounds the same note on the track: its off is the last) */
+                same |= j != k && sm_kb_note[j] == c.step && sm_kb_trk[j] == c.trk;
+            if (same || sm_cmd_push(c))
+                sm_kb_note[k] = 0xFFu;
+        }
     }
 }
 
@@ -437,7 +529,10 @@ static void sm_input_poll(void)
         sm_ui.held_step = sm_ui.sel_step = 0xFFu;
         sm_dirty = 1;
     }
-    sm_keys_press(notes, now);
+    sm_oct_poll(pressed, now);
+    sm_kbd_poll(sm_ui.kbd ? notes : 0);
+    if (!sm_ui.kbd)                                       /* (the keyboard mode: the keys play, they are no trigs) */
+        sm_keys_press(notes, now);
     if (pre && !sm_page_is_step() && !sm_page_home() && sm_trig_held() >= 0) {   /* a trig held on a sound page: PRESETS is its FLAG */
         int32_t hs = sm_trig_held();
         sm_key_used |= sm_key_arm;

@@ -176,8 +176,10 @@ static void sm_seq_init(void)
     memset(sm_lk_step, 0xFF, sizeof sm_lk_step);
     memset(sm_gen, 0, sizeof sm_gen);
     memset(sm_pre, 0, sizeof sm_pre);
-    for (t = 0; t < SM_NTRK; t++)
+    for (t = 0; t < SM_NTRK; t++) {
         sm_seq_idle(t);
+        sm_midi_forget(t);
+    }
     sm_play_pat = (uint8_t)(smp.cur % SM_NPAT);
     sm_mstep = 0;
     sm_solo = 0;
