@@ -1,0 +1,96 @@
+# SWAMP MACHINE — этап 3: паттерны, цепочки, сохранение
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 16 паттернов с китами и их смена во время игры, цепочки, копирование/очистка/UNDO, FILL, видимая длина трека, сохранение проекта во флеш (2 копии + автосейв), страница SAVE (PROJECT, USER-пресеты).
+
+**Architecture:** Прежнее приложение `firmware/src/swamp/`. Правило владения: главный цикл — единственный писатель `smp`; ISR читает `smp`, владеет `trk[]`, транспортом и состоянием секвенсора. Смена паттерна: главный цикл пишет запрос `smp.next`; ISR на границе решает и пишет своё `sm_play_pat` (+ грузит киты 4 треков через `sm_track_load` из `smp.pat[next].kit`); главный цикл видит `sm_play_pat` и обновляет `smp.cur`.
+
+**Tech Stack:** как в этапах 1–2.
+
+**Spec:** `docs/superpowers/specs/2026-10-16-monofm2-fork-design.md` (разделы 3, 4 «Цепочки», «SEQ-слой», 5 «SAVE», 9).
+
+## Global Constraints
+
+- Ветка `swamp`; трейлер `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` + `Claude-Session: https://claude.ai/code/session_01Fh9JFsxsQqPqcywieGAYBE`; без force-push.
+- Нет `#if FELUCCA_*` в `firmware/src/swamp/`; файлы Felucca UI/seq/project/mf_pat не компилируются (можно читать как образец).
+- Владение `smp` — см. Architecture; публикация: поля → `SM_BARRIER()` → флаг/счётчик.
+- RAM headroom ≥ 4096 B (сейчас 9664), pool ≥ 8192 B.
+- Сообщения только: «CLEARED», «UNDO», «SAVED», «LOCKS FULL», ошибка флеша.
+- Флеш проекта SWAMP: копия A `0xB4000`, копия B `0xC0000`, рабочая (автосейв) `0xCC000`, по 48 КиБ (`0xC000`, 12 секторов) — бывшая область проекта MONOFM; не задевает пользовательские пресеты с `0xDC000`. Запись флеша только на стопе (во время игры — отложить до STOP).
+- Слой SEQ (раскладка MONOFM, `MONOFM.md` «SEQ + белые»): F3 CLEAR трека (держать 0,8 с — все 4 трека), G3 COPY паттерн, A3 COPY трек, B3 PASTE трек, D4 PASTE паттерн, E4 / F4 SHIFT < >, B4 / C5 TRN − +, F#5 держать 0,8 с — SAVE проекта, ALGORITHM — выбор паттерна, OCT+ — в цепочку, OCT− — сбросить набранное, G#3 — выключить цепочку; K1 LEN (уже есть).
+
+## Review Focus
+
+1. Смена паттерна во время игры на 300 BPM с разными машинами на всех 4 треках: смена ровно на границе, кроссфейд машин, без зависших нот и без одного блока «новые параметры на старой машине». Тест в Task 1.
+2. Обрыв питания во время записи проекта: при загрузке берётся целая последняя копия (CRC), не полузаписанная. Тест в Task 4.
+3. UNDO после CLEAR всех треков во время игры возвращает триги и локи, не ломая пул локов. Тест в Task 3.
+4. Цепочка с повторами (A1 A1 A2) и с паттернами разной длины: каждое звено играет до конца. Тест в Task 2.
+5. Проект сохранён, прибор выключен/включён: киты, триги, локи, длины, BPM, swing, мьюты, цепочка — как были. Тест в Task 4.
+
+---
+
+### Task 0: FLAG на зажатом триге на любой странице (Тим 23:09)
+
+**Files:** `sm_input.c`, `sm_draw.c`, тесты.
+
+- Держишь клавишу шага на любой странице звука → ручка PRESETS листает FLAG этого шага (тот же список, что на STEP: —, ACC, SLD, A+S, X2, X3, X4, AX2, AX3, AX4, REST, PSLD) вместо пресета трека; поворот помечает клавишу «использована» (триг при отпускании не переключается). На пустом шаге — как на STEP (REST-триг). Пока шаг зажат, в строке страницы крупно `FLAG ACC` (текущий флаг шага).
+- [ ] Tests: `test_flag_on_held_trig_any_page` (страница FILTER, держать шаг 3, PRESETS +1 → ACC, пресет трека не изменился, триг остался), `test_flag_shown_while_held`.
+- [ ] Implement, run, commit + push, CI. `"SWAMP: trig FLAG on PRESETS while a trig is held, on every page"`
+
+---
+
+### Task 1: 16 паттернов с китами, смена во время игры, видимая длина
+
+**Files:** `sm_model.h/.c` (`smp.next`, режим смены, мастер-длина), `sm_seq.c` (граница, загрузка китов, `sm_play_pat`), `sm_layer.c` (SEQ: ALGORITHM — выбор паттерна, отпускание SEQ — запрос), `sm_draw.c` (карта слоя SEQ: сетка A01–A16 — играет/выбран/запрошен/пустой; `LEN nn` крупно; длина трека справа от полосы шагов), `tests/swamp_test.c`.
+
+**Interfaces:**
+- `smp.next` (0xFF нет), `smp.mode` (SEQUENTIAL — в конце паттерна; DIRECT START — сразу, с шага 1; DIRECT JUMP — сразу, с той же позиции), мастер-длина `smp.pat[p].mlen` (0 AUTO = самый длинный трек).
+- `static volatile uint8_t sm_play_pat` (ISR) — главный цикл после каждого кадра: если `sm_play_pat != smp.cur` → `smp.cur = sm_play_pat`, `sm_dirty`.
+- На смене ISR: для каждого трека `sm_track_load(t, &smp.pat[next].kit.snd[t])`, сброс маски локов и PSLIDE, позиции треков по режиму; порядок внутри блока — как у команд (до `engine_block`).
+- Правки во время игры идут в `smp.pat[smp.cur]`; паттерн, который сейчас грузится, главный цикл не правит (правки пишутся в `cur`, который ещё старый, до подтверждения ISR).
+
+- [ ] Tests: `test_pat_switch_boundary` (SEQUENTIAL: смена ровно на конце мастер-длины ±CTL), `test_pat_switch_kits` (машины всех 4 треков сменились, первый блок нового паттерна — фейд старых машин, без «новых параметров на старой машине»), `test_pat_direct_start/jump`, `test_pat_switch_300bpm_no_hang` (100 смен на 300 BPM, через 400 блоков после STOP тишина), `test_len_visible` (SEQ зажат → «LEN 32» на экране; полоса показывает длину).
+- [ ] Implement, run (и под санитайзерами), commit + push, CI зелёный. `"SWAMP: 16 patterns with kits, switching while playing, visible track length"`
+
+---
+
+### Task 2: Цепочки
+
+**Files:** `sm_model.h/.c` (`chain[16]`, `nchain` — в модели, сохраняются), `sm_seq.c` (ISR ведёт позицию цепочки `sm_cpos`), `sm_layer.c` (OCT+ / OCT− / G#3 в слое SEQ), `sm_draw.c` (цепочка и текущее звено на карте слоя и в шапке), тесты.
+
+- [ ] Tests: `test_chain_build` (OCT+ ×3 → A1 A1 A2), `test_chain_plays_links` (каждое звено до своего конца, разные длины, по кругу), `test_chain_off` (G#3 — играет текущий), `test_chain_reset` (OCT−).
+- [ ] Implement, run, commit + push. `"SWAMP: pattern chains"`
+
+---
+
+### Task 3: Копирование, очистка, UNDO, сдвиг, транспоз, FILL
+
+**Files:** `sm_edit.c` (новый: буфер копии паттерна/трека, снимок UNDO одного паттерна, сдвиг, транспоз), `sm_layer.c` (клавиши слоя SEQ по Global Constraints; GLO + G5 — FILL пока держишь), `sm_seq.c` (`sm_fill` из GLO), `sm_input.c` (SAVE держать — UNDO), `sm_draw.c` (сообщения CLEARED / UNDO на 1 с), тесты.
+
+**Interfaces:** `static void sm_undo_snap(void)` (перед каждой разрушительной правкой: CLEAR, PASTE, SHIFT, TRN — копия `smp.pat[cur]` в один буфер; RAM: один `sm_pattern_t` ≈ 2,6 КБ — проверить headroom), `static void sm_undo(void)`; копия/вставка трека переносит звук трека (кит) + шаги + локи трека; паттерна — всё. Удаление локов при CLEAR/PASTE — через тот же путь, что `sm_lock_clear_step`/UNLOCK (во время игры — надгробия + unlock); восстановление UNDO во время игры: шаги и пул пишутся в порядке, безопасном для ISR (сначала `n=0` у затрагиваемых шагов и `nlock` вниз, затем поля, затем `n`/`nlock` — барьеры).
+
+- [ ] Tests: `test_clear_track`, `test_clear_all_hold` (0,8 с), `test_undo_after_clear_while_playing` (триги и локи вернулись, пул цел, ISR не применил чужой лок), `test_copy_paste_track/pattern` (кит, шаги, локи), `test_shift_trn`, `test_fill_glo_g5` (COND FILL срабатывает только пока держишь).
+- [ ] Implement, run, commit + push. `"SWAMP: copy, paste, clear, undo, shift, transpose, FILL"`
+
+---
+
+### Task 4: Сохранение проекта
+
+**Files:** `sm_store.c` (новый), `sm_layer.c` (SEQ + F#5 держать 0,8 с — SAVE), `sm_main.c` (загрузка при старте; автосейв), тесты (симулятор флеша — как в `tests/swamp_host.h` для настроек этапа 1).
+
+**Interfaces:** заголовок `{magic "SWP1", version 1, seq, size, crc32 тела, hcrc}`, тело = `sm_project_t` (уплотнить пул локов перед записью); SAVE пишет в более старую из A/B; автосейв — в W через 8 с тишины после правки, только на стопе; при старте — самая новая целая из A/B/W по `seq`; запрос SAVE во время игры — выполняется на STOP («SAVED» тогда); ошибка флеша — сообщение. Запись идёт с остановленным аудио? Нет: только на стопе, звук идёт (хвосты эффектов допустимы), стираются/пишутся сектора драйвером `storage_hw.c`.
+
+- [ ] Tests: `test_save_load_roundtrip` (киты, триги, локи, длины, BPM, swing, мьюты, цепочка), `test_power_cut_mid_write` (оборванная запись → загружается предыдущая целая), `test_autosave_idle` (8 с тишины на стопе → W записан; во время игры — нет), `test_save_while_playing_deferred`.
+- [ ] Implement, run, commit + push. `"SWAMP: project storage — two copies, autosave, load at boot"`
+
+---
+
+### Task 5: Страница SAVE — PROJECT и USER-пресеты, установщик
+
+**Files:** `sm_pages.c` (семейство SAVE: PROJECT, USER), `sm_input.c`, `sm_draw.c`, `sm_upreset.c` (новый: 64 слота звука трека во флеше `0xDC000`… — формат свой, с CRC), `SWAMP.md`, тесты.
+
+**Interfaces:** PROJECT: ALGORITHM листает 16 паттернов (`A01`… + «пусто»/«есть»), K1 мастер-длина, K2 режим смены, кнопки: OCT+ LOAD (перейти), F#5 держать SAVE, OCT− RELOAD паттерна из сохранённого. USER: ALGORITHM / PRESETS листают 64 слота, OCT+ — загрузить в трек, F#5 держать — сохранить звук трека в слот, имя = имя машины + номер. На HOME и USER ALGORITHM — пресеты трека (спек), на PROJECT — паттерны.
+
+- [ ] Tests: `test_project_page_lists_patterns`, `test_user_preset_save_load` (машина и все параметры, после перезагрузки), `test_user_preset_power_cut`.
+- [ ] Implement, run, commit + push, CI зелёный, `SOURCE_COMMIT` установщика = HEAD. `"SWAMP: SAVE pages — project, user presets; stage 3 notes"`
