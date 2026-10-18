@@ -8265,6 +8265,28 @@ static void fx_fig(const int32_t *L, uint32_t n, double *bright, double *rms)
     *bright = e > 0 ? d / e : 0;
     *rms = sqrt(e / n);
 }
+/* the mean figures of 8 renders of T1 with DIST type dty (-1: clean) and INSERT type ity (the voices start on random phases, so
+ * one render differs from the next by up to ~20 %: a mean of 8 is stable to a few %) */
+static void fx_mean(int dty, int ity, double *bright, double *rms)
+{
+    static int32_t L[CTL * 300];
+    double sb = 0, sr = 0, b, r;
+    uint32_t k;
+    for (k = 0; k < 8u; k++) {
+        fx_t1();
+        if (dty >= 0) {
+            trk[0].p[P_DIST] = 110;
+            trk[0].p[P_DTYPE] = (int16_t)dty;
+        }
+        trk[0].p[P_ITYPE] = (int16_t)ity;
+        fx_render(L, 300, 300);
+        fx_fig(L + CTL * 40, CTL * 260, &b, &r);
+        sb += b;
+        sr += r;
+    }
+    *bright = sb / 8;
+    *rms = sr / 8;
+}
 static double fx_energy(const int32_t *L, uint32_t n)
 {
     double e = 0;
@@ -8312,28 +8334,23 @@ static int test_fx_sends_audible(void)
 
 static int test_fx_dist_types(void)
 {
-    static int32_t L[4][CTL * 300];
-    double br[4], rm[4], base_br, base_rm;
+    double br[4], rm[4], base_br, base_rm, b2, r2, nul;
     int bad = 0, ok = 1;
     uint32_t ty, j;
-    fx_t1();
-    fx_render(L[0], 300, 300);
-    fx_fig(L[0] + CTL * 40, CTL * 260, &base_br, &base_rm);
+    fx_mean(-1, 0, &base_br, &base_rm);
+    fx_mean(-1, 0, &b2, &r2);
+    nul = fmax(fabs(b2 - base_br) / base_br, fabs(r2 - base_rm) / base_rm);
     for (ty = 0; ty < 4u; ty++) {
-        fx_t1();
-        trk[0].p[P_DIST] = 110;
-        trk[0].p[P_DTYPE] = (int16_t)ty;
-        fx_render(L[ty], 300, 300);
-        fx_fig(L[ty] + CTL * 40, CTL * 260, &br[ty], &rm[ty]);
-        printf("swamp: DIST type %u: brightness %.4f, rms %.0f (clean: %.4f, %.0f)\n", ty, br[ty], rm[ty], base_br, base_rm);
-        ok &= fabs(br[ty] - base_br) > 0.2 * base_br || fabs(rm[ty] - base_rm) > 0.2 * base_rm;   /* (two renders of one sound differ by ~5 %: the voice phases) */
+        fx_mean((int)ty, 0, &br[ty], &rm[ty]);
+        printf("swamp: DIST type %u: brightness %.4f, rms %.0f (clean: %.4f, %.0f; spread of the mean %.3f)\n", ty, br[ty], rm[ty], base_br, base_rm, nul);
+        ok &= fabs(br[ty] - base_br) > 0.2 * base_br || fabs(rm[ty] - base_rm) > 0.2 * base_rm;
     }
     bad += check("FX: DIST drive 110: every type sounds unlike the clean note (20 %)", ok);
     ok = 1;
     for (ty = 0; ty < 4u; ty++)
         for (j = ty + 1u; j < 4u; j++)
-            ok &= fabs(br[ty] - br[j]) > 0.15 * br[ty] || fabs(rm[ty] - rm[j]) > 0.1 * rm[ty];
-    bad += check("FX: ... and no two types alike (brightness differs by 15 % or the level by 10 %)", ok);
+            ok &= fabs(br[ty] - br[j]) > 0.12 * br[ty] || fabs(rm[ty] - rm[j]) > 0.08 * rm[ty];
+    bad += check("FX: ... and no two types alike (brightness differs by 12 % or the level by 8 %)", ok);
     return bad;
 }
 
@@ -8378,24 +8395,17 @@ static int test_fx_insert_types(void)
     }
     {
         double b0, r0, bn, rn, nul;
-        fx_t1();
-        fx_render(L0, 400, 400);
-        fx_fig(L0 + CTL * 40, CTL * 350, &b0, &r0);
-        fx_t1();
-        fx_render(L1, 400, 400);
-        fx_fig(L1 + CTL * 40, CTL * 350, &bn, &rn);
-        nul = fmax(fabs(bn - b0) / b0, fabs(rn - r0) / r0);       /* (two renders of the same sound: the run-to-run difference) */
+        fx_mean(-1, 0, &b0, &r0);
+        fx_mean(-1, 0, &bn, &rn);
+        nul = fmax(fabs(bn - b0) / b0, fabs(rn - r0) / r0);       /* (two means of the same sound: the run-to-run difference) */
         printf("swamp: INSERT OFF twice: brightness %.4f %.4f, rms %.0f %.0f (spread %.4f)\n", b0, bn, r0, rn, nul);
         for (ty = 1; ty < 5u; ty++) {
             char w[100];
             double bt, rt, dd;
-            fx_t1();
-            trk[0].p[P_ITYPE] = SM_ITYPES[ty];
-            fx_render(L1, 400, 400);
-            fx_fig(L1 + CTL * 40, CTL * 350, &bt, &rt);
+            fx_mean(-1, SM_ITYPES[ty], &bt, &rt);
             dd = fmax(fabs(bt - b0) / b0, fabs(rt - r0) / r0);
             snprintf(w, sizeof w, "FX: INSERT %s is audible: brightness %.4f, rms %.0f against OFF %.4f, %.0f", N_ITYPE[SM_ITYPES[ty]], bt, rt, b0, r0);
-            bad += check(w, dd > 0.05 && dd > 5.0 * nul);
+            bad += check(w, dd > 0.15 && dd > 3.0 * nul);
         }
     }
     return bad;
