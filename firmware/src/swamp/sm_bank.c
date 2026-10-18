@@ -13,7 +13,11 @@
  * one that differs from it is "dirty" and is written before it leaves RAM (stopped), at SAVE and by the autosave (8 s with no
  * edit and no note sounding, stopped). With no flash (the part not recognised at boot) a bank left is forgotten.
  *
- * Flash (0xB4000..0xDC000, MONOFM's USR2 / USR3 sample room: SWAMP plays USR1 only, eng_sample.c SMP_USER_LIVE): the project
+ * Flash (0xB4000..0xDC000: MONOFM's project area (mf_pat.c MFP_A 0xB4000) and Felucca / STRANGE's user sample slots USR2 / USR3.
+ * SWAMP plays USR1 only, eng_sample.c SMP_USER_LIVE, but its first SAVE or autosave erases a MONOFM project and user samples
+ * saved there, and installing MONOFM later wipes SWAMP's banks: the two do not share a part. This build's bank format is
+ * version 1, unmigrated: a future firmware may drop banks saved on it if the pattern layout grows, stage 4 adds the
+ * versioned migration): the project
  * object (BPM, swing, mutes, change mode, chain, the current pattern) in two copies, one sector each (A 0xB4000, B 0xB5000);
  * the banks in a pool of 7 places of 5 sectors (0xB6000 + 0x5000 * i): a bank is 8 x sm_pattern_t = 20352 B, so ten copies
  * (two per bank) would need 200 KiB of the 160. Each place: a 32-byte header at +0 {magic "SWB1", version, bank, used, seq,
@@ -79,6 +83,7 @@ static uint32_t sm_phash;                                 /* the project's when 
 static uint8_t sm_want = SM_PAT_NONE;                     /* a pattern id asked for whose bank is not in RAM yet */
 static uint8_t sm_chain_pend[SM_NCHAIN], sm_chain_npend;  /* a chain whose link 1's bank is not in RAM yet */
 static uint8_t sm_gop_kind, sm_gop_g;                     /* a GLO save into a bank not in RAM yet (1: waiting) */
+static uint8_t sm_flash_hold;                             /* a write failed: no new try until an edit, a SAVE or a request */
 static uint8_t sm_save_pend;                              /* SAVE asked while playing: done at STOP */
 static uint32_t sm_as_sig, sm_as_t0, sm_as_look;          /* the autosave: the model's hash, since when, the last look */
 static uint8_t sm_glo_bank;                               /* GLO: the bank in view */
@@ -292,7 +297,25 @@ static int sm_store_all(void)
             bad |= sm_bank_save(h);
     if (sm_proj_hash() != sm_phash)
         bad |= sm_proj_save();
+    sm_flash_hold = bad != 0;                             /* (a failing part: no try on every poll, see sm_bank_poll) */
     return bad;
+}
+
+/* every value of the 8 kits of RAM slots s0.. inside its descriptor's range on the sound's machine (a bank from the flash is
+ * data: a CHAOS value out of range crashed once), the machine itself inside the list */
+static void sm_bank_clamp(uint32_t s0)
+{
+    uint32_t i, t, p;
+    for (i = 0; i < SM_BPAT; i++)
+        for (t = 0; t < SM_NTRK; t++) {
+            sm_sound_t *sd = &smp.pat[s0 + i].kit.snd[t];
+            sd->machine %= SM_NMACHINE;
+            for (p = 0; p < P_COUNT; p++) {
+                const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), p);
+                if (d)
+                    sd->p[p] = (int8_t)clamp(sd->p[p], d->min, d->max);
+            }
+        }
 }
 
 /* RAM half h <- bank b (the newest valid copy in the flash, else 8 empty patterns with the default kit). The half is free:
@@ -309,6 +332,8 @@ static void sm_bank_fill(uint32_t h, uint32_t b)
              st_crc32(&smp.pat[s0], SM_BANK_BYTES) == sm_fs_crc[sl];
         if (!ok)
             sm_msg_show(SM_MSG_FLASH);
+        else
+            sm_bank_clamp(s0);
     }
     if (!ok) {
         sm_kit_t kit;
@@ -398,6 +423,7 @@ static void sm_bank_init(void)
     sm_chain_npend = 0;
     sm_gop_kind = 0;
     sm_save_pend = 0;
+    sm_flash_hold = 0;
     sm_glo_bank = 0;
     sm_glo_key = 0xFFu;
     sm_fsave_dn = sm_fsave_done = 0;
@@ -435,7 +461,10 @@ static uint32_t sm_bank_bring(uint32_t b)
     if (sm_half_dirty(h) && flash_ok) {                   /* (no flash: RAM only, a bank left is forgotten) */
         if (*(volatile uint8_t *)&sm_playing)
             return SM_BR_WAIT;                            /* (its edits stay in RAM till STOP: never lost) */
+        if (sm_flash_hold)
+            return SM_BR_FAIL;                            /* (it failed a moment ago: no erase again till an edit or a request) */
         if (sm_bank_save(h)) {
+            sm_flash_hold = 1;
             sm_msg_show(SM_MSG_FLASH);
             return SM_BR_FAIL;
         }
@@ -458,6 +487,7 @@ static void sm_ask(uint32_t g)
 {
     if (g >= SM_NGPAT)
         return;
+    sm_flash_hold = 0;                                    /* (a request: one more try) */
     smp.nchain = 0;
     sm_chain_npend = 0;
     SM_BARRIER();
@@ -476,6 +506,7 @@ static void sm_chain_ask(const uint8_t *c, uint32_t n)
 {
     uint32_t i;
     n = n < SM_NCHAIN ? n : SM_NCHAIN;
+    sm_flash_hold = 0;
     sm_want = SM_PAT_NONE;
     for (i = 0; i < n; i++)
         sm_chain_pend[i] = (uint8_t)(c[i] % SM_NGPAT);
@@ -524,6 +555,7 @@ static int sm_pat_store(uint32_t g)
 static void sm_save_ask(void)
 {
     sm_save_pend = 1;
+    sm_flash_hold = 0;
 }
 
 /* every poll, after sm_pat_poll: a request or a chain whose bank came in is asked for; the next link's bank brought in on the
@@ -575,9 +607,11 @@ static void sm_bank_poll(uint32_t now)
         int dirty = sm_half_dirty(0) || sm_half_dirty(1) || sm_proj_hash() != sm_phash;
         sm_as_look = now;
         if (sig != sm_as_sig || voices_busy()) {          /* (quiet: no edit, and no note sounding: an erase silences the */
-            sm_as_sig = sig;                              /* audio, so not over a note played on the keys or from MIDI) */
+            if (sig != sm_as_sig)                         /* audio, so not over a note played on the keys or from MIDI) */
+                sm_flash_hold = 0;                        /* (an edit: a failed write is tried again) */
+            sm_as_sig = sig;
             sm_as_t0 = now;
-        } else if (dirty && flash_ok && (uint32_t)(now - sm_as_t0) >= SM_AUTOSAVE_US * FM1_TICKS_PER_US) {
+        } else if (dirty && flash_ok && !sm_flash_hold && (uint32_t)(now - sm_as_t0) >= SM_AUTOSAVE_US * FM1_TICKS_PER_US) {
             if (sm_store_all())
                 sm_msg_show(SM_MSG_FLASH);
             sm_as_t0 = now;
@@ -601,6 +635,7 @@ static void sm_glo_tap(uint32_t place)
     uint32_t g = sm_glo_bank * SM_BPAT + place % SM_BPAT;
     if (g == sm_gid_of(smp.cur))
         return;
+    sm_flash_hold = 0;                                    /* (a request: one more try) */
     if (sm_pat_used(g)) {
         sm_ask(g);
     } else if (sm_pat_store(g)) {
@@ -636,6 +671,7 @@ static void sm_glo_poll(uint32_t notes, uint32_t now)
     } else if (!sm_glo_done && (uint32_t)(now - sm_glo_t0) >= SM_GLO_HOLD_US * FM1_TICKS_PER_US) {
         uint32_t g = sm_glo_bank * SM_BPAT + sm_glo_key;
         sm_glo_done = 1;
+        sm_flash_hold = 0;
         if (g != sm_gid_of(smp.cur) && sm_pat_store(g)) {
             sm_gop_kind = 1;
             sm_gop_g = (uint8_t)g;

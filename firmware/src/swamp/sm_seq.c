@@ -674,16 +674,24 @@ static void sm_rev_put(uint32_t kind, uint32_t t, uint32_t st, uint32_t note, ui
 }
 
 /* a note to record on track t (playing only; at the start of a block, from the commands or MIDI IN): the nearest step (the
- * one playing in its first half, else the next) and that step's fires on this pass dropped (the key sounded) */
+ * one playing in its first half, else the next) and that step's fires on this pass dropped (the key sounded). The edge: the
+ * master length's last step playing, its second half, is the end of the pattern (a pattern asked for or a chain's next link
+ * comes next, or the tracks start again from step 1, which clears the marks), so the next step is not this pattern's: the
+ * note stays on the last step, as in the first half, the one rule for every case (a track that loops inside the master,
+ * its next step not past the master's end, rounds on as before) */
 static void sm_rec_on(uint32_t t, uint32_t note, uint32_t vel)
 {
-    uint32_t step_q8, el, st;
+    uint32_t step_q8, el, st, edge;
     if (!sm_playing || t >= SM_NTRK)
         return;
     note &= 0x7Fu;
     step_q8 = sm_step_q8();
     el = sm_next_q8 < step_q8 ? step_q8 - sm_next_q8 : 0u; /* (of the step playing; PLAY this block: a whole step, the next is 1) */
-    if (el * 2u < step_q8) {
+    {
+        const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
+        edge = sm_mstep >= sm_mlen_of(pt) && (pt->mlen || !sm_next[t]);
+    }
+    if (el * 2u < step_q8 || edge) {
         st = sm_pos[t];
         if (sm_late_q8[t] != SM_Q8_NONE && sm_late_st[t] == st)
             sm_late_q8[t] = SM_Q8_NONE;

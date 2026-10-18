@@ -67,7 +67,8 @@ static uint8_t nor[0x100000], flash_ok = 1;
 /* the power cut (the banks test): the flash takes nor_budget more bytes (an erase counts 1) and then nothing; -1 no cut.
  * nor_writes counts every erase and program (nothing is written while playing) */
 static int32_t nor_budget = -1;
-static uint32_t nor_writes;
+static uint32_t nor_writes, nor_erases;
+static uint32_t nor_fail;                                 /* 1: every erase fails; 2: a program is dropped (the read-back differs) */
 static int nor_take(void)
 {
     nor_writes++;
@@ -81,6 +82,9 @@ static int nor_take(void)
 static int st_read(uint32_t off, void *dst, uint32_t n) { memcpy(dst, nor + off, n); return 0; }
 static int st_erase(uint32_t off)
 {
+    nor_erases++;
+    if (nor_fail & 1u)
+        return 1;
     if (nor_take())
         memset(nor + off, 0xFF, 4096);
     return 0;
@@ -89,6 +93,8 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
 {
     const uint8_t *s = src;
     uint32_t i;
+    if (nor_fail & 2u)
+        return 0;
     for (i = 0; i < n; i++)
         if (nor_take())
             nor[off + i] &= s[i];
@@ -6854,7 +6860,7 @@ static int test_bank_roundtrip(void)
     run_block();
     sm_input_poll();
     sm_sound_from_preset(&smp.pat[1].kit.snd[0], 5, 2);
-    smp.pat[1].kit.snd[0].p[P_FCUT] = -12;
+    smp.pat[1].kit.snd[0].p[P_ED_FLT] = -12;
     smp.pat[1].kit.snd[1].len = 24;
     smp.pat[1].kit.snd[2].dvel = 77;
     smp.pat[1].mlen = 12;
@@ -6890,8 +6896,8 @@ static int test_bank_roundtrip(void)
     bank_reboot();
     bad += check("ROUND: power on: bank A in half 0, every byte of its 8 patterns (kits, trigs, locks, lengths)",
                  smp.hbank[0] == 0u && !memcmp(&smp.pat[0], a, sizeof a));
-    bad += check("ROUND: ... the current pattern A02, its kit on the tracks (T1's machine and CUT)", smp.cur == 1u &&
-                 trk[0].engine == sm_engine_of(5) && trk[0].p[P_FCUT] == -12 && sm_play_pat == 1u);
+    bad += check("ROUND: ... the current pattern A02, its kit on the tracks (T1's machine and ENV)", smp.cur == 1u &&
+                 trk[0].engine == sm_engine_of(5) && trk[0].p[P_ED_FLT] == -12 && sm_play_pat == 1u);
     bad += check("ROUND: ... BPM 137.4, swing 61, mutes T1 T3, DIRECT START, the chain A02 C05 B02",
                  smp.bpm10 == 1374u && smp.swing == 61u && smp.mute == 5u && smp.mode == SM_PM_START && smp.nchain == 3u &&
                  smp.chain[0] == 1u && smp.chain[1] == 20u && smp.chain[2] == 9u);
@@ -6975,6 +6981,116 @@ static int test_bank_autosave(void)
     bad += check("AUTOSAVE: ... the note gone, 8 s on: written", nor_writes > w0 && !sm_half_dirty(0));
     bank_reboot();
     bad += check("AUTOSAVE: ... the power off and on: the edit is there", smp.pat[0].step[0][5].n == 1u);
+    return bad;
+}
+
+/* a failing flash (every erase fails, or every program is lost so the read-back differs): stopped, nothing erases over and
+ * over: one try per edit, per SAVE, per bank asked for */
+static int test_bank_flash_fail(void)
+{
+    int bad = 0, mode;
+    uint32_t e0, e1, i, lim;
+    for (mode = 1; mode <= 2; mode++) {
+        lim = mode == 1 ? 3u : 12u;                       /* (one try of both halves and the project: 5 erases each when they work) */
+        nor_wipe();
+        in_reset();
+        host_ticks = 1000u;
+        smp.nchain = 0;
+        pat_trig(0, 0, 0, 48);
+        nor_fail = (uint32_t)mode;
+        e0 = nor_erases;
+        for (i = 0; i < 60u; i++) {                       /* 12 s: the first try */
+            ms(200);
+            sm_input_poll();
+        }
+        e1 = nor_erases;
+        for (i = 0; i < 240u; i++) {                      /* 48 s on */
+            ms(200);
+            sm_input_poll();
+        }
+        bad += check(mode == 1 ? "FLASHFAIL: erase fails, dirty, stopped: one try, then no erase for 48 s" :
+                                 "FLASHFAIL: read-back fails, dirty, stopped: one try, then no erase for 48 s",
+                     e1 - e0 <= lim && e1 > e0 && nor_erases == e1 && sm_half_dirty(0));
+        e0 = nor_erases;
+        pat_trig(0, 0, 1, 50);                            /* an edit: tried again */
+        for (i = 0; i < 100u; i++) {
+            ms(200);
+            sm_input_poll();
+        }
+        bad += check("FLASHFAIL: ... an edit: one more try, then quiet", nor_erases > e0 && nor_erases - e0 <= lim);
+        e0 = nor_erases;
+        seq_f5_save();
+        for (i = 0; i < 5u; i++) {
+            ms(200);
+            sm_input_poll();
+        }
+        bad += check("FLASHFAIL: ... SAVE asked: tried", nor_erases > e0 && nor_erases - e0 <= lim);
+        e0 = nor_erases;
+        for (i = 0; i < 150u; i++) {
+            ms(200);
+            sm_input_poll();
+        }
+        bad += check("FLASHFAIL: ... and quiet again", nor_erases == e0);
+        nor_fail = 0;
+        pat_trig(0, 0, 2, 52);                            /* the flash heals: the next edit saves */
+        for (i = 0; i < 60u; i++) {
+            ms(200);
+            sm_input_poll();
+        }
+        bad += check("FLASHFAIL: ... the part back, an edit: saved", !sm_half_dirty(0));
+    }
+    /* a chain whose link 1 is in a bank not in RAM, the free half dirty: the preload fails, polls erase once */
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    smp.hbank[1] = 1;
+    pat_trig(8, 0, 0, 60);                                /* the other half edited */
+    smp.chain[0] = 16;                                    /* C1 */
+    smp.chain[1] = 0;
+    smp.nchain = 2;
+    nor_fail = 1;
+    e0 = nor_erases;
+    for (i = 0; i < 15u; i++) {                           /* 3 s */
+        ms(200);
+        sm_input_poll();
+    }
+    e1 = nor_erases;
+    for (i = 0; i < 150u; i++) {                          /* 30 s on */
+        ms(200);
+        sm_input_poll();
+    }
+    bad += check("FLASHFAIL: chain preload over a dirty half, the erase fails, stopped: a try or two, then none for 30 s",
+                 e1 > e0 && e1 - e0 <= 3u && nor_erases == e1);
+    nor_fail = 0;
+    smp.nchain = 0;
+    return bad;
+}
+
+/* a bank loaded from the flash holds every kit value inside its descriptor's range (a CHAOS value out of range crashed once) */
+static int test_bank_kit_clamp(void)
+{
+    int bad = 0;
+    uint32_t t, i, wild = 0, out = 0;
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    for (t = 0; t < SM_NTRK; t++)
+        for (i = 0; i < P_COUNT; i++) {
+            const param_desc_t *d = sm_desc_safe(sm_engine_of(smp.pat[3].kit.snd[t].machine), i);
+            if (d) {
+                smp.pat[3].kit.snd[t].p[i] = (int8_t)(t & 1u ? -128 : 127);
+                wild += d->max < 127 || d->min > -128;
+            }
+        }
+    bad += check("KITCLAMP: crafted out-of-range values in a saved bank", wild > 4u && sm_bank_save(0) == 0);
+    bank_reboot();
+    for (t = 0; t < SM_NTRK; t++)
+        for (i = 0; i < P_COUNT; i++) {
+            const param_desc_t *d = sm_desc_safe(sm_engine_of(smp.pat[3].kit.snd[t].machine), i);
+            if (d && (smp.pat[3].kit.snd[t].p[i] < d->min || smp.pat[3].kit.snd[t].p[i] > d->max))
+                out++;
+        }
+    bad += check("KITCLAMP: loaded from the flash: every value inside its range", out == 0u && smp.pat[3].kit.snd[0].p[0] != 0x7F + 1);
     return bad;
 }
 
@@ -7238,6 +7354,85 @@ static int test_live_rec_keys(void)
 }
 
 /* MIDI notes on the selected track's channel record as the keys do (REC + PLAY; no keyboard mode needed) */
+/* live record at the master length's edge: a note in the second half of the last step stays on it */
+static int test_live_rec_edge(void)
+{
+    int bad = 0;
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    press(B_REC);
+    sm_input_poll();
+    oct_pair(0);
+    smp.mode = SM_PM_SEQ;
+    smp.nchain = 0;
+    smp.pat[1] = smp.pat[0];
+    smp.next = 1;                                         /* pattern 2 asked for: it comes at the end of this one */
+    press(B_PLAY);
+    sm_input_poll();
+    into_step(0, 15, 0.70);
+    kb_key(WHITE[0], 1);
+    run_block();
+    sm_input_poll();
+    kb_key(WHITE[0], 0);
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC EDGE: 70 % into the last step, a pattern asked for: on the last step, not step 1 of the pattern",
+                 stp(0, 15)->n == 1u && stp(0, 15)->note[0] == 53u && !stp(0, 0)->n && !smp.pat[1].step[0][0].n);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    in_reset();
+    host_ticks = 1000u;
+    press(B_REC);
+    sm_input_poll();
+    oct_pair(0);
+    smp.mode = SM_PM_SEQ;
+    smp.nchain = 0;
+    smp.next = SM_PAT_NONE;
+    smp.pat[smp.cur].mlen = 8;                            /* a master length of 8: the tracks start again from step 1 there */
+    press(B_PLAY);
+    sm_input_poll();
+    into_step(0, 7, 0.70);
+    kb_key(WHITE[0], 1);
+    run_block();
+    sm_input_poll();
+    kb_key(WHITE[0], 0);
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC EDGE: master length 8, 70 % into step 8: on step 8 (not 9, which is not played again)",
+                 stp(0, 7)->n == 1u && !stp(0, 8)->n && !stp(0, 0)->n);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    in_reset();
+    host_ticks = 1000u;
+    press(B_REC);
+    sm_input_poll();
+    oct_pair(0);
+    smp.mode = SM_PM_SEQ;
+    smp.nchain = 0;
+    smp.next = SM_PAT_NONE;
+    smp.pat[smp.cur].mlen = 0;
+    smp.pat[smp.cur].kit.snd[0].len = 4;                  /* a track of 4 in a master of 16: its own loop, no edge */
+    press(B_PLAY);
+    sm_input_poll();
+    into_step(0, 3, 0.70);
+    kb_key(WHITE[0], 1);
+    run_block();
+    sm_input_poll();
+    kb_key(WHITE[0], 0);
+    run_block();
+    sm_input_poll();
+    bad += check("LIVEREC EDGE: a track of 4 in a master of 16, 70 % into its step 4: round to its step 1 (no master edge)",
+                 stp(0, 0)->n == 1u && !stp(0, 3)->n);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    return bad;
+}
+
 static int test_live_rec_midi(void)
 {
     int bad = 0;
@@ -7998,6 +8193,9 @@ int main(void)
     bad += test_bank_roundtrip();
     bad += test_bank_autosave();
     bad += test_bank_flash_map();
+    bad += test_bank_flash_fail();
+    bad += test_bank_kit_clamp();
+    bad += test_live_rec_edge();
     bad += test_rec_grid();
     bad += test_shift_trig_copy();
     bad += test_live_rec_keys();
