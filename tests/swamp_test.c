@@ -842,7 +842,7 @@ static int test_alg_selects_track(void)
 static int test_pages_cycle(void)
 {
     int bad = 0, ok = 1;
-    static const char *const want[4] = {"EDIT 1", "EDIT 2", "VOICE", "EDIT 1"};
+    static const char *const want[4] = {"EDIT 1", "EDIT 2", "EDIT 1", "EDIT 2"};
     uint32_t k;
     in_reset();
     press(B_ENV);
@@ -2455,9 +2455,7 @@ static int test_leds_family(void)
     ok &= led_of(fm1_led, panel.btn[B_ENV]) == 1 && led_of(fm1_led, panel.btn[B_EDIT]) == 0 && led_of(fm1_led, panel.btn[B_GLO]) == 0;
     ok &= led_of(fm1_led_dim, panel.btn[B_EDIT]) == 1 && led_of(fm1_led_dim, panel.btn[B_GLO]) == 1;     /* the rest glow */
     for (pg = 0; pg < sm_page_count(); pg++) {
-        uint32_t b = SM_PAGES[pg].fam == SMFAM_EDIT ? B_EDIT : SM_PAGES[pg].fam == SMFAM_GLO ? B_GLO :
-                     SM_PAGES[pg].fam == SMFAM_SEQ ? B_SEQ : SM_PAGES[pg].fam == SMFAM_HOME ? B_HOME :
-                     SM_PAGES[pg].fam == SMFAM_ARP ? B_ARP : SM_PAGES[pg].fam == SMFAM_FX ? B_FX : B_ENV;
+        uint32_t b = sm_fam_btn(SM_PAGES[pg].fam);   /* (VOICE lights EDIT, the deep pages FX, EUCLID SEQ, MENU HOME) */
         sm_ui.page = (uint8_t)pg;
         sm_leds();
         ok &= led_of(fm1_led, panel.btn[b]) == 1;
@@ -4130,11 +4128,10 @@ static int test_shift_oct(void)
     turn(EN_K2, -1); sm_input_poll();
     turn(EN_K2, -1); sm_input_poll();
     turn(EN_K2, -1); sm_input_poll();
-    bad += check("SHIFT: + K2 (CUT, 0..127) down: three detents, no step yet", ksnd(0)->p[P_FCUT] == v0);
-    turn(EN_K2, -1); sm_input_poll();
-    bad += check("SHIFT: ... the fourth: one step", ksnd(0)->p[P_FCUT] == v0 - 1);
-    turn(EN_K2, -8); sm_input_poll();
-    bad += check("SHIFT: ... eight more: two steps (a quarter a detent)", ksnd(0)->p[P_FCUT] == v0 - 3);
+    bad += check("SHIFT: + K2 (CUT, 0..127) down: three detents, x4: 12 steps", ksnd(0)->p[P_FCUT] == v0 - 12);
+    turn(EN_K2, 1); sm_input_poll();
+    bad += check("SHIFT: ... one detent up: 4 steps (acceleration, not the fine turn)", ksnd(0)->p[P_FCUT] == v0 - 8);
+    v0 = ksnd(0)->p[P_FCUT];
     f0 = ksnd(0)->p[P_FLT];
     turn(EN_K1, 1); sm_input_poll();
     bad += check("SHIFT: + K1 (FILT, a list): a detent is a step, as ever", ksnd(0)->p[P_FLT] == f0 + 1);
@@ -4152,19 +4149,19 @@ static int test_shift_oct(void)
     bad += check("SHIFT: OCT- let go: SHIFT off, a detent a step again", !sm_shift && ksnd(0)->p[P_FCUT] == v0 - 2);
     oct_tap(B_OCTUP);
     bad += check("OCT+: round to the page 1..16", sm_ui.bank == 0u);
-    /* CLOCK: SHIFT keeps the tempo at 0.1 a detent (no flick) */
+    /* CLOCK: SHIFT turns the tempo 1.0 BPM a detent */
     sm_ui.page = (uint8_t)page_by_name("CLOCK");
     b0 = smp.bpm10;
     btn_down(B_OCTDN);
     sm_input_poll();
     turn(EN_K1, 3); sm_input_poll();
     turn(EN_K1, 3); sm_input_poll();
-    bad += check("SHIFT: CLOCK K1 flicked: 0.1 a detent (+0.6), no x10", smp.bpm10 == b0 + 6u);
+    bad += check("SHIFT: CLOCK K1: 1.0 BPM a detent (6 detents: +6.0)", smp.bpm10 == b0 + 60u);
     btn_up(B_OCTDN);
     ms(150);
     sm_input_poll();
     /* the keyboard mode: OCT- is the octave down, no SHIFT */
-    press(B_ARP);
+    oct_pair(0);
     sm_input_poll();
     btn_down(B_OCTDN);
     sm_input_poll();
@@ -4875,18 +4872,25 @@ static int test_arp_keyboard(void)
     host_ticks = 1000u;
     press(B_ARP);
     sm_input_poll();
-    bad += check("ARP: a tap: the keyboard mode and the ARP page", sm_ui.kbd == 1u && sm_ui.page == sm_arp_page(0) &&
+    bad += check("ARP: a tap: the ARP page only, no keyboard mode", !sm_ui.kbd && sm_ui.page == sm_arp_page(0) &&
                  !strcmp(sm_cur_page()->name, "ARP"));
     leds_setup(LEDS_DIM);
-    sm_ui.kbd = 1;
+    sm_ui.page = (uint8_t)sm_arp_page(0);
     sm_leds();
-    bad += check("ARP: ... its LED lit", led_of(fm1_led, panel.btn[B_ARP]) == 1);
+    bad += check("ARP: ... its LED lit (the page's family), the keyboard mode not", led_of(fm1_led, panel.btn[B_ARP]) == 1);
+    host_ticks = 1000u;
+    press(B_ARP);
+    sm_input_poll();
+    bad += check("ARP: again: ARP 2, still no keyboard mode", !sm_ui.kbd && sm_ui.page == sm_arp_page(1) && !strcmp(sm_cur_page()->name, "ARP 2"));
+    press(B_ARP);
+    sm_input_poll();
+    bad += check("ARP: again: round to ARP", !sm_ui.kbd && sm_ui.page == sm_arp_page(0));
     in_reset();
     midi_reset();
     in_reset();
     host_ticks = 1000u;
-    press(B_ARP);
-    sm_input_poll();
+    oct_pair(0);
+    bad += check("ARP: the keyboard mode by OCT- + OCT+ only", sm_ui.kbd == 1u);
     kb_key(WHITE[2], 1);
     mix_blocks(3);
     bad += check("ARP: ... MODE OFF: a key plays a note on the track, no trig toggled",
@@ -4895,19 +4899,20 @@ static int test_arp_keyboard(void)
     mix_blocks(2);
     press(B_ARP);
     sm_input_poll();
+    bad += check("ARP: tapped in the keyboard mode: the ARP page, the mode stays", sm_ui.kbd && sm_ui.page == sm_arp_page(0));
+    press(B_ARP);
+    sm_input_poll();
     bad += check("ARP: again: ARP 2, still the keyboard mode", sm_ui.kbd && sm_ui.page == sm_arp_page(1) &&
                  !strcmp(sm_cur_page()->name, "ARP 2"));
     press(B_ARP);
     sm_input_poll();
-    bad += check("ARP: again: the mode is off, no hung note", !sm_ui.kbd && notes_on_core(0) == 0u);
+    bad += check("ARP: again: ARP; the mode on, the ARP page does not switch it off", sm_ui.kbd && sm_ui.page == sm_arp_page(0));
+    oct_pair(0);
+    bad += check("ARP: the mode off by OCT- + OCT+, no hung note", !sm_ui.kbd && notes_on_core(0) == 0u);
     sm_rec = 1;                                           /* (grid record) */
     kb_key(WHITE[2], 1);
     kb_key(WHITE[2], 0);
     bad += check("ARP: ... and the key is a trig again (REC on)", smp.pat[smp.cur].step[0][2].n == 1u);
-    press(B_ARP);
-    sm_input_poll();
-    oct_pair(0);
-    bad += check("ARP: on by ARP, off by OCT- + OCT+ (one state)", !sm_ui.kbd);
     sm_ui.page = (uint8_t)page_by_name("FILTER");
     oct_pair(0);                                          /* (the keyboard mode on by the pair, the page unchanged) */
     press(B_ARP);
@@ -8155,13 +8160,28 @@ static int test_arp_pages(void)
 
 /* ------------------------------------------------------------------ FX pages (stage 4, Task 1) --- */
 /* the FX button's family: FX (the four sends, SELECT the delay's MIX), DIST (TYPE DRIVE TONE OUT, SELECT LCUT), INSERT (TYPE A B C,
- * SELECT MIX). Held, with SELECT: the deep global pages DLY / REV / CHORUS, the values song.g, the project's */
+ * SELECT MIX). SHIFT + FX: the deep global pages DLY / REV / CHORUS, the values song.g, the project's */
 static void fx_tap(void)
 {
     btn_down(B_FX);
     sm_input_poll();
     ms(100);
     btn_up(B_FX);
+    sm_input_poll();
+}
+/* SHIFT (OCT- held) + a family button tapped, OCT- let go after */
+static void shift_press(uint32_t b)
+{
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    btn_down(b);
+    sm_input_poll();
+    ms(50);
+    btn_up(b);
+    sm_input_poll();
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    ms(200);                                              /* (OCT-'s single press has waited out its pair window) */
     sm_input_poll();
 }
 /* a turn of one control, a poll; the parameter ids of the knobs K1..K4 and SELECT, and what changed in the selected track's model */
@@ -8297,6 +8317,7 @@ static double fx_energy(const int32_t *L, uint32_t n)
 }
 static int test_fx_sends_audible(void)
 {
+    rng_state = 0x1234567u;                               /* (the voices' random phases: the same run whatever the tests before drew) */
     static const uint8_t SEND[4] = {P_DIST, P_CHOR, P_DLY, P_REV};
     static const char *const NAME[4] = {"DST", "CHO", "DLY", "REV"};
     static int32_t L0[CTL * 600], L1[CTL * 600];
@@ -8359,6 +8380,7 @@ static int test_fx_insert_types(void)
     static int32_t L0[CTL * 400], L1[CTL * 400];
     int bad = 0, ok = 1, seen[9] = {0}, i;
     uint32_t ty, n;
+    rng_state = 0x1234567u;                               /* (the voices' random phases: the same run whatever the tests before drew) */
     in_reset();
     host_ticks = 1000u;
     sm_ui.page = (uint8_t)page_by_name("INSERT");
@@ -8419,10 +8441,9 @@ static int test_fx_deep_pages(void)
     in_reset();
     host_ticks = 1000u;
     sm_ui.page = (uint8_t)page_by_name("DIST");
-    layer_hold(B_FX);
-    bad += check("FX: FX held 500 ms: the layer is on, the page under it still DIST", sm_layer == SML_FX && sm_ui.page == page_by_name("DIST"));
-    bad += check("FX: ... it shows the deep page DLY: K1 TIME, K2 FDBK, K3 COLOR, K4 MIX", !strcmp(sm_cur_page()->name, "DLY") &&
-                 sm_page_param(0) == (SM_GLB | G_DTIME) && sm_page_param(1) == (SM_GLB | G_DFDBK) &&
+    shift_press(B_FX);
+    bad += check("FX: SHIFT + FX: the deep page DLY (a page, no layer), the FX family's page left", sm_layer == SML_NONE && !strcmp(sm_cur_page()->name, "DLY"));
+    bad += check("FX: ... K1 TIME, K2 FDBK, K3 COLOR, K4 MIX", sm_page_param(0) == (SM_GLB | G_DTIME) && sm_page_param(1) == (SM_GLB | G_DFDBK) &&
                  sm_page_param(2) == (SM_GLB | G_DCOLOR) && sm_page_param(3) == (SM_GLB | G_DMIX));
     t0 = song.g[G_DTIME]; f0 = song.g[G_DFDBK]; d0 = song.g[G_DCOLOR];
     before = *ksnd(0);
@@ -8433,9 +8454,8 @@ static int test_fx_deep_pages(void)
     run_block();
     bad += check("FX: ... K1 K2 K3 edit song.g (TIME, FDBK, COLR), the sound of the track is untouched",
                  song.g[G_DTIME] == param_turn(&GP[G_DTIME], t0, 2) && song.g[G_DTIME] != t0 && song.g[G_DFDBK] == f0 - 5 && song.g[G_DCOLOR] == d0 + 4 && !memcmp(&before, ksnd(0), sizeof before));
-    turn(EN_SELECT, 1);
-    sm_input_poll();
-    bad += check("FX: SELECT +1: REV (TYPE, SIZE, DAMP)", sm_layer == SML_FX && !strcmp(sm_cur_page()->name, "REV") &&
+    shift_press(B_FX);
+    bad += check("FX: SHIFT + FX again: REV (TYPE, SIZE, DAMP)", sm_layer == SML_NONE && !strcmp(sm_cur_page()->name, "REV") &&
                  sm_page_param(0) == (SM_GLB | G_RTYPE) && sm_page_param(1) == (SM_GLB | G_RSIZE) && sm_page_param(2) == (SM_GLB | G_RDAMP) &&
                  sm_page_param(3) == SM_NOPARAM);
     {
@@ -8445,9 +8465,8 @@ static int test_fx_deep_pages(void)
         sm_input_poll();
         bad += check("FX: ... K1 REVERB TYPE (HALL -> SPRING), K2 SIZE", song.g[G_RTYPE] == r0 - 1 && song.g[G_RSIZE] == z0 - 10);
     }
-    turn(EN_SELECT, 1);
-    sm_input_poll();
-    bad += check("FX: SELECT +1: CHORUS (RATE, DEPTH)", !strcmp(sm_cur_page()->name, "CHORUS") && sm_page_param(0) == (SM_GLB | G_CRATE) &&
+    shift_press(B_FX);
+    bad += check("FX: SHIFT + FX again: CHORUS (RATE, DEPTH)", !strcmp(sm_cur_page()->name, "CHORUS") && sm_page_param(0) == (SM_GLB | G_CRATE) &&
                  sm_page_param(1) == (SM_GLB | G_CDEPTH) && sm_page_param(2) == SM_NOPARAM);
     {
         int16_t c0 = song.g[G_CRATE], e0 = song.g[G_CDEPTH];
@@ -8457,25 +8476,14 @@ static int test_fx_deep_pages(void)
         run_block();
         bad += check("FX: ... K1 / K2 edit CRT, CDP; the core reads song.g", song.g[G_CRATE] == c0 + 7 && song.g[G_CDEPTH] == e0 + 3);
     }
-    turn(EN_SELECT, 1);
-    sm_input_poll();
-    bad += check("FX: SELECT +1 once more: round to DLY", !strcmp(sm_cur_page()->name, "DLY"));
-    turn(EN_SELECT, -1);
-    sm_input_poll();
-    bad += check("FX: SELECT -1: back to CHORUS", !strcmp(sm_cur_page()->name, "CHORUS"));
+    shift_press(B_FX);
+    bad += check("FX: SHIFT + FX once more: round to DLY", !strcmp(sm_cur_page()->name, "DLY"));
+    fx_tap();
+    bad += check("FX: the FX button tapped from a deep page: the FX page", !strcmp(sm_cur_page()->name, "FX"));
+    layer_hold(B_FX);
+    bad += check("FX: FX held 500 ms: no layer (the FX button has none), no page change at its release", sm_layer == SML_NONE);
     layer_let_go(B_FX);
-    bad += check("FX: FX let go: the layer closes, the page is DIST as before, nothing changed it", sm_layer == SML_NONE &&
-                 !strcmp(sm_cur_page()->name, "DIST"));
-    /* a turn while FX is down is the layer even before 400 ms (as everywhere) */
-    sm_ui.page = (uint8_t)page_by_name("FX");
-    btn_down(B_FX);
-    sm_input_poll();
-    ms(40);
-    turn(EN_SELECT, 1);
-    sm_input_poll();
-    bad += check("FX: SELECT turned 40 ms after FX went down: the layer at once, DLY -> REV", sm_layer == SML_FX && !strcmp(sm_cur_page()->name, "REV"));
-    layer_let_go(B_FX);
-    bad += check("FX: ... let go: no tap (the page FX stays)", !strcmp(sm_cur_page()->name, "FX"));
+    bad += check("FX: ... let go: still FX", !strcmp(sm_cur_page()->name, "FX") && sm_hold_btn() == 0xFFu);
     /* globals take no locks, REC or not, a trig held or not */
     ok = 1;
     in_reset();
@@ -8670,22 +8678,533 @@ static int test_fx_draw(void)
     draw_full();
     bad += check("FX draw: ... on FLANG: RATE DEPTH FDBK", lint_has("FLANG", 0, 0) && lint_has("DEPTH", 0, 0) && lint_has("FDBK", 0, 0));
     ksnd(0)->p[P_ITYPE] = 0;
-    sm_layer = SML_FX;
-    sm_lay_fpage = 0;
+    sm_ui.page = (uint8_t)page_by_name("DLY");
     save = song.g[G_DTIME];
     draw_full();
-    bad += check("FX draw: FX held: DLY page: TIME FDBK COLOR MIX, no layer map, the page line says DLY GLOBAL",
+    bad += check("FX draw: SHIFT + FX: DLY page: TIME FDBK COLOR MIX, no layer map, the page line says DLY GLOBAL",
                  lint_has("TIME", 0, 0) && lint_has("FDBK", 0, 0) && lint_has("COLOR", 0, 0) && lint_has("MIX", 0, 0) && lint_has("DLY \x12 GLOBAL", 0, 0) &&
                  lint_frame("dly") == 0);
-    sm_lay_fpage = 1;
+    sm_ui.page = (uint8_t)page_by_name("REV");
     draw_full();
     bad += check("FX draw: ... REV page: TYPE SIZE DAMP", lint_has("TYPE", 0, 0) && lint_has("SIZE", 0, 0) && lint_has("DAMP", 0, 0) &&
                  lint_has("HALL", 0, 0) && lint_frame("rev") == 0);
-    sm_lay_fpage = 2;
+    sm_ui.page = (uint8_t)page_by_name("CHORUS");
     draw_full();
     bad += check("FX draw: ... CHORUS page: RATE DEPTH", lint_has("RATE", 0, 0) && lint_has("DEPTH", 0, 0) && lint_frame("cho") == 0);
     song.g[G_DTIME] = save;
-    sm_layer = SML_NONE;
+    return bad;
+}
+
+/* ------------------------------------------------------------------ stage 4, Task 1A: controls remap --- */
+static void shift_dn(void) { btn_down(B_OCTDN); sm_input_poll(); }
+static void shift_up(void) { btn_up(B_OCTDN); sm_input_poll(); ms(200); sm_input_poll(); }
+static void key_tap_p(uint32_t k) { key_dn(k); sm_input_poll(); key_up(k); sm_input_poll(); }
+
+/* SHIFT + HOME / EDIT / SEQ / GLO / SAVE: the combos */
+static int test_shift_combos(void)
+{
+    int bad = 0;
+    uint32_t t0;
+    in_reset();
+    host_ticks = 1000u;
+    shift_press(B_HOME);
+    bad += check("SHIFT+HOME: the MENU page (a stub), no layer", !strcmp(sm_cur_page()->name, "MENU") && sm_layer == SML_NONE && !sm_ui.kbd);
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("MENU");
+    draw_full();
+    bad += check("SHIFT+HOME: the screen says MENU", lint_has("MENU", 0, 0) && lint_frame("menu") == 0);
+    in_reset();
+    host_ticks = 1000u;
+    sm_ui.page = (uint8_t)page_by_name("MENU");
+    press(B_HOME);
+    sm_input_poll();
+    bad += check("SHIFT+HOME: HOME tapped from MENU: the HOME family's first page, MIXER", !strcmp(sm_cur_page()->name, "MIXER"));
+    shift_press(B_EDIT);
+    bad += check("SHIFT+EDIT: the VOICE page (VOICE GLIDE DETUNE PRIO), no layer", !strcmp(sm_cur_page()->name, "VOICE") && sm_layer == SML_NONE &&
+                 sm_page_param(0) == P_VOICE && sm_page_param(1) == P_GLIDE && sm_page_param(2) == P_DETUNE && sm_page_param(3) == P_PRIO);
+    press(B_EDIT);
+    sm_input_poll();
+    bad += check("SHIFT+EDIT: EDIT tapped from VOICE: EDIT 1; EDIT 2 next; then EDIT 1 (VOICE is not in the cycle)", !strcmp(sm_cur_page()->name, "EDIT 1"));
+    press(B_EDIT);
+    sm_input_poll();
+    press(B_EDIT);
+    sm_input_poll();
+    bad += check("SHIFT+EDIT: ... EDIT 2, EDIT 1", !strcmp(sm_cur_page()->name, "EDIT 1"));
+    shift_press(B_SEQ);
+    bad += check("SHIFT+SEQ: the EUCLID page, no layer", !strcmp(sm_cur_page()->name, "EUCLID") && sm_layer == SML_NONE && !sm_page_is_step());
+    shift_press(B_GLO);
+    bad += check("SHIFT+GLO: no combo: no layer, no page change", sm_layer == SML_NONE && !strcmp(sm_cur_page()->name, "EUCLID"));
+    press(B_SEQ);
+    sm_input_poll();
+    bad += check("SHIFT+SEQ: SEQ tapped from EUCLID: the STEP page", sm_page_is_step());
+    /* SHIFT + SAVE: the quick save, and its hold is no UNDO */
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 0, 48);
+    sm_edit_clear(1u, 1);
+    sm_msg = SM_MSG_NONE;
+    shift_dn();
+    t0 = nor_writes;
+    btn_down(B_SAVE);
+    sm_input_poll();
+    sm_input_poll();
+    bad += check("SHIFT+SAVE: the quick save: written, SAVED", nor_writes > t0 && sm_msg == SM_MSG_SAVED);
+    ms(600);
+    sm_input_poll();
+    bad += check("SHIFT+SAVE: ... held on: no UNDO (the cleared track stays cleared)", sm_msg != SM_MSG_UNDO && !ed_trigs(cpat(), 0));
+    btn_up(B_SAVE);
+    sm_input_poll();
+    shift_up();
+    /* a plain SAVE hold is still UNDO */
+    btn_down(B_SAVE);
+    sm_input_poll();
+    ms(600);
+    sm_input_poll();
+    bad += check("SHIFT+SAVE: a plain SAVE hold: UNDO as ever", sm_msg == SM_MSG_UNDO && ed_trigs(cpat(), 0) == 1u);
+    btn_up(B_SAVE);
+    sm_input_poll();
+    return bad;
+}
+
+/* the EUCLID page */
+static int test_euclid(void)
+{
+    int bad = 0, ok;
+    uint32_t i;
+    static const uint8_t R0[6] = {0, 3, 6, 8, 11, 14}, R1[6] = {1, 4, 7, 9, 12, 15};
+    in_reset();
+    host_ticks = 1000u;
+    ksnd(0)->len = 16u;
+    sm_step_toggle(0, 1);                                 /* a trig the generator must replace */
+    sm_step_toggle(1, 5);                                 /* another track's: untouched */
+    shift_press(B_SEQ);
+    bad += check("EUCLID: defaults STEPS 16, HITS 4, ROT 0", sm_eu_steps == 16u && sm_eu_hits == 4u && sm_eu_rot == 0u);
+    turn(EN_K1, -8);
+    turn(EN_K2, -1);
+    sm_input_poll();
+    bad += check("EUCLID: K1 STEPS 8, K2 HITS 3 (hits follow the steps)", sm_eu_steps == 8u && sm_eu_hits == 3u);
+    bad += check("EUCLID: turning generates nothing: the trig of step 2 is still there", stp(0, 1)->n == 1u);
+    oct_tap(B_OCTUP);
+    ok = 1;
+    for (i = 0; i < 16u; i++) {
+        uint32_t want = i == 0 || i == 3 || i == 6 || i == 8 || i == 11 || i == 14;
+        ok &= (stp(0, i)->n != 0) == want;
+    }
+    bad += check("EUCLID: OCT+ generates E(3,8) over the 16 steps of T1: 1 4 7 9 12 15 (the old trig gone)", ok && ed_trigs(cpat(), 0) == 6u && !sm_ui.kbd);
+    bad += check("EUCLID: ... the other track untouched", stp(1, 5)->n == 1u && ed_trigs(cpat(), 1) == 1u);
+    turn(EN_K3, 1);
+    sm_input_poll();
+    oct_tap(B_OCTUP);
+    ok = 1;
+    for (i = 0; i < 6u; i++)
+        ok &= stp(0, R1[i])->n == 1u;
+    bad += check("EUCLID: ROT 1 turns the cycle right: 2 5 8 10 13 16", ok && ed_trigs(cpat(), 0) == 6u && !stp(0, 0)->n);
+    turn(EN_K2, 50);
+    turn(EN_K3, 50);
+    sm_input_poll();
+    bad += check("EUCLID: HITS stop at STEPS, ROT at STEPS - 1", sm_eu_hits == 8u && sm_eu_rot == 7u);
+    turn(EN_K1, 40);
+    sm_input_poll();
+    bad += check("EUCLID: STEPS stop at 32", sm_eu_steps == 32u);
+    turn(EN_K1, -40);
+    turn(EN_K2, -50);
+    sm_input_poll();
+    bad += check("EUCLID: STEPS 1, HITS follow to 0, ROT to 0", sm_eu_steps == 1u && sm_eu_hits == 0u && sm_eu_rot == 0u);
+    oct_tap(B_OCTUP);
+    bad += check("EUCLID: HITS 0: an empty track", !ed_trigs(cpat(), 0));
+    btn_down(B_SAVE);
+    sm_input_poll();
+    ms(600);
+    sm_input_poll();
+    btn_up(B_SAVE);
+    sm_input_poll();
+    ok = 1;
+    for (i = 0; i < 6u; i++)
+        ok &= stp(0, R1[i])->n == 1u;
+    bad += check("EUCLID: UNDO (SAVE held) brings the track before the last generation back", ok && sm_msg == SM_MSG_UNDO);
+    (void)R0;
+    /* the screen: STEPS HITS ROT, OCT+ GEN; no preset line */
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("EUCLID");
+    draw_full();
+    bad += check("EUCLID: the screen says STEPS HITS ROT and OCT+ GEN", lint_has("STEPS", 0, 0) && lint_has("HITS", 0, 0) && lint_has("ROT", 0, 0) &&
+                 lint_has("EUCLID \x12 OCT+ GEN", 0, 0) && lint_frame("euclid") == 0);
+    /* on another page OCT+ is still the page of steps, not a generation */
+    in_reset();
+    host_ticks = 1000u;
+    ksnd(0)->len = 32u;
+    sm_step_toggle(0, 2);
+    oct_tap(B_OCTUP);
+    bad += check("EUCLID: other pages: OCT+ turns the page of steps, nothing generated", sm_ui.bank == 1u && stp(0, 2)->n == 1u && ed_trigs(cpat(), 0) == 1u);
+    return bad;
+}
+
+/* SHIFT + D#4 / F#4 shifts the track, D#5 / F#5 transposes it; the net in the header for a second */
+static int test_shift_keys(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    ksnd(0)->len = 16u;
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
+    stp(0, 0)->note[0] = 60;
+    stp(0, 4)->note[0] = 64;
+    key_tap_p(13);
+    bad += check("SHIFT keys: F#4 without SHIFT: nothing", stp(0, 0)->n == 1u && stp(0, 4)->n == 1u && !sm_msg);
+    shift_dn();
+    key_tap_p(13);
+    bad += check("SHIFT keys: SHIFT + F#4: the trigs one step forward (0, 4 -> 1, 5), the notes with them",
+                 !stp(0, 0)->n && stp(0, 1)->n == 1u && stp(0, 5)->n == 1u && stp(0, 1)->note[0] == 60 && stp(0, 5)->note[0] == 64);
+    bad += check("SHIFT keys: ... the header says SHIFT +1", sm_msg == SM_MSG_SHIFT && sm_msg_val == 1);
+    draw_full();
+    bad += check("SHIFT keys: ... on the screen: SHIFT +1", lint_has("SHIFT +1", 0, 0));
+    key_tap_p(10);
+    key_tap_p(10);
+    bad += check("SHIFT keys: SHIFT + D#4 twice: two back (15, 3), SHIFT -1 net, wrapping at the length",
+                 stp(0, 15)->n == 1u && stp(0, 3)->n == 1u && !stp(0, 1)->n && sm_msg == SM_MSG_SHIFT && sm_msg_val == -1);
+    key_tap_p(25);
+    bad += check("SHIFT keys: SHIFT + F#5: the notes +1 semitone (60 -> 61, 64 -> 65), TRN +1 in the header",
+                 stp(0, 15)->note[0] == 61 && stp(0, 3)->note[0] == 65 && sm_msg == SM_MSG_TRN && sm_msg_val == 1);
+    key_tap_p(22);
+    key_tap_p(22);
+    bad += check("SHIFT keys: SHIFT + D#5 twice: 59 and 63, TRN -1", stp(0, 15)->note[0] == 59 && stp(0, 3)->note[0] == 63 && sm_msg_val == -1);
+    draw_full();
+    bad += check("SHIFT keys: ... the screen says TRN -1", lint_has("TRN -1", 0, 0));
+    ms(1100);
+    sm_input_poll();
+    bad += check("SHIFT keys: the value is gone from the header after 1 s", sm_msg == SM_MSG_NONE);
+    shift_up();
+    /* another track: its own net */
+    sm_ui.trk = 1;
+    sm_step_toggle(1, 2);
+    shift_dn();
+    key_tap_p(13);
+    bad += check("SHIFT keys: T2 selected: T2's trig moves (2 -> 3), T1's stay, SHIFT +1 (its own net)",
+                 stp(1, 3)->n == 1u && !stp(1, 2)->n && stp(0, 15)->n == 1u && sm_msg_val == 1);
+    shift_up();
+    /* UNDO takes the last one back */
+    btn_down(B_SAVE);
+    sm_input_poll();
+    ms(600);
+    sm_input_poll();
+    btn_up(B_SAVE);
+    sm_input_poll();
+    bad += check("SHIFT keys: UNDO: T2's shift taken back", stp(1, 2)->n == 1u && !stp(1, 3)->n);
+    return bad;
+}
+
+/* SHIFT + a knob: acceleration */
+static uint32_t sm_step_eff_note(uint32_t t, uint32_t st)
+{
+    sm_step_t e;
+    sm_step_eff(stp(t, st), ksnd(t), &e);
+    return e.note[0];
+}
+static int test_shift_accel(void)
+{
+    int bad = 0;
+    int16_t f0, r0;
+    int32_t span = GP[G_DFDBK].max - GP[G_DFDBK].min, m = span >= 256 ? 8 : span >= 64 ? 4 : 1;
+    in_reset();
+    host_ticks = 1000u;
+    sm_ui.page = (uint8_t)page_by_name("DLY");
+    song.g[G_DFDBK] = (int16_t)(GP[G_DFDBK].min + span / 2);
+    f0 = song.g[G_DFDBK];
+    turn(EN_K2, 2);
+    sm_input_poll();
+    bad += check("ACCEL: DLY FDBK without SHIFT: two detents", song.g[G_DFDBK] == param_turn(&GP[G_DFDBK], f0, 2));
+    f0 = song.g[G_DFDBK];
+    shift_dn();
+    turn(EN_K2, 2);
+    sm_input_poll();
+    bad += check("ACCEL: ... with SHIFT: x4 (x8 from a range of 256)", m > 1 && song.g[G_DFDBK] == param_turn(&GP[G_DFDBK], f0, 2 * m));
+    sm_ui.page = (uint8_t)page_by_name("REV");
+    r0 = song.g[G_RTYPE];
+    turn(EN_K1, -1);
+    sm_input_poll();
+    bad += check("ACCEL: a list (REVERB TYPE): SHIFT changes nothing, one detent one place", song.g[G_RTYPE] == r0 - 1);
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    {
+        int8_t c0 = ksnd(0)->p[P_FCUT];
+        turn(EN_K2, -3);
+        sm_input_poll();
+        bad += check("ACCEL: a sound parameter (CUT 0..127): x4", ksnd(0)->p[P_FCUT] == c0 - 12);
+    }
+    sm_ui.page = (uint8_t)page_by_name("CLOCK");
+    {
+        uint32_t b0 = smp.bpm10;
+        turn(EN_SELECT, 3);
+        sm_input_poll();
+        bad += check("ACCEL: CLOCK SELECT: 1.0 BPM a detent", smp.bpm10 == b0 + 30u);
+    }
+    sm_ui.page = (uint8_t)page_by_name("STEP");
+    sm_step_toggle(0, 3);
+    sm_ui.sel_step = 3;
+    {
+        uint32_t n0 = sm_step_eff_note(0, 3);
+        turn(EN_K1, 1);
+        sm_input_poll();
+        bad += check("ACCEL: STEP NOTE: x4 (a third)", sm_step_eff_note(0, 3) == n0 + 4u);
+    }
+    shift_up();
+    return bad;
+}
+
+/* the keyboard mode: OCT- + OCT+ only, the octave beside KEYS */
+static int test_kbd_readout(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    draw_setup();
+    sm_ui.kbd = 1;
+    sm_ui.oct = 2;
+    draw_full();
+    bad += check("KEYS readout: KEYS +2", lint_has("KEYS", 0, 0) && lint_has("+2", 0, 0) && lint_frame("keys2") == 0);
+    sm_ui.oct = -1;
+    draw_full();
+    bad += check("KEYS readout: KEYS -1", lint_has("KEYS", 0, 0) && lint_has("-1", 0, 0));
+    sm_ui.oct = 0;
+    draw_full();
+    bad += check("KEYS readout: octave 0: KEYS 0", lint_has("KEYS", 0, 0) && lint_has("0", 0, 0));
+    return bad;
+}
+
+/* ARP held + F3: the keyboard notes' LATCH, apart from the arp */
+static int test_kbd_latch(void)
+{
+    int bad = 0;
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    sm_rec = 1;                                           /* (a key would toggle a trig, if it were one) */
+    oct_pair(0);
+    bad += check("LATCH: the keyboard mode on, ARP MODE OFF", sm_ui.kbd && !ksnd(0)->p[P_AMODE]);
+    btn_down(B_ARP);
+    sm_input_poll();
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    sm_input_poll();
+    mix_blocks(3);
+    bad += check("LATCH: ARP held + F3: LATCH on (T1), F3 is no note and no trig, the page unchanged",
+                 (sm_klatch & 1u) && on_n[0] == 0u && !stp(0, 0)->n && sm_ui.page == 0u);
+    btn_up(B_ARP);
+    sm_input_poll();
+    bad += check("LATCH: ... ARP let go: no tap (the page stays), the keyboard mode stays", sm_ui.page == 0u && sm_ui.kbd);
+    kb_key(WHITE[2], 1);
+    mix_blocks(3);
+    kb_key(WHITE[2], 0);
+    mix_blocks(3);
+    bad += check("LATCH: a key let go: its note sounds on (no note-off), ARP MODE still OFF", notes_on_core(0) == 1u && ev_count(0, 0) == 0u);
+    kb_key(WHITE[4], 1);
+    mix_blocks(3);
+    kb_key(WHITE[4], 0);
+    mix_blocks(3);
+    bad += check("LATCH: a new chord replaces: the first note off, the second held", notes_on_core(0) == 1u && ev_count(0, 0) == 1u);
+    kb_key(WHITE[5], 1);
+    kb_key(WHITE[6], 1);
+    mix_blocks(3);
+    kb_key(WHITE[5], 0);
+    kb_key(WHITE[6], 0);
+    mix_blocks(3);
+    bad += check("LATCH: a chord of two keys: both latched (the old one gone), sounding (the voice may be mono)",
+                 sm_kl_note[0][0] != 0xFFu && sm_kl_note[0][1] != 0xFFu && sm_kl_note[0][2] == 0xFFu && notes_on_core(0) >= 1u);
+    btn_down(B_ARP);
+    sm_input_poll();
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    sm_input_poll();
+    btn_up(B_ARP);
+    sm_input_poll();
+    mix_blocks(3);
+    bad += check("LATCH: ARP held + F3 again: LATCH off, every held note let go", !(sm_klatch & 1u) && notes_on_core(0) == 0u);
+    kb_key(WHITE[2], 1);
+    mix_blocks(2);
+    kb_key(WHITE[2], 0);
+    mix_blocks(3);
+    bad += check("LATCH: off: a key let go ends its note as ever", notes_on_core(0) == 0u);
+    /* leaving the keyboard mode lets the latched notes go */
+    btn_down(B_ARP);
+    sm_input_poll();
+    key_tap_p(WHITE[0]);
+    btn_up(B_ARP);
+    sm_input_poll();
+    kb_key(WHITE[2], 1);
+    mix_blocks(2);
+    kb_key(WHITE[2], 0);
+    mix_blocks(2);
+    bad += check("LATCH: on again, a note held", (sm_klatch & 1u) && notes_on_core(0) == 1u);
+    oct_pair(0);
+    mix_blocks(3);
+    bad += check("LATCH: OCT- + OCT+ (the keyboard mode off): the note let go, LATCH off", !sm_ui.kbd && notes_on_core(0) == 0u && !sm_klatch);
+    /* a track's own: T2 selected, T1's latch does not hold T2's notes */
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    oct_pair(0);
+    sm_ui.trk = 1;
+    btn_down(B_ARP);
+    sm_input_poll();
+    key_tap_p(WHITE[0]);
+    btn_up(B_ARP);
+    sm_input_poll();
+    sm_ui.trk = 0;
+    kb_key(WHITE[2], 1);
+    mix_blocks(2);
+    kb_key(WHITE[2], 0);
+    mix_blocks(3);
+    bad += check("LATCH: per track: T2's LATCH on, T1's keys end with the key", sm_klatch == 2u && notes_on_core(0) == 0u);
+    /* with the arp on: the arp's own latch semantics */
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    oct_pair(0);
+    ksnd(0)->p[P_AMODE] = 1;
+    sm_input_poll();
+    btn_down(B_ARP);
+    sm_input_poll();
+    key_tap_p(WHITE[0]);
+    btn_up(B_ARP);
+    sm_input_poll();
+    kb_key(WHITE[2], 1);
+    kb_key(WHITE[2], 0);
+    bad += check("LATCH: the arp on: the key's note stays in the arp's set after the key", sm_ak[0].n == 1u);
+    kb_key(WHITE[4], 1);
+    bad += check("LATCH: ... a new chord replaces it (the arp's own latch)", sm_ak[0].n == 1u && sm_ak[0].note[0] == 53u + 7u);
+    kb_key(WHITE[4], 0);
+    btn_down(B_ARP);
+    sm_input_poll();
+    key_tap_p(WHITE[0]);
+    btn_up(B_ARP);
+    sm_input_poll();
+    bad += check("LATCH: ... LATCH off: the set is the keys down (none)", sm_ak[0].n == 0u);
+    /* the LEDs: F3 under ARP held */
+    leds_setup(LEDS_DIM);
+    host_ticks = 1000u;
+    btn_down(B_ARP);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    sm_leds();
+    bad += check("LATCH: LEDs: ARP held: F3 glows with LATCH off, no other key", led_of(fm1_led, 14u) == 0 && led_of(fm1_led_dim, 14u) == 1 &&
+                 led_of(fm1_led_dim, 14u + WHITE[1]) == 0);
+    sm_latch_toggle();
+    sm_leds();
+    bad += check("LATCH: LEDs: ... lit with LATCH on", led_of(fm1_led, 14u) == 1);
+    btn_up(B_ARP);
+    sm_input_poll();
+    return bad;
+}
+
+/* HOME held + F3 .. B3: the track */
+static int test_home_track_keys(void)
+{
+    int bad = 0;
+    uint32_t w;
+    in_reset();
+    host_ticks = 1000u;
+    sm_rec = 1;
+    btn_down(B_HOME);
+    sm_input_poll();
+    for (w = 0; w < 4u; w++) {
+        key_dn(WHITE[w]);
+        sm_input_poll();
+        key_up(WHITE[w]);
+        sm_input_poll();
+        bad += check("HOME + keys: F3 G3 A3 B3 select T1..T4", sm_ui.trk == w);
+    }
+    key_tap_p(WHITE[5]);
+    bad += check("HOME + keys: the fifth white key: nothing (T4 stays)", sm_ui.trk == 3u);
+    bad += check("HOME + keys: no trig toggled (REC on), no step held", !ed_trigs(cpat(), 0) && !ed_trigs(cpat(), 1) && !ed_trigs(cpat(), 2) &&
+                 !ed_trigs(cpat(), 3) && sm_ui.held_step == 0xFFu);
+    btn_up(B_HOME);
+    sm_input_poll();
+    bad += check("HOME + keys: HOME let go: no tap (the page unchanged)", sm_ui.page == 0u);
+    /* the keyboard mode: no note while HOME is held */
+    midi_reset();
+    oct_pair(0);
+    btn_down(B_HOME);
+    sm_input_poll();
+    key_tap_p(WHITE[1]);
+    btn_up(B_HOME);
+    sm_input_poll();
+    mix_blocks(3);
+    bad += check("HOME + keys: in the keyboard mode the key selects T2 and plays no note", sm_ui.trk == 1u && on_n[1] == 0u && on_n[3] == 0u);
+    /* ALGORITHM still selects the track */
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    bad += check("HOME + keys: ALGORITHM still selects the track", sm_ui.trk == 2u);
+    /* a tap is the page as ever */
+    press(B_HOME);
+    sm_input_poll();
+    bad += check("HOME + keys: a tap: MIXER", !strcmp(sm_cur_page()->name, "MIXER"));
+    /* the LEDs */
+    leds_setup(LEDS_DIM);
+    host_ticks = 1000u;
+    sm_ui.trk = 2;
+    btn_down(B_HOME);
+    sm_input_poll();
+    ms(500);
+    sm_input_poll();
+    sm_leds();
+    bad += check("HOME + keys: LEDs: F3 .. B3 glow, the selected track's (A3) lit, the step keys gone",
+                 led_of(fm1_led, 14u + WHITE[2]) == 1 && led_of(fm1_led, 14u + WHITE[0]) == 0 && led_of(fm1_led_dim, 14u + WHITE[0]) == 1 &&
+                 led_of(fm1_led_dim, 14u + WHITE[3]) == 1 && led_of(fm1_led_dim, 14u + WHITE[6]) == 0);
+    btn_up(B_HOME);
+    sm_input_poll();
+    return bad;
+}
+
+/* OCT+ in the step pages: the strip says the page */
+static int test_oct_strip(void)
+{
+    int bad = 0;
+    draw_setup();
+    ksnd(0)->len = 32u;
+    draw_full();
+    bad += check("PAGES: length 32: the strip says P1 (large), not the length", lint_has("P1", 0, 0) && !lint_has("32", 0, 0));
+    sm_ui.bank = 1;
+    draw_full();
+    bad += check("PAGES: ... page 2: P2", lint_has("P2", 0, 0) && !lint_has("P1", 0, 0) && lint_frame("p2") == 0);
+    sm_ui.bank = 0;
+    ksnd(0)->len = 16u;
+    draw_full();
+    bad += check("PAGES: length 16: one page, the strip says the length", lint_has("16", 0, 0) && !lint_has("P1", 0, 0));
+    return bad;
+}
+
+/* REC: ARM while stopped (steady LED), REC while playing (breathing LED) */
+static int test_rec_arm(void)
+{
+    int bad = 0;
+    draw_setup();
+    draw_full();
+    bad += check("ARM: REC off: neither ARM nor REC in the header", !lint_has("ARM", 0, 0) && !lint_has("REC", 0, 0));
+    sm_rec = 1;
+    sm_playing = 0;
+    draw_full();
+    bad += check("ARM: REC on, stopped: ARM (inverted) in the header", lint_has("ARM", 0, 0) && !lint_has("REC", 0, 0));
+    leds_setup(LEDS_DIM);
+    sm_rec = 1;
+    sm_playing = 0;
+    sm_leds();
+    bad += check("ARM: ... the REC LED steady", led_of(fm1_led, panel.btn[B_REC]) == 1 && led_of(fm1_led_breath, panel.btn[B_REC]) == 0);
+    sm_playing = 1;
+    draw_full();
+    bad += check("REC: REC on, playing: REC in the header, not ARM", lint_has("REC", 0, 0) && !lint_has("ARM", 0, 0));
+    sm_leds();
+    bad += check("REC: ... the REC LED breathes (not steady)", led_of(fm1_led, panel.btn[B_REC]) == 0 && led_of(fm1_led_breath, panel.btn[B_REC]) == 1);
+    sm_playing = 0;
+    sm_rec = 0;
+    sm_leds();
+    bad += check("REC: off: the LED dark", led_of(fm1_led, panel.btn[B_REC]) == 0 && led_of(fm1_led_breath, panel.btn[B_REC]) == 0);
     return bad;
 }
 
@@ -8860,6 +9379,15 @@ int main(void)
     bad += test_fx_global_persist();
     bad += test_fx_project_migration();
     bad += test_fx_draw();
+    bad += test_shift_combos();
+    bad += test_euclid();
+    bad += test_shift_keys();
+    bad += test_shift_accel();
+    bad += test_kbd_readout();
+    bad += test_kbd_latch();
+    bad += test_home_track_keys();
+    bad += test_oct_strip();
+    bad += test_rec_arm();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

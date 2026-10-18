@@ -7,9 +7,10 @@
  *    as it turns round every LED: the active ones dark, the rest lit);
  *  - the step playing is a soft running light: the MID level, never a full flash: on an empty step mid, a trig comes down
  *    to mid, a REST has mid in place of its breath; a held step is mid too (and a frame on the screen);
+ *  - REC: steady while armed (stopped), breathing while recording (playing); a HOME / ARP hold: F3 .. B3 the tracks / F3 the LATCH
  *  - OCT- / OCT+ (outside a layer): OCT+ lit on the page of steps 17..32 (a track longer than 16; 1..16: it glows), OCT- (SHIFT)
  *    lit while it is held; the keyboard mode: the white keys show no steps, and OCT- / OCT+ are lit while the octave is below /
- *    above 0;
+ *    above 0 (the header says KEYS +n);
  *  - buttons: the family of the page in view lit (HOME's too), REC lit while recording, PLAY's own LED glows (dark while playing, its
  *    green one lit), the rest glow, as settings_leds (OFF / DIM LO / DIM HI / INV) says;
  *  - a layer open (sm_layer.c): its button breathes (not lit, no glow), and the keys show what they do in it instead of the
@@ -90,6 +91,24 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
     }
 }
 
+/* HOME held: F3 .. B3 are T1 .. T4 (the selected one lit); ARP held: F3 is LATCH (lit while the selected track's is on) */
+static void sm_leds_hold(uint8_t *nl, uint8_t *ng, uint8_t *ni)
+{
+    uint32_t k, w = 0, b = sm_hold_btn(), t = sm_ui.trk % SM_NTRK;
+    for (k = 0; k < SM_NKEYS; k++) {
+        if ((SM_BLACK_KEYS >> k) & 1u)
+            continue;
+        if (b == B_HOME && w < SM_NTRK) {
+            sm_led_put(ni, 14u + k, 1);
+            sm_led_put(w == t ? nl : ng, 14u + k, 1);
+        } else if (b == B_ARP && w == 0u) {
+            sm_led_put(ni, 14u + k, 1);
+            sm_led_put((sm_klatch >> t) & 1u ? nl : ng, 14u + k, 1);
+        }
+        w++;
+    }
+}
+
 static void sm_leds(void)
 {
     uint8_t nl[FM1_NCOL] = {0}, ng[FM1_NCOL] = {0}, nb[FM1_NCOL] = {0}, nm[FM1_NCOL] = {0}, ni[FM1_NCOL] = {0};
@@ -103,7 +122,7 @@ static void sm_leds(void)
     }
     len = pt->kit.snd[t].len;
     len = len < 1u ? 1u : len > SM_NSTEP ? SM_NSTEP : len;
-    for (k = 0; k < SM_NKEYS && !sm_layer && !sm_ui.kbd; k++) {
+    for (k = 0; k < SM_NKEYS && !sm_layer && !sm_ui.kbd && sm_hold_btn() == 0xFFu; k++) {
         const sm_step_t *st;
         uint32_t s;
         if ((SM_BLACK_KEYS >> k) & 1u)
@@ -118,7 +137,9 @@ static void sm_leds(void)
         else if (s < len && st->n)
             sm_led_put(nl, 14u + k, 1);
     }
-    if (sm_layer)
+    if (sm_hold_btn() != 0xFFu)
+        sm_leds_hold(nl, ng, ni);
+    else if (sm_layer)
         sm_leds_layer(nl, ng, ni, nb);
     else if (sm_ui.kbd) {                                      /* the keyboard mode: the octave (the buttons' glow is below) */
         sm_led_put(nl, panel.btn[B_OCTDN], sm_ui.oct < 0);
@@ -131,15 +152,11 @@ static void sm_leds(void)
         sm_led_put(ng, panel.btn[k], 1);
         sm_led_put(ni, panel.btn[k], 1);
     }
-    {
-        uint32_t fam = SM_PAGES[sm_ui.page % sm_page_count()].fam;   /* (the page under an open layer: FX held shows the deep ones) */
-        sm_led_put(nl, panel.btn[fam == SMFAM_EDIT ? B_EDIT : fam == SMFAM_GLO ? B_GLO : fam == SMFAM_SEQ ? B_SEQ :
-                                 fam == SMFAM_HOME ? B_HOME : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX ? B_FX : B_ENV], 1);
-    }
-    sm_led_put(nl, panel.btn[B_ARP], sm_ui.kbd != 0u);   /* ARP: lit while the keyboard mode is on */
+    sm_led_put(nl, panel.btn[sm_fam_btn(SM_PAGES[sm_ui.page % sm_page_count()].fam)], 1);   /* (the family of the page in view) */
     if (sm_layer)                                         /* the open layer's button breathes: masked out of lit and glow below */
         sm_led_put(nb, panel.btn[sm_layer_button(sm_layer)], 1);
-    sm_led_put(nl, panel.btn[B_REC], *(volatile uint8_t *)&sm_rec != 0u);
+    if (*(volatile uint8_t *)&sm_rec != 0u)               /* REC on: steady while stopped (armed), breathing while playing (recording) */
+        sm_led_put(play ? nb : nl, panel.btn[B_REC], 1);
     if (play) {                                           /* playing: PLAY's green, its own LED dark in every mode */
         sm_led_clear(ng, panel.btn[B_PLAY]);
         sm_led_clear(ni, panel.btn[B_PLAY]);

@@ -38,6 +38,7 @@ enum { SM_AM_OFF, SM_AM_UP, SM_AM_DN, SM_AM_UPDN, SM_AM_RND, SM_AM_ORD, SM_AM_RE
 typedef struct { uint8_t note[SM_AK_N]; uint8_t vel, n; } sm_aset_t;
 static sm_aset_t sm_ak[SM_NTRK];                          /* the keyboard mode's keys given to the arp (the main loop writes) */
 static sm_aset_t sm_am[SM_NTRK];                          /* MIDI IN's notes given to the arp (the audio stream writes) */
+static uint8_t sm_klatch;                                 /* bit per track: the keyboard's LATCH (ARP held + F3, sm_input.c); the main loop's */
 static uint32_t sm_amdn[SM_NTRK][4];                      /* MIDI notes down now, bit per note (LATCH's "none down") */
 
 static uint8_t sm_ar[SM_NTRK][SM_AR_N], sm_arn[SM_NTRK]; /* the arp's own note book */
@@ -85,18 +86,25 @@ static void sm_aset_remove(sm_aset_t *s, uint32_t note)
 }
 static void sm_aset_clear(sm_aset_t *s) { s->n = 0; }
 
+/* the keyboard keys' LATCH of track t: the arp's own (P_AHOLD, ARP 2) or the keyboard's (sm_klatch): the same semantics either way */
+static uint32_t sm_arp_latch(uint32_t t)
+{
+    t %= SM_NTRK;
+    return smp.pat[smp.cur % SM_NPAT].kit.snd[t].p[P_AHOLD] != 0 || ((sm_klatch >> t) & 1u);
+}
+
 /* the main loop (sm_input.c): a keyboard key for track t. others_down: another key of the arp is down on the track */
 static void sm_arp_key_on(uint32_t t, uint32_t note, uint32_t vel, uint32_t others_down)
 {
     t %= SM_NTRK;
-    if (smp.pat[smp.cur % SM_NPAT].kit.snd[t].p[P_AHOLD] && !others_down)
+    if (sm_arp_latch(t) && !others_down)
         sm_aset_clear(&sm_ak[t]);                         /* (LATCH: a new chord replaces the latched one) */
     sm_aset_add(&sm_ak[t], note & 0x7Fu, vel);
 }
 static void sm_arp_key_off(uint32_t t, uint32_t note, uint32_t force)
 {
     t %= SM_NTRK;
-    if (force || !smp.pat[smp.cur % SM_NPAT].kit.snd[t].p[P_AHOLD])
+    if (force || !sm_arp_latch(t))
         sm_aset_remove(&sm_ak[t], note & 0x7Fu);
 }
 /* the main loop: track t's keyboard set replaced by these c notes (LATCH turned off: only the keys down stay) */

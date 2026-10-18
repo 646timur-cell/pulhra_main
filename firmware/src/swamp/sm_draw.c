@@ -2,8 +2,9 @@
 /* SWAMP MACHINE screen, Elektron mk1 look: one ink (white) on black, a 5 x 7 pixel font at scale 2, no smoothing, no grain;
  * a selection is an inversion. 240 x 240, every band its own canvas:
  *   y   0..19   header: T1 SAW 03 (track, machine, preset) left, the track inverted while it is muted (the keyboard mode: T1 KEYS,
- *               KEYS inverted, in place of the machine and preset); A01 120.0 > (pattern,
- *               tempo, transport) right; while recording REC (inverted) at the right corner in place of the pattern;
+ *               KEYS inverted and the octave, KEYS +2, in place of the machine and preset); A01 120.0 > (pattern,
+ *               tempo, transport) right; REC on: ARM (stopped: grid record) or REC (playing: recording), inverted, at the right
+ *               corner in place of the pattern; SHIFT +2 / TRN -3 (the net of SHIFT + D#4 F#4 / D#5 F#5) for a second;
  *               the lock pool full: LOCKS FULL (inverted) alone for a second
  *   y  20..47   the page and the preset: EDIT 1 . SYNC LEAD (a layer open: its name instead); STEP: STEP 05 . X3, the step
  *               edited and its FLAG (none: STEP . DEFAULT, the track's trig defaults)
@@ -17,7 +18,7 @@
  *               picked underlined, the one asked for framed, an empty one dim), the change mode and the master length)
  *   y 220..239  the 16 steps of the bank as dots only, 13 px each (a trig a dot, a ratchet stacked dots, a REST a hollow dot;
  *               a bar under the one playing, over the one held; nothing past the track's length), and right of them the
- *               track's length; the panel LEDs carry the rest of the steps (sm_leds.c). HOME > MIXER: the four tracks, a
+ *               track's length, or, on a track of two pages (over 16 steps), the page: P1 / P2 (P2 inverted); the panel LEDs carry the rest of the steps (sm_leds.c). HOME > MIXER: the four tracks, a
  *               row of dots each (smd_strip4), and the rings the four LEVELs (a muted track's dim, the selected one's label
  *               inverted)
  * The LCD transfer is the dear part: a zone is redrawn only when what it shows changed (a signature of its inputs). */
@@ -122,7 +123,8 @@ static uint32_t smd_hdr_sig(void)
     const sm_sound_t *s = smd_snd();
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, sm_gid_of(smp.cur));
-    h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg);
+    h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg); h = smd_mix(h, (uint32_t)(uint16_t)sm_msg_val);
+    h = smd_mix(h, (uint32_t)(uint8_t)sm_ui.oct);
     h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
     return smd_mix(h, smd_rec);
 }
@@ -156,6 +158,7 @@ static void smd_lenstr(char *b, uint32_t v)               /* 1 .. 128 as text, n
     b[i++] = (char)('0' + v % 10u);
     b[i] = 0;
 }
+static void smd_int(char *b, int32_t v, int plus);
 static void smd_header(void)
 {
     char l[8], a[4], t[12], nm[6];
@@ -164,7 +167,18 @@ static void smd_header(void)
     const sm_sound_t *s = smd_snd();
     smd_begin(0, SMD_HDR_Y, 240u, SMD_HDR_H);
     if (sm_msg) {                                         /* a message (LOCKS FULL, CLEARED, UNDO), inverted, the whole header for 1 s */
+        char mb[16];
         const char *m = SM_MSG_TEXT[sm_msg % SM_MSG_COUNT];
+        if (sm_msg == SM_MSG_SHIFT || sm_msg == SM_MSG_TRN) {   /* the text and its signed value: SHIFT +2, TRN -3 */
+            uint32_t n = 0;
+            while (m[n] && n < 6u) {
+                mb[n] = m[n];
+                n++;
+            }
+            mb[n++] = ' ';
+            smd_int(mb + n, sm_msg_val, 1);
+            m = mb;
+        }
         sm_px_text((240 - 12 * smd_len(m)) / 2, 2, 2u, m, T_TEXT, 1);
         smd_end();
         return;
@@ -173,7 +187,10 @@ static void smd_header(void)
     l[0] = 'T'; l[1] = (char)('1' + sm_ui.trk % SM_NTRK); l[2] = 0;
     x = sm_px_text(2, 2, 2u, l, T_TEXT, (int)smd_muted()) + 2 + 6;   /* (a muted track: inverted) */
     if (sm_ui.kbd) {                                      /* the keyboard mode: KEYS, inverted, where the machine and preset are */
-        sm_px_text(x, 2, 2u, "KEYS", T_TEXT, 1);
+        char o[4];                                        /* KEYS +2: the octave, -3 .. +3 (0 plain) */
+        x += sm_px_text(x, 2, 2u, "KEYS", T_TEXT, 1) + 6;
+        smd_int(o, sm_ui.oct, 1);
+        sm_px_text(x, 2, 2u, o, T_TEXT, 0);
     } else {
         smd_upper(nm, ENGINES[sm_engine_of(s->machine)]->name, 4u);
         x += sm_px_text(x, 2, 2u, nm, T_TEXT, 0) + 6;
@@ -189,7 +206,7 @@ static void smd_header(void)
     x -= 6 + 12 * smd_len(t);
     sm_px_text(x, 2, 2u, t, T_TEXT, 0);
     if (rec)
-        sm_px_text(240 - 36, 2, 2u, "REC", T_TEXT, 1);
+        sm_px_text(240 - 36, 2, 2u, smd_play ? "REC" : "ARM", T_TEXT, 1);   /* (stopped: armed, grid record; playing: recording) */
     else
         sm_px_text(x - 6 - 36, 2, 2u, a, T_TEXT, smp.nchain >= 2u);   /* (a chain plays: the pattern inverted) */
     smd_end();
@@ -230,7 +247,6 @@ static uint32_t smd_page_sig(void)
         h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
     if (sm_map_open())                                    /* (the title of the layer: its page of machines, the track's length) */
         h = smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank);
-    h = smd_mix(h, sm_deep_idx());                        /* (FX held: the deep page) */
     return h;
 }
 static void smd_cat(char *d, uint32_t *n, const char *s)   /* s appended (upper case) at d[*n] */
@@ -245,11 +261,7 @@ static void smd_page(void)
     char b[24];
     uint32_t n;
     smd_begin(0, SMD_PAGE_Y, 240u, SMD_PAGE_H);
-    if (sm_layer == SML_FX) {                             /* FX held: DLY . GLOBAL (the deep page, the project's) */
-        n = 0;
-        smd_cat(b, &n, sm_cur_page()->name);
-        smd_cat(b, &n, " \x12 GLOBAL");
-    } else if (sm_layer) {                                /* a layer open: its name in place of the page and the preset */
+    if (sm_layer) {                                /* a layer open: its name in place of the page and the preset */
         n = 0;
         if (sm_layer == SML_EDIT) {
             smd_cat(b, &n, "MACHINE ");
@@ -292,8 +304,15 @@ static void smd_page(void)
             b[n] = 0;
             smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");
         }
-    } else if (sm_page_home()) {                        /* MIXER, CLOCK: the page alone (the sound is not what the knobs edit) */
+    } else if (sm_page_home() == SMH_EUCLID) {          /* EUCLID . OCT+ GEN (OCT+ generates the trigs) */
+        n = 0;
+        smd_cat(b, &n, "EUCLID \x12 OCT+ GEN");
+    } else if (sm_page_home()) {                        /* MIXER, CLOCK, MENU: the page alone (the sound is not what the knobs edit) */
         smd_upper(b, sm_cur_page()->name, 8u);
+    } else if (sm_cur_page()->fam == SMFAM_DEEP) {      /* DLY . GLOBAL (the deep pages are the project's, no preset) */
+        n = 0;
+        smd_cat(b, &n, sm_cur_page()->name);
+        smd_cat(b, &n, " \x12 GLOBAL");
     } else {
         smd_upper(b, sm_cur_page()->name, 8u);
         for (n = 0; b[n]; n++) {}
@@ -383,6 +402,25 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
 {
     uint32_t i;
     o->on = 1;
+    if (sm_page_home() == SMH_EUCLID) {                   /* K1 STEPS, K2 HITS, K3 ROT */
+        static const char *const L[3] = {"STEPS", "HITS", "ROT"};
+        uint32_t v = k == 0u ? sm_eu_steps : k == 1u ? sm_eu_hits : sm_eu_rot, mx = k == 0u ? SM_NSTEP : k == 1u ? sm_eu_steps : sm_eu_steps - 1u;
+        if (k > 2u) {
+            o->on = 0;
+            return;
+        }
+        for (i = 0; L[k][i]; i++)
+            o->lab[i] = L[k][i];
+        o->lab[i] = 0;
+        smd_int(o->val, (int32_t)v, 0);
+        o->v = (int32_t)v;
+        o->pos = (k == 0u ? (v - 1u) * 256u / (SM_NSTEP - 1u) : mx ? v * 256u / mx : 0u);
+        return;
+    }
+    if (sm_page_home() == SMH_MENU) {
+        o->on = 0;
+        return;
+    }
     if (sm_page_home() == SMH_MIXER) {
         const sm_sound_t *s = &smp.pat[smp.cur % SM_NPAT].kit.snd[k % SM_NTRK];
         const param_desc_t *d = sm_desc_safe(sm_engine_of(s->machine), P_LEVEL);
@@ -495,7 +533,6 @@ static uint32_t smd_knob_sig(uint32_t k)
     uint32_t i;
     smd_knob_get(k, &o);
     h = smd_mix(h, sm_ui.page); h = smd_mix(h, smd_snd()->machine); h = smd_mix(h, (uint32_t)o.on);
-    h = smd_mix(h, sm_deep_idx());
     h = smd_mix(h, (uint32_t)o.v); h = smd_mix(h, (uint32_t)o.filled); h = smd_mix(h, (uint32_t)o.dot);
     h = smd_mix(h, (uint32_t)(o.dim * 2 + o.inv));
     for (i = 0; o.val[i]; i++)                            /* (the STEP page: the text is the value) */
@@ -549,7 +586,7 @@ static uint32_t smd_sel_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_page_param(4);
-    uint32_t h = smd_mix(smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine), sm_deep_idx());
+    uint32_t h = smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine);
     if (sm_page_is_step()) {
         char b[8];
         uint32_t i;
@@ -574,6 +611,7 @@ static void smd_select(void)
         const char *lab = smd_step_nudge(val);
         x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
+    } else if (sm_page_home() == SMH_EUCLID || sm_page_home() == SMH_MENU) {   /* (nothing on SELECT) */
     } else if (sm_page_home()) {                          /* HOME: SELECT is the tempo */
         char val[8];
         int32_t x = sm_px_text(4, 2, 2u, "TEMPO", T_TEXT, 0) + 4 + 12;
@@ -861,8 +899,15 @@ static void smd_strip1(void)
         if (smd_mark() == s)
             cv_rect(x - 4, 0, 8, 2, T_TEXT);
     }
-    smd_lenstr(l, len);                                   /* the length, right of the steps */
-    sm_px_text(238 - 12 * smd_len(l), 3, 2u, l, T_TEXT, 0);
+    if (len > 16u) {                                      /* two pages of steps: the page number, large (P2 inverted) */
+        l[0] = 'P';
+        l[1] = (char)('1' + (b ? 1 : 0));
+        l[2] = 0;
+        sm_px_text(238 - 24, 3, 2u, l, T_TEXT, b ? 1 : 0);
+    } else {
+        smd_lenstr(l, len);                               /* the length, right of the steps */
+        sm_px_text(238 - 12 * smd_len(l), 3, 2u, l, T_TEXT, 0);
+    }
     smd_end();
 }
 static void smd_strip(void)

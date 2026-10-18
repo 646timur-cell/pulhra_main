@@ -9,8 +9,12 @@
 #define SM_GLB 0x80u                                      /* a page's parameter id with this bit is a GLOBAL (song.g[id & 0x7F]): the
                                                              FX page's SELECT and the deep FX pages; no locks, the project's */
 
-enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_COUNT };
-enum { SMH_NONE, SMH_MIXER, SMH_CLOCK };                  /* a HOME page's kind (sm_page_t.home) */
+/* the families of the buttons (a tap of the button: the family's next page) and, after FX, the families of the SHIFT combos (no
+ * button of their own: SHIFT + EDIT the VOICE page, SHIFT + FX the deep FX pages DLY / REV / CHORUS in turn, SHIFT + SEQ the
+ * EUCLID page, SHIFT + HOME the MENU page; sm_layer.c) */
+enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_VOICE, SMFAM_DEEP, SMFAM_EUCL, SMFAM_MENU,
+       SMFAM_COUNT };
+enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
 
 typedef struct {
     const char *name;
@@ -23,7 +27,6 @@ typedef struct {
 static const sm_page_t SM_PAGES[] = {
     {"EDIT 1", SMFAM_EDIT, {P_E0, P_E1, P_E2, P_E3}, P_E8},
     {"EDIT 2", SMFAM_EDIT, {P_E4, P_E5, P_E6, P_E7}, P_E8},
-    {"VOICE", SMFAM_EDIT, {P_VOICE, P_GLIDE, P_DETUNE, P_PRIO}, SM_NOPARAM},
     {"AMP", SMFAM_GLO, {P_ATK, P_DEC, P_SUS, P_REL}, P_ESYNC},
     {"MIX", SMFAM_GLO, {P_LEVEL, P_PAN, P_DIST, P_REV}, SM_NOPARAM},
     {"FILTER", SMFAM_ENV, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}, P_LD_FLT},   /* SELECT: LFO>FLT (HYB: WIDTH) */
@@ -39,15 +42,15 @@ static const sm_page_t SM_PAGES[] = {
     {"FX", SMFAM_FX, {P_DIST, P_CHOR, P_DLY, P_REV}, SM_GLB | G_DMIX},
     {"DIST", SMFAM_FX, {P_DTYPE, P_DIST, P_DTONE, P_DOUT}, P_DLCUT},
     {"INSERT", SMFAM_FX, {P_ITYPE, P_IA, P_IB, P_IC}, P_IMIX},
-};
-
-/* the deep global pages: the FX button held and SELECT turned (sm_layer.c SML_FX) cycles them; they show while FX is held and
- * the knobs edit song.g (the project's: sm_bank.c). Not in the table above (no button of theirs) */
-#define SM_NDEEP 3u
-static const sm_page_t SM_DEEP[SM_NDEEP] = {
-    {"DLY", SMFAM_FX, {SM_GLB | G_DTIME, SM_GLB | G_DFDBK, SM_GLB | G_DCOLOR, SM_GLB | G_DMIX}, SM_NOPARAM},
-    {"REV", SMFAM_FX, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RDAMP, SM_NOPARAM}, SM_NOPARAM},
-    {"CHORUS", SMFAM_FX, {SM_GLB | G_CRATE, SM_GLB | G_CDEPTH, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
+    /* the pages of the SHIFT combos (SHIFT + EDIT, FX, SEQ, HOME). VOICE: the sound's voicing (out of EDIT's cycle); DLY / REV /
+     * CHORUS: the deep global effect pages (song.g, the project's: sm_bank.c; no locks), in turn on SHIFT + FX; EUCLID: K1 STEPS,
+     * K2 HITS, K3 ROT, OCT+ generates the trigs into the selected track (sm_input.c sm_eu_gen); MENU: a stub until the menu */
+    {"VOICE", SMFAM_VOICE, {P_VOICE, P_GLIDE, P_DETUNE, P_PRIO}, SM_NOPARAM},
+    {"DLY", SMFAM_DEEP, {SM_GLB | G_DTIME, SM_GLB | G_DFDBK, SM_GLB | G_DCOLOR, SM_GLB | G_DMIX}, SM_NOPARAM},
+    {"REV", SMFAM_DEEP, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RDAMP, SM_NOPARAM}, SM_NOPARAM},
+    {"CHORUS", SMFAM_DEEP, {SM_GLB | G_CRATE, SM_GLB | G_CDEPTH, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
+    {"EUCLID", SMFAM_EUCL, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_EUCLID},
+    {"MENU", SMFAM_MENU, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_MENU},
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
@@ -55,25 +58,22 @@ static const sm_page_t SM_DEEP[SM_NDEEP] = {
  * selected last (a key held past SM_HOLD_US or turned on; 0xFF none; the STEP page edits it when no key is down), the keyboard
  * mode (the keys play the selected track: sm_input.c) and its octave -3 .. +3 */
 static struct { uint8_t page, trk, held_step, bank, sel_step, kbd; int8_t oct; } sm_ui;
-enum { SML_NONE, SML_EDIT, SML_GLO, SML_SEQ, SML_FX };
-static uint8_t sm_lay_fpage;                              /* FX held: the deep page in view (0 DLY, 1 REV, 2 CHORUS) */
+enum { SML_NONE, SML_EDIT, SML_GLO, SML_SEQ };
 static uint8_t sm_layer;                                  /* the layer open while its button is held (sm_layer.c; the screen and the LEDs read it) */
 static volatile uint8_t sm_rec;                           /* recording (the REC key): grid record (the trig keys edit the steps only
                                                              then), knob turns while playing lock the playing trig, live record */
 static uint8_t sm_dirty;                                  /* the screen must redraw (sm_draw clears it) */
 
 static uint32_t sm_page_count(void) { return sizeof SM_PAGES / sizeof SM_PAGES[0]; }
-/* the page shown: the deep page while FX is held, else the page of sm_ui.page */
-static const sm_page_t *sm_cur_page(void)
+static const sm_page_t *sm_cur_page(void) { return &SM_PAGES[sm_ui.page % sm_page_count()]; }
+/* a layer with its map over the knobs (EDIT, GLO, SEQ) */
+static uint32_t sm_map_open(void) { return sm_layer != 0; }
+/* the button whose LED a family lights: its own, or (the SHIFT combos' families) the button of the combo */
+static uint32_t sm_fam_btn(uint32_t fam)
 {
-    if (sm_layer == SML_FX)
-        return &SM_DEEP[sm_lay_fpage % SM_NDEEP];
-    return &SM_PAGES[sm_ui.page % sm_page_count()];
+    return fam == SMFAM_EDIT || fam == SMFAM_VOICE ? B_EDIT : fam == SMFAM_GLO ? B_GLO : fam == SMFAM_SEQ || fam == SMFAM_EUCL ? B_SEQ :
+           fam == SMFAM_HOME || fam == SMFAM_MENU ? B_HOME : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX || fam == SMFAM_DEEP ? B_FX : B_ENV;
 }
-/* a layer with its map over the knobs (EDIT, GLO, SEQ); FX held shows the deep pages' knobs, not a map */
-static uint32_t sm_map_open(void) { return sm_layer && sm_layer != SML_FX; }
-/* the deep page in view + 1 while FX is held, else 0 (the screen's signatures) */
-static uint32_t sm_deep_idx(void) { return sm_layer == SML_FX ? 1u + sm_lay_fpage % SM_NDEEP : 0u; }
 
 /* a family's button: its first page, or, when the page is of that family already, the next one (the last wraps) */
 static void sm_page_press(uint32_t fam)
@@ -115,8 +115,8 @@ static uint32_t sm_page_param(uint32_t k)
     return id;
 }
 
-/* the ARP button's pages (ARP, ARP 2): the first page of the family, and the page after it */
-static uint32_t sm_arp_page(uint32_t second)
+/* the ARP button's pages (ARP, ARP 2): the first page of the family, and the page after it (the tests') */
+static uint32_t __attribute__((unused)) sm_arp_page(uint32_t second)
 {
     uint32_t i, n = sm_page_count(), seen = 0;
     for (i = 0; i < n; i++)
@@ -124,7 +124,6 @@ static uint32_t sm_arp_page(uint32_t second)
             return i;
     return 0;
 }
-static int sm_page_is_arp(void) { return sm_cur_page()->fam == SMFAM_ARP; }
 
 static int sm_page_is_step(void) { return sm_cur_page()->fam == SMFAM_SEQ; }
 static uint32_t sm_page_home(void) { return sm_cur_page()->home; }   /* SMH_*: 0 not a HOME page */

@@ -35,7 +35,18 @@ static void sm_edit_init(void)
 }
 
 /* sm_input.c sm_pat_poll: another pattern plays now (the snapshot is of the one before) */
-static void sm_edit_pat_changed(void) { sm_undo_ok = 0; }
+static void sm_acc_reset(uint32_t mask)                   /* the net SHIFT / TRN shown of the tracks of mask: rewritten, back to 0 */
+{
+    uint32_t t;
+    for (t = 0; t < SM_NTRK; t++)
+        if ((mask >> t) & 1u)
+            sm_sh_acc[t] = sm_trn_acc[t] = 0;
+}
+static void sm_edit_pat_changed(void)
+{
+    sm_undo_ok = 0;
+    sm_acc_reset(0xFu);                                   /* (the net shown is of the pattern that was) */
+}
 
 static void sm_undo_snap(void)
 {
@@ -134,6 +145,7 @@ static void sm_edit_clear(uint32_t mask, int snap)
     for (t = 0; t < SM_NTRK; t++)
         if ((mask >> t) & 1u)
             sm_put_track(t, 0, 0, 0, 0);
+    sm_acc_reset(mask);
     sm_msg_show(SM_MSG_CLEARED);
 }
 
@@ -169,6 +181,7 @@ static void sm_paste_trk(uint32_t t)
     sm_undo_snap();
     sm_put_begin(1u << t);
     sm_put_track(t, &sm_clip, sm_clip_kind == SM_CLIP_TRK ? 0u : t, 0, 1);
+    sm_acc_reset(1u << t);
 }
 
 /* PASTE the pattern copied onto the current one: the kit, the steps, the locks, the master length */
@@ -182,6 +195,7 @@ static void sm_paste_pat(void)
     for (t = 0; t < SM_NTRK; t++)
         sm_put_track(t, &sm_clip, t, 0, 1);
     smp.pat[smp.cur % SM_NPAT].mlen = sm_clip.mlen;       /* (a byte) */
+    sm_acc_reset(0xFu);
 }
 
 /* SHIFT: track t's steps (and their locks) one step left (-1) or right (+1), wrapping at its length */
@@ -221,6 +235,7 @@ static void sm_undo(void)
         sm_put_track(t, &sm_undo_buf, t, 0, 1);
     smp.pat[smp.cur % SM_NPAT].mlen = sm_undo_buf.mlen;
     sm_undo_ok = 0;
+    sm_acc_reset(0xFu);
     sm_msg_show(SM_MSG_UNDO);
 }
 

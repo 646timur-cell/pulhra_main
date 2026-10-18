@@ -22,8 +22,9 @@
 
 /* the header's messages (the only ones: LOCKS FULL, CLEARED, UNDO; SAVED and the flash's error come with the storage), each
  * for SM_MSG_US, the header inverted */
-enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_SAVED, SM_MSG_FLASH, SM_MSG_COUNT };
-static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEARED", "UNDO", "SAVED", "FLASH ERROR"};
+enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_SAVED, SM_MSG_FLASH, SM_MSG_SHIFT, SM_MSG_TRN, SM_MSG_COUNT };
+static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEARED", "UNDO", "SAVED", "FLASH ERROR", "SHIFT", "TRN"};
+static int16_t sm_msg_val;                                /* SHIFT, TRN: the signed value shown after the text ("SHIFT +2") */
 static uint8_t sm_msg;                                    /* the message in the header (since sm_msg_t0), SM_MSG_NONE none */
 static uint32_t sm_msg_t0;
 
@@ -62,6 +63,11 @@ static void sm_msg_show(uint32_t id)
     sm_msg = (uint8_t)(id < SM_MSG_COUNT ? id : SM_MSG_NONE);
     sm_msg_t0 = fm1_ticks();
     sm_dirty = 1;
+}
+static void sm_msg_show_val(uint32_t id, int32_t v)
+{
+    sm_msg_val = (int16_t)v;
+    sm_msg_show(id);
 }
 static void sm_lock_full_msg(void) { sm_msg_show(SM_MSG_LOCKS); }   /* (the only message of the locks) */
 
