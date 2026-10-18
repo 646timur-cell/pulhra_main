@@ -25,6 +25,8 @@
  *              (smp.chain, sm_chain_set), one link: that pattern is asked for; G#3 turns the chain off (the pattern
  *              playing plays on). Asking for one pattern turns a chain off too (MONOFM's)
  *   GLO + G5   FILL while held (sm_fill: COND FILL / !FILL)
+ *   FX         tap: the family's next page (FX, DIST, INSERT). Hold: the deep global pages DLY / REV / CHORUS (SELECT cycles
+ *              them, K1..K4 edit song.g; no keys, no map; a turn while FX is down is the layer, as everywhere)
  * The keys and knobs of an open layer are the layer's alone (the page's knobs and the trigs do not see them); PLAY, the
  * track knob and PRESETS work as ever. The main loop is the only writer of all of it (sm_input.c's ownership). */
 
@@ -38,9 +40,10 @@ static uint8_t sm_lay_chain[SM_NCHAIN], sm_lay_nch;       /* SEQ: the chain bein
 static uint8_t sm_lay_clr;                                /* SEQ: F3 down since sm_lay_clr_t0 (1), its hold cleared all (2) */
 static uint32_t sm_lay_clr_t0;
 
-#define SM_NLBTN 4u
+#define SM_NLBTN 5u
 static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
     {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ}, {B_HOME, SML_NONE, SMFAM_HOME},
+    {B_FX, SML_FX, SMFAM_FX},
 };
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
@@ -71,7 +74,7 @@ static uint32_t sm_layer_busy(void) { return sm_layer || sm_lay_arm; }
 /* the button of layer l */
 static uint32_t sm_layer_button(uint32_t l)
 {
-    return l == SML_EDIT ? B_EDIT : l == SML_GLO ? B_GLO : B_SEQ;
+    return l == SML_EDIT ? B_EDIT : l == SML_GLO ? B_GLO : l == SML_FX ? B_FX : B_SEQ;
 }
 
 /* the page of machines (0..2) a machine is on, its first machine, how many it has */
@@ -89,6 +92,8 @@ static void sm_layer_open(uint32_t l)
     sm_lay_clr = 0;
     if (l == SML_EDIT)                                    /* (opens on the page of the selected track's machine) */
         sm_lay_epage = (uint8_t)sm_epage_of(sm_ui_sound()->machine);
+    if (l == SML_FX)
+        sm_lay_fpage = 0;                                 /* (opens on DLY) */
     if (l == SML_GLO)
         sm_glo_open();                                    /* (the grid: the current pattern's bank) */
     sm_fsave_dn = 0;
@@ -209,9 +214,13 @@ static void sm_seq_tool(uint32_t w, uint32_t t)
 }
 
 /* the open layer's keys (the white key number is its place among the white keys, F3 = 0) and knobs, this poll's edges */
-static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg)
+static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg, int32_t sel)
 {
     uint32_t key, t = sm_ui.trk % SM_NTRK;
+    if (sm_layer == SML_FX && sel) {                      /* SELECT cycles the deep pages DLY / REV / CHORUS (the knobs edit them) */
+        sm_lay_fpage = (uint8_t)(((int32_t)sm_lay_fpage + sel % (int32_t)SM_NDEEP + (int32_t)SM_NDEEP) % (int32_t)SM_NDEEP);
+        sm_dirty = 1;
+    }
     if (sm_layer == SML_EDIT && ((pressed >> panel.btn[B_OCTUP]) & 1u)) {
         sm_lay_epage = (uint8_t)((sm_lay_epage + 1u) % SM_NEPAGE);
         sm_dirty = 1;

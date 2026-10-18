@@ -95,7 +95,7 @@ static void sm_input_init(void)
 }
 
 static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);   /* sm_layer.c (after this file) */
-static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg);
+static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg, int32_t sel);
 static void sm_layer_end(void);
 static uint32_t sm_layer_busy(void);                      /* a layer open, or its button down */
 static void sm_undo(void);                                /* sm_edit.c (after this file) */
@@ -142,13 +142,24 @@ static void sm_turn_held(uint32_t id, int32_t s)
 static void sm_turn_base(uint32_t t, uint32_t id, int32_t s)
 {
     sm_sound_t *sd = &smp.pat[smp.cur % SM_NPAT].kit.snd[t % SM_NTRK];
-    const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), id);
-    int32_t v;
+    const param_desc_t *d = sm_desc_trk(sd, id);
     if (!s || !d)
         return;
-    v = param_turn(d, sd->p[id], s);
-    sd->p[id] = (int8_t)clamp(v, d->min, d->max);        /* (a byte write: the audio stream sees the old or the new) */
+    sd->p[id] = (int8_t)sm_val_turn(d, id, sd->p[id], s);   /* (a byte write: the audio stream sees the old or the new) */
     sm_param_push(t % SM_NTRK, id);
+    sm_dirty = 1;
+}
+
+/* a global effect parameter (song.g[g]: the delay, the reverb, the chorus) turned by s detents in its range. The core reads
+ * song.g once a block (fx.c); the main loop is the only writer and a store is one aligned int16, so a block sees the old or
+ * the new value. The project object (sm_bank.c) carries it; sm_proj_hash sees it, so the autosave takes it */
+static void sm_turn_glob(uint32_t g, int32_t s)
+{
+    const param_desc_t *d;
+    if (!s || g >= G_COUNT)
+        return;
+    d = &GP[g];
+    song.g[g] = (int16_t)clamp(param_turn(d, clamp(song.g[g], d->min, d->max), s), d->min, d->max);
     sm_dirty = 1;
 }
 
@@ -160,8 +171,13 @@ static void sm_turn_base(uint32_t t, uint32_t id, int32_t s)
  * on while playing, where a turn used to move a lock only, never the base: no trig under the playhead, nothing at all */
 static void sm_turn(uint32_t id, int32_t s)
 {
-    const param_desc_t *d = sm_desc_safe(sm_engine_of(sm_ui_sound()->machine), id);
+    const param_desc_t *d;
     uint32_t t = sm_ui.trk % SM_NTRK;
+    if (id & SM_GLB) {                                    /* a global (FX's SELECT, the deep pages): song.g, the project's; */
+        sm_turn_glob(id & ~SM_GLB, s);                    /* no lock, no REC (the base of the whole project) */
+        return;
+    }
+    d = sm_desc_trk(sm_ui_sound(), id);
     if (!s || !d)
         return;
     if (sm_key_arm) {
@@ -581,7 +597,7 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
  * starting afresh; a narrow range or a list turns as ever. Without SHIFT: the detents as they are */
 static int sm_wide(uint32_t id)
 {
-    const param_desc_t *d = id == SM_NOPARAM ? 0 : sm_desc_safe(sm_engine_of(sm_ui_sound()->machine), id);
+    const param_desc_t *d = id == SM_NOPARAM ? 0 : (id & SM_GLB) ? &GP[(id & ~SM_GLB) % G_COUNT] : sm_desc_trk(sm_ui_sound(), id);
     return d && d->fmt != F_ENUM && !d->names && d->max - d->min >= 64;
 }
 static int32_t sm_fine(uint32_t i, int32_t s, int wide)
@@ -814,12 +830,12 @@ static void sm_input_poll(void)
      * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
     sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);
     if (sm_layer) {
-        sm_layer_keys(pressed, notes, k, alg);
+        sm_layer_keys(pressed, notes, k, alg, sel);
         if (sm_layer == SML_SEQ)
             alg = 0;                                      /* (SEQ: ALGORITHM picks a pattern, not the track) */
         notes = 0;
         sel = 0;
-        for (i = 0; i < 4; i++)
+        for (i = 0; i < 4 && sm_layer != SML_FX; i++)     /* (FX held: the four knobs edit the deep page) */
             k[i] = 0;
     }
     sm_layer_end();

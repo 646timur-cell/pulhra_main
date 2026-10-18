@@ -15,9 +15,9 @@
  *
  * Flash (0xB4000..0xDC000: MONOFM's project area (mf_pat.c MFP_A 0xB4000) and Felucca / STRANGE's user sample slots USR2 / USR3.
  * SWAMP plays USR1 only, eng_sample.c SMP_USER_LIVE, but its first SAVE or autosave erases a MONOFM project and user samples
- * saved there, and installing MONOFM later wipes SWAMP's banks: the two do not share a part. This build's bank format is
- * version 1, unmigrated: a future firmware may drop banks saved on it if the pattern layout grows, stage 4 adds the
- * versioned migration): the project
+ * saved there, and installing MONOFM later wipes SWAMP's banks: the two do not share a part. The bank format is
+ * version 1, unmigrated: a future firmware may drop banks saved on it if the pattern layout grows; the project object is
+ * versioned (stage 4: version 2 adds the global effects, a version 1 object loads with their defaults)): the project
  * object (BPM, swing, mutes, change mode, chain, the current pattern) in two copies, one sector each (A 0xB4000, B 0xB5000);
  * the banks in a pool of 7 places of 5 sectors (0xB6000 + 0x5000 * i): a bank is 8 x sm_pattern_t = 20352 B, so ten copies
  * (two per bank) would need 200 KiB of the 160. Each place: a 32-byte header at +0 {magic "SWB1", version, bank, used, seq,
@@ -38,7 +38,8 @@
 #define SM_BANK_BYTES (SM_BPAT * (uint32_t)sizeof(sm_pattern_t))
 #define SM_BMAGIC 0x31425753u                             /* "SWB1" */
 #define SM_PMAGIC 0x31505753u                             /* "SWP1" */
-#define SM_STORE_VER 1u
+#define SM_STORE_VER 1u                                   /* the banks' (and version 1 of the project object) */
+#define SM_PROJ_VER 2u                                    /* the project object's: version 2 adds the global effects */
 #define SM_AUTOSAVE_US 8000000u                           /* 8 s of quiet, stopped: the autosave */
 #define SM_STORE_CHECK_US 200000u                         /* how often the autosave looks (a hash of both halves) */
 #define SM_SAVE_HOLD_US 800000u                           /* SEQ + F#5 held this long: SAVE */
@@ -61,12 +62,20 @@ _Static_assert(SMP_USER_BASE + SMP_USER_LIVE * SMP_USER_SIZE <= SM_FL_LO, "the l
 _Static_assert(SM_FL_LO >= 0xB4000u && SM_FL_HI <= 0xDC000u && (SM_FL_SLOT0 & 0xFFFu) == 0u && (SM_FL_SPAN & 0xFFFu) == 0u,
                "SWAMP's flash: 0xB4000..0xDC000, whole sectors");
 
-/* the project object: what is not a pattern's */
+/* the project object: what is not a pattern's. Version 1 (stage 3) ended at chain (SM_PREC1_BYTES); version 2 adds the global
+ * effects, song.g[SM_GFX[i]] (the delay, the reverb, the chorus: the deep FX pages). The bank format is untouched (the banks
+ * keep SM_STORE_VER). A version 1 object loads with the new fields at their defaults (GP[id].def); the first save after that
+ * writes version 2 (the other copy keeps the old one until then: the newest valid copy of either version wins) */
+#define SM_NGFX 9u
+static const uint8_t SM_GFX[SM_NGFX] = {G_DTIME, G_DFDBK, G_DCOLOR, G_DMIX, G_RTYPE, G_RSIZE, G_RDAMP, G_CRATE, G_CDEPTH};
 typedef struct {
     uint16_t bpm10;
     uint8_t swing, mute, mode, nchain, cur, rsv;          /* cur: the pattern id (0..39) */
     uint8_t chain[SM_NCHAIN];                             /* pattern ids */
+    int16_t g[SM_NGFX];                                   /* version 2: the global effects (SM_GFX order) */
 } sm_prec_t;
+#define SM_PREC1_BYTES 24u                                /* version 1's size: everything up to g */
+_Static_assert(sizeof(sm_prec_t) == SM_PREC1_BYTES + 2u * SM_NGFX, "the project object: version 1 then g, no padding");
 _Static_assert(sizeof(sm_prec_t) + SM_FL_DATA <= SM_FL_SEC, "the project fits its sector");
 
 /* the flash places, as found at power-on and kept since (the main loop's) */
@@ -110,7 +119,7 @@ static uint32_t sm_half_hash(uint32_t h)
 static int sm_half_dirty(uint32_t h) { return smp.hbank[h] < SM_NBANK && sm_half_hash(h) != sm_hhash[h]; }
 static void sm_prec_get(sm_prec_t *r)
 {
-    uint32_t g = sm_gid_of(smp.cur);
+    uint32_t g = sm_gid_of(smp.cur), i;
     memset(r, 0, sizeof *r);
     r->bpm10 = smp.bpm10;
     r->swing = smp.swing;
@@ -119,6 +128,8 @@ static void sm_prec_get(sm_prec_t *r)
     r->nchain = smp.nchain;
     r->cur = (uint8_t)(g < SM_NGPAT ? g : 0u);
     memcpy(r->chain, smp.chain, sizeof r->chain);
+    for (i = 0; i < SM_NGFX; i++)
+        r->g[i] = song.g[SM_GFX[i]];
 }
 static uint32_t sm_proj_hash(void)
 {
@@ -154,7 +165,13 @@ static uint32_t sm_slot_addr(uint32_t i) { return SM_FL_SLOT0 + (i % SM_FL_NSLOT
 static int sm_seq_newer(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 0; }
 static int sm_hdr_ok(const sm_fhdr_t *h, uint32_t magic)
 {
-    return h->magic == magic && h->version == SM_STORE_VER && h->hcrc == st_crc32(h, sizeof *h - 4u);
+    return h->magic == magic && h->hcrc == st_crc32(h, sizeof *h - 4u);
+}
+/* the project object's version and size agree: 1 with SM_PREC1_BYTES, 2 with the whole record */
+static int sm_phdr_ok(const sm_fhdr_t *h)
+{
+    return sm_hdr_ok(h, SM_PMAGIC) && ((h->version == SM_STORE_VER && h->size == SM_PREC1_BYTES) ||
+                                       (h->version == SM_PROJ_VER && h->size == sizeof(sm_prec_t)));
 }
 /* the CRC of n bytes of the flash at off (read in 256-byte pieces) */
 static uint32_t sm_flash_crc(uint32_t off, uint32_t n)
@@ -275,7 +292,7 @@ static int sm_proj_save(void)
     c = !sm_fp_ok[0] ? 0u : !sm_fp_ok[1] ? 1u : sm_seq_newer(sm_fp_seq[0], sm_fp_seq[1]) ? 1u : 0u;
     memset(&hd, 0, sizeof hd);
     hd.magic = SM_PMAGIC;
-    hd.version = SM_STORE_VER;
+    hd.version = SM_PROJ_VER;
     hd.bank = 0xFFu;
     hd.seq = sm_fs_next;
     sm_fp_ok[c] = 0;
@@ -359,7 +376,7 @@ static void sm_store_boot(void)
     memset(sm_fs_top, SM_BANK_NONE, sizeof sm_fs_top);
     memset(sm_fp_ok, 0, sizeof sm_fp_ok);
     for (i = 0; flash_ok && i < SM_FL_NSLOT; i++) {
-        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || hd.bank >= SM_NBANK ||
+        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || hd.version != SM_STORE_VER || hd.bank >= SM_NBANK ||
             hd.size != SM_BANK_BYTES || sm_flash_crc(sm_slot_addr(i) + SM_FL_DATA, hd.size) != hd.crc)
             continue;
         sm_fs_bank[i] = hd.bank;
@@ -373,8 +390,8 @@ static void sm_store_boot(void)
         have = 1;
     }
     for (i = 0; flash_ok && i < 2u; i++) {
-        if (st_read(SM_FL_PROJ + i * SM_FL_SEC, &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_PMAGIC) || hd.size != sizeof r ||
-            sm_flash_crc(SM_FL_PROJ + i * SM_FL_SEC + SM_FL_DATA, sizeof r) != hd.crc)
+        if (st_read(SM_FL_PROJ + i * SM_FL_SEC, &hd, sizeof hd) || !sm_phdr_ok(&hd) ||
+            sm_flash_crc(SM_FL_PROJ + i * SM_FL_SEC + SM_FL_DATA, hd.size) != hd.crc)
             continue;
         sm_fp_ok[i] = 1;
         sm_fp_seq[i] = hd.seq;
@@ -387,7 +404,15 @@ static void sm_store_boot(void)
     sm_fs_next = have ? top + 1u : 1u;
     for (b = 0; b < SM_NBANK; b++)
         sm_used[b] = sm_fs_top[b] < SM_FL_NSLOT ? sm_fs_used[sm_fs_top[b]] : 0u;
-    if (pc < 2u && !st_read(SM_FL_PROJ + pc * SM_FL_SEC + SM_FL_DATA, &r, sizeof r)) {
+    memset(&r, 0, sizeof r);
+    for (i = 0; i < SM_NGFX; i++)                         /* (a version 1 object has no g: the defaults) */
+        r.g[i] = GP[SM_GFX[i]].def;
+    if (pc < 2u && !st_read(SM_FL_PROJ + pc * SM_FL_SEC, &hd, sizeof hd) &&
+        !st_read(SM_FL_PROJ + pc * SM_FL_SEC + SM_FL_DATA, &r, hd.size)) {
+        for (i = 0; i < SM_NGFX; i++) {                   /* (the global effects into the core's song.g, in their ranges) */
+            const param_desc_t *d = &GP[SM_GFX[i]];
+            song.g[SM_GFX[i]] = (int16_t)clamp(r.g[i], d->min, d->max);
+        }
         smp.bpm10 = (uint16_t)clamp(r.bpm10, 300, 3000);
         smp.swing = (uint8_t)clamp(r.swing, 50, 75);
         smp.mute = (uint8_t)(r.mute & ((1u << SM_NTRK) - 1u));

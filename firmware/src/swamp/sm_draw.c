@@ -228,8 +228,9 @@ static uint32_t smd_page_sig(void)
     }
     if (smd_flag_held())                                  /* (a trig held on a sound page: its FLAG is the line) */
         h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
-    if (sm_layer)                                         /* (the title of the layer: its page of machines, the track's length) */
+    if (sm_map_open())                                    /* (the title of the layer: its page of machines, the track's length) */
         h = smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank);
+    h = smd_mix(h, sm_deep_idx());                        /* (FX held: the deep page) */
     return h;
 }
 static void smd_cat(char *d, uint32_t *n, const char *s)   /* s appended (upper case) at d[*n] */
@@ -244,7 +245,11 @@ static void smd_page(void)
     char b[24];
     uint32_t n;
     smd_begin(0, SMD_PAGE_Y, 240u, SMD_PAGE_H);
-    if (sm_layer) {                                       /* a layer open: its name in place of the page and the preset */
+    if (sm_layer == SML_FX) {                             /* FX held: DLY . GLOBAL (the deep page, the project's) */
+        n = 0;
+        smd_cat(b, &n, sm_cur_page()->name);
+        smd_cat(b, &n, " \x12 GLOBAL");
+    } else if (sm_layer) {                                /* a layer open: its name in place of the page and the preset */
         n = 0;
         if (sm_layer == SML_EDIT) {
             smd_cat(b, &n, "MACHINE ");
@@ -417,7 +422,16 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
  * says LATCH, and ORDER is spelled out */
 static const char *smd_label(uint32_t id, const param_desc_t *d)
 {
-    return id == P_AHOLD ? "LATCH" : id == P_AORDER ? "ORDER" : d->label;
+    if (id == P_DIST && sm_cur_page()->id[0] == P_DTYPE)  /* DIST's page: the send is the drive */
+        return "DRIVE";
+    return id == P_AHOLD ? "LATCH" : id == P_AORDER ? "ORDER" : id == P_DOUT ? "LVL" : id == P_ITYPE ? "TYPE" :
+           id == (SM_GLB | G_DCOLOR) ? "COLOR" : id == (SM_GLB | G_CRATE) ? "RATE" : id == (SM_GLB | G_CDEPTH) ? "DEPTH" : d->label;
+}
+static uint32_t smd_itype_place(int32_t v)                /* the place of an INSERT TYPE in the track's list (0..4) */
+{
+    uint32_t i;
+    for (i = 0; i < 4u && (int32_t)SM_ITYPES[i] < v; i++) {}
+    return i;
 }
 static void smd_knob_get(uint32_t k, smd_knob_t *o)
 {
@@ -442,7 +456,17 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     }
     if (id == SM_NOPARAM)
         return;
-    o->d = sm_desc_safe(sm_engine_of(s->machine), id);
+    if (id & SM_GLB) {                                    /* a global: song.g, no locks */
+        o->d = &GP[(id & ~SM_GLB) % G_COUNT];
+        o->on = 1;
+        o->v = clamp(song.g[(id & ~SM_GLB) % G_COUNT], o->d->min, o->d->max);
+        o->pos = o->d->max > o->d->min ? (uint32_t)((o->v - o->d->min) * 256 / (o->d->max - o->d->min)) : 0u;
+        smd_upper(o->lab, smd_label(id, o->d), 5u);
+        param_format(o->d, o->v, o->val, &unit);
+        o->val[5] = 0;
+        return;
+    }
+    o->d = sm_desc_trk(s, id);
     if (!o->d)
         return;
     o->on = 1;
@@ -458,6 +482,8 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     o->v = clamp(o->v, o->d->min, o->d->max);
     if (o->d->max > o->d->min)
         o->pos = (uint32_t)((o->v - o->d->min) * 256 / (o->d->max - o->d->min));
+    if (id == P_ITYPE)                                    /* (the track's INSERT list is five of the nine: the ring walks it) */
+        o->pos = smd_itype_place(o->v) * 256u / 4u;
     smd_upper(o->lab, smd_label(id, o->d), 5u);
     param_format(o->d, o->v, o->val, &unit);
     o->val[5] = 0;
@@ -469,6 +495,7 @@ static uint32_t smd_knob_sig(uint32_t k)
     uint32_t i;
     smd_knob_get(k, &o);
     h = smd_mix(h, sm_ui.page); h = smd_mix(h, smd_snd()->machine); h = smd_mix(h, (uint32_t)o.on);
+    h = smd_mix(h, sm_deep_idx());
     h = smd_mix(h, (uint32_t)o.v); h = smd_mix(h, (uint32_t)o.filled); h = smd_mix(h, (uint32_t)o.dot);
     h = smd_mix(h, (uint32_t)(o.dim * 2 + o.inv));
     for (i = 0; o.val[i]; i++)                            /* (the STEP page: the text is the value) */
@@ -493,6 +520,8 @@ static int32_t smd_sel_val(uint32_t id)                  /* SELECT's value: the 
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     int32_t li = sm_ui.held_step < SM_NSTEP ? sm_lock_find(pt, sm_ui.trk % SM_NTRK, sm_ui.held_step, id) : -1;
+    if (id & SM_GLB)
+        return song.g[(id & ~SM_GLB) % G_COUNT];
     return li >= 0 ? pt->lock[li].val : smd_snd()->p[id];
 }
 /* the STEP page's SELECT: a step edited, NUDGE and its value ("-" an empty step); none, SWNG and the track's swing ("58%");
@@ -520,7 +549,7 @@ static uint32_t smd_sel_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_page_param(4);
-    uint32_t h = smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine);
+    uint32_t h = smd_mix(smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine), sm_deep_idx());
     if (sm_page_is_step()) {
         char b[8];
         uint32_t i;
@@ -537,7 +566,7 @@ static void smd_select(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_page_param(4);
-    const param_desc_t *d = id == SM_NOPARAM ? 0 : sm_desc_safe(sm_engine_of(s->machine), id);
+    const param_desc_t *d = id == SM_NOPARAM ? 0 : (id & SM_GLB) ? &GP[(id & ~SM_GLB) % G_COUNT] : sm_desc_trk(s, id);
     smd_begin(0, SMD_SEL_Y, 240u, SMD_SEL_H);
     if (sm_page_is_step()) {
         char val[8];
@@ -869,8 +898,8 @@ static void sm_draw(void)
     sig[0] = smd_hdr_sig();
     sig[1] = smd_page_sig();
     for (z = 0; z < 4u; z++)
-        sig[SMD_Z_KNOB0 + z] = sm_layer ? smd_map_sig(z) : smd_knob_sig(z);
-    sig[SMD_Z_SEL] = sm_layer ? smd_map_sig(4u) : smd_sel_sig();      /* (a layer open: the five rows of its map) */
+        sig[SMD_Z_KNOB0 + z] = sm_map_open() ? smd_map_sig(z) : smd_knob_sig(z);
+    sig[SMD_Z_SEL] = sm_map_open() ? smd_map_sig(4u) : smd_sel_sig();      /* (a layer open: the five rows of its map) */
     sig[SMD_Z_STRIP] = smd_strip_sig();
     for (z = 0; z < SMD_NZONE; z++) {
         if ((sm_zvalid & (1u << z)) && sm_zsig[z] == sig[z])
@@ -879,7 +908,7 @@ static void sm_draw(void)
             smd_header();
         else if (z == 1)
             smd_page();
-        else if (z <= SMD_Z_SEL && sm_layer)
+        else if (z <= SMD_Z_SEL && sm_map_open())
             smd_map_row(z - SMD_Z_KNOB0);
         else if (z < SMD_Z_SEL)
             smd_knob(z - SMD_Z_KNOB0);
@@ -890,6 +919,6 @@ static void sm_draw(void)
         sm_zsig[z] = sig[z];
         sm_zvalid |= (uint8_t)(1u << z);
     }
-    if (!sm_layer && smd_mapped)
+    if (!sm_map_open() && smd_mapped)
         smd_unmap();
 }

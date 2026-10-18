@@ -2457,7 +2457,7 @@ static int test_leds_family(void)
     for (pg = 0; pg < sm_page_count(); pg++) {
         uint32_t b = SM_PAGES[pg].fam == SMFAM_EDIT ? B_EDIT : SM_PAGES[pg].fam == SMFAM_GLO ? B_GLO :
                      SM_PAGES[pg].fam == SMFAM_SEQ ? B_SEQ : SM_PAGES[pg].fam == SMFAM_HOME ? B_HOME :
-                     SM_PAGES[pg].fam == SMFAM_ARP ? B_ARP : B_ENV;
+                     SM_PAGES[pg].fam == SMFAM_ARP ? B_ARP : SM_PAGES[pg].fam == SMFAM_FX ? B_FX : B_ENV;
         sm_ui.page = (uint8_t)pg;
         sm_leds();
         ok &= led_of(fm1_led, panel.btn[b]) == 1;
@@ -8053,6 +8053,533 @@ static int test_arp_pages(void)
     return bad;
 }
 
+
+/* ------------------------------------------------------------------ FX pages (stage 4, Task 1) --- */
+/* the FX button's family: FX (the four sends, SELECT the delay's MIX), DIST (TYPE DRIVE TONE OUT, SELECT LCUT), INSERT (TYPE A B C,
+ * SELECT MIX). Held, with SELECT: the deep global pages DLY / REV / CHORUS, the values song.g, the project's */
+static void fx_tap(void)
+{
+    btn_down(B_FX);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_FX);
+    sm_input_poll();
+}
+/* a turn of one control, a poll; the parameter ids of the knobs K1..K4 and SELECT, and what changed in the selected track's model */
+static int test_fx_pages(void)
+{
+    static const struct { const char *pg; uint8_t id[5]; } T[3] = {
+        {"FX", {P_DIST, P_CHOR, P_DLY, P_REV, SM_GLB | G_DMIX}},
+        {"DIST", {P_DTYPE, P_DIST, P_DTONE, P_DOUT, P_DLCUT}},
+        {"INSERT", {P_ITYPE, P_IA, P_IB, P_IC, P_IMIX}},
+    };
+    int bad = 0, ok = 1;
+    uint32_t i, p;
+    in_reset();
+    host_ticks = 1000u;
+    sm_ui.page = (uint8_t)page_by_name("MIX");
+    fx_tap();
+    bad += check("FX: the FX button tapped from another family: the FX page, no layer", !strcmp(sm_cur_page()->name, "FX") && sm_layer == SML_NONE);
+    fx_tap();
+    bad += check("FX: tapped again: DIST", !strcmp(sm_cur_page()->name, "DIST"));
+    fx_tap();
+    bad += check("FX: ... INSERT", !strcmp(sm_cur_page()->name, "INSERT"));
+    fx_tap();
+    bad += check("FX: ... and round to FX", !strcmp(sm_cur_page()->name, "FX"));
+    for (p = 0; p < 3u; p++) {
+        sm_ui.page = (uint8_t)page_by_name(T[p].pg);
+        for (i = 0; i < 5u; i++) {
+            sm_sound_t before;
+            int16_t g0 = song.g[G_DMIX];
+            uint32_t id = T[p].id[i];
+            ok &= sm_page_param(i) == id;
+            if (!(id & SM_GLB) && id != P_ITYPE && id != P_DTYPE)
+                ksnd(0)->p[id] = 64;                      /* (mid range: a turn either way moves it) */
+            before = *ksnd(0);
+            sm_ui.trk = 0;
+            turn(i < 4u ? EN_K1 + i : EN_SELECT, id == P_ITYPE || id == P_DTYPE ? 1 : -3);
+            sm_input_poll();
+            if (id & SM_GLB)
+                ok &= song.g[id & ~SM_GLB] != g0 && !memcmp(&before, ksnd(0), sizeof before);
+            else
+                ok &= ksnd(0)->p[id] != before.p[id];
+            run_block();
+            ok &= (id & SM_GLB) || trk[0].p[id] == ksnd(0)->p[id];
+        }
+    }
+    bad += check("FX: every knob and SELECT of FX / DIST / INSERT turns its parameter (model and core; FX's SELECT is song.g MIX)", ok);
+    return bad;
+}
+
+/* the mix of T1 playing a note with the given parameters on a clean line: n blocks, the left output; the bus peaks */
+static uint32_t fx_pk_c, fx_pk_d, fx_pk_r, fx_pk_w;
+static void fx_flush(void)
+{
+    uint32_t b;
+    for (b = 0; b < 12000u; b++)                          /* (the lines of the delay and the reverb run out: 8.7 s) */
+        block_peak(0, 0);
+}
+static void fx_render(int32_t *L, uint32_t blocks, uint32_t off_at)
+{
+    uint32_t b, i, n = 0;
+    fx_pk_c = fx_pk_d = fx_pk_r = fx_pk_w = 0;
+    trk_note_on(&trk[0], 57, 100);
+    for (b = 0; b < blocks; b++) {
+        int32_t out[2 * CTL];
+        if (b == off_at)
+            trk_note_off(&trk[0], 57);
+        mix_block(out, CTL);
+        for (i = 0; i < CTL; i++) {
+            uint32_t a;
+            if (L)
+                L[n++] = out[2u * i];
+            a = (uint32_t)(send_c[i] < 0 ? -send_c[i] : send_c[i]); fx_pk_c = a > fx_pk_c ? a : fx_pk_c;
+            a = (uint32_t)(send_d[i] < 0 ? -send_d[i] : send_d[i]); fx_pk_d = a > fx_pk_d ? a : fx_pk_d;
+            a = (uint32_t)(send_r[i] < 0 ? -send_r[i] : send_r[i]); fx_pk_r = a > fx_pk_r ? a : fx_pk_r;
+            a = (uint32_t)(wet[i] < 0 ? -wet[i] : wet[i]); fx_pk_w = a > fx_pk_w ? a : fx_pk_w;
+        }
+    }
+    trk_all_off(&trk[0]);
+}
+static void fx_t1(void)                                   /* T1 SAW alone, dry, the defaults of the core's globals */
+{
+    uint32_t t, i;
+    sm_core_init();
+    for (t = 0; t < SM_NTRK; t++)
+        for (i = 0; i < 4u; i++)
+            trk[t].p[P_DIST + i] = 0;
+    trk[0].p[P_ITYPE] = 0;
+    trk[0].p[P_DTYPE] = 0;
+    trk[1].p[P_LEVEL] = trk[2].p[P_LEVEL] = trk[3].p[P_LEVEL] = 0;
+}
+/* each send is heard on its own bus: only its bus gets the signal and the wet mix has it; the same note with the send at 0
+ * leaves the bus silent */
+/* a spectral figure of a mix: the share of the energy in the first difference (high) and the crest factor */
+static void fx_fig(const int32_t *L, uint32_t n, double *bright, double *rms)
+{
+    double e = 0, d = 0;
+    uint32_t i;
+    for (i = 1; i < n; i++) {
+        e += (double)L[i] * L[i];
+        d += (double)(L[i] - L[i - 1]) * (L[i] - L[i - 1]);
+    }
+    *bright = e > 0 ? d / e : 0;
+    *rms = sqrt(e / n);
+}
+static double fx_energy(const int32_t *L, uint32_t n)
+{
+    double e = 0;
+    uint32_t i;
+    for (i = 0; i < n; i++)
+        e += (double)L[i] * L[i];
+    return e;
+}
+static int test_fx_sends_audible(void)
+{
+    static const uint8_t SEND[4] = {P_DIST, P_CHOR, P_DLY, P_REV};
+    static const char *const NAME[4] = {"DST", "CHO", "DLY", "REV"};
+    static int32_t L0[CTL * 600], L1[CTL * 600];
+    int bad = 0;
+    uint32_t s, k;
+    for (s = 0; s < 4u; s++) {
+        char w[120];
+        uint32_t pk[4], w0;
+        double e0, e1, b0, b1, r0, r1;
+        fx_t1();
+        fx_flush();
+        fx_render(L0, 600, 300);
+        w0 = fx_pk_w;
+        e0 = fx_energy(L0, CTL * 600u);
+        fx_fig(L0 + CTL * 40, CTL * 260, &b0, &r0);
+        fx_flush();
+        trk[0].p[SEND[s]] = 100;
+        song.g[G_DMIX] = 127;
+        fx_render(L1, 600, 300);
+        pk[0] = fx_pk_c; pk[1] = fx_pk_d; pk[2] = fx_pk_r;
+        e1 = fx_energy(L1, CTL * 600u);
+        fx_fig(L1 + CTL * 40, CTL * 260, &b1, &r1);
+        if (s == 0) {                                     /* DIST: in the track, before the sends; the sound changes, no bus */
+            snprintf(w, sizeof w, "FX: send %s (the drive) changes the sound (brightness %.3f -> %.3f), no send bus", NAME[s], b0, b1);
+            bad += check(w, fabs(b1 - b0) > 0.1 * b0 && !pk[0] && !pk[1] && !pk[2]);
+            continue;
+        }
+        k = s - 1u;
+        snprintf(w, sizeof w, "FX: send %s: its bus peaks %u, the others 0, the wet mix %u (without it %u), the output gains energy x%.2f",
+                 NAME[s], pk[k], fx_pk_w, w0, e1 / e0);
+        bad += check(w, pk[k] > 500u && pk[(k + 1u) % 3u] == 0 && pk[(k + 2u) % 3u] == 0 && fx_pk_w > w0 + 300u && e1 > 1.05 * e0);
+    }
+    return bad;
+}
+
+static int test_fx_dist_types(void)
+{
+    static int32_t L[4][CTL * 300];
+    double br[4], rm[4], base_br, base_rm;
+    int bad = 0, ok = 1;
+    uint32_t ty, j;
+    fx_t1();
+    fx_render(L[0], 300, 300);
+    fx_fig(L[0] + CTL * 40, CTL * 260, &base_br, &base_rm);
+    for (ty = 0; ty < 4u; ty++) {
+        fx_t1();
+        trk[0].p[P_DIST] = 110;
+        trk[0].p[P_DTYPE] = (int16_t)ty;
+        fx_render(L[ty], 300, 300);
+        fx_fig(L[ty] + CTL * 40, CTL * 260, &br[ty], &rm[ty]);
+        printf("swamp: DIST type %u: brightness %.4f, rms %.0f (clean: %.4f, %.0f)\n", ty, br[ty], rm[ty], base_br, base_rm);
+        ok &= fabs(br[ty] - base_br) > 0.2 * base_br || fabs(rm[ty] - base_rm) > 0.2 * base_rm;   /* (two renders of one sound differ by ~5 %: the voice phases) */
+    }
+    bad += check("FX: DIST drive 110: every type sounds unlike the clean note (20 %)", ok);
+    ok = 1;
+    for (ty = 0; ty < 4u; ty++)
+        for (j = ty + 1u; j < 4u; j++)
+            ok &= fabs(br[ty] - br[j]) > 0.15 * br[ty] || fabs(rm[ty] - rm[j]) > 0.1 * rm[ty];
+    bad += check("FX: ... and no two types alike (brightness differs by 15 % or the level by 10 %)", ok);
+    return bad;
+}
+
+static int test_fx_insert_types(void)
+{
+    static int32_t L0[CTL * 400], L1[CTL * 400];
+    int bad = 0, ok = 1, seen[9] = {0}, i;
+    uint32_t ty, n;
+    in_reset();
+    host_ticks = 1000u;
+    sm_ui.page = (uint8_t)page_by_name("INSERT");
+    ksnd(0)->p[P_ITYPE] = 0;
+    for (i = 0; i < 24; i++) {                            /* up through the whole knob, then down */
+        turn(EN_K1, 1);
+        sm_input_poll();
+        seen[ksnd(0)->p[P_ITYPE] % 9]++;
+    }
+    ok = ksnd(0)->p[P_ITYPE] == IT_CHORUS;
+    for (i = 0; i < 24; i++) {
+        turn(EN_K1, -1);
+        sm_input_poll();
+        seen[ksnd(0)->p[P_ITYPE] % 9]++;
+    }
+    bad += check("FX: INSERT TYPE up 24 detents ends on CHOR, down 24 ends on OFF", ok && ksnd(0)->p[P_ITYPE] == IT_OFF);
+    bad += check("FX: ... the types visited are OFF CRUSH PHASR FLANG CHOR only: no SOFT / HARD / FOLD / FUZZ",
+                 seen[IT_SOFT] == 0 && seen[IT_HARD] == 0 && seen[IT_FOLD] == 0 && seen[IT_FUZZ] == 0 && seen[IT_CRUSH] && seen[IT_PHASER] &&
+                 seen[IT_FLANGER] && seen[IT_CHORUS] && seen[IT_OFF]);
+    turn(EN_K1, 1);
+    sm_input_poll();
+    bad += check("FX: ... one detent from OFF is CRUSH (5), then PHASR 6, FLANG 7, CHOR 8", ksnd(0)->p[P_ITYPE] == IT_CRUSH);
+    ksnd(0)->p[P_ITYPE] = IT_SOFT;                         /* a value from an older kit: turns from the first listed above it */
+    turn(EN_K1, 1);
+    sm_input_poll();
+    bad += check("FX: ... a stored SOFT turned up goes to PHASR (the list's next above CRUSH), never stays a drive", ksnd(0)->p[P_ITYPE] == IT_PHASER);
+    ksnd(0)->p[P_ITYPE] = 0;
+    {   /* A B C show as the type's own: CRUSH BITS, PHASR RATE */
+        const param_desc_t *d;
+        ksnd(0)->p[P_ITYPE] = IT_CRUSH;
+        d = sm_desc_trk(ksnd(0), P_IA);
+        bad += check("FX: INSERT A on CRUSH is BITS, on PHASR is RATE", !strcmp(d->label, "BITS") &&
+                     (ksnd(0)->p[P_ITYPE] = IT_PHASER, !strcmp(sm_desc_trk(ksnd(0), P_IA)->label, "RATE")));
+    }
+    {
+        double b0, r0, bn, rn, nul;
+        fx_t1();
+        fx_render(L0, 400, 400);
+        fx_fig(L0 + CTL * 40, CTL * 350, &b0, &r0);
+        fx_t1();
+        fx_render(L1, 400, 400);
+        fx_fig(L1 + CTL * 40, CTL * 350, &bn, &rn);
+        nul = fmax(fabs(bn - b0) / b0, fabs(rn - r0) / r0);       /* (two renders of the same sound: the run-to-run difference) */
+        printf("swamp: INSERT OFF twice: brightness %.4f %.4f, rms %.0f %.0f (spread %.4f)\n", b0, bn, r0, rn, nul);
+        for (ty = 1; ty < 5u; ty++) {
+            char w[100];
+            double bt, rt, dd;
+            fx_t1();
+            trk[0].p[P_ITYPE] = SM_ITYPES[ty];
+            fx_render(L1, 400, 400);
+            fx_fig(L1 + CTL * 40, CTL * 350, &bt, &rt);
+            dd = fmax(fabs(bt - b0) / b0, fabs(rt - r0) / r0);
+            snprintf(w, sizeof w, "FX: INSERT %s is audible: brightness %.4f, rms %.0f against OFF %.4f, %.0f", N_ITYPE[SM_ITYPES[ty]], bt, rt, b0, r0);
+            bad += check(w, dd > 0.05 && dd > 5.0 * nul);
+        }
+    }
+    return bad;
+}
+
+static int test_fx_deep_pages(void)
+{
+    int bad = 0, ok;
+    int16_t t0, f0, d0;
+    sm_sound_t before;
+    in_reset();
+    host_ticks = 1000u;
+    sm_ui.page = (uint8_t)page_by_name("DIST");
+    layer_hold(B_FX);
+    bad += check("FX: FX held 500 ms: the layer is on, the page under it still DIST", sm_layer == SML_FX && sm_ui.page == page_by_name("DIST"));
+    bad += check("FX: ... it shows the deep page DLY: K1 TIME, K2 FDBK, K3 COLOR, K4 MIX", !strcmp(sm_cur_page()->name, "DLY") &&
+                 sm_page_param(0) == (SM_GLB | G_DTIME) && sm_page_param(1) == (SM_GLB | G_DFDBK) &&
+                 sm_page_param(2) == (SM_GLB | G_DCOLOR) && sm_page_param(3) == (SM_GLB | G_DMIX));
+    t0 = song.g[G_DTIME]; f0 = song.g[G_DFDBK]; d0 = song.g[G_DCOLOR];
+    before = *ksnd(0);
+    turn(EN_K1, 2);
+    turn(EN_K2, -5);
+    turn(EN_K3, 4);
+    sm_input_poll();
+    run_block();
+    bad += check("FX: ... K1 K2 K3 edit song.g (TIME, FDBK, COLR), the sound of the track is untouched",
+                 song.g[G_DTIME] == param_turn(&GP[G_DTIME], t0, 2) && song.g[G_DTIME] != t0 && song.g[G_DFDBK] == f0 - 5 && song.g[G_DCOLOR] == d0 + 4 && !memcmp(&before, ksnd(0), sizeof before));
+    turn(EN_SELECT, 1);
+    sm_input_poll();
+    bad += check("FX: SELECT +1: REV (TYPE, SIZE, DAMP)", sm_layer == SML_FX && !strcmp(sm_cur_page()->name, "REV") &&
+                 sm_page_param(0) == (SM_GLB | G_RTYPE) && sm_page_param(1) == (SM_GLB | G_RSIZE) && sm_page_param(2) == (SM_GLB | G_RDAMP) &&
+                 sm_page_param(3) == SM_NOPARAM);
+    {
+        int16_t r0 = song.g[G_RTYPE], z0 = song.g[G_RSIZE];
+        turn(EN_K1, -1);
+        turn(EN_K2, -10);
+        sm_input_poll();
+        bad += check("FX: ... K1 REVERB TYPE (HALL -> SPRING), K2 SIZE", song.g[G_RTYPE] == r0 - 1 && song.g[G_RSIZE] == z0 - 10);
+    }
+    turn(EN_SELECT, 1);
+    sm_input_poll();
+    bad += check("FX: SELECT +1: CHORUS (RATE, DEPTH)", !strcmp(sm_cur_page()->name, "CHORUS") && sm_page_param(0) == (SM_GLB | G_CRATE) &&
+                 sm_page_param(1) == (SM_GLB | G_CDEPTH) && sm_page_param(2) == SM_NOPARAM);
+    {
+        int16_t c0 = song.g[G_CRATE], e0 = song.g[G_CDEPTH];
+        turn(EN_K1, 7);
+        turn(EN_K2, 3);
+        sm_input_poll();
+        run_block();
+        bad += check("FX: ... K1 / K2 edit CRT, CDP; the core reads song.g", song.g[G_CRATE] == c0 + 7 && song.g[G_CDEPTH] == e0 + 3);
+    }
+    turn(EN_SELECT, 1);
+    sm_input_poll();
+    bad += check("FX: SELECT +1 once more: round to DLY", !strcmp(sm_cur_page()->name, "DLY"));
+    turn(EN_SELECT, -1);
+    sm_input_poll();
+    bad += check("FX: SELECT -1: back to CHORUS", !strcmp(sm_cur_page()->name, "CHORUS"));
+    layer_let_go(B_FX);
+    bad += check("FX: FX let go: the layer closes, the page is DIST as before, nothing changed it", sm_layer == SML_NONE &&
+                 !strcmp(sm_cur_page()->name, "DIST"));
+    /* a turn while FX is down is the layer even before 400 ms (as everywhere) */
+    sm_ui.page = (uint8_t)page_by_name("FX");
+    btn_down(B_FX);
+    sm_input_poll();
+    ms(40);
+    turn(EN_SELECT, 1);
+    sm_input_poll();
+    bad += check("FX: SELECT turned 40 ms after FX went down: the layer at once, DLY -> REV", sm_layer == SML_FX && !strcmp(sm_cur_page()->name, "REV"));
+    layer_let_go(B_FX);
+    bad += check("FX: ... let go: no tap (the page FX stays)", !strcmp(sm_cur_page()->name, "FX"));
+    /* globals take no locks, REC or not, a trig held or not */
+    ok = 1;
+    in_reset();
+    host_ticks = 1000u;
+    sm_rec = 1;
+    sm_step_toggle(0, 3);
+    sm_ui.page = (uint8_t)page_by_name("FX");
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    turn(EN_SELECT, -4);
+    sm_input_poll();
+    ok &= cpat()->nlock == 0u;
+    key_up(WHITE[3]);
+    sm_input_poll();
+    sm_rec = 0;
+    bad += check("FX: a trig held, FX's SELECT (the delay MIX, a global) turned: no lock, the project value moved", ok && song.g[G_DMIX] == GP[G_DMIX].def - 4);
+    return bad;
+}
+
+/* a lock on a send, on a step: it plays (REC, a trig held, the knob turned), the next step has the base */
+static int test_fx_send_lock(void)
+{
+    static const uint8_t SEND[4] = {P_DIST, P_CHOR, P_DLY, P_REV};
+    int bad = 0, ok = 1;
+    uint32_t i;
+    in_reset();
+    host_ticks = 1000u;
+    sm_rec = 1;
+    sm_ui.page = (uint8_t)page_by_name("FX");
+    sm_ui.trk = 0;
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 4);
+    key_dn(WHITE[4]);
+    sm_input_poll();
+    for (i = 0; i < 4u; i++) {
+        turn(EN_K1 + i, 20 + (int32_t)i);
+        sm_input_poll();
+    }
+    key_up(WHITE[4]);
+    sm_input_poll();
+    for (i = 0; i < 4u; i++)
+        ok &= lk_val(0, 4, SEND[i]) == 20 + (int32_t)i && ksnd(0)->p[SEND[i]] == (i == 0 ? 0 : 0) + (ksnd(0)->p[SEND[i]]);
+    bad += check("FX: a trig held on FX, K1..K4 turned: four locks on step 5 (DST CHO DLY REV)", ok && cpat()->nlock == 4u);
+    {
+        int8_t base[4];
+        for (i = 0; i < 4u; i++)
+            base[i] = ksnd(0)->p[SEND[i]];
+        press(B_PLAY);
+        sm_input_poll();
+        ok = run_to_step(0, 4);
+        for (i = 0; i < 4u; i++)
+            ok &= trk[0].p[SEND[i]] == lk_val(0, 4, SEND[i]);
+        bad += check("FX: PLAY: at step 5 the core has the four locked sends", ok);
+        ok = run_to_step(0, 0);
+        for (i = 0; i < 4u; i++)
+            ok &= trk[0].p[SEND[i]] == base[i];
+        bad += check("FX: ... step 1 the base again", ok);
+    }
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    sm_rec = 0;
+    return bad;
+}
+
+/* the DIST and INSERT pages lock as every page does (TYPE excepted: it is locked on the INSERT's list) */
+static int test_fx_insert_lock(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_rec = 1;
+    sm_ui.page = (uint8_t)page_by_name("INSERT");
+    sm_ui.trk = 0;
+    sm_step_toggle(0, 2);
+    key_dn(WHITE[2]);
+    sm_input_poll();
+    turn(EN_K1, 2);                                       /* OFF -> CRUSH -> PHASR */
+    sm_input_poll();
+    key_up(WHITE[2]);
+    sm_input_poll();
+    bad += check("FX: INSERT TYPE locked on a step: PHASR (6), the base stays OFF", lk_val(0, 2, P_ITYPE) == IT_PHASER && ksnd(0)->p[P_ITYPE] == IT_OFF);
+    sm_rec = 0;
+    return bad;
+}
+
+static int test_fx_global_persist(void)
+{
+    static const int16_t V[SM_NGFX] = {3, 41, 99, 17, 1, 33, 120, 77, 5};
+    int bad = 0, ok = 1;
+    uint32_t i;
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    for (i = 0; i < SM_NGFX; i++)
+        song.g[SM_GFX[i]] = V[i];
+    smp.bpm10 = 1313;
+    bad += check("FX: a global changed makes the project dirty (the autosave takes it)", sm_proj_hash() != sm_phash);
+    bad += check("FX: save writes the project object: version 2", sm_store_all() == 0 && sm_fp_ok[0] + sm_fp_ok[1] >= 1);
+    bank_reboot();
+    for (i = 0; i < SM_NGFX; i++)
+        ok &= song.g[SM_GFX[i]] == V[i];
+    bad += check("FX: save, power off, on: the nine global effect values are back in song.g", ok && smp.bpm10 == 1313u);
+    bad += check("FX: ... the project is clean after the load", sm_proj_hash() == sm_phash);
+    /* one more write (the other copy), reboot again */
+    song.g[G_DTIME] = 6;
+    bad += check("FX: a second save (the other copy)", sm_store_all() == 0);
+    bank_reboot();
+    bad += check("FX: ... reboot: the newest copy wins", song.g[G_DTIME] == 6 && song.g[G_CDEPTH] == 5);
+    /* an out-of-range stored value is clamped on load */
+    song.g[G_DFDBK] = 120;
+    sm_store_all();
+    bank_reboot();
+    bad += check("FX: FDBK 120 (its range's top) survives", song.g[G_DFDBK] == 120);
+    return bad;
+}
+
+/* a version 1 project object (stage 3: no global effects) in the flash loads, with the new fields at their defaults, the rest
+ * of it as it was and the banks untouched; the next save is version 2 */
+static int test_fx_project_migration(void)
+{
+    sm_fhdr_t hd;
+    struct { uint16_t bpm10; uint8_t swing, mute, mode, nchain, cur, rsv; uint8_t chain[SM_NCHAIN]; } v1;
+    int bad = 0, ok = 1;
+    uint32_t i, c;
+    static sm_pattern_t a[SM_BPAT];
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    pat_trig(0, 0, 5, 60);
+    smp.bpm10 = 999;
+    sm_store_all();                                       /* (a bank and a version 2 project) */
+    memcpy(a, &smp.pat[0], sizeof a);
+    /* the project's two sectors: wipe them, write a version 1 object by hand (a stage 3 firmware's) */
+    memset(&v1, 0, sizeof v1);
+    v1.bpm10 = 1500;
+    v1.swing = 60;
+    v1.mute = 2;
+    v1.mode = SM_PM_JUMP;
+    v1.cur = 0;
+    for (c = 0; c < 2u; c++)
+        memset(nor + SM_FL_PROJ + c * SM_FL_SEC, 0xFF, SM_FL_SEC);
+    memset(&hd, 0, sizeof hd);
+    hd.magic = SM_PMAGIC;
+    hd.version = 1;
+    hd.bank = 0xFF;
+    hd.seq = 5000;
+    ok &= sizeof v1 == 24u && sm_flash_write(SM_FL_PROJ, 1, &hd, &v1, sizeof v1) == 0;
+    bad += check("MIGRATE: a version 1 project object (24 bytes) written as stage 3 did", ok);
+    for (i = 0; i < SM_NGFX; i++)
+        song.g[SM_GFX[i]] = 111;                          /* (whatever the RAM had: the load must set the defaults) */
+    bank_reboot();
+    ok = smp.bpm10 == 1500u && smp.swing == 60u && smp.mute == 2u && smp.mode == SM_PM_JUMP;
+    bad += check("MIGRATE: version 1 loaded: BPM, swing, mute, change mode as stored", ok);
+    ok = 1;
+    for (i = 0; i < SM_NGFX; i++)
+        ok &= song.g[SM_GFX[i]] == GP[SM_GFX[i]].def;
+    bad += check("MIGRATE: ... the nine global effects at their defaults (GP[i].def)", ok);
+    bad += check("MIGRATE: ... the bank format unchanged: the pattern loads byte for byte", smp.hbank[0] == 0u && !memcmp(&smp.pat[0], a, sizeof a));
+    song.g[G_DMIX] = 12;
+    bad += check("MIGRATE: a save after it writes version 2 (the version 1 copy stays valid until then)", sm_store_all() == 0);
+    {
+        uint32_t newest = sm_seq_newer(sm_fp_seq[0], sm_fp_seq[1]) ? 0u : 1u;
+        st_read(SM_FL_PROJ + newest * SM_FL_SEC, &hd, sizeof hd);
+        bad += check("MIGRATE: ... the newer copy's header: version 2, 42 bytes", hd.version == SM_PROJ_VER && hd.size == sizeof(sm_prec_t) && sizeof(sm_prec_t) == 42u);
+    }
+    bank_reboot();
+    bad += check("MIGRATE: ... reboot: DMIX 12, BPM 150.0 kept", song.g[G_DMIX] == 12 && smp.bpm10 == 1500u);
+    /* a torn version 2 copy newer than a good one: the older (valid) one is used */
+    return bad;
+}
+
+static int test_fx_draw(void)
+{
+    int bad = 0;
+    int16_t save;
+    draw_setup();
+    sm_ui.page = (uint8_t)page_by_name("FX");
+    draw_full();
+    bad += check("FX draw: the FX page says DST CHO DLY REV and MIX (SELECT)", lint_has("DST", 0, 0) && lint_has("CHO", 0, 0) &&
+                 lint_has("DLY", 0, 0) && lint_has("REV", 0, 0) && lint_has("MIX", 0, 0) && lint_frame("fx") == 0);
+    sm_ui.page = (uint8_t)page_by_name("DIST");
+    draw_full();
+    bad += check("FX draw: the DIST page says TYPE DRIVE TONE LVL and LCUT", lint_has("TYPE", 0, 0) && lint_has("DRIVE", 0, 0) &&
+                 lint_has("TONE", 0, 0) && lint_has("LVL", 0, 0) && lint_has("LCUT", 0, 0) && lint_frame("dist") == 0);
+    sm_ui.page = (uint8_t)page_by_name("INSERT");
+    ksnd(0)->p[P_ITYPE] = IT_CRUSH;
+    draw_full();
+    bad += check("FX draw: the INSERT page on CRUSH says TYPE CRUSH BITS RATE LPF MIX", lint_has("TYPE", 0, 0) && lint_has("CRUSH", 0, 0) &&
+                 lint_has("BITS", 0, 0) && lint_has("RATE", 0, 0) && lint_has("LPF", 0, 0) && lint_has("MIX", 0, 0) && lint_frame("ins") == 0);
+    ksnd(0)->p[P_ITYPE] = IT_FLANGER;
+    draw_full();
+    bad += check("FX draw: ... on FLANG: RATE DEPTH FDBK", lint_has("FLANG", 0, 0) && lint_has("DEPTH", 0, 0) && lint_has("FDBK", 0, 0));
+    ksnd(0)->p[P_ITYPE] = 0;
+    sm_layer = SML_FX;
+    sm_lay_fpage = 0;
+    save = song.g[G_DTIME];
+    draw_full();
+    bad += check("FX draw: FX held: DLY page: TIME FDBK COLOR MIX, no layer map, the page line says DLY GLOBAL",
+                 lint_has("TIME", 0, 0) && lint_has("FDBK", 0, 0) && lint_has("COLOR", 0, 0) && lint_has("MIX", 0, 0) && lint_has("DLY \x12 GLOBAL", 0, 0) &&
+                 lint_frame("dly") == 0);
+    sm_lay_fpage = 1;
+    draw_full();
+    bad += check("FX draw: ... REV page: TYPE SIZE DAMP", lint_has("TYPE", 0, 0) && lint_has("SIZE", 0, 0) && lint_has("DAMP", 0, 0) &&
+                 lint_has("HALL", 0, 0) && lint_frame("rev") == 0);
+    sm_lay_fpage = 2;
+    draw_full();
+    bad += check("FX draw: ... CHORUS page: RATE DEPTH", lint_has("RATE", 0, 0) && lint_has("DEPTH", 0, 0) && lint_frame("cho") == 0);
+    song.g[G_DTIME] = save;
+    sm_layer = SML_NONE;
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -8213,6 +8740,16 @@ int main(void)
     bad += test_arp_midi();
     bad += test_arp_rec();
     bad += test_arp_pages();
+    bad += test_fx_pages();
+    bad += test_fx_sends_audible();
+    bad += test_fx_dist_types();
+    bad += test_fx_insert_types();
+    bad += test_fx_deep_pages();
+    bad += test_fx_send_lock();
+    bad += test_fx_insert_lock();
+    bad += test_fx_global_persist();
+    bad += test_fx_project_migration();
+    bad += test_fx_draw();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

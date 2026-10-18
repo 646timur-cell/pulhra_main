@@ -151,7 +151,7 @@ static int sm_lock_turn(uint32_t t, uint32_t s, uint32_t id, int32_t d, int mk)
 {
     sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
     const sm_sound_t *sd = &p->kit.snd[t % SM_NTRK];
-    const param_desc_t *dc = sm_desc_safe(sm_engine_of(sd->machine), id);
+    const param_desc_t *dc = sm_desc_trk(sd, id);
     int32_t i, v;
     uint32_t make;
     if (!d || !dc || t >= SM_NTRK || s >= SM_NSTEP)
@@ -161,7 +161,7 @@ static int sm_lock_turn(uint32_t t, uint32_t s, uint32_t id, int32_t d, int mk)
         return 0;
     i = sm_lock_find(p, t, s, id);
     v = i >= 0 ? p->lock[i].val : sd->p[id];
-    v = clamp(param_turn(dc, clamp(v, dc->min, dc->max), d), dc->min, dc->max);
+    v = sm_val_turn(dc, id, v, d);
     if (!sm_lock_set(t, s, id, v))
         return 0;
     if (make) {                                           /* (n 0: the audio stream reads none of it yet) */

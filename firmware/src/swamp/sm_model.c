@@ -15,6 +15,32 @@ static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
     return param_desc_of(e % NENGINES, id);
 }
 
+/* the descriptor of parameter id on the sound s: sm_desc_safe, and the INSERT's three values A B C as its TYPE names them
+ * (params.c ins_desc: DRIVE .. for the swept ones, BITS RATE LPF for CRUSH; the ranges are 0..127 in every type) */
+static const param_desc_t *sm_desc_trk(const sm_sound_t *s, uint32_t id)
+{
+    if (id >= P_IA && id <= P_IC)
+        return ins_desc(s->p[P_ITYPE], id - P_IA);
+    return sm_desc_safe(sm_engine_of(s->machine), id);
+}
+
+/* the INSERT TYPEs a track offers, in the order of the knob: OFF CRUSH PHASR FLANG CHOR (fx.c IT_*, the values stored). The
+ * drives (SOFT HARD FOLD FUZZ) are DIST's own on a track; the master inserts of stage 4 offer all of them */
+static const uint8_t SM_ITYPES[5] = {IT_OFF, IT_CRUSH, IT_PHASER, IT_FLANGER, IT_CHORUS};
+
+/* value v of parameter id (descriptor d) turned by s detents, in its range. INSERT TYPE walks SM_ITYPES only (a value not in the
+ * list, from an older kit, turns from the first listed one above it) */
+static int32_t sm_val_turn(const param_desc_t *d, uint32_t id, int32_t v, int32_t s)
+{
+    if (id == P_ITYPE) {
+        int32_t i = 0, n = (int32_t)(sizeof SM_ITYPES / sizeof SM_ITYPES[0]);
+        while (i < n - 1 && (int32_t)SM_ITYPES[i] < v)
+            i++;
+        return SM_ITYPES[clamp(i + s, 0, n - 1)];
+    }
+    return clamp(param_turn(d, clamp(v, d->min, d->max), s), d->min, d->max);
+}
+
 /* a machine's preset as the sound ui.c apply_preset_to + set_engine_of leave on a track (the sound only, nothing of the
  * track's own, no undo, no UI): the parameter defaults, the engine's eight values and its ninth, the ADSR, F.ENV, the
  * voice mode, the sends */

@@ -6,8 +6,10 @@
  * track's trig defaults and SELECT the track's own SWING. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
  * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both */
 #define SM_NOPARAM 0xFFu
+#define SM_GLB 0x80u                                      /* a page's parameter id with this bit is a GLOBAL (song.g[id & 0x7F]): the
+                                                             FX page's SELECT and the deep FX pages; no locks, the project's */
 
-enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_COUNT };
+enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_COUNT };
 enum { SMH_NONE, SMH_MIXER, SMH_CLOCK };                  /* a HOME page's kind (sm_page_t.home) */
 
 typedef struct {
@@ -31,6 +33,21 @@ static const sm_page_t SM_PAGES[] = {
     {"CLOCK", SMFAM_HOME, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_CLOCK},   /* K1 BPM, K2 SWING */
     {"ARP", SMFAM_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}, P_AORDER},                  /* the arpeggiator (sm_arp.c): the ARP tap */
     {"ARP 2", SMFAM_ARP, {P_ASWING, P_APROB, P_AHOLD, SM_NOPARAM}, SM_NOPARAM},         /* K3 is LATCH (params.c names it HOLD) */
+    /* the FX button's family (a tap goes to the next page: FX, DIST, INSERT). FX: the four sends, SELECT the delay's MIX (the
+     * core has no separate dry level: the dry is the track's LEVEL); DIST: TYPE DRIVE (the send P_DIST is the drive) TONE OUT,
+     * SELECT LOW CUT; INSERT: TYPE (OFF CRUSH PHASR FLANG CHOR: the drives are DIST's), A B C, SELECT MIX */
+    {"FX", SMFAM_FX, {P_DIST, P_CHOR, P_DLY, P_REV}, SM_GLB | G_DMIX},
+    {"DIST", SMFAM_FX, {P_DTYPE, P_DIST, P_DTONE, P_DOUT}, P_DLCUT},
+    {"INSERT", SMFAM_FX, {P_ITYPE, P_IA, P_IB, P_IC}, P_IMIX},
+};
+
+/* the deep global pages: the FX button held and SELECT turned (sm_layer.c SML_FX) cycles them; they show while FX is held and
+ * the knobs edit song.g (the project's: sm_bank.c). Not in the table above (no button of theirs) */
+#define SM_NDEEP 3u
+static const sm_page_t SM_DEEP[SM_NDEEP] = {
+    {"DLY", SMFAM_FX, {SM_GLB | G_DTIME, SM_GLB | G_DFDBK, SM_GLB | G_DCOLOR, SM_GLB | G_DMIX}, SM_NOPARAM},
+    {"REV", SMFAM_FX, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RDAMP, SM_NOPARAM}, SM_NOPARAM},
+    {"CHORUS", SMFAM_FX, {SM_GLB | G_CRATE, SM_GLB | G_CDEPTH, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
@@ -38,14 +55,25 @@ static const sm_page_t SM_PAGES[] = {
  * selected last (a key held past SM_HOLD_US or turned on; 0xFF none; the STEP page edits it when no key is down), the keyboard
  * mode (the keys play the selected track: sm_input.c) and its octave -3 .. +3 */
 static struct { uint8_t page, trk, held_step, bank, sel_step, kbd; int8_t oct; } sm_ui;
-enum { SML_NONE, SML_EDIT, SML_GLO, SML_SEQ };
+enum { SML_NONE, SML_EDIT, SML_GLO, SML_SEQ, SML_FX };
+static uint8_t sm_lay_fpage;                              /* FX held: the deep page in view (0 DLY, 1 REV, 2 CHORUS) */
 static uint8_t sm_layer;                                  /* the layer open while its button is held (sm_layer.c; the screen and the LEDs read it) */
 static volatile uint8_t sm_rec;                           /* recording (the REC key): grid record (the trig keys edit the steps only
                                                              then), knob turns while playing lock the playing trig, live record */
 static uint8_t sm_dirty;                                  /* the screen must redraw (sm_draw clears it) */
 
 static uint32_t sm_page_count(void) { return sizeof SM_PAGES / sizeof SM_PAGES[0]; }
-static const sm_page_t *sm_cur_page(void) { return &SM_PAGES[sm_ui.page % sm_page_count()]; }
+/* the page shown: the deep page while FX is held, else the page of sm_ui.page */
+static const sm_page_t *sm_cur_page(void)
+{
+    if (sm_layer == SML_FX)
+        return &SM_DEEP[sm_lay_fpage % SM_NDEEP];
+    return &SM_PAGES[sm_ui.page % sm_page_count()];
+}
+/* a layer with its map over the knobs (EDIT, GLO, SEQ); FX held shows the deep pages' knobs, not a map */
+static uint32_t sm_map_open(void) { return sm_layer && sm_layer != SML_FX; }
+/* the deep page in view + 1 while FX is held, else 0 (the screen's signatures) */
+static uint32_t sm_deep_idx(void) { return sm_layer == SML_FX ? 1u + sm_lay_fpage % SM_NDEEP : 0u; }
 
 /* a family's button: its first page, or, when the page is of that family already, the next one (the last wraps) */
 static void sm_page_press(uint32_t fam)
