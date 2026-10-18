@@ -50,6 +50,8 @@ static uint8_t sm_oct_pend;                               /* an OCT press waitin
 static uint32_t sm_oct_t0;                                /* ... when it went down */
 static uint8_t sm_kb_note[SM_NKEYS], sm_kb_trk[SM_NKEYS]; /* keyboard mode: the note each key sounds (0xFF none) and its track */
 static uint32_t sm_kb_pend;                               /* bit per key: pressed, its note-on not pushed yet */
+static uint32_t sm_kb_arp;                                /* bit per key: it went to the track's arpeggiator (sm_arp.c), not the voices */
+static uint8_t sm_arp_lseen[SM_NTRK], sm_arp_mseen[SM_NTRK];   /* each track's LATCH and MODE as the main loop last saw them */
 static uint8_t sm_shift;                                  /* SHIFT: OCT- held outside the keyboard mode and the layers (sm_oct_poll) */
 static int8_t sm_fine_acc[5];                             /* SHIFT's fine turn: the detents not yet a step, K1..K4, SELECT */
 /* LIVE RECORD, the main loop's side (sm_lrec_poll): the recorded notes still held (their trig's LEN comes at the release) and,
@@ -79,6 +81,9 @@ static void sm_input_init(void)
     memset(sm_kb_note, 0xFF, sizeof sm_kb_note);
     memset(sm_kb_trk, 0, sizeof sm_kb_trk);
     sm_kb_pend = 0;
+    sm_kb_arp = 0;
+    memset(sm_arp_lseen, 0, sizeof sm_arp_lseen);
+    memset(sm_arp_mseen, 0, sizeof sm_arp_mseen);
     sm_unl_pend = 0;
     sm_rec = 0;
     memset(sm_ro, 0, sizeof sm_ro);
@@ -328,11 +333,38 @@ static void sm_oct_single(uint32_t up)
     }
 }
 
+static void sm_arp_clear_all(void)                        /* the keyboard sets of every arp emptied (latched notes too) */
+{
+    uint32_t t;
+    for (t = 0; t < SM_NTRK; t++)
+        sm_aset_clear(&sm_ak[t]);
+}
+
 static void sm_oct_toggle(void)
 {
     sm_ui.kbd = (uint8_t)!sm_ui.kbd;
+    if (!sm_ui.kbd)
+        sm_arp_clear_all();                               /* (leaving the keyboard mode lets every arp go, latched or not) */
     sm_key_arm = sm_key_used = 0;                         /* (a trig key down at the switch never toggles a trig) */
     sm_ui.held_step = sm_ui.sel_step = 0xFFu;
+    sm_dirty = 1;
+}
+
+/* ARP tapped. Not in the keyboard mode: it comes on and the ARP page (MODE RATE OCT GATE, SELECT ORDER). On the ARP page: ARP 2
+ * (SWING PROB LATCH). On ARP 2: the keyboard mode goes off (every arp note let go). In the keyboard mode on any other page: the
+ * ARP page. OCT- + OCT+ still toggles the keyboard mode alone, the page unchanged */
+static void sm_arp_tap(void)
+{
+    if (!sm_ui.kbd) {
+        sm_oct_toggle();
+        sm_ui.page = (uint8_t)sm_arp_page(0);
+    } else if (sm_ui.page == sm_arp_page(0)) {
+        sm_ui.page = (uint8_t)sm_arp_page(1);
+    } else if (sm_ui.page == sm_arp_page(1)) {
+        sm_oct_toggle();
+    } else {
+        sm_ui.page = (uint8_t)sm_arp_page(0);
+    }
     sm_dirty = 1;
 }
 
@@ -340,7 +372,7 @@ static void sm_oct_poll(uint32_t pressed, uint32_t now)
 {
     uint32_t dn = (pressed >> panel.btn[B_OCTDN]) & 1u, up = (pressed >> panel.btn[B_OCTUP]) & 1u;
     if (!sm_layer_busy() && ((pressed >> panel.btn[B_ARP]) & 1u))
-        sm_oct_toggle();                                  /* ARP: the keyboard mode too (the arpeggiator pages come in stage 5) */
+        sm_arp_tap();
     sm_shift = (uint8_t)(!sm_ui.kbd && !sm_layer_busy() && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u));
     if (sm_layer_busy()) {                         /* (the layers use OCT: EDIT's next page; a layer button down may open one) */
         sm_oct_pend = 0;
@@ -389,7 +421,16 @@ static void sm_kbd_poll(uint32_t edges)
                 sm_cmd_t c = {SMC_KEYON, (uint8_t)(sm_ui.trk % SM_NTRK), 0, SM_KEY_VEL, 0};
                 c.step = (uint8_t)clamp((int32_t)(SM_KEY_NOTE0 + k) + 12 * sm_ui.oct, 0, 127);
                 c.val = (int16_t)(sm_rec && sm_playing);  /* (live record; the audio stream checks PLAY again) */
-                if (sm_cmd_push(c)) {
+                if (smp.pat[smp.cur % SM_NPAT].kit.snd[c.trk].p[P_AMODE] > 0) {   /* an arpeggiator on the track: the key is its input */
+                    uint32_t j, others = 0;
+                    for (j = 0; j < SM_NKEYS; j++)
+                        others |= ((sm_kb_arp >> j) & 1u) && sm_kb_trk[j] == c.trk;
+                    sm_arp_key_on(c.trk, c.step, SM_KEY_VEL, others);
+                    sm_kb_arp |= bit;
+                    sm_kb_note[k] = c.step;
+                    sm_kb_trk[k] = c.trk;
+                    sm_kb_pend &= ~bit;
+                } else if (sm_cmd_push(c)) {
                     sm_kb_note[k] = c.step;
                     sm_kb_trk[k] = c.trk;
                     sm_kb_pend &= ~bit;
@@ -399,10 +440,44 @@ static void sm_kbd_poll(uint32_t edges)
             sm_cmd_t c = {SMC_KEYOFF, sm_kb_trk[k], sm_kb_note[k], 0, 0};
             uint32_t j, same = 0;
             for (j = 0; j < SM_NKEYS; j++)               /* (another key sounds the same note on the track: its off is the last) */
-                same |= j != k && sm_kb_note[j] == c.step && sm_kb_trk[j] == c.trk;
-            if (same || sm_cmd_push(c))
+                same |= j != k && sm_kb_note[j] == c.step && sm_kb_trk[j] == c.trk && ((sm_kb_arp >> j) & 1u) == ((sm_kb_arp >> k) & 1u);
+            if ((sm_kb_arp >> k) & 1u) {                  /* (an arp key: out of the set unless LATCH holds it, or another key has the note) */
+                if (!same)
+                    sm_arp_key_off(c.trk, c.step, !sm_ui.kbd);
+                sm_kb_arp &= ~bit;
                 sm_kb_note[k] = 0xFFu;
+            } else if (same || sm_cmd_push(c)) {
+                sm_kb_note[k] = 0xFFu;
+            }
         }
+    }
+}
+
+/* the arpeggiators, once a poll: a track whose MODE went OFF lets its keyboard set go; LATCH turned off drops every note whose
+ * key is not down (the set is rebuilt from the keys down: the audio stream sees the old set or the new, sm_arp_key_set) */
+static void sm_arp_poll(void)
+{
+    uint32_t t, k;
+    for (t = 0; t < SM_NTRK; t++) {
+        const sm_sound_t *sd = &smp.pat[smp.cur % SM_NPAT].kit.snd[t];
+        uint8_t m = sd->p[P_AMODE] > 0, l = sd->p[P_AHOLD] != 0;
+        if (m != sm_arp_mseen[t] && !m)
+            sm_aset_clear(&sm_ak[t]);
+        if (l != sm_arp_lseen[t] && !l && m) {
+            uint8_t nt[SM_AK_N];
+            uint32_t c = 0, i;
+            for (k = 0; k < SM_NKEYS; k++) {
+                if (!((sm_kb_arp >> k) & 1u) || sm_kb_trk[k] != t)
+                    continue;
+                for (i = 0; i < c && nt[i] != sm_kb_note[k]; i++)
+                    ;
+                if (i == c && c < SM_AK_N)
+                    nt[c++] = sm_kb_note[k];
+            }
+            sm_arp_key_set(t, nt, c);
+        }
+        sm_arp_mseen[t] = m;
+        sm_arp_lseen[t] = l;
     }
 }
 
@@ -761,6 +836,7 @@ static void sm_input_poll(void)
         sm_dirty = 1;
     }
     sm_oct_poll(pressed, now);
+    sm_arp_poll();
     sm_kbd_poll(sm_ui.kbd ? notes : 0);
     if (!sm_ui.kbd)                                       /* (the keyboard mode: the keys play, they are no trigs) */
         sm_keys_press(notes, now);

@@ -413,6 +413,12 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         o->on = 0;
     }
 }
+/* a parameter's label on the screen: params.c names P_AHOLD "HOLD" (the module's "LATCH" is behind FELUCCA_MODULE); the ARP 2 page
+ * says LATCH, and ORDER is spelled out */
+static const char *smd_label(uint32_t id, const param_desc_t *d)
+{
+    return id == P_AHOLD ? "LATCH" : id == P_AORDER ? "ORDER" : d->label;
+}
 static void smd_knob_get(uint32_t k, smd_knob_t *o)
 {
     const sm_sound_t *s = smd_snd();
@@ -452,7 +458,7 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     o->v = clamp(o->v, o->d->min, o->d->max);
     if (o->d->max > o->d->min)
         o->pos = (uint32_t)((o->v - o->d->min) * 256 / (o->d->max - o->d->min));
-    smd_upper(o->lab, o->d->label, 5u);
+    smd_upper(o->lab, smd_label(id, o->d), 5u);
     param_format(o->d, o->v, o->val, &unit);
     o->val[5] = 0;
 }
@@ -548,7 +554,7 @@ static void smd_select(void)
         char lab[8], val[12];
         const char *unit;
         int32_t x;
-        smd_upper(lab, id == P_LD_FLT ? "LFO>FLT" : d->label, 7u);   /* (FILTER's SELECT: the LFO's depth, not a filter's FLT) */
+        smd_upper(lab, id == P_LD_FLT ? "LFO>FLT" : smd_label(id, d), 7u);   /* (FILTER's SELECT: the LFO's depth, not a filter's FLT) */
         param_format(d, clamp(smd_sel_val(id), d->min, d->max), val, &unit);
         x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
         val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;   /* (what fits the row) */

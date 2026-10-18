@@ -99,6 +99,15 @@ static uint32_t sm_step_q8(void)
 static uint32_t sm_midi_has(uint32_t t, uint32_t note);   /* sm_midi.c: the notes MIDI holds on track t */
 static void sm_midi_forget(uint32_t t);
 static void sm_midi_drain(void);
+static uint32_t sm_arp_has(uint32_t t, uint32_t note);     /* sm_arp.c: the arpeggiator's own notes */
+static uint32_t sm_arp_mode(uint32_t t);
+static void sm_arp_midi_on(uint32_t t, uint32_t note, uint32_t vel);
+static uint32_t sm_arp_midi_off(uint32_t t, uint32_t note);
+static void sm_arp_block(uint32_t n);
+static void sm_arp_play(void);
+static void sm_arp_stop(void);
+static void sm_arp_forget(uint32_t t);
+static void sm_arp_init(void);
 
 /* the sequencer lets go of its notes on track t (a note MIDI holds too keeps sounding: it is MIDI's to let go) */
 static void sm_seq_release(uint32_t t)
@@ -220,6 +229,7 @@ static void sm_seq_init(void)
     sm_rec_mtrk = 0xFFu;
     sm_cq.head = sm_cq.tail = 0;
     sm_cov.head = sm_cov.tail = 0;
+    sm_arp_init();
 }
 
 static void sm_pat_switch(uint32_t n, uint32_t how);
@@ -250,6 +260,7 @@ static void sm_seq_play(void)
         if (s < SM_NPAT && s != sm_play_pat)
             sm_pat_switch(s, SM_PM_START);
     }
+    sm_arp_play();                                        /* (the arps start over with the grid) */
     sm_playing = 1;
 }
 
@@ -267,6 +278,7 @@ static void sm_seq_stop(void)
         sm_midi_forget(t);                                /* (MIDI's notes went with them) */
         sm_seq_idle(t);
     }
+    sm_arp_stop();                                        /* (the arp's too; it goes on from its own clock if keys are held) */
     sm_seq_unlock_all();
     sm_rec_stop();
     memset(sm_pos, 0, sizeof sm_pos);
@@ -727,12 +739,14 @@ static void events_block(uint32_t n)
             trk_all_off(&trk[t]);
             sm_nheld[t] = 0;
             sm_midi_forget(t);
+            sm_arp_forget(t);
             sm_slid[t] = 0;
             sm_rat_left[t] = 0;
             sm_rat_q8[t] = SM_Q8_NONE;
         }
         engine_block(&trk[t]);                            /* engine switch: fade, then switch (voice.c) */
     }
+    sm_arp_block(n);                                      /* (the arpeggiators run stopped too) */
     if (!sm_playing)
         return;
     {

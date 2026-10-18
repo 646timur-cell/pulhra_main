@@ -804,6 +804,7 @@ static void in_reset(void)
     for (k = 0; k < 7u; k++)
         host_enc[k] = 0;
 }
+static void oct_pair(uint32_t gap_ms);
 static void turn(uint32_t role, int32_t n) { host_enc[panel.enc[role]] += n * panel.dir[role]; }
 static void press(uint32_t b) { host_pressed |= 1u << panel.btn[b]; }
 /* OCT- / OCT+ tapped alone (down, a poll, up, 150 ms, a poll: a single press acts after the 100 ms it waits for the other) */
@@ -2449,7 +2450,8 @@ static int test_leds_family(void)
     ok &= led_of(fm1_led_dim, panel.btn[B_EDIT]) == 1 && led_of(fm1_led_dim, panel.btn[B_GLO]) == 1;     /* the rest glow */
     for (pg = 0; pg < sm_page_count(); pg++) {
         uint32_t b = SM_PAGES[pg].fam == SMFAM_EDIT ? B_EDIT : SM_PAGES[pg].fam == SMFAM_GLO ? B_GLO :
-                     SM_PAGES[pg].fam == SMFAM_SEQ ? B_SEQ : SM_PAGES[pg].fam == SMFAM_HOME ? B_HOME : B_ENV;
+                     SM_PAGES[pg].fam == SMFAM_SEQ ? B_SEQ : SM_PAGES[pg].fam == SMFAM_HOME ? B_HOME :
+                     SM_PAGES[pg].fam == SMFAM_ARP ? B_ARP : B_ENV;
         sm_ui.page = (uint8_t)pg;
         sm_leds();
         ok &= led_of(fm1_led, panel.btn[b]) == 1;
@@ -4066,8 +4068,7 @@ static int test_shift_oct(void)
     ms(150);
     sm_input_poll();
     bad += check("SHIFT: ... it is the octave -1", sm_ui.oct == -1);
-    press(B_ARP);
-    sm_input_poll();
+    oct_pair(0);                                          /* (ARP's second tap is ARP 2 now, not off) */
     ksnd(0)->len = 16u;
     return bad;
 }
@@ -4769,7 +4770,8 @@ static int test_arp_keyboard(void)
     host_ticks = 1000u;
     press(B_ARP);
     sm_input_poll();
-    bad += check("ARP: a tap: the keyboard mode", sm_ui.kbd == 1u);
+    bad += check("ARP: a tap: the keyboard mode and the ARP page", sm_ui.kbd == 1u && sm_ui.page == sm_arp_page(0) &&
+                 !strcmp(sm_cur_page()->name, "ARP"));
     leds_setup(LEDS_DIM);
     sm_ui.kbd = 1;
     sm_leds();
@@ -4782,10 +4784,14 @@ static int test_arp_keyboard(void)
     sm_input_poll();
     kb_key(WHITE[2], 1);
     mix_blocks(3);
-    bad += check("ARP: ... a key plays a note on the track, no trig toggled",
+    bad += check("ARP: ... MODE OFF: a key plays a note on the track, no trig toggled",
                  on_n[0] == 1u && ev_nth(1, 0, 0)->note == 57u && !smp.pat[smp.cur].step[0][2].n);
     kb_key(WHITE[2], 0);
     mix_blocks(2);
+    press(B_ARP);
+    sm_input_poll();
+    bad += check("ARP: again: ARP 2, still the keyboard mode", sm_ui.kbd && sm_ui.page == sm_arp_page(1) &&
+                 !strcmp(sm_cur_page()->name, "ARP 2"));
     press(B_ARP);
     sm_input_poll();
     bad += check("ARP: again: the mode is off, no hung note", !sm_ui.kbd && notes_on_core(0) == 0u);
@@ -4797,6 +4803,11 @@ static int test_arp_keyboard(void)
     sm_input_poll();
     oct_pair(0);
     bad += check("ARP: on by ARP, off by OCT- + OCT+ (one state)", !sm_ui.kbd);
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    oct_pair(0);                                          /* (the keyboard mode on by the pair, the page unchanged) */
+    press(B_ARP);
+    sm_input_poll();
+    bad += check("ARP: in the keyboard mode on another page: the ARP page", sm_ui.kbd && sm_ui.page == sm_arp_page(0));
     return bad;
 }
 
@@ -7346,6 +7357,507 @@ static int test_step_select_swing(void)
     return bad;
 }
 
+/* ------------------------------------------------------------------------------------------------ ARP (Task 6) --- */
+/* a fresh start: T1's arp set (MODE, RATE, OCT, GATE), the keyboard mode on (OCT- + OCT+, the page unchanged), stopped */
+static void arp_setup(uint32_t mode, uint32_t rate, uint32_t oct, uint32_t gate)
+{
+    in_reset();
+    midi_reset();
+    in_reset();
+    host_ticks = 1000u;
+    ksnd(0)->p[P_AMODE] = (int8_t)mode;
+    ksnd(0)->p[P_ARATE] = (int8_t)rate;
+    ksnd(0)->p[P_AOCT] = (int8_t)oct;
+    ksnd(0)->p[P_AGATE] = (int8_t)gate;
+    oct_pair(0);
+}
+/* T1's note-ons so far, in order: the notes and the sample clocks (the count) */
+static uint32_t arp_ons(uint8_t *note, uint32_t *at, uint32_t max)
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < seq_nev && i < 1024u && n < max; i++)
+        if (seq_ev[i].on && seq_ev[i].t == 0) {
+            note[n] = seq_ev[i].note;
+            at[n++] = seq_ev[i].at;
+        }
+    return n;
+}
+static int arp_seq_is(const uint8_t *got, uint32_t n, const uint8_t *want, uint32_t m)   /* the first m notes */
+{
+    uint32_t i;
+    if (n < m)
+        return 0;
+    for (i = 0; i < m; i++)
+        if (got[i] != want[i])
+            return 0;
+    return 1;
+}
+static void arp_hold3(void)                               /* C4 (60) first, then F3 (53), then A3 (57): pressed out of order */
+{
+    kb_key(WHITE[4], 1);
+    kb_key(WHITE[0], 1);
+    kb_key(WHITE[2], 1);
+}
+
+static int test_arp_order(void)
+{
+    int bad = 0;
+    uint8_t nt[64];
+    uint32_t at[64], n;
+    static const uint8_t UP[6] = {53, 57, 60, 53, 57, 60}, DN[6] = {60, 57, 53, 60, 57, 53}, UPDN[8] = {53, 57, 60, 57, 53, 57, 60, 57};
+    static const uint8_t ORD[3] = {60, 53, 57};
+    arp_setup(1, 2, 1, 64);
+    arp_hold3();
+    blocks_of(6.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: UP at 1/16: low to high, 53 57 60 53 57 60 (keys pressed 60 53 57)", arp_seq_is(nt, n, UP, 6) && n == 7u);
+    arp_setup(2, 2, 1, 64);
+    arp_hold3();
+    blocks_of(5.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: DOWN: 60 57 53 60 57 53", arp_seq_is(nt, n, DN, 6));
+    arp_setup(3, 2, 1, 64);
+    arp_hold3();
+    blocks_of(7.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: UP-DOWN: 53 57 60 57 53 57 60 57 (the ends once)", arp_seq_is(nt, n, UPDN, 8));
+    arp_setup(5, 2, 1, 64);
+    arp_hold3();
+    blocks_of(3.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: AS PLAYED (ORD): 60 53 57 as pressed", arp_seq_is(nt, n, ORD, 3));
+    arp_setup(1, 2, 1, 64);
+    ksnd(0)->p[P_AORDER] = 1;                              /* ORDER PLAY: UP over the notes as pressed */
+    arp_hold3();
+    blocks_of(3.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: ORDER PLAY with UP: 60 53 57", arp_seq_is(nt, n, ORD, 3));
+    arp_setup(14, 2, 1, 64);
+    arp_hold3();
+    blocks_of(0.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: CHORD: the three notes at once on one step", n == 3u && at[0] == at[1] && at[1] == at[2]);
+    return bad;
+}
+
+static int test_arp_rate_timing(void)
+{
+    int bad = 0, ok = 1;
+    uint8_t nt[64];
+    uint32_t at[64], n, i, rate;
+    static const double LEN[4] = {4.0, 2.0, 1.0, 0.5};    /* RATE 1/4 1/8 1/16 1/32 in 1/16 steps at 120 BPM */
+    for (rate = 0; rate < 4u; rate++) {
+        arp_setup(1, rate, 1, 64);
+        kb_key(WHITE[0], 1);
+        blocks_of(LEN[rate] * 6.5);
+        n = arp_ons(nt, at, 64);
+        ok = n == 7u;
+        for (i = 1; i < n && ok; i++)
+            ok = near(at[i] - at[i - 1u], (uint32_t)(LEN[rate] * S120));
+        bad += check(rate == 2u ? "ARP: RATE 1/16 at 120 BPM: the note-ons FS/8 apart (+-CTL)" :
+                                  "ARP: RATE 1/4, 1/8, 1/32: 4, 2, 1/2 x FS/8 apart (+-CTL)", ok);
+    }
+    arp_setup(1, 4, 1, 64);                               /* 8T: a third of a beat */
+    kb_key(WHITE[0], 1);
+    blocks_of(10.0);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: RATE 8T: a third of a quarter apart", n >= 6u && near(at[4] - at[3], (uint32_t)(4.0 * S120 / 3.0)));
+    /* playing: the first note waits for the arp's grid (1/16 steps of the sequencer) */
+    arp_setup(1, 2, 1, 64);
+    press(B_PLAY);
+    sm_input_poll();
+    blocks_of(3.3);
+    kb_key(WHITE[0], 1);
+    blocks_of(3.0);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: playing, a key at 3.3 steps: the arp's note on the grid (4 x FS/8 +-CTL), then every step",
+                 n >= 2u && near(at[0], (uint32_t)(4.0 * S120)) && near(at[1] - at[0], (uint32_t)S120));
+    arp_setup(1, 2, 1, 64);                               /* playing from PLAY: step 0 with the sequencer's */
+    kb_key(WHITE[0], 1);
+    blocks_of(1.5);
+    press(B_PLAY);
+    sm_input_poll();
+    {
+        uint32_t t0 = seq_clock;
+        blocks_of(3.5);
+        n = arp_ons(nt, at, 64);
+        bad += check("ARP: PLAY restarts the arp on the sequencer's grid (a note at PLAY, then every step)",
+                     n >= 3u && at[n - 4u] <= t0 + CTL && near(at[n - 3u] - t0, (uint32_t)S120) && near(at[n - 2u] - t0, (uint32_t)(2.0 * S120)));
+    }
+    return bad;
+}
+
+static int test_arp_oct_gate(void)
+{
+    int bad = 0;
+    uint8_t nt[64];
+    uint32_t at[64], n, i, off_at = 0;
+    static const uint8_t O2[4] = {60, 72, 60, 72}, O3[6] = {60, 72, 84, 60, 72, 84};
+    arp_setup(1, 2, 2, 64);
+    kb_key(WHITE[4], 1);
+    blocks_of(3.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: OCT 2: C4 then C5, again", arp_seq_is(nt, n, O2, 4));
+    arp_setup(1, 2, 3, 64);
+    kb_key(WHITE[4], 1);
+    blocks_of(5.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: OCT 3: three octaves", arp_seq_is(nt, n, O3, 6));
+    arp_setup(1, 2, 1, 64);
+    kb_key(WHITE[4], 1);
+    blocks_of(2.5);
+    for (i = 0; i < seq_nev && i < 1024u; i++)
+        if (!seq_ev[i].on && seq_ev[i].t == 0) {
+            off_at = seq_ev[i].at;
+            break;
+        }
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: GATE 64 (50 %): the note lasts half a step (+-CTL)", n >= 2u && off_at && near(off_at - at[0], (uint32_t)(S120 / 2.0)));
+    arp_setup(1, 2, 1, 127);
+    kb_key(WHITE[4], 1);
+    blocks_of(2.5);
+    off_at = 0;
+    for (i = 0; i < seq_nev && i < 1024u; i++)
+        if (!seq_ev[i].on && seq_ev[i].t == 0) {
+            off_at = seq_ev[i].at;
+            break;
+        }
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: GATE 127: nearly the whole step (+-CTL)", n >= 2u && near(off_at - at[0], (uint32_t)(S120 * 127.0 / 128.0)));
+    return bad;
+}
+
+static int test_arp_swing(void)
+{
+    int bad = 0;
+    uint8_t nt[64];
+    uint32_t at[64], n;
+    arp_setup(1, 2, 1, 64);
+    ksnd(0)->p[P_ASWING] = 100;                            /* every second step half a step late */
+    kb_key(WHITE[4], 1);
+    blocks_of(6.0);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: SWING 100: step 1 half a step late, step 2 on the grid", n >= 4u && near(at[1] - at[0], (uint32_t)(1.5 * S120)) &&
+                 near(at[2] - at[0], (uint32_t)(2.0 * S120)) && near(at[3] - at[0], (uint32_t)(3.5 * S120)));
+    return bad;
+}
+
+static int test_arp_latch(void)
+{
+    int bad = 0;
+    uint8_t nt[64];
+    uint32_t at[64], n, i, c60 = 0, c53 = 0, c57 = 0;
+    static const uint8_t UP2[4] = {53, 57, 53, 57};
+    arp_setup(1, 2, 1, 64);
+    ksnd(0)->p[P_AHOLD] = 1;
+    kb_key(WHITE[0], 1);
+    kb_key(WHITE[2], 1);
+    blocks_of(1.5);
+    kb_key(WHITE[0], 0);
+    kb_key(WHITE[2], 0);
+    blocks_of(5.0);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: LATCH: the keys let go, the arp goes on (53 57 53 57 ..)", n >= 6u && arp_seq_is(nt, n, UP2, 4));
+    kb_key(WHITE[4], 1);                                   /* a new press with none down: a new set */
+    blocks_of(0.5);
+    kb_key(WHITE[4], 0);
+    blocks_of(6.0);
+    n = arp_ons(nt, at, 64);
+    for (i = n > 4u ? n - 4u : 0u; i < n; i++) {
+        c60 += nt[i] == 60u;
+        c53 += nt[i] == 53u;
+        c57 += nt[i] == 57u;
+    }
+    bad += check("ARP: LATCH: a press after all were let go replaces the set (the last notes are all 60)", c60 == 4u && !c53 && !c57);
+    kb_key(WHITE[0], 1);                                   /* a second key while one is held: added */
+    kb_key(WHITE[2], 1);
+    kb_key(WHITE[0], 0);
+    kb_key(WHITE[2], 0);
+    blocks_of(0.5);
+    kb_key(WHITE[4], 1);
+    kb_key(WHITE[5], 1);                                   /* 60 held, then 62: both in the set */
+    kb_key(WHITE[4], 0);
+    kb_key(WHITE[5], 0);
+    blocks_of(6.0);
+    n = arp_ons(nt, at, 64);
+    c60 = c53 = 0;
+    for (i = n > 4u ? n - 4u : 0u; i < n; i++) {
+        c60 += nt[i] == 60u;
+        c53 += nt[i] == 62u;
+    }
+    bad += check("ARP: LATCH: two keys pressed together after the release: both stay (60, 62), the old set gone", c60 == 2u && c53 == 2u);
+    ksnd(0)->p[P_AHOLD] = 0;                               /* LATCH off with no key down: the arp stops */
+    sm_input_poll();
+    blocks_of(2.0);
+    n = arp_ons(nt, at, 64);
+    blocks_of(6.0);
+    bad += check("ARP: LATCH turned off: the latched notes go, no more steps play", arp_ons(nt, at, 64) == n && !notes_on_core(0));
+    kb_key(WHITE[0], 1);
+    blocks_of(1.5);
+    kb_key(WHITE[0], 0);
+    blocks_of(1.5);
+    n = arp_ons(nt, at, 64);
+    blocks_of(5.0);
+    bad += check("ARP: LATCH off: a key let go ends its note in the set at once (no more steps)", arp_ons(nt, at, 64) == n);
+    return bad;
+}
+
+static int test_arp_prob(void)
+{
+    int bad = 0;
+    uint8_t nt[256];
+    uint32_t at[256], n;
+    arp_setup(1, 2, 1, 64);
+    ksnd(0)->p[P_APROB] = 0;
+    kb_key(WHITE[0], 1);
+    blocks_of(20.0);
+    bad += check("ARP: PROB 0: silence (20 steps, no note-on)", arp_ons(nt, at, 256) == 0u);
+    arp_setup(1, 2, 1, 64);
+    ksnd(0)->p[P_APROB] = 64;
+    kb_key(WHITE[0], 1);
+    blocks_of(200.0);
+    n = arp_ons(nt, at, 256);
+    bad += check("ARP: PROB 64 (about half): 70 .. 130 of 200 steps play", n > 70u && n < 130u);
+    arp_setup(1, 2, 1, 64);
+    kb_key(WHITE[0], 1);
+    blocks_of(40.0);
+    bad += check("ARP: PROB 127 (default): every step (40 of 40)", arp_ons(nt, at, 256) == 41u);
+    return bad;
+}
+
+static int test_arp_no_hang(void)
+{
+    int bad = 0;
+    uint8_t nt[64];
+    uint32_t at[64], n;
+    arp_setup(1, 2, 1, 127);
+    ksnd(0)->p[P_AHOLD] = 1;
+    arp_hold3();
+    kb_key(WHITE[4], 0);
+    kb_key(WHITE[0], 0);
+    kb_key(WHITE[2], 0);
+    blocks_of(2.3);
+    bad += check("ARP: latched and playing, a note sounds", notes_on_core(0) >= 1u);
+    ksnd(0)->p[P_AMODE] = 0;                               /* MODE OFF: every arp note ends in the next block, the set is gone */
+    sm_input_poll();
+    run_block();
+    run_block();
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: MODE OFF: no note sounds", notes_on_core(0) == 0u);
+    blocks_of(6.0);
+    bad += check("ARP: ... and nothing plays after it", arp_ons(nt, at, 64) == n && !notes_on_core(0));
+    ksnd(0)->p[P_AMODE] = 1;                               /* back on: the latched notes did not come back */
+    sm_input_poll();
+    blocks_of(6.0);
+    bad += check("ARP: MODE back on: the set was emptied by OFF (nothing plays)", arp_ons(nt, at, 64) == n);
+    /* a mode change between two modes ends the sounding note */
+    arp_setup(1, 2, 1, 127);
+    kb_key(WHITE[0], 1);
+    blocks_of(0.4);
+    bad += check("ARP: held key, UP: a note sounds", notes_on_core(0) == 1u);
+    ksnd(0)->p[P_AMODE] = 2;
+    run_block();
+    run_block();
+    bad += check("ARP: UP -> DOWN: the sounding note ended in the block (the next step starts a new one)", seq_nev >= 2u && !seq_ev[seq_nev - 1u].on);
+    kb_key(WHITE[0], 0);
+    blocks_of(2.0);
+    bad += check("ARP: the key let go (no LATCH): silent after the gate", notes_on_core(0) == 0u);
+    /* STOP: with the key held and playing, STOP ends the note; no key, no latch: silence for good */
+    arp_setup(1, 2, 1, 127);
+    press(B_PLAY);
+    sm_input_poll();
+    kb_key(WHITE[0], 1);
+    blocks_of(2.3);
+    kb_key(WHITE[0], 0);
+    blocks_of(0.1);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    bad += check("ARP: STOP: the note ended in the block", !sm_playing && notes_on_core(0) == 0u);
+    blocks_of(30.0);
+    bad += check("ARP: ... and 30 steps later still silent (nothing hangs, the clock rests)", notes_on_core(0) == 0u && voices_busy() == 0u);
+    /* latched, STOP: the arp goes on from its own clock; leaving the keyboard mode silences it */
+    arp_setup(1, 2, 1, 64);
+    ksnd(0)->p[P_AHOLD] = 1;
+    press(B_PLAY);
+    sm_input_poll();
+    kb_key(WHITE[0], 1);
+    kb_key(WHITE[0], 0);
+    blocks_of(2.3);
+    press(B_PLAY);
+    sm_input_poll();
+    n = arp_ons(nt, at, 64);
+    blocks_of(3.0);
+    bad += check("ARP: latched, STOP: the arp goes on from its own clock", arp_ons(nt, at, 64) > n);
+    oct_pair(0);                                           /* the keyboard mode off: the latched set is gone */
+    run_block();
+    run_block();
+    n = arp_ons(nt, at, 64);
+    blocks_of(6.0);
+    bad += check("ARP: ... the keyboard mode off: silence, no hung note", !sm_ui.kbd && arp_ons(nt, at, 64) == n && notes_on_core(0) == 0u);
+    return bad;
+}
+
+static int test_arp_mute(void)
+{
+    int bad = 0;
+    uint8_t nt[64];
+    uint32_t at[64], n;
+    arp_setup(1, 2, 1, 127);
+    kb_key(WHITE[0], 1);
+    blocks_of(2.3);
+    bad += check("ARP: mute: a note sounds before", notes_on_core(0) >= 1u);
+    smp.mute = 1;
+    run_block();
+    run_block();
+    bad += check("ARP: ... muted: the note ends in the next block", notes_on_core(0) == 0u);
+    n = arp_ons(nt, at, 64);
+    blocks_of(6.0);
+    bad += check("ARP: ... and no step plays while muted", arp_ons(nt, at, 64) == n);
+    smp.mute = 0;
+    blocks_of(3.0);
+    bad += check("ARP: unmuted: the key still held, the arp plays again", arp_ons(nt, at, 64) > n);
+    return bad;
+}
+
+static int test_arp_own_book(void)
+{
+    int bad = 0;
+    arp_setup(1, 2, 1, 64);
+    sm_step_toggle(0, 0);
+    stp(0, 0)->note[0] = 53;
+    stp(0, 0)->len = SM_LEN_INF;                           /* the sequencer holds 53 to the next trig */
+    press(B_PLAY);
+    sm_input_poll();
+    kb_key(WHITE[0], 1);                                   /* the arp plays 53 too */
+    blocks_of(2.5);
+    bad += check("ARP: the sequencer holds 53, the arp plays and ends 53: the sequencer's note keeps sounding",
+                 sm_seq_has(0, 53) && notes_on_core(0) >= 1u);
+    kb_key(WHITE[0], 0);
+    blocks_of(1.0);
+    bad += check("ARP: ... the key let go: the arp left nothing of its own", !sm_arp_has(0, 53));
+    press(B_PLAY);                                         /* (STOP: the sequencer's held note goes too) */
+    sm_input_poll();
+    run_block();
+    trk_all_off(&trk[0]);
+    return bad;
+}
+
+static int test_arp_midi(void)
+{
+    int bad = 0;
+    uint8_t nt[64];
+    uint32_t at[64], n;
+    static const uint8_t M[4] = {60, 64, 60, 64};
+    arp_setup(1, 2, 1, 64);
+    midi_on(0, 64, 90);
+    midi_on(0, 60, 90);
+    blocks_of(3.5);
+    n = arp_ons(nt, at, 64);
+    bad += check("ARP: MIDI ch 1 notes: the arp plays them (60 64 60 64), not the notes themselves", arp_seq_is(nt, n, M, 4) && n == 4u);
+    midi_off(0, 64);
+    midi_off(0, 60);
+    blocks_of(2.0);
+    n = arp_ons(nt, at, 64);
+    blocks_of(6.0);
+        bad += check("ARP: MIDI note-offs: the arp stops, nothing hangs", arp_ons(nt, at, 64) == n && notes_on_core(0) == 0u);
+    midi_on(1, 70, 90);                                    /* T2 has no arp: it plays directly */
+    run_block();
+    bad += check("ARP: another channel (no arp): the note plays as ever", ev_notes(1, 70) == 1u);
+    return bad;
+}
+
+static int test_arp_rec(void)
+{
+    int bad = 0, i, run = 0, best = 0;
+    arp_setup(1, 2, 1, 64);
+    press(B_REC);
+    sm_input_poll();
+    press(B_PLAY);
+    sm_input_poll();
+    kb_key(WHITE[0], 1);                                   /* 53 and 57 held: the arp alternates */
+    kb_key(WHITE[2], 1);
+    blocks_of(10.0);
+    sm_input_poll();
+    for (i = 0; i < 16; i++) {
+        const sm_step_t *s = stp(0, (uint32_t)i);
+        if (s->n == 1u && (s->note[0] == 53u || s->note[0] == 57u)) {
+            run++;
+            best = run > best ? run : best;
+        } else {
+            run = 0;
+        }
+    }
+    bad += check("ARP: REC + playing: the arp's notes are written as trigs on consecutive steps (8 or more)", best >= 8);
+    {
+        uint32_t a = 0, b = 0;
+        for (i = 0; i < 16; i++) {
+            a += stp(0, (uint32_t)i)->note[0] == 53u;
+            b += stp(0, (uint32_t)i)->note[0] == 57u;
+        }
+        bad += check("ARP: ... both notes of the arp recorded, alternating (4 or more of each)", a >= 4u && b >= 4u);
+    }
+    kb_key(WHITE[0], 0);
+    kb_key(WHITE[2], 0);
+    blocks_of(2.0);
+    press(B_REC);
+    sm_input_poll();
+    {
+        uint32_t i2, nz = 0;
+        for (i2 = 0; i2 < 16u; i2++)
+            nz += stp(0, i2)->n;
+        for (i2 = 0; i2 < 32u; i2++)
+            run_block();
+        bad += check("ARP: REC off: the arp writes nothing more", nz >= 8u);
+        nz = 0;
+        for (i2 = 0; i2 < 16u; i2++)
+            nz += stp(0, i2)->n;
+        bad += check("ARP: ... (the trigs stay)", nz >= 8u);
+    }
+    return bad;
+}
+
+static int test_arp_pages(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    press(B_ARP);
+    sm_input_poll();
+    ksnd(0)->p[P_AMODE] = 0;
+    turn(EN_K1, 1);
+    sm_input_poll();
+    bad += check("ARP page: K1 is MODE (OFF -> UP)", ksnd(0)->p[P_AMODE] == 1);
+    turn(EN_K3, 1);
+    sm_input_poll();
+    bad += check("ARP page: K3 is OCT", ksnd(0)->p[P_AOCT] == 2);
+    turn(EN_K4, -10);
+    sm_input_poll();
+    bad += check("ARP page: K4 is GATE", ksnd(0)->p[P_AGATE] < 64);
+    turn(EN_SELECT, 1);
+    sm_input_poll();
+    bad += check("ARP page: SELECT is ORDER (NOTE -> PLAY)", ksnd(0)->p[P_AORDER] == 1);
+    press(B_ARP);
+    sm_input_poll();
+    turn(EN_K1, 5);
+    turn(EN_K2, -3);
+    sm_input_poll();
+    bad += check("ARP 2 page: K1 SWING up, K2 PROB down", ksnd(0)->p[P_ASWING] > 0 && ksnd(0)->p[P_APROB] < 127);
+    turn(EN_K3, 1);
+    sm_input_poll();
+    bad += check("ARP 2 page: K3 is LATCH (on)", ksnd(0)->p[P_AHOLD] == 1);
+    draw_setup();
+    sm_ui.page = (uint8_t)sm_arp_page(1);
+    draw_full();
+    bad += check("ARP 2 page: the screen says LATCH, SWG, PROB", lint_has("LATCH", 0, 0) && lint_has("PROB", 0, 0) && lint_frame("arp2") == 0);
+    sm_ui.page = (uint8_t)sm_arp_page(0);
+    ksnd(0)->p[P_AMODE] = 1;
+    draw_full();
+    bad += check("ARP page: the screen says MODE RATE OCT GATE and ORDER", lint_has("MODE", 0, 0) && lint_has("RATE", 0, 0) &&
+                 lint_has("OCT", 0, 0) && lint_has("GATE", 0, 0) && lint_has("ORDER", 0, 0) && lint_frame("arp1") == 0);
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -7491,6 +8003,18 @@ int main(void)
     bad += test_live_rec_keys();
     bad += test_live_rec_midi();
     bad += test_step_select_swing();
+    bad += test_arp_order();
+    bad += test_arp_rate_timing();
+    bad += test_arp_oct_gate();
+    bad += test_arp_swing();
+    bad += test_arp_latch();
+    bad += test_arp_prob();
+    bad += test_arp_no_hang();
+    bad += test_arp_mute();
+    bad += test_arp_own_book();
+    bad += test_arp_midi();
+    bad += test_arp_rec();
+    bad += test_arp_pages();
     bad += test_draw_shots();
     printf("swamp: %d failed\n", bad);
     return bad != 0;

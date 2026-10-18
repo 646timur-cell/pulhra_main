@@ -7,7 +7,7 @@
  * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both */
 #define SM_NOPARAM 0xFFu
 
-enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_COUNT };
+enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_COUNT };
 enum { SMH_NONE, SMH_MIXER, SMH_CLOCK };                  /* a HOME page's kind (sm_page_t.home) */
 
 typedef struct {
@@ -29,6 +29,8 @@ static const sm_page_t SM_PAGES[] = {
     {"STEP", SMFAM_SEQ, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_NONE},
     {"MIXER", SMFAM_HOME, {P_LEVEL, P_LEVEL, P_LEVEL, P_LEVEL}, SM_NOPARAM, SMH_MIXER},   /* K1..K4: the LEVEL of T1..T4 */
     {"CLOCK", SMFAM_HOME, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_CLOCK},   /* K1 BPM, K2 SWING */
+    {"ARP", SMFAM_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}, P_AORDER},                  /* the arpeggiator (sm_arp.c): the ARP tap */
+    {"ARP 2", SMFAM_ARP, {P_ASWING, P_APROB, P_AHOLD, SM_NOPARAM}, SM_NOPARAM},         /* K3 is LATCH (params.c names it HOLD) */
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
@@ -84,6 +86,17 @@ static uint32_t sm_page_param(uint32_t k)
         return P_HWIDTH;
     return id;
 }
+
+/* the ARP button's pages (ARP, ARP 2): the first page of the family, and the page after it */
+static uint32_t sm_arp_page(uint32_t second)
+{
+    uint32_t i, n = sm_page_count(), seen = 0;
+    for (i = 0; i < n; i++)
+        if (SM_PAGES[i].fam == SMFAM_ARP && seen++ == (second ? 1u : 0u))
+            return i;
+    return 0;
+}
+static int sm_page_is_arp(void) { return sm_cur_page()->fam == SMFAM_ARP; }
 
 static int sm_page_is_step(void) { return sm_cur_page()->fam == SMFAM_SEQ; }
 static uint32_t sm_page_home(void) { return sm_cur_page()->home; }   /* SMH_*: 0 not a HOME page */

@@ -13,6 +13,7 @@ static volatile uint8_t panic_req;
 #include "sm_cmd.c"                                       /* the command queue: the main loop -> the audio stream */
 #include "sm_seq.c"                                       /* events_block: the commands, the engines, the steps */
 #include "sm_midi.c"                                      /* MIDI IN: the notes of channels 1..4 (midi_in_q of usb.c) onto T1..T4 */
+#include "sm_arp.c"                                       /* the arpeggiator: its notes, its clock, its own note book */
 
 #include "sm_pages.c"                                     /* the pages, sm_ui */
 #include "sm_lock.c"                                      /* the parameter locks: the pool, its writers (the main loop's) */

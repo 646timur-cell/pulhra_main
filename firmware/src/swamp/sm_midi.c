@@ -17,14 +17,16 @@
  * cleared, as Felucca's events_block does (the sequencer's notes are not touched: they are its own).
  * The keyboard mode (sm_input.c: OCT- + OCT+) plays through the same mechanism: its keys arrive as SMC_KEYON / SMC_KEYOFF
  * (sm_cmd.c) and have a third book, sm_kn, handled like MIDI's (sm_kbd_note): the three sides never end one another's note,
- * a muted track starts no keyboard note and lets go of those it holds, STOP and the panic forget them. */
+ * a muted track starts no keyboard note and lets go of those it holds, STOP and the panic forget them.
+ * A track with an arpeggiator (MODE not OFF, sm_arp.c) takes its MIDI notes as the arp's input (sm_arp_midi_on / off) instead of playing
+ * them; the arp keeps a fourth book (sm_arp_has), which the other sides leave alone and which leaves theirs alone. */
 static uint32_t sm_mn[SM_NTRK][4];                        /* the notes MIDI holds, bit per note 0..127 */
 static uint32_t sm_kn[SM_NTRK][4];                        /* the notes the keyboard mode holds (its own book: SMC_KEYON / KEYOFF) */
 
 static uint32_t sm_mn_has(uint32_t t, uint32_t note) { return (sm_mn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
 static uint32_t sm_kn_has(uint32_t t, uint32_t note) { return (sm_kn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
 /* a note some side other than the sequencer holds (MIDI IN or the keyboard): the sequencer lets go of its own only without it */
-static uint32_t sm_midi_has(uint32_t t, uint32_t note) { return sm_mn_has(t, note) | sm_kn_has(t, note); }
+static uint32_t sm_midi_has(uint32_t t, uint32_t note) { return sm_mn_has(t, note) | sm_kn_has(t, note) | sm_arp_has(t, note); }
 
 static uint32_t sm_seq_has(uint32_t t, uint32_t note)
 {
@@ -49,7 +51,7 @@ static void sm_midi_release(uint32_t t)
     if (!(sm_mn[t][0] | sm_mn[t][1] | sm_mn[t][2] | sm_mn[t][3]))
         return;
     for (note = 0; note < 128u; note++)
-        if (sm_mn_has(t, note) && !sm_seq_has(t, note) && !sm_kn_has(t, note))
+        if (sm_mn_has(t, note) && !sm_seq_has(t, note) && !sm_kn_has(t, note) && !sm_arp_has(t, note))
             trk_note_off(&trk[t], note);
     memset(sm_mn[t], 0, sizeof sm_mn[0]);
 }
@@ -61,7 +63,7 @@ static void sm_kbd_release(uint32_t t)
     if (!(sm_kn[t][0] | sm_kn[t][1] | sm_kn[t][2] | sm_kn[t][3]))
         return;
     for (note = 0; note < 128u; note++)
-        if (sm_kn_has(t, note) && !sm_seq_has(t, note) && !sm_mn_has(t, note))
+        if (sm_kn_has(t, note) && !sm_seq_has(t, note) && !sm_mn_has(t, note) && !sm_arp_has(t, note))
             trk_note_off(&trk[t], note);
     memset(sm_kn[t], 0, sizeof sm_kn[0]);
 }
@@ -81,7 +83,7 @@ static void sm_kbd_note(uint32_t t, uint32_t note, uint32_t vel)
         trk_note_on(&trk[t], note, vel > 127u ? 127u : vel);
     } else if (sm_kn_has(t, note)) {
         sm_kn[t][note >> 5] &= ~(1u << (note & 31u));
-        if (!sm_seq_has(t, note) && !sm_mn_has(t, note))
+        if (!sm_seq_has(t, note) && !sm_mn_has(t, note) && !sm_arp_has(t, note))
             trk_note_off(&trk[t], note);
     }
 }
@@ -109,6 +111,11 @@ static void sm_midi_drain(void)
         if ((hi != 0x80u && hi != 0x90u) || (pkt & 0x0Fu) != hi >> 4 || ch >= SM_NTRK)
             continue;                                     /* (a SysEx byte, realtime, CC .., another channel) */
         if (hi == 0x90u && vel) {
+            if (sm_arp_mode(ch)) {                        /* (an arpeggiator on the track: the note is its input, it records its own) */
+                if (!((mute >> ch) & 1u))
+                    sm_arp_midi_on(ch, note, vel);
+                continue;
+            }
             if (ch == sm_rec_mtrk)                        /* (REC on, the selected track's channel: recorded while playing) */
                 sm_rec_on(ch, note, vel);
             if ((mute >> ch) & 1u)
@@ -117,10 +124,12 @@ static void sm_midi_drain(void)
             trk_note_on(&trk[ch], note, vel);
             continue;
         }
+        if (sm_arp_midi_off(ch, note))
+            continue;
         sm_rec_off(ch, note);
         if (sm_mn_has(ch, note)) {
             sm_mn[ch][note >> 5] &= ~(1u << (note & 31u));
-            if (!sm_seq_has(ch, note) && !sm_kn_has(ch, note))
+            if (!sm_seq_has(ch, note) && !sm_kn_has(ch, note) && !sm_arp_has(ch, note))
                 trk_note_off(&trk[ch], note);
         }
     }
