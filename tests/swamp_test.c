@@ -3230,6 +3230,105 @@ static int test_rec_preview(void)
     return bad;
 }
 
+/* hardware (4f51c43): "REC+PLAY: no live record of the knobs". Every way the owner may start it, through the real path
+ * (button edges and held bits, polls between audio blocks, the time going on): REC tapped then PLAY; REC held + PLAY
+ * (Elektron's live record), REC let go after; PLAY then REC. Then a knob turned a detent a poll over a whole bar on
+ * FILTER (K2 CUT) or EDIT 1 (K1): REC is on, the base moves and the core has it at once, a lock on every trig passed
+ * (none on the empty steps), and the next pass plays the locks back */
+static uint32_t lrg_gest, lrg_pagei, lrg_slot;
+static void lrg_polls(uint32_t blocks)                    /* the main loop: a poll between audio blocks, 1 ms a block */
+{
+    uint32_t b;
+    for (b = 0; b < blocks; b++) {
+        run_block();
+        ms(1);
+        sm_input_poll();
+    }
+}
+static int test_rec_live_gestures(void)
+{
+    int bad = 0;
+    static const char *const GN[5] = {"REC tap, PLAY", "REC held + PLAY", "PLAY, REC tap", "REC on (grid), REC held + PLAY",
+                                      "playing, REC held + PLAY"};
+    static const char *const PN[2] = {"FILTER K2", "EDIT 1 K1"};
+    for (lrg_slot = 0; lrg_slot < 6u; lrg_slot += 5u)
+    for (lrg_gest = 0; lrg_gest < 5u; lrg_gest++)
+        for (lrg_pagei = 0; lrg_pagei < 2u; lrg_pagei++) {
+            uint32_t s, id, role, nl = 0, nempty = 0, moved = 1, back = 1, b;
+            int32_t v0;
+            char what[160];
+            in_reset();
+            host_ticks = 1000u;
+            if (lrg_slot) {                               /* (another pattern playing: a RAM slot not 0) */
+                smp.next = (uint8_t)lrg_slot;
+                lrg_polls(3);
+            }
+            sm_ui.page = (uint8_t)page_by_name(lrg_pagei ? "EDIT 1" : "FILTER");
+            id = sm_page_param(lrg_pagei ? 0u : 1u);
+            role = lrg_pagei ? EN_K1 : EN_K2;
+            set_param(0, id, 10);
+            for (s = 0; s < 16u; s += 2u)
+                sm_step_toggle(0, s);                     /* (trigs on the odd-numbered steps 1 3 5 ..) */
+            if (lrg_gest == 0u) {
+                press(B_REC);
+                lrg_polls(1);
+                ms(300);
+                press(B_PLAY);
+                lrg_polls(2);
+            } else if (lrg_gest == 1u || lrg_gest == 3u || lrg_gest == 4u) {
+                if (lrg_gest == 3u) {                     /* (the trigs were put in with REC on: grid record) */
+                    press(B_REC);
+                    lrg_polls(200);
+                }
+                if (lrg_gest == 4u) {
+                    press(B_PLAY);
+                    lrg_polls(200);
+                }
+                btn_down(B_REC);
+                lrg_polls(30);
+                btn_down(B_PLAY);
+                lrg_polls(5);
+                btn_up(B_PLAY);
+                lrg_polls(30);
+                btn_up(B_REC);
+                lrg_polls(2);
+            } else {
+                press(B_PLAY);
+                lrg_polls(40);
+                press(B_REC);
+                lrg_polls(1);
+            }
+            snprintf(what, sizeof what, "LIVE %s, %s: REC on, playing", GN[lrg_gest], PN[lrg_pagei]);
+            bad += check(what, sm_rec && sm_playing);
+            run_to_step(0, 15);                           /* (the pass from step 1) */
+            v0 = ksnd(0)->p[id];
+            for (b = 0; b < 16u; b++) {                   /* a detent a poll, a step each, a whole bar */
+                uint32_t st = sm_pos[0];
+                run_to_step(0, (st + 1u) % 16u);
+                turn(role, 1);
+                sm_input_poll();
+                run_block();
+                moved &= trk[0].p[id] == ksnd(0)->p[id];
+            }
+            for (s = 0; s < 16u; s++) {
+                if (lk_val(0, s, id) != LK_NONE)
+                    nl += (s & 1u) == 0u, nempty += (s & 1u) != 0u;
+            }
+            snprintf(what, sizeof what, "LIVE %s, %s: the base moved, the core at once", GN[lrg_gest], PN[lrg_pagei]);
+            bad += check(what, ksnd(0)->p[id] == v0 + 16 && moved);
+            snprintf(what, sizeof what, "LIVE %s, %s: a lock on every trig (8), none on an empty step", GN[lrg_gest], PN[lrg_pagei]);
+            if (check(what, nl == 8u && !nempty))
+                bad++, printf("  locks on trigs %u, on empty steps %u\n", nl, nempty);
+            for (s = 0; s < 16u; s += 2u)                 /* the next pass: each trig its own lock */
+                if (lk_val(0, s, id) != LK_NONE)
+                    back &= run_to_step(0, s) && trk[0].p[id] == lk_val(0, s, id);
+            snprintf(what, sizeof what, "LIVE %s, %s: the next pass plays the locks", GN[lrg_gest], PN[lrg_pagei]);
+            bad += check(what, back && nl);
+        }
+    in_reset();
+    return bad;
+}
+
 /* ------------------------------------------------------------------------------------------------ STEP (Task 5) --- */
 #define S120 ((double)FS / 8.0)                           /* a 1/16 at 120 BPM, in samples */
 static sm_step_t *stp(uint32_t t, uint32_t s) { return &smp.pat[smp.cur].step[t][s]; }
@@ -8654,6 +8753,7 @@ int main(void)
     bad += test_lock_layer_disarms();
     bad += test_lock_unlock_on_remove();
     bad += test_rec_preview();
+    bad += test_rec_live_gestures();
     bad += test_step_vel_acc();
     bad += test_step_len();
     bad += test_step_cond();

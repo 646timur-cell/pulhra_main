@@ -843,8 +843,16 @@ static void sm_input_poll(void)
     sm_save_poll(pressed, now);
     sm_rec_poll(pressed);
     sm_lrec_poll();                                       /* (live record: the notes the audio stream placed) */
-    if ((pressed >> panel.btn[B_PLAY]) & 1u)              /* (against a PLAY / STOP not pushed yet, if there is one) */
+    if (((pressed >> panel.btn[B_PLAY]) & 1u) && ((fm1_in.buttons >> panel.btn[B_REC]) & 1u)) {
+        /* REC held + PLAY (Elektron's live record): recording on whatever REC's own press made of it (on from grid record,
+         * that press turned it off), and playing (started; already playing: it plays on, a STOP not pushed yet dropped) */
+        sm_rec = 1;
+        sm_rec_mtrk = (uint8_t)(sm_ui.trk % SM_NTRK);
+        sm_tr_pend = (uint8_t)(sm_playing ? (sm_tr_pend == 1u ? 1u : 0u) : 1u);
+        sm_dirty = 1;
+    } else if ((pressed >> panel.btn[B_PLAY]) & 1u) {     /* (against a PLAY / STOP not pushed yet, if there is one) */
         sm_tr_pend = (uint8_t)(sm_tr_pend ? (sm_tr_pend == 1u ? 2u : 1u) : (sm_playing ? 2u : 1u));
+    }
     if (alg) {
         int32_t t = ((int32_t)sm_ui.trk + alg) % (int32_t)SM_NTRK;
         sm_ui.trk = (uint8_t)(t < 0 ? t + (int32_t)SM_NTRK : t);
