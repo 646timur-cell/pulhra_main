@@ -53,6 +53,8 @@ static uint8_t sm_kb_note[SM_NKEYS], sm_kb_trk[SM_NKEYS]; /* keyboard mode: the 
 static uint32_t sm_kb_pend;                               /* bit per key: pressed, its note-on not pushed yet */
 static uint32_t sm_kb_arp;                                /* bit per key: it went to the track's arpeggiator (sm_arp.c), not the voices */
 static uint8_t sm_arp_lseen[SM_NTRK], sm_arp_mseen[SM_NTRK];   /* each track's LATCH and MODE as the main loop last saw them */
+/* sm_midi_ch (the MIDI page's channel per track) and sm_midi_src (the SETUP page's source) live in sm_midi.c, which the
+ * audio stream reads; the MIDI and SETUP pages here write them, the screen reads them */
 static uint8_t sm_shift;                                  /* SHIFT: OCT- held outside the keyboard mode and the layers (sm_oct_poll) */
 static int8_t sm_sh_acc[SM_NTRK], sm_trn_acc[SM_NTRK];    /* SHIFT + D#4 / F#4, D#5 / F#5: the net shift and transpose of a track since the pattern came (the header's value) */
 #define SM_KL_N 8u
@@ -857,6 +859,8 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
     if (sm_page_home() == SMH_MIXER) {
         for (i = 0; i < SM_NTRK; i++)
             sm_turn_base(i, P_LEVEL, k[i]);
+        if (sel)                                            /* SELECT: selected track's volume */
+            sm_turn_base(sm_ui.trk % SM_NTRK, P_LEVEL, sel);
     } else {
         sm_bpm_turn(sm_shift ? k[0] * 10 : sm_bpm_accel(k[0], now));   /* (SHIFT: 1.0 a detent) */
         if (k[1]) {
@@ -866,8 +870,8 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
                 sm_dirty = 1;
             }
         }
+        sm_bpm_turn(sm_shift ? sel * 10 : sel);             /* CLOCK: SELECT is tempo */
     }
-    sm_bpm_turn(sm_shift ? sel * 10 : sel);
 }
 
 /* SHIFT: OCT- held outside the keyboard mode (sm_shift is this, minus a layer open: sm_oct_poll) */
@@ -1020,8 +1024,16 @@ static void sm_input_poll(void)
         sm_step_page(k, sel, pre);
     } else if (sm_page_home() == SMH_EUCLID) {
         sm_eu_page(k);
-    } else if (sm_page_home() == SMH_MENU) {
-        /* (the menu's stub: nothing to turn yet) */
+    } else if (sm_page_home() == SMH_MIDI) {
+        uint32_t i;
+        for (i = 0; i < SM_NTRK; i++)
+            if (k[i]) {                               /* a knob down from 1 wraps to 16 (C's % is a negative remainder) */
+                int32_t c = (int32_t)sm_midi_ch[i] - 1 + k[i];
+                sm_midi_ch[i] = (uint8_t)((c % 16 + 16) % 16 + 1);
+            }
+    } else if (sm_page_home() == SMH_SETUP) {
+        if (k[0]) smp.mode = (uint8_t)((((int32_t)smp.mode + k[0]) % SM_PM_COUNT + SM_PM_COUNT) % SM_PM_COUNT);
+        if (k[1]) sm_midi_src = (uint8_t)((((int32_t)sm_midi_src + k[1]) % 3 + 3) % 3);
     } else if (sm_page_home()) {
         sm_preset_turn(pre);
         sm_home_page(k, sel, now);

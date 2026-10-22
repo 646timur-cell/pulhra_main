@@ -417,8 +417,33 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         o->pos = (k == 0u ? (v - 1u) * 256u / (SM_NSTEP - 1u) : mx ? v * 256u / mx : 0u);
         return;
     }
-    if (sm_page_home() == SMH_MENU) {
-        o->on = 0;
+    if (sm_page_home() == SMH_MIDI) {
+        o->on = 1;
+        o->lab[0] = 'T'; o->lab[1] = (char)('1' + k % SM_NTRK); o->lab[2] = 0;
+        smd_int(o->val, (int32_t)sm_midi_ch[k % SM_NTRK], 0);
+        o->v = (int32_t)sm_midi_ch[k % SM_NTRK];
+        o->pos = (uint32_t)(sm_midi_ch[k % SM_NTRK] - 1) * 256u / 15u;
+        o->dim = 0;
+        o->inv = k % SM_NTRK == sm_ui.trk % SM_NTRK;
+        return;
+    }
+    if (sm_page_home() == SMH_SETUP) {
+        o->on = 1;
+        if ((k & 3u) == 0u) {
+            o->lab[0] = 'M'; o->lab[1] = 'O'; o->lab[2] = 'D'; o->lab[3] = 'E'; o->lab[4] = 0;
+            static const char *const PM_N[] = {"SEQ", "DIR.S", "DIR.J"};
+            smd_upper(o->val, PM_N[smp.mode % SM_PM_COUNT], 5u);
+            o->v = (int32_t)smp.mode;
+            o->pos = smp.mode * 256u / (SM_PM_COUNT - 1u);
+            o->dim = 0; o->inv = 0;
+        } else if ((k & 3u) == 1u) {
+            o->lab[0] = 'S'; o->lab[1] = 'R'; o->lab[2] = 'C'; o->lab[3] = 0;
+            static const char *const SRC_N[] = {"USB", "INT", "JACK"};
+            smd_upper(o->val, SRC_N[sm_midi_src % 3], 5u);
+            o->v = (int32_t)sm_midi_src;
+            o->pos = sm_midi_src * 256u / 2u;
+            o->dim = 0; o->inv = 0;
+        } else { o->on = 0; }
         return;
     }
     if (sm_page_home() == SMH_MIXER) {
@@ -611,8 +636,18 @@ static void smd_select(void)
         const char *lab = smd_step_nudge(val);
         x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
-    } else if (sm_page_home() == SMH_EUCLID || sm_page_home() == SMH_MENU) {   /* (nothing on SELECT) */
-    } else if (sm_page_home()) {                          /* HOME: SELECT is the tempo */
+    } else if (sm_page_home() == SMH_EUCLID || sm_page_home() == SMH_MENU || sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP) {   /* (nothing on SELECT) */
+    } else if (sm_page_home() == SMH_MIXER) {              /* MIXER: SELECT is the selected track's volume */
+        char lab[8], val[12];
+        const char *unit;
+        int32_t x;
+        const sm_sound_t *s = smd_snd();
+        smd_upper(lab, "LEVEL", 5u);
+        param_format(&TP[P_LEVEL], clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max), val, &unit);
+        x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
+        val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
+        sm_px_text(x, 2, 2u, val, T_TEXT, 1);
+    } else if (sm_page_home()) {                          /* CLOCK: SELECT is the tempo */
         char val[8];
         int32_t x = sm_px_text(4, 2, 2u, "TEMPO", T_TEXT, 0) + 4 + 12;
         fmt_fix(val, smp.bpm10, 1);

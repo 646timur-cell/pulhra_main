@@ -879,42 +879,43 @@ static int test_knob_writes_model_and_core(void)
     press(B_ENV);
     sm_input_poll();
     sel = sm_ui.trk;
-    turn(EN_K2, -200);
+    turn(EN_SELECT, -200);                                /* SELECT is CUTOFF */
     sm_input_poll();
     v0 = ksnd(sel)->p[P_FCUT];
-    bad += check("INPUT: FILTER, K2 -200: CUT at its minimum in the model", v0 == TP[P_FCUT].min);
-    turn(EN_K2, 10);
+    bad += check("INPUT: FILTER, SELECT -200: CUT at its minimum in the model", v0 == TP[P_FCUT].min);
+    turn(EN_SELECT, 10);
     sm_input_poll();
     v1 = ksnd(sel)->p[P_FCUT];
-    bad += check("INPUT: K2 +10: CUT grew", v1 > v0);
+    bad += check("INPUT: SELECT +10: CUT grew", v1 > v0);
     run_block();
     bad += check("INPUT: ... after one block the core has it", trk[sel].p[P_FCUT] == v1);
-    turn(EN_K2, 500);
+    turn(EN_SELECT, 500);
     sm_input_poll();
     run_block();
-    bad += check("INPUT: K2 +500: clipped at TP max, model and core",
+    bad += check("INPUT: SELECT +500: clipped at TP max, model and core",
                  ksnd(sel)->p[P_FCUT] == TP[P_FCUT].max && trk[sel].p[P_FCUT] == TP[P_FCUT].max);
     sm_dirty = 0;
-    turn(EN_K1, 1);
+    turn(EN_K4, 1);                                       /* K4 is FILT type */
     sm_input_poll();
     bad += check("INPUT: a knob turn sets sm_dirty", sm_dirty);
     in_reset();
-    press(B_ENV);                                         /* FILTER: SELECT is HWIDTH */
+    press(B_ENV);                                         /* FILTER: SELECT is CUTOFF, K3 is LFO>FLT */
     sm_input_poll();
-    turn(EN_SELECT, -3);
+    turn(EN_K3, -3);                                      /* K3 is LFO>FLT */
     sm_input_poll();
     run_block();
-    bad += check("INPUT: SELECT on FILTER (FILT OFF): LFO>FLT, model and core, FILT to LP",
+    bad += check("INPUT: K3 on FILTER (FILT OFF): LFO>FLT, model and core, FILT to LP",
                  ksnd(0)->p[P_LD_FLT] == TP[P_LD_FLT].def - 3 && trk[0].p[P_LD_FLT] == ksnd(0)->p[P_LD_FLT] &&
                  ksnd(0)->p[P_FLT] == 1);
-    turn(EN_K1, 4);                                       /* FILT HYB: SELECT is WIDTH */
+    ksnd(0)->p[P_LD_FLT] = TP[P_LD_FLT].def;             /* reset LFO>FLT before the HYB test */
+    turn(EN_K4, 4);                                       /* K4 is FILT type: HYB */
     sm_input_poll();
-    turn(EN_SELECT, -3);
+    turn(EN_K3, -3);                                      /* K3 is LFO>FLT even in HYB */
     sm_input_poll();
     run_block();
-    bad += check("INPUT: SELECT on FILTER (FILT HYB): HWIDTH, model and core",
-                 ksnd(0)->p[P_FLT] == 5 && ksnd(0)->p[P_HWIDTH] == TP[P_HWIDTH].def - 3 &&
-                 trk[0].p[P_HWIDTH] == ksnd(0)->p[P_HWIDTH]);
+    bad += check("INPUT: K3 on FILTER (FILT HYB): LFO>FLT, model and core",
+                 ksnd(0)->p[P_FLT] == 5 && ksnd(0)->p[P_LD_FLT] == TP[P_LD_FLT].def - 3 &&
+                 trk[0].p[P_LD_FLT] == ksnd(0)->p[P_LD_FLT]);
     in_reset();
     press(B_ENV);
     sm_input_poll();
@@ -967,14 +968,14 @@ static void flt_play(int32_t filt, double *b0, double *b1, double *r1)
     press(B_ENV);
     sm_input_poll();
     if (filt) {
-        turn(EN_K1, filt);
+        turn(EN_K4, filt);                                 /* K4 is FILT type */
         sm_input_poll();
     }
     press(B_PLAY);
     sm_input_poll();
     *b0 = flt_bright(FS / 2u / CTL, &r0);
-    turn(EN_K2, filt == 5 ? 110 : -110);                  /* (HYB: BASE up, the high-pass) */
-    turn(EN_K3, 100);
+    turn(EN_SELECT, -110);                                 /* SELECT is CUTOFF */
+    turn(EN_K1, 100);                                      /* K1 is RESONANCE */
     sm_input_poll();
     *b1 = flt_bright(FS / 2u / CTL, r1);
     press(B_PLAY);
@@ -990,15 +991,14 @@ static int test_filter_play(void)
                  ksnd(1)->p[P_FLT] == 1 && trk[1].p[P_FLT] == 1 && ksnd(1)->p[P_FCUT] < 40 && b1 < 0.1 * b0);
     flt_play(1, &b0, &b1, &r1);
     printf("swamp: FILT LP: brightness %.4f -> %.4f (rms %.0f)\n", b0, b1, r1);
-    bad += check("FILTER: FILT LP, playing: K2 CUT -110 + K3 RES through the input: the core has them, far darker",
+    bad += check("FILTER: FILT LP, playing: SELECT CUT -110 + K1 RES through the input: the core has them, far darker",
                  trk[1].p[P_FLT] == 1 && trk[1].p[P_FCUT] == ksnd(1)->p[P_FCUT] && trk[1].p[P_FRES] == ksnd(1)->p[P_FRES] &&
                  ksnd(1)->p[P_FRES] > 90 && b1 < 0.1 * b0 && r1 > 20.0);
     flt_play(5, &b0, &b1, &r1);
     printf("swamp: FILT HYB: brightness %.4f -> %.4f\n", b0, b1);
-    bad += check("FILTER: FILT HYB: K2 / K3 are HYBRID's BASE / RES (MONOFM's twin page), model and core",
-                 ksnd(1)->p[P_HBASE] > 90 && ksnd(1)->p[P_HRES] > 90 && trk[1].p[P_HBASE] == ksnd(1)->p[P_HBASE] &&
-                 trk[1].p[P_HRES] == ksnd(1)->p[P_HRES] && ksnd(1)->p[P_FCUT] == TP[P_FCUT].def);
-    bad += check("FILTER: ... heard, playing: BASE up high-passes T2 (brighter)", b1 > 1.5 * b0);
+    bad += check("FILTER: FILT HYB: SELECT CUT -110 + K1 RES through the input: the core has them",
+                 trk[1].p[P_FLT] == 5 && trk[1].p[P_FCUT] == ksnd(1)->p[P_FCUT] && trk[1].p[P_FRES] == ksnd(1)->p[P_FRES] &&
+                 ksnd(1)->p[P_FRES] > 90);
     return bad;
 }
 
@@ -1710,26 +1710,26 @@ static int test_seq_len(void)
     host_ticks = 1000u;
     layer_hold(B_SEQ);
     bad += check("SEQ: held 500 ms: the SEQ layer", sm_layer == SML_SEQ);
-    turn(EN_K1, 16);
+    turn(EN_SELECT, 16);                                  /* SELECT is track length */
     sm_input_poll();
-    bad += check("SEQ: K1 +16: the track's length 32", ksnd(0)->len == 32u && ksnd(1)->len == 16u);
-    turn(EN_K1, 5);
+    bad += check("SEQ: SELECT +16: the track's length 32", ksnd(0)->len == 32u && ksnd(1)->len == 16u);
+    turn(EN_SELECT, 5);
     sm_input_poll();
-    bad += check("SEQ: K1 +5 more: stays 32", ksnd(0)->len == 32u);
-    turn(EN_K1, -100);
+    bad += check("SEQ: SELECT +5 more: stays 32", ksnd(0)->len == 32u);
+    turn(EN_SELECT, -100);
     sm_input_poll();
-    bad += check("SEQ: K1 -100: 1", ksnd(0)->len == 1u);
-    turn(EN_K1, 31);
+    bad += check("SEQ: SELECT -100: 1", ksnd(0)->len == 1u);
+    turn(EN_SELECT, 31);
     sm_input_poll();
-    bad += check("SEQ: K1 +31: 32", ksnd(0)->len == 32u);
+    bad += check("SEQ: SELECT +31: 32", ksnd(0)->len == 32u);
     {
         sm_sound_t before = *ksnd(0);
         before.len = 32u;
+        turn(EN_K1, 5);
+        turn(EN_K2, 5);
         turn(EN_K3, 5);
-        turn(EN_K4, 5);
-        turn(EN_SELECT, 5);
         sm_input_poll();
-        bad += check("SEQ: the other knobs are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
+        bad += check("SEQ: K1-K3 are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
     }
     layer_let_go(B_SEQ);
     oct_tap(B_OCTUP);                                     /* OCT+: the second bank: the gate opens with the length */
@@ -1747,9 +1747,9 @@ static int test_seq_len(void)
     bad += check("SEQ: ... and step 32 (31) at 31 x FS/8", on_n[0] == 2u && near(on_at[0][1], 31u * FS / 8u));
     sm_ui.bank = 1;
     layer_hold(B_SEQ);
-    turn(EN_K1, -20);
+    turn(EN_SELECT, -20);
     sm_input_poll();
-    bad += check("SEQ: K1 down to 12: the bank goes back to 0 (no second page)", ksnd(0)->len == 12u && sm_ui.bank == 0u);
+    bad += check("SEQ: SELECT down to 12: the bank goes back to 0 (no second page)", ksnd(0)->len == 12u && sm_ui.bank == 0u);
     layer_let_go(B_SEQ);
     return bad;
 }
@@ -1970,21 +1970,21 @@ static int test_ring_lock_fill(void)
     sm_ui.page = (uint8_t)pg;
     sm_ui.held_step = 4;
     pt->nlock = 1;
-    pt->lock[0].ts = (0u << 5) | 4u; pt->lock[0].param = P_FCUT; pt->lock[0].val = 99;
+    pt->lock[0].ts = (0u << 5) | 4u; pt->lock[0].param = P_FRES; pt->lock[0].val = 99;  /* K1 is RES */
     draw_full();
     for (k = 0; k < 4; k++) {
         uint16_t c = host_screen[94u * 240u + (uint32_t)(60 * k + 30)];
-        bad += check(k == 1 ? "RING: CUT, locked on the held step, is a filled disc" : "RING: the others are not filled",
-                     (k == 1 && c == INK) || (k != 1 && c == BGC));
+        bad += check(k == 0 ? "RING: RES, locked on the held step, is a filled disc" : "RING: the others are not filled",
+                     (k == 0 && c == INK) || (k != 0 && c == BGC));
     }
     sm_ui.held_step = 5;                                    /* another step held: nothing filled */
     sm_dirty = 1;
     sm_draw();
-    bad += check("RING: another step held: CUT is not filled", host_screen[94u * 240u + 90u] == BGC);
+    bad += check("RING: another step held: RES is not filled", host_screen[94u * 240u + 30u] == BGC);
     sm_ui.held_step = 0xFFu;
     sm_dirty = 1;
     sm_draw();
-    bad += check("RING: no step held: nothing filled", host_screen[94u * 240u + 90u] == BGC);
+    bad += check("RING: no step held: nothing filled", host_screen[94u * 240u + 30u] == BGC);
     pt->nlock = 0;
     return bad;
 }
@@ -2751,16 +2751,16 @@ static int test_lock_hold_turn(void)
     bad += check("LOCK: ... let go without a turn: the trig on", cpat()->step[0][4].n == 1u);
     key_dn(WHITE[4]);
     sm_input_poll();
-    turn(EN_K2, 10);                                      /* FILTER K2: CUT */
+    turn(EN_SELECT, 10);                                  /* SELECT is CUTOFF */
     sm_input_poll();
-    bad += check("LOCK: step 4 held, K2 +10: a CUT lock on step 4 = base + 10", lk_val(0, 4, P_FCUT) == base + 10);
+    bad += check("LOCK: step 4 held, SELECT +10: a CUT lock on step 4 = base + 10", lk_val(0, 4, P_FCUT) == base + 10);
     bad += check("LOCK: ... the base did not change", ksnd(0)->p[P_FCUT] == base);
     bad += check("LOCK: ... the step held shows at once (held_step 4)", sm_ui.held_step == 4u);
-    smd_knob_get(1, &o);
-    bad += check("LOCK: ... the CUT ring is filled and shows the lock", o.filled && o.v == base + 10);
-    smd_knob_get(2, &o);
+    smd_knob_get(0, &o);                                  /* K1 is RES: no lock */
     bad += check("LOCK: ... the RES ring (no lock) shows the base, not filled", !o.filled && o.v == ksnd(0)->p[P_FRES]);
-    turn(EN_K2, -3);
+    smd_knob_get(1, &o);                                  /* K2 is ENV>FLT: no lock */
+    bad += check("LOCK: ... the ENV>FLT ring (no lock) shows the base, not filled", !o.filled && o.v == ksnd(0)->p[P_ED_FLT]);
+    turn(EN_SELECT, -3);
     sm_input_poll();
     bad += check("LOCK: a second turn edits the lock (base + 7), one entry", lk_val(0, 4, P_FCUT) == base + 7 && cpat()->nlock == 1u);
     key_up(WHITE[4]);
@@ -2770,8 +2770,8 @@ static int test_lock_hold_turn(void)
                  !sm_param_locked_any(0, P_FRES) && !sm_param_locked_any(1, P_FCUT));
     key_dn(WHITE[6]);                                     /* an empty step held and turned: nothing (no lock, no trig) */
     sm_input_poll();
-    turn(EN_K2, 5);
-    turn(EN_SELECT, 2);
+    turn(EN_SELECT, 5);                                   /* SELECT is CUTOFF */
+    turn(EN_K3, 2);                                       /* K3 is LFO>FLT */
     sm_input_poll();
     key_up(WHITE[6]);
     sm_input_poll();
@@ -2779,16 +2779,16 @@ static int test_lock_hold_turn(void)
                  lk_val(0, 6, P_FCUT) == base + 5 && lk_val(0, 6, P_LD_FLT) == clamp(TP[P_LD_FLT].def + 2, TP[P_LD_FLT].min, TP[P_LD_FLT].max) && cpat()->step[0][6].n == 1u &&
                  cpat()->step[0][6].flags == SMF_REST && cpat()->nlock == 3u && ksnd(0)->p[P_FCUT] == base &&
                  ksnd(0)->p[P_LD_FLT] == TP[P_LD_FLT].def);
-    key_dn(WHITE[4]);                                     /* SELECT while held: its parameter (LFO>FLT) locked */
+    key_dn(WHITE[4]);                                     /* K3 while held: its parameter (LFO>FLT) locked */
     sm_input_poll();
-    turn(EN_SELECT, -2);
+    turn(EN_K3, -2);
     sm_input_poll();
     key_up(WHITE[4]);
     sm_input_poll();
-    bad += check("LOCK: SELECT while held: a lock of its parameter, no toggle", lk_val(0, 4, P_LD_FLT) == TP[P_LD_FLT].def - 2 &&
+    bad += check("LOCK: K3 while held: a lock of its parameter, no toggle", lk_val(0, 4, P_LD_FLT) == TP[P_LD_FLT].def - 2 &&
                  cpat()->step[0][4].n == 1u);
     sm_ui.held_step = 4;
-    bad += check("LOCK: SELECT shows the held step's lock, the base otherwise", smd_sel_val(P_LD_FLT) == TP[P_LD_FLT].def - 2 &&
+    bad += check("LOCK: K3 shows the held step's lock, the base otherwise", smd_sel_val(P_LD_FLT) == TP[P_LD_FLT].def - 2 &&
                  (sm_ui.held_step = 0xFFu, smd_sel_val(P_LD_FLT) == TP[P_LD_FLT].def));
     return bad;
 }
@@ -2836,7 +2836,7 @@ static int test_lock_during_play_300bpm(void)
     key_dn(WHITE[7]);
     sm_input_poll();
     for (i = 0; i < 50u; i++) {                           /* 50 detents over 4 bars (64 steps of ~69 blocks) */
-        turn(EN_K2, (i & 1u) ? -1 : 2);
+        turn(EN_SELECT, (i & 1u) ? -1 : 2);               /* SELECT is CUTOFF */
         sm_input_poll();
         for (b = 0; b < 88u; b++)
             run_block();
@@ -3029,7 +3029,7 @@ static int test_rec_records_on_trigs(void)
     press(B_REC);
     sm_input_poll();
     bad += check("REC: the REC key: sm_rec on", sm_rec == 1u);
-    turn(EN_K2, 3);                                       /* stopped: a turn is the base, as ever */
+    turn(EN_SELECT, 3);                                   /* SELECT is CUTOFF: stopped, a turn is the base */
     sm_input_poll();
     bad += check("REC: stopped: a turn moves the base, no lock", ksnd(0)->p[P_FCUT] == base + 3 && cpat()->nlock == 0u);
     base = ksnd(0)->p[P_FCUT];
@@ -3037,7 +3037,7 @@ static int test_rec_records_on_trigs(void)
     sm_input_poll();
     run_block();
     for (i = 0; i < 64u; i++) {                           /* two bars at 120: a turn every ~43 blocks */
-        turn(EN_K2, -1);
+        turn(EN_SELECT, -1);
         sm_input_poll();
         for (b = 0; b < 43u; b++)
             run_block();
@@ -3104,7 +3104,7 @@ static int test_lock_press_turn_same_poll(void)
     filter_page();
     sm_step_toggle(0, 6);
     key_dn(WHITE[6]);
-    turn(EN_K2, -5);                                      /* the press edge and the turn in one poll */
+    turn(EN_SELECT, -5);                                  /* SELECT is CUTOFF: the press edge and the turn in one poll */
     sm_input_poll();
     key_up(WHITE[6]);
     sm_input_poll();
@@ -3212,7 +3212,7 @@ static int test_rec_preview(void)
     press(B_PLAY);
     sm_input_poll();
     run_to_step(0, 5);
-    turn(EN_K2, 10);
+    turn(EN_SELECT, 10);                                  /* SELECT is CUTOFF */
     sm_input_poll();
     v = lk_val(0, 5, P_FCUT);
     bad += check("FIX1: REC turn on step 5: lock 74, the base 74 too (a turn is the base, 02:43)", v == 74 && ksnd(0)->p[P_FCUT] == 74);
@@ -3220,9 +3220,9 @@ static int test_rec_preview(void)
     bad += check("FIX1: ... the core has it after the next block", sm_pos[0] == 5u && trk[0].p[P_FCUT] == 74);
     press(B_REC);                                         /* REC off: the base back to 64, step 5 keeps its 74 */
     sm_input_poll();
-    turn(EN_K2, -10);
+    turn(EN_SELECT, -10);
     sm_input_poll();
-    bad += check("FIX1: ... REC off, K2 -10: the base 64, the lock still 74", ksnd(0)->p[P_FCUT] == 64 && lk_val(0, 5, P_FCUT) == 74);
+    bad += check("FIX1: ... REC off, SELECT -10: the base 64, the lock still 74", ksnd(0)->p[P_FCUT] == 64 && lk_val(0, 5, P_FCUT) == 74);
     bad += check("FIX1: ... the next (unlocked) trig: the base", run_to_step(0, 6) && trk[0].p[P_FCUT] == 64);
     bad += check("FIX1: ... step 5 again: its lock", run_to_step(0, 5) && trk[0].p[P_FCUT] == 74);
     return bad;
@@ -3248,7 +3248,7 @@ static int test_rec_live_gestures(void)
     int bad = 0;
     static const char *const GN[5] = {"REC tap, PLAY", "REC held + PLAY", "PLAY, REC tap", "REC on (grid), REC held + PLAY",
                                       "playing, REC held + PLAY"};
-    static const char *const PN[2] = {"FILTER K2", "EDIT 1 K1"};
+    static const char *const PN[2] = {"FILTER SELECT", "EDIT 1 K1"};
     for (lrg_slot = 0; lrg_slot < 6u; lrg_slot += 5u)
     for (lrg_gest = 0; lrg_gest < 5u; lrg_gest++)
         for (lrg_pagei = 0; lrg_pagei < 2u; lrg_pagei++) {
@@ -3262,8 +3262,8 @@ static int test_rec_live_gestures(void)
                 lrg_polls(3);
             }
             sm_ui.page = (uint8_t)page_by_name(lrg_pagei ? "EDIT 1" : "FILTER");
-            id = sm_page_param(lrg_pagei ? 0u : 1u);
-            role = lrg_pagei ? EN_K1 : EN_K2;
+            id = sm_page_param(lrg_pagei ? 0u : 4u);      /* FILTER: SELECT is CUTOFF */
+            role = lrg_pagei ? EN_K1 : EN_SELECT;
             set_param(0, id, 10);
             for (s = 0; s < 16u; s += 2u)
                 sm_step_toggle(0, s);                     /* (trigs on the odd-numbered steps 1 3 5 ..) */
@@ -4125,16 +4125,16 @@ static int test_shift_oct(void)
     sm_input_poll();
     bad += check("SHIFT: OCT- held: SHIFT on, the page and the keyboard mode as they were", sm_shift && !sm_ui.bank && !sm_ui.kbd);
     v0 = ksnd(0)->p[P_FCUT];
-    turn(EN_K2, -1); sm_input_poll();
-    turn(EN_K2, -1); sm_input_poll();
-    turn(EN_K2, -1); sm_input_poll();
-    bad += check("SHIFT: + K2 (CUT, 0..127) down: three detents, x4: 12 steps", ksnd(0)->p[P_FCUT] == v0 - 12);
-    turn(EN_K2, 1); sm_input_poll();
+    turn(EN_SELECT, -1); sm_input_poll();                  /* SELECT is CUTOFF */
+    turn(EN_SELECT, -1); sm_input_poll();
+    turn(EN_SELECT, -1); sm_input_poll();
+    bad += check("SHIFT: + SELECT (CUT, 0..127) down: three detents, x4: 12 steps", ksnd(0)->p[P_FCUT] == v0 - 12);
+    turn(EN_SELECT, 1); sm_input_poll();
     bad += check("SHIFT: ... one detent up: 4 steps (acceleration, not the fine turn)", ksnd(0)->p[P_FCUT] == v0 - 8);
     v0 = ksnd(0)->p[P_FCUT];
     f0 = ksnd(0)->p[P_FLT];
-    turn(EN_K1, 1); sm_input_poll();
-    bad += check("SHIFT: + K1 (FILT, a list): a detent is a step, as ever", ksnd(0)->p[P_FLT] == f0 + 1);
+    turn(EN_K4, 1); sm_input_poll();                       /* K4 is FILT type */
+    bad += check("SHIFT: + K4 (FILT, a list): a detent is a step, as ever", ksnd(0)->p[P_FLT] == f0 + 1);
     host_pressed |= 1u << panel.btn[B_OCTUP];             /* SHIFT + OCT+ (the 100 ms of a pair long past): the page turns */
     fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
     sm_input_poll();
@@ -4145,7 +4145,7 @@ static int test_shift_oct(void)
     btn_up(B_OCTDN);
     sm_input_poll();
     v0 = ksnd(0)->p[P_FCUT];
-    turn(EN_K2, -2); sm_input_poll();
+    turn(EN_SELECT, -2); sm_input_poll();
     bad += check("SHIFT: OCT- let go: SHIFT off, a detent a step again", !sm_shift && ksnd(0)->p[P_FCUT] == v0 - 2);
     oct_tap(B_OCTUP);
     bad += check("OCT+: round to the page 1..16", sm_ui.bank == 0u);
@@ -4247,24 +4247,23 @@ static int test_home_bpm_select(void)
     host_ticks = 1000u;
     press(B_HOME);
     sm_input_poll();
-    turn(EN_SELECT, 10);
+    bad += check("HOME: MIXER page", !strcmp(sm_cur_page()->name, "MIXER"));
+    turn(EN_SELECT, 5);                                   /* SELECT is selected track's volume */
     sm_input_poll();
-    bad += check("HOME: SELECT +10 on MIXER: 121.0 BPM", smp.bpm10 == 1210u);
-    turn(EN_SELECT, -3);
-    sm_input_poll();
-    bad += check("HOME: SELECT -3: 120.7", smp.bpm10 == 1207u);
+    run_block();
+    bad += check("HOME: SELECT +5 on MIXER: track volume up", ksnd(0)->p[P_LEVEL] > TP[P_LEVEL].def && trk[0].p[P_LEVEL] == ksnd(0)->p[P_LEVEL]);
     press(B_HOME);
     sm_input_poll();
     bad += check("HOME: CLOCK page", !strcmp(sm_cur_page()->name, "CLOCK"));
     turn(EN_SELECT, 3);
     sm_input_poll();
-    bad += check("HOME: SELECT on CLOCK too: 121.0", smp.bpm10 == 1210u);
+    bad += check("HOME: SELECT on CLOCK: tempo up", smp.bpm10 == 1203u);
     turn(EN_K1, 2);
     sm_input_poll();
-    bad += check("HOME: K1 slowly (2 detents): 0.1 BPM each", smp.bpm10 == 1212u);
+    bad += check("HOME: K1 slowly (2 detents): 0.1 BPM each", smp.bpm10 == 1205u);
     turn(EN_K1, -5);
     sm_input_poll();
-    bad += check("HOME: K1 -5 in one poll (a new turn): 3 x 0.1, then 2 x 1.0", smp.bpm10 == 1212u - 23u);
+    bad += check("HOME: K1 -5 in one poll (a new turn): 3 x 0.1, then 2 x 1.0", smp.bpm10 == 1205u - 23u);
     turn(EN_K1, -5000);
     sm_input_poll();
     bad += check("HOME: K1 far down: 30.0 BPM", smp.bpm10 == 300u);
@@ -4290,6 +4289,8 @@ static int test_home_bpm_select(void)
     host_ticks = 1000u;
     press(B_HOME);
     sm_input_poll();
+    press(B_HOME);                                        /* CLOCK: SELECT is tempo */
+    sm_input_poll();
     turn(EN_SELECT, 300);
     sm_input_poll();
     sm_step_toggle(0, 0);
@@ -4298,7 +4299,7 @@ static int test_home_bpm_select(void)
     S = (double)FS * 150.0 / 1500.0;
     seq_run((uint32_t)(5.0 * S));
     b = on_n[0];
-    bad += check("HOME: 150.0 BPM from SELECT: the trig on step 4 at 4 steps of that tempo",
+    bad += check("HOME: 150.0 BPM from CLOCK SELECT: the trig on step 4 at 4 steps of that tempo",
                  smp.bpm10 == 1500u && b == 2u && near_d(on_at[0][1], 4.0 * S));
     return bad;
 }
@@ -4357,7 +4358,7 @@ static int test_home_draw(void)
     nb += lint_frame("MIXER");
     bad += check("HOMEDRAW: MIXER: the page line and the four rings' labels T1 T2 T3 T4",
                  lint_has("MIXER", 0, 0) && lint_has("T1", 0, 0) && lint_has("T2", 0, 0) && lint_has("T3", 0, 0) && lint_has("T4", 0, 0));
-    bad += check("HOMEDRAW: ... SELECT is TEMPO with the BPM", lint_has("TEMPO", 0, 0) && lint_has("120.0", 0, 0));
+    bad += check("HOMEDRAW: ... SELECT is LEVEL with the track volume", lint_has("LEVEL", 0, 0));
     ksnd(2)->p[P_LEVEL] = 40;
     {
         uint32_t a = smd_knob_sig(2);
@@ -5438,12 +5439,6 @@ static int test_pat_seq_layer(void)
     sm_input_poll();
     key_up(1);
     bad += check("PAT: ... F#3 twice more: SEQUENTIAL again", smp.mode == SM_PM_SEQ);
-    turn(EN_K2, 8);
-    sm_input_poll();
-    bad += check("PAT: ... K2 +8: the master length 8", smp.pat[0].mlen == 8u);
-    turn(EN_K2, -20);
-    sm_input_poll();
-    bad += check("PAT: ... K2 -20: AUTO (0)", smp.pat[0].mlen == 0u);
     layer_let_go(B_SEQ);
     bad += check("PAT: SEQ let go: A03 asked for", smp.next == 2u && smp.cur == 0u);
     run_block();
@@ -5932,15 +5927,15 @@ static int test_copy_paste_track(void)
     sm_lock_set(2, 0, P_PAN, 5);
     t1 = *ksnd(0);
     layer_hold(B_SEQ);
-    lay_key(WHITE[2]);                                    /* A3: COPY the track (T1) */
+    lay_key(WHITE[4]);                                    /* C4: COPY the track (T1) */
     layer_let_go(B_SEQ);
-    bad += check("EDIT/COPY: A3 copies, changes nothing", !memcmp(&t1, ksnd(0), sizeof t1) && sm_msg == SM_MSG_NONE);
+    bad += check("EDIT/COPY: C4 copies, changes nothing", !memcmp(&t1, ksnd(0), sizeof t1) && sm_msg == SM_MSG_NONE);
     turn(EN_ALGO, 2);                                     /* T3 */
     sm_input_poll();
     layer_hold(B_SEQ);
-    lay_key(WHITE[3]);                                    /* B3: PASTE the track */
+    lay_key(WHITE[5]);                                    /* D4: PASTE the track */
     layer_let_go(B_SEQ);
-    bad += check("EDIT/PASTE: B3 on T3: T1's sound (machine, preset, values, length)", !memcmp(&t1, ksnd(2), sizeof t1));
+    bad += check("EDIT/PASTE: D4 on T3: T1's sound (machine, preset, values, length)", !memcmp(&t1, ksnd(2), sizeof t1));
     for (s = 0; s < SM_NSTEP; s++)
         ok &= !memcmp(stp(0, s), stp(2, s), sizeof(sm_step_t));
     bad += check("EDIT/PASTE: ... T1's steps", ok);
@@ -5970,7 +5965,7 @@ static int test_copy_paste_pattern(void)
         ed_track(t);
     cpat()->mlen = 12;
     layer_hold(B_SEQ);
-    lay_key(WHITE[3]);                                    /* B3 PASTE track with nothing copied: nothing */
+    lay_key(WHITE[5]);                                    /* D4 PASTE track with nothing copied: nothing */
     bad += check("EDIT/PASTE: nothing copied: PASTE does nothing", ed_trigs(cpat(), 0) == 4u && !sm_undo_ok);
     lay_key(WHITE[1]);                                    /* G3: COPY the pattern */
     turn(EN_ALGO, 4);                                     /* A05 picked */
@@ -5980,7 +5975,7 @@ static int test_copy_paste_pattern(void)
     sm_input_poll();
     bad += check("EDIT/PASTE: A05 now (empty)", smp.cur == 4u && !ed_trigs(cpat(), 0));
     layer_hold(B_SEQ);
-    lay_key(WHITE[5]);                                    /* D4: PASTE the pattern */
+    lay_key(WHITE[2]);                                    /* A3: PASTE the pattern */
     layer_let_go(B_SEQ);
     for (t = 0; t < SM_NTRK; t++) {
         ok &= !memcmp(&smp.pat[0].kit.snd[t], &smp.pat[4].kit.snd[t], sizeof(sm_sound_t));
@@ -5989,7 +5984,7 @@ static int test_copy_paste_pattern(void)
                   ed_lock(&smp.pat[0], t, s, P_FCUT) == ed_lock(&smp.pat[4], t, s, P_FCUT) &&
                   ed_lock(&smp.pat[0], t, s, P_FRES) == ed_lock(&smp.pat[4], t, s, P_FRES);
     }
-    bad += check("EDIT/PASTE: D4 on A05: A01's kit, steps, locks, master length", ok && smp.pat[4].mlen == 12u &&
+    bad += check("EDIT/PASTE: A3 on A05: A01's kit, steps, locks, master length", ok && smp.pat[4].mlen == 12u &&
                  ed_live(&smp.pat[4], 4) == 8u);
     run_block();
     run_block();
@@ -6001,9 +5996,9 @@ static int test_copy_paste_pattern(void)
     run_block();
     sm_input_poll();
     layer_hold(B_SEQ);
-    lay_key(WHITE[3]);                                    /* PASTE track with a pattern copied: that track of it */
+    lay_key(WHITE[5]);                                    /* PASTE track with a pattern copied: that track of it */
     layer_let_go(B_SEQ);
-    bad += check("EDIT/PASTE: a pattern copied, B3 on A06's T1: A01's T1", smp.cur == 5u && ed_trigs(cpat(), 0) == 4u &&
+    bad += check("EDIT/PASTE: a pattern copied, D4 on A06's T1: A01's T1", smp.cur == 5u && ed_trigs(cpat(), 0) == 4u &&
                  ed_lock(cpat(), 0, 4, P_FCUT) == 20 && !ed_trigs(cpat(), 1));
     return bad;
 }
@@ -6166,20 +6161,20 @@ static int test_filter_auto_lp(void)
     int bad = 0;
     in_reset();
     sm_ui.page = (uint8_t)page_by_name("FILTER");
-    turn(EN_K1, 0);
-    turn(EN_K2, -5);
+    turn(EN_K4, 0);                                       /* K4 is FILT type */
+    turn(EN_SELECT, -5);                                  /* SELECT is CUTOFF */
     sm_input_poll();
     run_block();
     bad += check("FILT: OFF, CUT turned: FILT LP in the model and on the core, CUT moved",
                  ksnd(0)->p[P_FLT] == 1 && trk[0].p[P_FLT] == 1 && ksnd(0)->p[P_FCUT] != TP[P_FCUT].def);
     in_reset();
     sm_ui.page = (uint8_t)page_by_name("FILTER");
-    turn(EN_K3, 3);
+    turn(EN_K1, 3);                                       /* K1 is RESONANCE */
     sm_input_poll();
     bad += check("FILT: OFF, RES turned: LP", ksnd(0)->p[P_FLT] == 1);
     in_reset();
     sm_ui.page = (uint8_t)page_by_name("FILTER");
-    turn(EN_K4, 3);
+    turn(EN_K2, 3);                                       /* K2 is ENV>FLT */
     sm_input_poll();
     bad += check("FILT: OFF, ENV turned: LP", ksnd(0)->p[P_FLT] == 1);
     in_reset();
@@ -6196,13 +6191,13 @@ static int test_filter_auto_lp(void)
     in_reset();
     sm_ui.page = (uint8_t)page_by_name("FILTER");
     ksnd(0)->p[P_FLT] = 5;                                /* HYB */
-    turn(EN_K2, 3);
+    turn(EN_SELECT, 3);                                   /* SELECT is CUTOFF even in HYB */
     sm_input_poll();
-    bad += check("FILT: HYB: CUT (BASE) turned: stays HYB", ksnd(0)->p[P_FLT] == 5);
+    bad += check("FILT: HYB: CUT turned: stays HYB", ksnd(0)->p[P_FLT] == 5);
     in_reset();
     sm_ui.page = (uint8_t)page_by_name("FILTER");
     ksnd(0)->p[P_FLT] = 3;                                /* HP */
-    turn(EN_K3, 3);
+    turn(EN_K1, 3);                                       /* K1 is RESONANCE */
     sm_input_poll();
     bad += check("FILT: HP: RES turned: stays HP", ksnd(0)->p[P_FLT] == 3);
     in_reset();
@@ -6338,11 +6333,11 @@ static void flt_sel_capture(int32_t f, int32_t sel, int32_t *L)
     sm_input_poll();
     filter_page();
     if (f) {
-        turn(EN_K1, f);
+        turn(EN_K4, f);                                   /* K4 is FILT type */
         sm_input_poll();
     }
     if (sel) {
-        turn(EN_SELECT, sel);
+        turn(EN_SELECT, sel);                             /* SELECT is CUTOFF */
         sm_input_poll();
     }
     press(B_PLAY);
@@ -6370,9 +6365,9 @@ static int test_filter_select(void)
     }
     printf("  repeat: difference %.3f %% of the energy\n", e > 0 ? 100.0 * d / e : 0.0);
     bad += check("FSEL: the same capture twice differs by < 1 % (the measure below is the knob's)", e > 0 && d / e < 0.01);
-    for (f = 0; f <= 5; f++) {
+    for (f = 0; f <= 4; f++) {                            /* HYB (5) skipped: CUTOFF does not affect HYB's sound */
         char line[120];
-        int32_t sel = f == 5 ? -90 : -60;                 /* (HYB: WIDTH 127 -> 37; else the LFO's depth 0 -> -60) */
+        int32_t sel = -60;                                /* SELECT is CUTOFF in every FILT */
         uint32_t id;
         flt_sel_capture(f, 0, hw_cap[0]);
         flt_sel_capture(f, sel, hw_cap[1]);
@@ -6382,9 +6377,9 @@ static int test_filter_select(void)
             d += (a - b) * (a - b);
             e += a * a;
         }
-        snprintf(line, sizeof line, "FSEL: FILT %-5s: SELECT is %s and is heard (difference %.0f %% of the energy)", NM[f],
-                 f == 5 ? "WIDTH" : "LFO>FLT", e > 0 ? 100.0 * d / e : 0.0);
-        bad += check(line, id == (f == 5 ? P_HWIDTH : P_LD_FLT) && e > 0 && d / e > 0.05 &&
+        snprintf(line, sizeof line, "FSEL: FILT %-5s: SELECT is CUTOFF and is heard (difference %.0f %% of the energy)", NM[f],
+                 e > 0 ? 100.0 * d / e : 0.0);
+        bad += check(line, id == P_FCUT && e > 0 && d / e > 0.05 &&
                            ksnd(1)->p[P_FLT] == (f ? f : 1));
     }
     return bad;
@@ -6719,9 +6714,11 @@ static int test_bank_glo_grid(void)
     glo_key_tap(11);                                      /* E4: A3, empty */
     bad += check("BANK/GLO: a tap on an empty place (E4, A3): the current pattern saved into it, kit and all; no switch",
                  !memcmp(&smp.pat[2], &smp.pat[0], sizeof smp.pat[0]) && smp.pat[2].kit.snd[0].p[P_FCUT] == 33 &&
-                 (sm_used[0] & 4u) && smp.cur == 0u && smp.next == SM_PAT_NONE && sm_want == SM_PAT_NONE);
+                 (sm_used[0] & 4u) && smp.cur == 0u && smp.next == SM_PAT_NONE && sm_want == SM_PAT_NONE &&
+                 sm_msg == SM_MSG_SAVED);
     glo_key_tap(11);
     bad += check("BANK/GLO: a tap on it again (used): asked for", smp.next == 2u);
+    sm_msg = SM_MSG_NONE;
     run_block();
     sm_input_poll();
     bad += check("BANK/GLO: ... stopped: it plays at once (A3 current)", smp.cur == 2u && smp.next == SM_PAT_NONE);
@@ -7247,13 +7244,13 @@ static int test_rec_grid(void)
     base = ksnd(0)->p[P_FCUT];
     key_dn(WHITE[3]);
     sm_input_poll();
-    turn(EN_K2, -5);
+    turn(EN_SELECT, -5);                                  /* SELECT is CUTOFF */
     sm_input_poll();
     key_up(WHITE[3]);
     sm_input_poll();
     key_dn(WHITE[6]);                                     /* an empty step held + a turn: no REST trig either */
     sm_input_poll();
-    turn(EN_K2, -2);
+    turn(EN_SELECT, -2);
     sm_input_poll();
     key_up(WHITE[6]);
     sm_input_poll();
@@ -7270,7 +7267,7 @@ static int test_rec_grid(void)
     base = ksnd(0)->p[P_FCUT];
     key_dn(WHITE[3]);
     sm_input_poll();
-    turn(EN_K2, 4);
+    turn(EN_SELECT, 4);
     sm_input_poll();
     key_up(WHITE[3]);
     sm_input_poll();
@@ -8124,18 +8121,18 @@ static int test_arp_pages(void)
     press(B_ARP);
     sm_input_poll();
     ksnd(0)->p[P_AMODE] = 0;
-    turn(EN_K1, 1);
+    turn(EN_K3, 1);                                       /* K3 is MODE */
     sm_input_poll();
-    bad += check("ARP page: K1 is MODE (OFF -> UP)", ksnd(0)->p[P_AMODE] == 1);
-    turn(EN_K3, 1);
+    bad += check("ARP page: K3 is MODE (OFF -> UP)", ksnd(0)->p[P_AMODE] == 1);
+    turn(EN_K2, 1);                                       /* K2 is OCT */
     sm_input_poll();
-    bad += check("ARP page: K3 is OCT", ksnd(0)->p[P_AOCT] == 2);
-    turn(EN_K4, -10);
+    bad += check("ARP page: K2 is OCT", ksnd(0)->p[P_AOCT] == 2);
+    turn(EN_K1, -10);                                     /* K1 is GATE */
     sm_input_poll();
-    bad += check("ARP page: K4 is GATE", ksnd(0)->p[P_AGATE] < 64);
-    turn(EN_SELECT, 1);
+    bad += check("ARP page: K1 is GATE", ksnd(0)->p[P_AGATE] < 64);
+    turn(EN_K4, 1);                                       /* K4 is ORDER */
     sm_input_poll();
-    bad += check("ARP page: SELECT is ORDER (NOTE -> PLAY)", ksnd(0)->p[P_AORDER] == 1);
+    bad += check("ARP page: K4 is ORDER (NOTE -> PLAY)", ksnd(0)->p[P_AORDER] == 1);
     press(B_ARP);
     sm_input_poll();
     turn(EN_K1, 5);
@@ -8152,8 +8149,8 @@ static int test_arp_pages(void)
     sm_ui.page = (uint8_t)sm_arp_page(0);
     ksnd(0)->p[P_AMODE] = 1;
     draw_full();
-    bad += check("ARP page: the screen says MODE RATE OCT GATE and ORDER", lint_has("MODE", 0, 0) && lint_has("RATE", 0, 0) &&
-                 lint_has("OCT", 0, 0) && lint_has("GATE", 0, 0) && lint_has("ORDER", 0, 0) && lint_frame("arp1") == 0);
+    bad += check("ARP page: the screen says GATE OCT MODE ORDER and RATE", lint_has("GATE", 0, 0) && lint_has("OCT", 0, 0) &&
+                 lint_has("MODE", 0, 0) && lint_has("ORDER", 0, 0) && lint_has("RATE", 0, 0) && lint_frame("arp1") == 0);
     return bad;
 }
 
@@ -8708,17 +8705,17 @@ static int test_shift_combos(void)
     in_reset();
     host_ticks = 1000u;
     shift_press(B_HOME);
-    bad += check("SHIFT+HOME: the MENU page (a stub), no layer", !strcmp(sm_cur_page()->name, "MENU") && sm_layer == SML_NONE && !sm_ui.kbd);
+    bad += check("SHIFT+HOME: the MIDI page (the first of the MENU family), no layer", !strcmp(sm_cur_page()->name, "MIDI") && sm_layer == SML_NONE && !sm_ui.kbd);
     draw_setup();
-    sm_ui.page = (uint8_t)page_by_name("MENU");
+    sm_ui.page = (uint8_t)page_by_name("MIDI");
     draw_full();
-    bad += check("SHIFT+HOME: the screen says MENU", lint_has("MENU", 0, 0) && lint_frame("menu") == 0);
+    bad += check("SHIFT+HOME: the screen says MIDI", lint_has("MIDI", 0, 0) && lint_frame("midi") == 0);
     in_reset();
     host_ticks = 1000u;
-    sm_ui.page = (uint8_t)page_by_name("MENU");
+    sm_ui.page = (uint8_t)page_by_name("MIDI");
     press(B_HOME);
     sm_input_poll();
-    bad += check("SHIFT+HOME: HOME tapped from MENU: the HOME family's first page, MIXER", !strcmp(sm_cur_page()->name, "MIXER"));
+    bad += check("SHIFT+HOME: HOME tapped from MIDI: the HOME family's first page, MIXER", !strcmp(sm_cur_page()->name, "MIXER"));
     shift_press(B_EDIT);
     bad += check("SHIFT+EDIT: the VOICE page (VOICE GLIDE DETUNE PRIO), no layer", !strcmp(sm_cur_page()->name, "VOICE") && sm_layer == SML_NONE &&
                  sm_page_param(0) == P_VOICE && sm_page_param(1) == P_GLIDE && sm_page_param(2) == P_DETUNE && sm_page_param(3) == P_PRIO);
@@ -8764,6 +8761,187 @@ static int test_shift_combos(void)
     bad += check("SHIFT+SAVE: a plain SAVE hold: UNDO as ever", sm_msg == SM_MSG_UNDO && ed_trigs(cpat(), 0) == 1u);
     btn_up(B_SAVE);
     sm_input_poll();
+    return bad;
+}
+
+/* -------------------------------------------------- SCL / MICRO pages --- */
+/* the SCL button's family: SCL (ROOT SCALE QUANT TRANS), MICRO (TUNE AMT ROOT). No layer: a tap cycles, as the
+ * plans/scl_pages_plan.md says: SCL tapped -> SCL, tapped again -> MICRO, tapped again -> SCL (round) */
+static int test_scl_pages(void)
+{
+    static const struct { const char *pg; uint8_t id[4]; } T[2] = {
+        {"SCL", {P_ROOT, P_SCALE, P_QUANT, P_TRANS}},
+        {"MICRO", {P_FM4_LEVEL, P_MAMT, P_ROOT, SM_NOPARAM}},
+    };
+    int bad = 0, ok = 1;
+    uint32_t i, p;
+    in_reset();
+    host_ticks = 1000u;
+    sm_ui.page = (uint8_t)page_by_name("MIX");
+    btn_down(B_SCL);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_SCL);
+    sm_input_poll();
+    bad += check("SCL: the SCL button tapped from another family: the SCL page, no layer",
+                 !strcmp(sm_cur_page()->name, "SCL") && sm_layer == SML_NONE);
+    btn_down(B_SCL);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_SCL);
+    sm_input_poll();
+    bad += check("SCL: tapped again: MICRO", !strcmp(sm_cur_page()->name, "MICRO"));
+    btn_down(B_SCL);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_SCL);
+    sm_input_poll();
+    bad += check("SCL: tapped again: rounds to SCL", !strcmp(sm_cur_page()->name, "SCL"));
+    for (p = 0; p < 2u; p++) {
+        sm_ui.page = (uint8_t)page_by_name(T[p].pg);
+        for (i = 0; i < 4u; i++) {
+            uint8_t id = T[p].id[i];
+            uint8_t before;
+            ok &= sm_page_param(i) == id;                 /* (K4 of MICRO has none) */
+            if (id == SM_NOPARAM)
+                continue;
+            ksnd(0)->p[id] = (int8_t)((TP[id].min + TP[id].max) / 2);   /* (mid: a turn either way moves it) */
+            turn(EN_K1 + i, 1);
+            sm_input_poll();
+            before = ksnd(0)->p[id];
+            turn(EN_K1 + i, 1);
+            sm_input_poll();
+            ok &= ksnd(0)->p[id] != before;               /* a detent moved the model */
+            run_block();
+            ok &= trk[0].p[id] == ksnd(0)->p[id];         /* ... and the core has it */
+        }
+    }
+    bad += check("SCL: the knobs of SCL and MICRO turn their parameters (model and core, K4 of MICRO none)", ok);
+    return bad;
+}
+
+/* --------------------------------------------------- LFO pages --- */
+/* the LFO button's family: LFO (WAVE PHASE SYNC TRIG, SELECT RATE), LFO DEST (PIT FLT SHP AMP, SELECT FADE), a tap cycles */
+static int test_lfo_pages(void)
+{
+    int bad = 0, ok;
+    uint32_t i;
+    in_reset();
+    host_ticks = 1000u;
+    sm_ui.page = (uint8_t)page_by_name("MIX");
+    btn_down(B_LFO);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_LFO);
+    sm_input_poll();
+    bad += check("LFO: the LFO button tapped: the LFO page, no layer", !strcmp(sm_cur_page()->name, "LFO") && sm_layer == SML_NONE);
+    btn_down(B_LFO);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_LFO);
+    sm_input_poll();
+    bad += check("LFO: tapped again: LFO DEST", !strcmp(sm_cur_page()->name, "LFO DEST"));
+    btn_down(B_LFO);
+    sm_input_poll();
+    ms(100);
+    btn_up(B_LFO);
+    sm_input_poll();
+    bad += check("LFO: ... and round to LFO", !strcmp(sm_cur_page()->name, "LFO"));
+    sm_ui.page = (uint8_t)page_by_name("LFO");
+    ok = sm_page_param(0) == P_LWAVE && sm_page_param(1) == P_LPHASE && sm_page_param(2) == P_LSYNC && sm_page_param(3) == P_LTRIG && sm_page_param(4) == P_LRATE;
+    sm_ui.page = (uint8_t)page_by_name("LFO DEST");
+    ok &= sm_page_param(0) == P_LD_PIT && sm_page_param(1) == P_LD_FLT && sm_page_param(2) == P_LD_SHP && sm_page_param(3) == P_LD_AMP && sm_page_param(4) == P_LFADE;
+    sm_ui.page = (uint8_t)page_by_name("LFO");
+    sm_ui.trk = 0;
+    for (i = 0; i < 4u; i++) {
+        uint32_t id = sm_page_param(i);
+        uint8_t before;
+        ksnd(0)->p[id] = (int8_t)((TP[id].min + TP[id].max) / 2);   /* (mid: a turn either way moves it) */
+        before = ksnd(0)->p[id];
+        turn(EN_K1 + i, 1);
+        sm_input_poll();
+        ok &= ksnd(0)->p[id] != before;
+        run_block();
+        ok &= trk[0].p[id] == ksnd(0)->p[id];
+    }
+    bad += check("LFO: the knobs are WAVE PHASE SYNC TRIG (SELECT RATE, DEST: PIT FLT SHP AMP) and turn the track (model and core)", ok);
+    return bad;
+}
+
+/* --------------------------------- the MIDI page (channel per track) and the SETUP page (MIDI source) --- */
+static int test_midi_pages(void)
+{
+    int bad = 0;
+    uint32_t k;
+    /* the MIDI page: a note plays on the track whose channel it listens on */
+    midi_reset();
+    for (k = 0; k < SM_NTRK; k++)
+        sm_midi_ch[k] = (uint8_t)(1u + k);                /* 1 2 3 4 */
+    midi_put(0x90u | 9u, 60, 100, 1);                     /* channel 10: no track on it */
+    mix_blocks(2);
+    bad += check("MIDI page: a note on channel 10 (no track): nothing", seq_nev == 0u);
+    midi_reset();
+    sm_midi_ch[2] = 10u;                                  /* T3 listens on channel 10 now */
+    midi_put(0x90u | 9u, 60, 100, 1);
+    mix_blocks(2);
+    bad += check("MIDI page: T3 set to channel 10: a note on channel 10 plays T3", on_n[2] == 1u && notes_on_core(2) == 1u);
+    midi_reset();
+    midi_put(0x90u | 2u, 62, 100, 1);                     /* channel 3: T3's old channel, now dead */
+    mix_blocks(2);
+    bad += check("MIDI page: ... and a note on channel 3 (T3's old): nothing", seq_nev == 0u);
+    /* the SETUP page: the source filter */
+    midi_reset();
+    sm_midi_src = 0u;                                     /* USB */
+    midi_put(0x90u, 60, 100, 2);                          /* from the TRS jack: dropped */
+    midi_put(0x90u, 61, 100, 1);                          /* from USB: taken */
+    mix_blocks(2);
+    bad += check("SETUP page: source USB: only the USB port's notes", on_n[0] == 1u && seq_nev == 1u && ev_nth(1, 0, 0) && ev_nth(1, 0, 0)->note == 61u);
+    midi_reset();
+    sm_midi_src = 2u;                                     /* JACK */
+    midi_put(0x90u, 62, 100, 1);                          /* from USB: dropped */
+    midi_put(0x90u, 63, 100, 2);                          /* from the TRS jack: taken */
+    mix_blocks(2);
+    bad += check("SETUP page: source JACK: only the TRS jack's notes", on_n[0] == 1u && seq_nev == 1u && ev_nth(1, 0, 0) && ev_nth(1, 0, 0)->note == 63u);
+    midi_reset();
+    sm_midi_src = 1u;                                     /* INT: both merged */
+    midi_put(0x90u, 64, 100, 1);
+    midi_put(0x90u, 65, 100, 2);
+    mix_blocks(2);
+    bad += check("SETUP page: source INT: both ports merged", on_n[0] == 2u && seq_nev == 2u);
+    /* the knobs themselves: MIDI page K1..K4 the channels, SETUP page K1 MODE / K2 SRC, both directions with a wrap
+     * (a down turn from 1 or 0 must not land on 255: the drain and the screen would be lost) */
+    in_reset();
+    host_ticks = 1000u;
+    shift_press(B_HOME);                                  /* MIDI (the first page of the MENU family) */
+    bad += check("SETUP knob: SHIFT+HOME: the MIDI page", !strcmp(sm_cur_page()->name, "MIDI"));
+    turn(EN_K1, -1);                                      /* T1: 1 -> 16 */
+    sm_input_poll();
+    bad += check("SETUP knob: MIDI page K1 down: T1's channel wraps to 16", sm_midi_ch[0] == 16u);
+    turn(EN_K1, 1);                                       /* back to 1 */
+    sm_input_poll();
+    bad += check("SETUP knob: ... K1 up: back to 1", sm_midi_ch[0] == 1u);
+    shift_press(B_HOME);                                  /* SETUP (the next page of the MENU family) */
+    bad += check("SETUP knob: SHIFT+HOME again: the SETUP page", !strcmp(sm_cur_page()->name, "SETUP"));
+    turn(EN_K1, 1);                                       /* MODE: 0 -> 1 */
+    sm_input_poll();
+    bad += check("SETUP knob: K1 (MODE) turns the pattern change mode", smp.mode == 1u);
+    turn(EN_K1, -2);                                      /* 1 - 2 -> 2, not 255 */
+    sm_input_poll();
+    bad += check("SETUP knob: ... K1 down two: wraps to DIR.J (2)", smp.mode == 2u);
+    turn(EN_K2, -1);                                      /* SRC: 1 -> 0 (USB) */
+    sm_input_poll();
+    bad += check("SETUP knob: K2 (SRC) down: USB", sm_midi_src == 0u);
+    turn(EN_K2, -1);                                      /* 0 -> JACK (2), not 255 */
+    sm_input_poll();
+    bad += check("SETUP knob: ... and wraps up JACK (2), never 255", sm_midi_src == 2u);
+    for (k = 0; k < SM_NTRK; k++) {                       /* (leave nothing held: the books clear, the tracks released) */
+        sm_mn[k][0] = sm_mn[k][1] = sm_mn[k][2] = sm_mn[k][3] = 0;
+        sm_kn[k][0] = sm_kn[k][1] = sm_kn[k][2] = sm_kn[k][3] = 0;
+        trk_all_off(&trk[k]);
+        sm_midi_ch[k] = (uint8_t)(1u + k);                /* (back to the defaults) */
+    }
+    sm_midi_src = 1u;
+    mix_blocks(1);
     return bad;
 }
 
@@ -8928,7 +9106,7 @@ static int test_shift_accel(void)
     sm_ui.page = (uint8_t)page_by_name("FILTER");
     {
         int8_t c0 = ksnd(0)->p[P_FCUT];
-        turn(EN_K2, -3);
+        turn(EN_SELECT, -3);                               /* SELECT is CUTOFF */
         sm_input_poll();
         bad += check("ACCEL: a sound parameter (CUT 0..127): x4", ksnd(0)->p[P_FCUT] == c0 - 12);
     }
@@ -9380,6 +9558,9 @@ int main(void)
     bad += test_fx_project_migration();
     bad += test_fx_draw();
     bad += test_shift_combos();
+    bad += test_scl_pages();
+    bad += test_lfo_pages();
+    bad += test_midi_pages();
     bad += test_euclid();
     bad += test_shift_keys();
     bad += test_shift_accel();

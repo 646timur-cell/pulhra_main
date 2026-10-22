@@ -12,9 +12,9 @@
 /* the families of the buttons (a tap of the button: the family's next page) and, after FX, the families of the SHIFT combos (no
  * button of their own: SHIFT + EDIT the VOICE page, SHIFT + FX the deep FX pages DLY / REV / CHORUS in turn, SHIFT + SEQ the
  * EUCLID page, SHIFT + HOME the MENU page; sm_layer.c) */
-enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_VOICE, SMFAM_DEEP, SMFAM_EUCL, SMFAM_MENU,
+enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_LFO, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_SCL, SMFAM_VOICE, SMFAM_DEEP, SMFAM_EUCL, SMFAM_MENU,
        SMFAM_COUNT };
-enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
+enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU, SMH_MIDI, SMH_SETUP };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
 
 typedef struct {
     const char *name;
@@ -27,14 +27,16 @@ typedef struct {
 static const sm_page_t SM_PAGES[] = {
     {"EDIT 1", SMFAM_EDIT, {P_E0, P_E1, P_E2, P_E3}, P_E8},
     {"EDIT 2", SMFAM_EDIT, {P_E4, P_E5, P_E6, P_E7}, P_E8},
-    {"AMP", SMFAM_GLO, {P_ATK, P_DEC, P_SUS, P_REL}, P_ESYNC},
+    {"AMP", SMFAM_GLO, {P_ATK, P_DEC, P_SUS, P_REL}, P_LEVEL},   /* SELECT: track volume (ESYNC removed) */
     {"MIX", SMFAM_GLO, {P_LEVEL, P_PAN, P_DIST, P_REV}, SM_NOPARAM},
-    {"FILTER", SMFAM_ENV, {P_FLT, P_FCUT, P_FRES, P_ED_FLT}, P_LD_FLT},   /* SELECT: LFO>FLT (HYB: WIDTH) */
+    {"FILTER", SMFAM_ENV, {P_FRES, P_ED_FLT, P_LD_FLT, P_FLT}, P_FCUT},   /* SELECT: CUTOFF, K1 RES, K2 ENV>FLT, K3 LFO>FLT, K4 TYPE */
     {"F.ENV", SMFAM_ENV, {P_FATK, P_FDEC, P_ED_FLT, SM_NOPARAM}, SM_NOPARAM},
+    {"LFO", SMFAM_LFO, {P_LWAVE, P_LPHASE, P_LSYNC, P_LTRIG}, P_LRATE},   /* SELECT: RATE, K1 WAVE, K2 PHASE, K3 SYNC, K4 TRIG */
+    {"LFO DEST", SMFAM_LFO, {P_LD_PIT, P_LD_FLT, P_LD_SHP, P_LD_AMP}, P_LFADE},
     {"STEP", SMFAM_SEQ, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_NONE},
-    {"MIXER", SMFAM_HOME, {P_LEVEL, P_LEVEL, P_LEVEL, P_LEVEL}, SM_NOPARAM, SMH_MIXER},   /* K1..K4: the LEVEL of T1..T4 */
+    {"MIXER", SMFAM_HOME, {P_LEVEL, P_LEVEL, P_LEVEL, P_LEVEL}, P_LEVEL, SMH_MIXER},   /* K1..K4: the LEVEL of T1..T4, SELECT: selected track's volume */
     {"CLOCK", SMFAM_HOME, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_CLOCK},   /* K1 BPM, K2 SWING */
-    {"ARP", SMFAM_ARP, {P_AMODE, P_ARATE, P_AOCT, P_AGATE}, P_AORDER},                  /* the arpeggiator (sm_arp.c): the ARP tap */
+    {"ARP", SMFAM_ARP, {P_AGATE, P_AOCT, P_AMODE, P_AORDER}, P_ARATE},                  /* SELECT: RATE, K1 GATE, K2 OCT, K3 MODE, K4 ORDER */
     {"ARP 2", SMFAM_ARP, {P_ASWING, P_APROB, P_AHOLD, SM_NOPARAM}, SM_NOPARAM},         /* K3 is LATCH (params.c names it HOLD) */
     /* the FX button's family (a tap goes to the next page: FX, DIST, INSERT). FX: the four sends, SELECT the delay's MIX (the
      * core has no separate dry level: the dry is the track's LEVEL); DIST: TYPE DRIVE (the send P_DIST is the drive) TONE OUT,
@@ -50,7 +52,10 @@ static const sm_page_t SM_PAGES[] = {
     {"REV", SMFAM_DEEP, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RDAMP, SM_NOPARAM}, SM_NOPARAM},
     {"CHORUS", SMFAM_DEEP, {SM_GLB | G_CRATE, SM_GLB | G_CDEPTH, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
     {"EUCLID", SMFAM_EUCL, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_EUCLID},
-    {"MENU", SMFAM_MENU, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_MENU},
+    {"SCL", SMFAM_SCL, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}, SM_NOPARAM},
+    {"MICRO", SMFAM_SCL, {P_FM4_LEVEL, P_MAMT, P_ROOT, SM_NOPARAM}, SM_NOPARAM},
+    {"MIDI", SMFAM_MENU, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_MIDI},
+    {"SETUP", SMFAM_MENU, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_SETUP},
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
@@ -72,7 +77,8 @@ static uint32_t sm_map_open(void) { return sm_layer != 0; }
 static uint32_t sm_fam_btn(uint32_t fam)
 {
     return fam == SMFAM_EDIT || fam == SMFAM_VOICE ? B_EDIT : fam == SMFAM_GLO ? B_GLO : fam == SMFAM_SEQ || fam == SMFAM_EUCL ? B_SEQ :
-           fam == SMFAM_HOME || fam == SMFAM_MENU ? B_HOME : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX || fam == SMFAM_DEEP ? B_FX : B_ENV;
+           fam == SMFAM_HOME || fam == SMFAM_MENU ? B_HOME : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX || fam == SMFAM_DEEP ? B_FX :
+           fam == SMFAM_LFO ? B_LFO : fam == SMFAM_SCL ? B_SCL : B_ENV;
 }
 
 /* a family's button: its first page, or, when the page is of that family already, the next one (the last wraps) */
@@ -99,20 +105,12 @@ static void sm_page_press(uint32_t fam)
  * the selected track's sound makes K2 / K3 HYBRID's BASE / RES (CUT / RES do nothing then: voice.c mf_filter_voice) and
  * SELECT its WIDTH (the low-pass above BASE). In OFF / LP / BP / HP / NOTCH SELECT is the LFO's depth onto the cutoff
  * (P_LD_FLT, LFO DEST's FLT): mf_filter_voice has no key tracking and no drive, its cutoff moves by ENV (K4), the LFO
- * and the accent, so LFO>FLT is the one filter control not on K1..K4 (SWAMP has no LFO page; the LFO runs at its
- * default RATE). Hardware 02:43: SELECT on FILTER was WIDTH in every FILT and did nothing outside HYB */
+ * and the accent, so LFO>FLT is the one filter control not on K1..K4 (the LFO page's FLT destination; the LFO runs at
+ * its own RATE from the LFO page). Hardware 02:43: SELECT on FILTER was WIDTH in every FILT and did nothing outside HYB */
 static uint32_t sm_page_param(uint32_t k)
 {
     const sm_page_t *pg = sm_cur_page();
-    uint32_t id = k < 4u ? pg->id[k] : pg->sel;
-    int hyb = pg->id[0] == P_FLT && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5;
-    if (hyb && id == P_FCUT)
-        return P_HBASE;
-    if (hyb && id == P_FRES)
-        return P_HRES;
-    if (hyb && k == 4u)
-        return P_HWIDTH;
-    return id;
+    return k < 4u ? pg->id[k] : pg->sel;
 }
 
 /* the ARP button's pages (ARP, ARP 2): the first page of the family, and the page after it (the tests') */

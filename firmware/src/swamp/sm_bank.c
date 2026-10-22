@@ -544,7 +544,7 @@ static void sm_chain_ask(const uint8_t *c, uint32_t n)
 }
 
 /* the current pattern copied into pattern id g (kit and all; GLO): its bank in RAM (else it waits), the slot quiet while the
- * copy is written (no link resolves into its half, not asked for). 0 done, 1 waiting */
+ * copy is written (no link resolves into its half, not asked for). 0 done, 1 waiting, 2 the flash failed (SM_MSG_FLASH shown) */
 static int sm_pat_store(uint32_t g)
 {
     uint32_t s, h, b = g / SM_BPAT, r;
@@ -552,7 +552,7 @@ static int sm_pat_store(uint32_t g)
         return 0;
     r = sm_bank_bring(b);
     if (r == SM_BR_FAIL)
-        return 0;
+        return 2;
     s = sm_slot_of(g);
     if (r == SM_BR_WAIT || s >= SM_NPAT)
         return 1;
@@ -615,8 +615,14 @@ static void sm_bank_poll(uint32_t now)
         if (sm_slot_of(smp.chain[c]) >= SM_NPAT)
             (void)sm_bank_bring(smp.chain[c] / SM_BPAT);   /* (playing with the other half dirty: the switch waits) */
     }
-    if (sm_gop_kind && !sm_pat_store(sm_gop_g))
-        sm_gop_kind = 0;
+    if (sm_gop_kind) {                                   /* the GLO save that waited for a free half: done, SAVED */
+        uint32_t g = sm_pat_store(sm_gop_g);
+        if (g != 1u) {
+            sm_gop_kind = 0;
+            if (!g)
+                sm_msg_show(SM_MSG_SAVED);
+        }
+    }
     if (playing) {
         sm_as_t0 = now;                                   /* (the quiet counts while stopped) */
         return;
@@ -657,15 +663,20 @@ static void sm_glo_open(void)
  * an empty one takes a copy of the current pattern */
 static void sm_glo_tap(uint32_t place)
 {
-    uint32_t g = sm_glo_bank * SM_BPAT + place % SM_BPAT;
+    uint32_t g = sm_glo_bank * SM_BPAT + place % SM_BPAT, r;
     if (g == sm_gid_of(smp.cur))
         return;
     sm_flash_hold = 0;                                    /* (a request: one more try) */
     if (sm_pat_used(g)) {
         sm_ask(g);
-    } else if (sm_pat_store(g)) {
-        sm_gop_kind = 1;                                  /* (its bank waits for a free half) */
+        return;
+    }
+    r = sm_pat_store(g);
+    if (r == 1u) {                                        /* (its bank waits for a free half) */
+        sm_gop_kind = 1;
         sm_gop_g = (uint8_t)g;
+    } else if (!r) {
+        sm_msg_show(SM_MSG_SAVED);                        /* (2: the flash failed, its FLASH shown) */
     }
 }
 /* GLO, every poll: a pattern key down (white C4..C5, place 0..7), its hold (>= 0.8 s: the current pattern saved into it again,
@@ -694,12 +705,16 @@ static void sm_glo_poll(uint32_t notes, uint32_t now)
         sm_glo_key = 0xFFu;
         sm_dirty = 1;
     } else if (!sm_glo_done && (uint32_t)(now - sm_glo_t0) >= SM_GLO_HOLD_US * FM1_TICKS_PER_US) {
-        uint32_t g = sm_glo_bank * SM_BPAT + sm_glo_key;
+        uint32_t g = sm_glo_bank * SM_BPAT + sm_glo_key, r = 0;
         sm_glo_done = 1;
         sm_flash_hold = 0;
-        if (g != sm_gid_of(smp.cur) && sm_pat_store(g)) {
+        if (g != sm_gid_of(smp.cur))
+            r = sm_pat_store(g);
+        if (r == 1u) {                                      /* (its bank waits for a free half) */
             sm_gop_kind = 1;
             sm_gop_g = (uint8_t)g;
+        } else if (!r) {
+            sm_msg_show(SM_MSG_SAVED);                      /* (2: the flash failed, its FLASH shown) */
         }
         sm_dirty = 1;
     }

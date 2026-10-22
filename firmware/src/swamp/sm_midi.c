@@ -22,6 +22,11 @@
  * them; the arp keeps a fourth book (sm_arp_has), which the other sides leave alone and which leaves theirs alone. */
 static uint32_t sm_mn[SM_NTRK][4];                        /* the notes MIDI holds, bit per note 0..127 */
 static uint32_t sm_kn[SM_NTRK][4];                        /* the notes the keyboard mode holds (its own book: SMC_KEYON / KEYOFF) */
+/* the MIDI page and the SETUP page (sm_input.c writes them, the drain and the screen read them): the channel each track
+ * listens on (1..16) and the source to take (0 USB the port alone, 1 INT both merged, 2 JACK the TRS jack alone). The
+ * defaults are the stage-2 routing: channel 1..4 -> T1..T4, both inputs (a TRS-only rig works out of the box). */
+static uint8_t sm_midi_ch[SM_NTRK] = {1, 2, 3, 4};
+static uint8_t sm_midi_src = 1;
 
 static uint32_t sm_mn_has(uint32_t t, uint32_t note) { return (sm_mn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
 static uint32_t sm_kn_has(uint32_t t, uint32_t note) { return (sm_kn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
@@ -104,10 +109,20 @@ static void sm_midi_drain(void)
             sm_kbd_release(t);
         }
     while (mi_r != mi_w) {
-        uint32_t pkt = midi_in_q[mi_r % MQ], status = (pkt >> 8) & 0xFFu, hi = status & 0xF0u, ch = status & 0x0Fu;
-        uint32_t note = (pkt >> 16) & 0x7Fu, vel = (pkt >> 24) & 0x7Fu;
+        uint32_t at = mi_r % MQ, pkt = midi_in_q[at];
+        uint32_t src = midi_in_source[at] ? midi_in_source[at] : 1u;   /* (0: unknown, as USB, as seq.c reads it) */
+        uint32_t status = (pkt >> 8) & 0xFFu, hi = status & 0xF0u, chan = (status & 0x0Fu) + 1u;
+        uint32_t note = (pkt >> 16) & 0x7Fu, vel = (pkt >> 24) & 0x7Fu, ch = SM_NTRK, i;
         RING_PUBLISH();
         mi_r++;
+        /* the SETUP page's MIDI source: USB (0) the USB port alone, INT (1) both merged, JACK (2) the TRS jack alone */
+        if ((sm_midi_src == 0u && src != 1u) || (sm_midi_src == 2u && src != 2u))
+            continue;
+        for (i = 0; i < SM_NTRK; i++)                     /* the MIDI page: the channel each track listens on (1..16) */
+            if (sm_midi_ch[i] == chan) {
+                ch = i;
+                break;
+            }
         if ((hi != 0x80u && hi != 0x90u) || (pkt & 0x0Fu) != hi >> 4 || ch >= SM_NTRK)
             continue;                                     /* (a SysEx byte, realtime, CC .., another channel) */
         if (hi == 0x90u && vel) {

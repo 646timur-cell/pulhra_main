@@ -42,18 +42,18 @@ static uint8_t sm_lay_chain[SM_NCHAIN], sm_lay_nch;       /* SEQ: the chain bein
 static uint8_t sm_lay_clr;                                /* SEQ: F3 down since sm_lay_clr_t0 (1), its hold cleared all (2) */
 static uint32_t sm_lay_clr_t0;
 
-#define SM_NLBTN 6u
+#define SM_NLBTN 8u
 static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
     {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ}, {B_HOME, SML_NONE, SMFAM_HOME},
-    {B_FX, SML_NONE, SMFAM_FX}, {B_ARP, SML_NONE, SMFAM_ARP},
+    {B_FX, SML_NONE, SMFAM_FX}, {B_ARP, SML_NONE, SMFAM_ARP}, {B_LFO, SML_NONE, SMFAM_LFO}, {B_SCL, SML_NONE, SMFAM_SCL},
 };
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
 #define SM_LAY_CHOFF_KEY 3u                               /* SEQ: G#3 (key 3), the chain off */
 #define SM_LAY_F3_KEY 0u                                  /* SEQ: F3 (key 0), CLEAR (held: all) */
 #define SM_LAY_FILL_KEY 26u                               /* GLO: G5 (key 26), FILL while held */
-enum { SM_W_CLEAR = 0, SM_W_COPY_PAT = 1, SM_W_COPY_TRK = 2, SM_W_PASTE_TRK = 3, SM_W_PASTE_PAT = 5, SM_W_SHL = 6, SM_W_SHR = 7,
-       SM_W_TRN_DN = 10, SM_W_TRN_UP = 11 };             /* SEQ: the white keys of the tools (F3 = 0) */
+enum { SM_W_CLEAR = 0, SM_W_COPY_PAT = 1, SM_W_COPY_TRK = 4, SM_W_PASTE_TRK = 5, SM_W_PASTE_PAT = 2, SM_W_SHL = 6, SM_W_SHR = 7,
+       SM_W_TRN_DN = 10, SM_W_TRN_UP = 11 };             /* SEQ: the white keys of the tools (F3 = 0); C4=4 copy, D4=5 paste */
 #define SM_NEPAGE 3u
 
 static void sm_layer_init(void)
@@ -268,23 +268,19 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         sm_lay_epage = (uint8_t)((sm_lay_epage + 1u) % SM_NEPAGE);
         sm_dirty = 1;
     }
-    if (sm_layer == SML_SEQ && k[0]) {
+    if (sm_layer == SML_SEQ && sel) {                     /* SELECT: the track's length */
         sm_sound_t *sd = sm_ui_sound();
-        int32_t len = clamp((int32_t)sd->len + k[0], 1, (int32_t)SM_NSTEP);
+        int32_t len = clamp((int32_t)sd->len + sel, 1, (int32_t)SM_NSTEP);
         if ((uint8_t)len != sd->len) {
-            sd->len = (uint8_t)len;                       /* (a byte: the audio stream reads it, sm_seq_step) */
+            sd->len = (uint8_t)len;
             if (len <= 16)
                 sm_ui.bank = 0;
             sm_dirty = 1;
         }
     }
-    if (sm_layer == SML_SEQ && k[1]) {                    /* the master length: 0 AUTO, 1..128 */
-        sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-        int32_t m = clamp((int32_t)pt->mlen + k[1], 0, (int32_t)SM_MLEN_MAX);
-        if ((uint8_t)m != pt->mlen) {
-            pt->mlen = (uint8_t)m;                        /* (a byte: the audio stream reads it at a step's start) */
-            sm_dirty = 1;
-        }
+    if (sm_layer == SML_SEQ && k[3]) {                    /* K4: the pattern change style (SEQ, DIR.S, DIR.J) */
+        smp.mode = (uint8_t)(((int32_t)smp.mode + k[3] + (int32_t)SM_PM_COUNT) % SM_PM_COUNT);
+        sm_dirty = 1;
     }
     if (sm_layer == SML_SEQ && ((pressed >> panel.btn[B_OCTUP]) & 1u) && sm_lay_nch < SM_NCHAIN) {
         sm_lay_chain[sm_lay_nch++] = (uint8_t)(sm_lay_pick < SM_NGPAT ? sm_lay_pick : sm_gid_of(smp.cur) % SM_NGPAT);
