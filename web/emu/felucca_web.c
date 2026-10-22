@@ -491,3 +491,17 @@ EXPORT uint32_t web_screen_draws(void) { return web_draws; }
 EXPORT uint32_t web_now_ms(void) { return fm1_ms; }
 EXPORT uint32_t web_playing(void) { return song.playing; }
 EXPORT uint32_t web_sample_rate(void) { return FS; }
+
+/* DIAG: identify which firmware this wasm was compiled for */
+EXPORT uint32_t web_diag_firmware(void)
+{
+#if FELUCCA_SWAMP
+    return 0x5357414d;  /* "SWAM" */
+#elif FELUCCA_STRANGE
+    return 0x53545241;  /* "STRA" */
+#else
+    return 0x46454c55;  /* "FELU" */
+#endif
+}
+EXPORT uint32_t web_diag_flash_lo(void) { return 0xB4000u; }
+EXPORT uint32_t web_diag_flash_hi(void) { return 0xDC000u; }

@@ -232,8 +232,14 @@ function build(name) {
 function syncButtons(redraw) {
   let m = latched;
   for (const b of btnBy.values()) m |= 1 << b;
-  if (m !== btnMask) { btnMask = m; send({ type: "buttons", mask: m }); }
-  else if (!redraw) return;
+  if (m !== btnMask) {
+    btnMask = m;
+    // DIAG: log button changes
+    const names = [];
+    for (const [k, v] of Object.entries(B)) if (m & (1 << v)) names.push(k);
+    diagLog("BTN: " + names.join(" ") + " (0x" + m.toString(16) + ")");
+    send({ type: "buttons", mask: m });
+  } else if (!redraw) return;
   for (const b of buttons) {
     const on = !!(m & (1 << b.bit));
     b.g.classList.toggle("held", on);
@@ -441,6 +447,14 @@ async function midiOn() {
   } catch { /* no permission: the panel only */ }
 }
 
+// ------------------------------------------------------------------ DIAG display
+const diag = document.createElement("pre");
+diag.id = "diag";
+diag.style.cssText = "position:fixed;bottom:0;right:0;background:rgba(0,0,0,.7);color:#0f0;font:11px monospace;padding:4px 8px;margin:0;z-index:99;pointer-events:none;max-width:50%;overflow:hidden;";
+diag.textContent = "DIAG: waiting for wasm...";
+document.body.appendChild(diag);
+function diagLog(line) { const t = diag.textContent; diag.textContent = (t.split("\n").length > 8 ? t.split("\n").slice(1).join("\n") : t) + "\n" + line; }
+
 // ------------------------------------------------------------------ switching on
 const status = document.getElementById("status");
 const say = (t) => { status.textContent = t; status.hidden = !t; };
@@ -459,8 +473,15 @@ async function switchOn() {
     await new Promise((res, rej) => {
       node.port.onmessage = (e) => {
         const m = e.data;
-        if (m.type === "ready") res();
-        else if (m.type === "error") rej(new Error(m.message));
+        if (m.type === "ready") {
+          if (m.diag) {
+            diagLog("DIAG: firmware = " + m.diag.fw);
+            diagLog("DIAG: flash = 0x" + m.diag.flashLo.toString(16) + "..0x" + m.diag.flashHi.toString(16));
+            diagLog("DIAG: STORE = " + STORE + (m.diag.flashLo === 0xB4000 ? " (PULHRA)" : " (Felucca)"));
+          }
+          diagLog("DIAG: worklet ready");
+          res();
+        } else if (m.type === "error") rej(new Error(m.message));
         else if (m.type === "frame") {
           if (m.fb) drawScreen(m.fb);
           if (m.leds) drawLights(lastLeds = m.leds, m.anim);

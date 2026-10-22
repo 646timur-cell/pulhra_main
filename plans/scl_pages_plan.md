@@ -1,4 +1,4 @@
-# Plan: Add SCL Pages to SWAMP MACHINE
+# Plan: Add SCL Pages to PULHRA
 
 ## Overview
 
@@ -11,7 +11,7 @@ No layer is needed — just a tap of the SCL button cycles between the two pages
 
 ## Files to Modify
 
-### 1. `firmware/src/swamp/sm_pages.c` — Add SCL family and pages
+### 1. `firmware/src/pulhra/sm_pages.c` — Add SCL family and pages
 
 **a) Add `SMFAM_SCL` to the family enum** (line 15)
 
@@ -56,7 +56,7 @@ static uint32_t sm_fam_btn(uint32_t fam)
 }
 ```
 
-### 2. `firmware/src/swamp/sm_layer.c` — Add SCL to button table
+### 2. `firmware/src/pulhra/sm_layer.c` — Add SCL to button table
 
 **a) Update `SM_NLBTN`** (line 45) from 7 to 8
 
@@ -78,7 +78,7 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
 };
 ```
 
-### 3. `firmware/src/swamp/sm_draw.c` — Verify rendering
+### 3. `firmware/src/pulhra/sm_draw.c` — Verify rendering
 
 The SCL and MICRO pages use standard track parameters (`P_ROOT`, `P_SCALE`, `P_QUANT`, `P_TRANS`, `P_FM4_LEVEL`, `P_MAMT`). The existing rendering code in `smd_knob_get()` and `smd_page()` should handle them automatically:
 
@@ -90,7 +90,7 @@ The SCL and MICRO pages use standard track parameters (`P_ROOT`, `P_SCALE`, `P_Q
 
 **No code changes needed** in `sm_draw.c` — the existing generic parameter rendering handles SCL/MICRO pages automatically.
 
-### 4. `firmware/src/swamp/sm_input.c` — Verify knob handling
+### 4. `firmware/src/pulhra/sm_input.c` — Verify knob handling
 
 The `sm_input_poll()` function handles pages in the `else` branch (line 1036-1047) for non-HOME, non-STEP, non-EUCLID, non-MIDI, non-SETUP pages:
 
@@ -113,7 +113,7 @@ SCL and MICRO pages will fall into this branch. The `sm_turn()` function handles
 
 **No code changes needed** in `sm_input.c`.
 
-### 5. `firmware/src/swamp/sm_leds.c` — Verify SCL button LED
+### 5. `firmware/src/pulhra/sm_leds.c` — Verify SCL button LED
 
 The LED code at line 151-155 iterates over all buttons and lights the family button:
 

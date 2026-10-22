@@ -50,7 +50,7 @@ All by Hügelton Instruments (Leo Kuroshita), in this tree:
 | klattsch by Tony Gies (<https://github.com/tgies/klattsch>): design reference for the VOICE engine; no code copied. Formant data from Klatt (1980) / Hillenbrand et al. (1995) | MIT (klattsch) | credit only |
 | X0X by charlesvestal (<https://github.com/charlesvestal/fm1-x0x>), a Felucca fork: the design of the browser emulator (the worklet, the device clock driven by its audio, the exports); its files credit it in their headers | GPL-3.0 | `web/emu/` |
 | DotGothic16 font by The DotGothic16 Project Authors (<https://github.com/fontworks-fonts/DotGothic16>): the browser emulator's knob labels, served with its page (cut to printable ASCII; the font declares no Reserved Font Name) | SIL OFL 1.1 | `web/emu/fonts/DotGothic16-subset.woff`, `LICENSES/OFL-DotGothic16.txt` (also `web/emu/fonts/OFL.txt`) |
-| 5 x 7 pixel font of the Adafruit GFX Library by Adafruit Industries (<https://github.com/adafruit/Adafruit-GFX-Library>, glcdfont.c): the glyphs of SWAMP MACHINE's screen, with this project's own play, stop and dot glyphs added | BSD-2-Clause | `firmware/src/swamp/sm_font.c`, `LICENSES/BSD-2-Clause-Adafruit-GFX.txt` |
+| 5 x 7 pixel font of the Adafruit GFX Library by Adafruit Industries (<https://github.com/adafruit/Adafruit-GFX-Library>, glcdfont.c): the glyphs of PULHRA's screen, with this project's own play, stop and dot glyphs added | BSD-2-Clause | `firmware/src/pulhra/sm_font.c`, `LICENSES/BSD-2-Clause-Adafruit-GFX.txt` |
 | JieLi AC79 SDK by JieLi Technology: three of its files go into every `.fwsc` package (below); none are in this tree | Apache-2.0 | `LICENSES/Apache-2.0.txt` |
 
 On the device, HOME held > ABOUT opens the information screen; turning PRESETS scrolls on into

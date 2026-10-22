@@ -1,5 +1,5 @@
-# SWAMP MACHINE (firmware/src/swamp.c on the MONOFM sound core): host tests, then the firmware package (.fwsc) with
-# JieLi's toolchain and the AC79 SDK, uploaded as the artifact "felucca-swamp" and published with its web installer to
+# PULHRA (firmware/src/pulhra.c on the MONOFM sound core): host tests, then the firmware package (.fwsc) with
+# JieLi's toolchain and the AC79 SDK, uploaded as the artifact "pulhra" and published with its web installer to
 # the firmware-builds branch.
 name: firmware
 
@@ -33,10 +33,10 @@ jobs:
           cc -O2 -w -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/monofm_test tests/monofm_test.c -lm
           build/host/monofm_test | tail -n 30
 
-      - name: Host tests (SWAMP)
+      - name: Host tests (PULHRA)
         run: |
-          cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/swamp_test tests/swamp_test.c -lm
-          build/host/swamp_test
+          cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/pulhra_test tests/pulhra_test.c -lm
+          build/host/pulhra_test
 
       - name: JieLi toolchain
         run: tools/get_toolchain.sh
@@ -46,15 +46,15 @@ jobs:
           git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
               https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
 
-      - name: Build (SWAMP)
+      - name: Build (PULHRA)
         run: |
           set -o pipefail
-          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 ./build.sh --release 1.5.1-swamp 2>&1 | tee build-swamp.log
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 ./build.sh --release 1.5.1 2>&1 | tee build-pulhra.log
 
       - name: "Build logs to the ci-logs branch (on a failure, for a clone without the Actions UI)"
         if: failure()
         run: |
-          mkdir -p /tmp/logs && cp build-swamp.log /tmp/logs/ 2>/dev/null || true
+          mkdir -p /tmp/logs && cp build-pulhra.log /tmp/logs/ 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan ci-logs && git rm -rfq . && git clean -fdxq
@@ -63,19 +63,19 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: felucca-swamp
+          name: pulhra
           path: |
-            build/felucca-1.5.1-swamp.fwsc
-            build/release-1.5.1-swamp/
-            build-swamp.log
+            build/pulhra-1.5.1.fwsc
+            build/release-1.5.1/
+            build-pulhra.log
 
       - name: Publish to the firmware-builds branch (the package, its checksum and the build log)
         if: github.ref == 'refs/heads/main'
         run: |
           sha=$(git rev-parse --short HEAD)
-          mkdir -p /tmp/out && cp build/felucca-1.5.1-swamp.fwsc build-swamp.log /tmp/out/
-          python3 web/make_module_installer.py build/felucca-1.5.1-swamp.fwsc 1.5.1-swamp /tmp/out/fm1-swamp-installer.html
-          (cd /tmp/out && sha256sum felucca-1.5.1-swamp.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
+          mkdir -p /tmp/out && cp build/pulhra-1.5.1.fwsc build-pulhra.log /tmp/out/
+          python3 web/make_module_installer.py build/pulhra-1.5.1.fwsc 1.5.1 /tmp/out/fm1-pulhra-installer.html
+          (cd /tmp/out && sha256sum pulhra-1.5.1.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan firmware-builds
@@ -89,10 +89,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 web/make_module_installer.py build/felucca-1.5.1-swamp.fwsc 1.5.1-swamp build/fm1-swamp-installer.html
-          set -- build/felucca-1.5.1-swamp.fwsc build/fm1-swamp-installer.html
+          python3 web/make_module_installer.py build/pulhra-1.5.1.fwsc 1.5.1 build/fm1-pulhra-installer.html
+          set -- build/pulhra-1.5.1.fwsc build/fm1-pulhra-installer.html
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$@" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$@" --title "$GITHUB_REF_NAME" --notes "SWAMP MACHINE for the M-VAVE FM-1. Install by opening fm1-swamp-installer.html in Chrome with the FM-1 on USB."
+            gh release create "$GITHUB_REF_NAME" "$@" --title "$GITHUB_REF_NAME" --notes "PULHRA for the M-VAVE FM-1. Install by opening fm1-pulhra-installer.html in Chrome with the FM-1 on USB."
           fi

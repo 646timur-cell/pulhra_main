@@ -24,8 +24,8 @@ MONOFM_TITLE = "FM-1 MONOFM"
 MONOFM_CREDIT = ('<p class="small">MONOFM build: the four-track groovebox of Felucca (64 steps, p-locks, REC, the FX layer) '
                  'playing only the darkmachine engines: STRING, MODAL, BLOW, RESO, JUNK, LYRA, CHAOS, DRIFT, the slice '
                  'machines and PLANT. Built on Felucca, below.</p>\n')
-SWAMP_TITLE = "FM-1 SWAMP MACHINE"
-SWAMP_CREDIT = ('<p class="small">SWAMP MACHINE build: its own four-track step sequencer app on the MONOFM sound core '
+PULHRA_TITLE = "FM-1 PULHRA"
+PULHRA_CREDIT = ('<p class="small">PULHRA build: its own four-track step sequencer app on the MONOFM sound core '
                 '(the darkmachine engines). Built on Felucca, below.</p>\n')
 TITLE = "FM-1 Sound Module"
 CREDIT = ('<p class="small">Sound-module build: TRACK CH MIDI, per-track transpose, HOME levels / TRANSPOSE, no '
@@ -40,8 +40,8 @@ def main(pkg, version, out):
         TITLE, CREDIT = STRANGE_TITLE, STRANGE_CREDIT
     elif "monofm" in version:                           # the MONOFM build (MONOFM.md)
         TITLE, CREDIT = MONOFM_TITLE, MONOFM_CREDIT
-    elif "swamp" in version:                            # SWAMP MACHINE (firmware/src/swamp.c)
-        TITLE, CREDIT = SWAMP_TITLE, SWAMP_CREDIT
+    elif "pulhra" in version or "pulhra" in Path(pkg).name:   # PULHRA (firmware/src/pulhra.c)
+        TITLE, CREDIT = PULHRA_TITLE, PULHRA_CREDIT
     raw = Path(pkg).read_bytes()
     product = product_of(raw)
     if not re.fullmatch(r"FM-1_9\d\d", product):

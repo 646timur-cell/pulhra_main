@@ -1,6 +1,6 @@
-The 5 x 7 glyphs of firmware/src/swamp/sm_font.c derive from the standard 5 x 7 font
+The 5 x 7 glyphs of firmware/src/pulhra/sm_font.c derive from the standard 5 x 7 font
 (glcdfont.c) of the Adafruit GFX Library <https://github.com/adafruit/Adafruit-GFX-Library>
-(BSD-2-Clause). The play, stop and centred-dot glyphs and any glyph changed for SWAMP
+(BSD-2-Clause). The play, stop and centred-dot glyphs and any glyph changed for PULHRA
 MACHINE are this project's own. sm_font.c stays under the licence below for the derived part;
 the rest of Felucca is GPL-3.0-only (LICENSE).
 

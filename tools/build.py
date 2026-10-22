@@ -193,7 +193,7 @@ def build_app():
     for flag in ("FELUCCA_FLASH", "FELUCCA_OTA", "FELUCCA_OTA_DRYRUN", "FELUCCA_OTA_RAMONLY", "FELUCCA_CDC",
                  "FELUCCA_UART", "FELUCCA_UAC", "FELUCCA_UAC_TONE", "FELUCCA_UAC_48K", "FELUCCA_ICONS", "FELUCCA_SLICE", "FELUCCA_FM4",
                  "FELUCCA_CDC_DEFAULT", "FELUCCA_UAC_AS_FIRST", "FELUCCA_MODULE", "FELUCCA_STRANGE", "FELUCCA_MONOFM", "FELUCCA_SWAMP"):
-        v = os.environ.get(flag)    # unset: the default in the entry (firmware/src/felucca.c, swamp.c)
+        v = os.environ.get(flag)    # unset: the default in the entry (firmware/src/felucca.c, pulhra.c)
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
     v = os.environ.get("FELUCCA_USB_LAYOUT")   # firmware/src/usb.c: how the USB composite presents itself (#67), 0..3
@@ -205,7 +205,7 @@ def build_app():
     # felucca.c goes to LLVM IR without the optimizer, the main-loop functions (UI, stores, editor) are
     # marked minsize (tools/size_fns.py), then the IR is compiled at -Os. FELUCCA_SIZE=0: -Os everywhere
     size = os.environ.get("FELUCCA_SIZE") != "0"
-    entry = FW / "src" / ("swamp.c" if os.environ.get("FELUCCA_SWAMP") == "1" else "felucca.c")   # SWAMP MACHINE: its own unit
+    entry = FW / "src" / ("pulhra.c" if os.environ.get("FELUCCA_SWAMP") == "1" else "felucca.c")   # PULHRA: its own unit
     cmain = (("cc", *flags, "-S", "-emit-llvm", "-Xclang", "-disable-llvm-optzns", "-c",
               entry, "-o", OUT / "felucca.ll") if size else
              ("cc", *flags, "-c", entry, "-o", OUT / "felucca.o"))
@@ -321,7 +321,7 @@ def mmio_check():
             break
         regs |= more
     errors = []
-    for f in sorted([*(FW / "src").glob("*.[ch]"), *(FW / "src" / "swamp").glob("*.[ch]"), *(FW / "loader").glob("*.c")]):
+    for f in sorted([*(FW / "src").glob("*.[ch]"), *(FW / "src" / "pulhra").glob("*.[ch]"), *(FW / "loader").glob("*.c")]):
         for no, ln in enumerate(strip(f.read_text()).splitlines(), 1):
             where = f"{f.relative_to(FW)}:{no}"
             for rx, what in ((MMIO_LIT, "register/window address"), (MMIO_CAST, "volatile pointer cast"),
@@ -348,7 +348,9 @@ def main():
             raise SystemExit(f"--release {a.release}: use X.Y, X.Y.Z, X.Y.Z.W or X.Y-suffix, one digit each")
         PRODUCT = "FM-1_9" + m[1] + m[2]
         VERSION = "v" + a.release.lower()      # e.g. v1.0, v1.1-rc1
-        name = f"felucca-{a.release}.fwsc"
+        # PULHRA (FELUCCA_SWAMP=1) names its package pulhra-*, Felucca keeps felucca-*
+        prefix = "pulhra" if os.environ.get("FELUCCA_SWAMP") == "1" else "felucca"
+        name = f"{prefix}-{a.release}.fwsc"
     fm1pkg_make.SDK = a.sdk
     for rel, sha in SDK_SHA256.items():          # fail early without the SDK
         if hashlib.sha256(fm1pkg_make.sdk_file(rel)).hexdigest() != sha:
@@ -382,7 +384,7 @@ def main():
         rel = OUT / f"release-{a.release}"
         shutil.rmtree(rel, ignore_errors=True)
         (rel / "LICENSES").mkdir(parents=True)
-        app = f"felucca-{a.release}-app.bin"
+        app = f"{prefix}-{a.release}-app.bin"
         (rel / name).write_bytes(pkg)
         (rel / app).write_bytes(img)
         (rel / "SHA256SUMS").write_text("".join(f"{hashlib.sha256(b).hexdigest()}  {n}\n"

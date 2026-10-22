@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-// Felucca in an AudioWorklet: felucca.wasm is the whole FM-1 firmware against a simulated FM-1
-// (web/emu/felucca_web.c). Each render quantum asks it for 128 frames, which runs the device's clock forward;
-// between quanta the page's input goes in and, about 30 times a second (4 when the page is hidden), the screen,
-// the lights and any changed flash go out. After X0X's web/emu/worklet.js (charlesvestal/fm1-x0x, GPL-3.0).
+// Felucca / PULHRA in an AudioWorklet: the wasm is the whole FM-1 firmware against a simulated FM-1
+// (web/emu/felucca_web.c or web/emu/pulhra_web.c). Each render quantum asks it for 128 frames, which runs
+// the device's clock forward; between quanta the page's input goes in and, about 30 times a second
+// (4 when the page is hidden), the screen, the lights and any changed flash go out.
+// After X0X's web/emu/worklet.js (charlesvestal/fm1-x0x, GPL-3.0).
 
-// The flash the page keeps: storage.c's areas (projects, user presets and their FM6 patches, the user sample
-// slots 0x97000..0xDFFFF; the autosave 0xE5000..0xE6FFF (1.2) and FM6's voice bank 0xE7000 (1.4.1); the settings and
-// the second FM6 copy 0xFC000..0xFFFFF), only the sectors that hold something (an erased sector is all 0xFF). {offset: bytes}
-export const STORE_AREAS = [[0x97000, 0xE0000], [0xE5000, 0xE8000], [0xFC000, 0x100000]];
+// The flash the page keeps: the areas depend on the firmware. Felucca: projects, user presets, FM6 patches,
+// user samples 0x97000..0xE0000, autosave 0xE5000..0xE8000, settings 0xFC000..0x100000.
+// PULHRA: project + banks 0xB4000..0xDC000. Set dynamically from web_diag_firmware() at load time.
+export let STORE_AREAS = [[0x97000, 0xE0000], [0xE5000, 0xE8000], [0xFC000, 0x100000]];  // Felucca default
 export function storeSectors(nor) {
   const out = {};
   for (const [a, b] of STORE_AREAS)
@@ -52,13 +53,26 @@ if (typeof registerProcessor === "function") {
           const { instance } = await WebAssembly.instantiate(m.wasm, {});
           const ex = instance.exports;
           ex._initialize();
+          // DIAG: detect firmware and set STORE_AREAS accordingly
+          const fwCode = ex.web_diag_firmware ? ex.web_diag_firmware() : 0;
+          const fwName = fwCode === 0x5357414d ? "PULHRA" : fwCode === 0x53545241 ? "STRANGE" : fwCode === 0x46454c55 ? "FELUCCA" : "UNKNOWN";
+          const flashLo = ex.web_diag_flash_lo ? ex.web_diag_flash_lo() : 0;
+          const flashHi = ex.web_diag_flash_hi ? ex.web_diag_flash_hi() : 0;
+          // Set STORE_AREAS to match the firmware's flash layout
+          if (flashLo === 0xB4000 && flashHi === 0xDC000) {
+            STORE_AREAS = [[0xB4000, 0xDC000]];
+            console.log("DIAG worklet.js: firmware = " + fwName + " (PULHRA), STORE_AREAS = [[0xB4000, 0xDC000]]");
+          } else {
+            STORE_AREAS = [[0x97000, 0xE0000], [0xE5000, 0xE8000], [0xFC000, 0x100000]];
+            console.log("DIAG worklet.js: firmware = " + fwName + " (Felucca/other), STORE_AREAS = Felucca areas");
+          }
           ex.web_nor_erase();
           restoreSectors(new Uint8Array(ex.memory.buffer, ex.web_nor(), ex.web_nor_size()), m.sectors);
           ex.web_master(m.master ?? 700);
           ex.web_boot();
           this.ex = ex;
           this.sentWrites = ex.web_flash_writes_count();
-          this.port.postMessage({ type: "ready", rate: ex.web_sample_rate() });
+          this.port.postMessage({ type: "ready", rate: ex.web_sample_rate(), diag: { fw: fwName, flashLo, flashHi } });
         } catch (err) {
           this.port.postMessage({ type: "error", message: String(err && err.message || err) });
         }
@@ -66,8 +80,11 @@ if (typeof registerProcessor === "function") {
       }
       const ex = this.ex;
       if (!ex) return;
-      if (m.type === "buttons" || m.type === "keys") this.queue.push(m);
-      else if (m.type === "enc") ex.web_enc(m.role, m.n | 0);
+      if (m.type === "buttons" || m.type === "keys") {
+        // DIAG: log button/key events
+        if (m.type === "buttons") console.log("DIAG: buttons mask=0x" + m.mask.toString(16));
+        this.queue.push(m);
+      } else if (m.type === "enc") ex.web_enc(m.role, m.n | 0);
       else if (m.type === "master") ex.web_master(m.value | 0);
       else if (m.type === "midi") ex.web_midi(m.data[0] | 0, m.data[1] | 0, m.data[2] | 0);
       else if (m.type === "visible") this.period = m.on ? 1 / 30 : 1 / 4;
@@ -112,8 +129,11 @@ if (typeof registerProcessor === "function") {
       const ex = this.ex, now = ex.web_now_ms();
       while (this.queue.length && now - this.nextOk >= 0) {
         const m = this.queue.shift();
-        if (m.type === "buttons") ex.web_buttons(m.mask >>> 0);
-        else ex.web_keys(m.mask >>> 0);
+        if (m.type === "buttons") {
+          // DIAG: log button apply
+          console.log("DIAG: apply buttons mask=0x" + m.mask.toString(16));
+          ex.web_buttons(m.mask >>> 0);
+        } else ex.web_keys(m.mask >>> 0);
         this.nextOk = now + HOLD_MS;
       }
     }
