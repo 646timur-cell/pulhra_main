@@ -34,7 +34,7 @@
 #define SM_HOLD_US 350000u                                /* a key held longer is a select, not a tap */
 #define SM_BLACK_KEYS 0x252A52Au                          /* the black keys of F3 .. G5, bit n = key n (ui_input.c) */
 #define SM_NKEYS 27u
-#define SM_OCT_PAIR_US 100000u                            /* OCT- and OCT+ pressed within this: both together (keyboard mode) */
+#define SM_OCT_PAIR_US 300000u                            /* OCT- and OCT+ pressed within this: both together (keyboard mode) */
 #define SM_KEY_NOTE0 53u                                  /* F3, the first key's MIDI note (C4 = 60) */
 #define SM_KEY_VEL 100u
 
@@ -654,8 +654,8 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
         for (i = 0; i < 4u; i++)
             if (k[i])
                 *f[i] = (uint8_t)sm_field_turn(i, *f[i], k[i]);
-        if (sel)                                          /* the track's own SWING (a byte the audio stream reads once a block) */
-            sd->swing = (uint8_t)clamp((int32_t)(sd->swing < 25u ? sd->swing : 25u) + sel, 0, 25);
+        if (sel)                                          /* the selected track's volume */
+            sm_turn_base(t, P_LEVEL, sel);
         return;
     }
     s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
@@ -666,8 +666,8 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
     for (i = 0; i < 4u; i++)
         if (k[i])
             *f[i] = (uint8_t)sm_field_turn(i, i == 0u ? e.note[0] : i == 1u ? e.vel : i == 2u ? e.len : e.cond, k[i]);
-    if (sel)
-        s->nudge = (int8_t)clamp((int32_t)s->nudge + sel, -8, 7);
+    if (sel)                                              /* the selected track's volume */
+        sm_turn_base(t, P_LEVEL, sel);
 }
 
 /* SHIFT + a knob: the turn accelerated. On a wide range (64 values or more, no list of names) a detent is 4 steps, on a very
@@ -1034,9 +1034,31 @@ static void sm_input_poll(void)
         sm_step_page(k, sel, pre);
     } else if (sm_page_home() == SMH_EUCLID) {
         sm_eu_page(k);
-    } else if (sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP) {
-        if (k[0]) smp.mode = (uint8_t)((((int32_t)smp.mode + k[0]) % SM_PM_COUNT + SM_PM_COUNT) % SM_PM_COUNT);
-        if (k[1]) sm_midi_src = (uint8_t)((((int32_t)sm_midi_src + k[1]) % 3 + 3) % 3);
+    } else if (sm_page_home() == SMH_MIDI) {
+        /* K1..K4: the MIDI channel of T1..T4, 0 OFF (no external MIDI on any channel), 1..16 the channel */
+        for (i = 0; i < SM_NTRK; i++)
+            if (k[i]) {
+                int32_t v = ((int32_t)sm_midi_ch[i] + k[i]) % 17;
+                if (v < 0)
+                    v += 17;
+                if ((uint8_t)v != sm_midi_ch[i]) {
+                    sm_midi_ch[i] = (uint8_t)v;
+                    sm_dirty = 1;
+                    if ((uint8_t)v == 0u)
+                        sm_midi_release_req(i);           /* (its channel went OFF: the drain lets its MIDI notes go) */
+                }
+            }
+    } else if (sm_page_home() == SMH_SETUP) {
+        uint8_t w = (uint8_t)((((int32_t)smp.mode + k[0]) % SM_PM_COUNT + SM_PM_COUNT) % SM_PM_COUNT);
+        if (k[0] && w != smp.mode) {
+            smp.mode = w;
+            sm_dirty = 1;
+        }
+        w = (uint8_t)((((int32_t)sm_midi_src + k[1]) % 3 + 3) % 3);
+        if (k[1] && w != sm_midi_src) {
+            sm_midi_src = w;
+            sm_dirty = 1;
+        }
     } else if (sm_page_home()) {
         sm_preset_turn(pre);
         sm_home_page(k, sel, now);

@@ -418,7 +418,20 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         o->pos = (k == 0u ? (v - 1u) * 256u / (SM_NSTEP - 1u) : mx ? v * 256u / mx : 0u);
         return;
     }
-    if (sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP) {
+    if (sm_page_home() == SMH_MIDI) {                     /* K1..K4: the MIDI channel of T1..T4, OFF (0) + 1..16 */
+        o->on = 1;
+        o->lab[0] = 'T'; o->lab[1] = (char)('1' + k); o->lab[2] = 0;
+        if (sm_midi_ch[k])
+            smd_int(o->val, (int32_t)sm_midi_ch[k], 0);
+        else {
+            o->val[0] = 'O'; o->val[1] = 'F'; o->val[2] = 'F'; o->val[3] = 0;
+        }
+        o->v = (int32_t)sm_midi_ch[k];
+        o->pos = (uint32_t)sm_midi_ch[k] * 256u / 16u;
+        o->dim = 0; o->inv = 0;
+        return;
+    }
+    if (sm_page_home() == SMH_SETUP) {
         o->on = 1;
         if ((k & 3u) == 0u) {
             o->lab[0] = 'M'; o->lab[1] = 'O'; o->lab[2] = 'D'; o->lab[3] = 'E'; o->lab[4] = 0;
@@ -603,15 +616,9 @@ static uint32_t smd_sel_sig(void)
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_page_param(4);
     uint32_t h = smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine);
-    if (sm_page_is_step()) {
-        char b[8];
-        uint32_t i;
-        h = smd_mix(h, (uint8_t)smd_step_nudge(b)[0]);
-        for (i = 0; b[i]; i++)
-            h = smd_mix(h, (uint8_t)b[i]);
-        return h;
-    }
-    if (sm_page_home())                                   /* (the selected track's volume) */
+    if (sm_page_is_step())
+        return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
+    if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP)   /* (the selected track's volume) */
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
     return id == SM_NOPARAM ? h : smd_mix(smd_mix(h, id), (uint32_t)smd_sel_val(id));
 }
@@ -622,12 +629,16 @@ static void smd_select(void)
     const param_desc_t *d = id == SM_NOPARAM ? 0 : (id & SM_GLB) ? &GP[(id & ~SM_GLB) % G_COUNT] : sm_desc_trk(s, id);
     smd_begin(0, SMD_SEL_Y, 240u, SMD_SEL_H, T_BG);
     if (sm_page_is_step()) {
-        char val[8];
+        char lab[8], val[12];
+        const char *unit;
         int32_t x;
-        const char *lab = smd_step_nudge(val);
+        smd_upper(lab, "LEVEL", 5u);
+        param_format(&TP[P_LEVEL], clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max), val, &unit);
         x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
+        val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
-    } else if (sm_page_home() == SMH_EUCLID) {             /* (nothing on SELECT for EUCLID) */
+    } else if (sm_page_home() == SMH_EUCLID || sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP) {
+        /* (nothing on SELECT for EUCLID / MIDI / SETUP) */
     } else if (sm_page_home()) {                           /* all HOME pages: SELECT is the selected track's volume */
         char lab[8], val[12];
         const char *unit;

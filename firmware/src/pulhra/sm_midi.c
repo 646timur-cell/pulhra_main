@@ -23,10 +23,14 @@
 static uint32_t sm_mn[SM_NTRK][4];                        /* the notes MIDI holds, bit per note 0..127 */
 static uint32_t sm_kn[SM_NTRK][4];                        /* the notes the keyboard mode holds (its own book: SMC_KEYON / KEYOFF) */
 /* the MIDI page and the SETUP page (sm_input.c writes them, the drain and the screen read them): the channel each track
- * listens on (1..16) and the source to take (0 USB the port alone, 1 INT both merged, 2 JACK the TRS jack alone). The
- * defaults are the stage-2 routing: channel 1..4 -> T1..T4, both inputs (a TRS-only rig works out of the box). */
+ * listens on (0 OFF: no external MIDI on any channel, 1..16 the channel) and the source to take (0 USB the port alone,
+ * 1 INT both merged, 2 JACK the TRS jack alone). The defaults are the stage-2 routing: channel 1..4 -> T1..T4, both
+ * inputs (a TRS-only rig works out of the box). */
 static uint8_t sm_midi_ch[SM_NTRK] = {1, 2, 3, 4};
 static uint8_t sm_midi_src = 1;
+static volatile uint8_t sm_midi_ch_release;               /* bit per track: its channel went OFF (sm_input.c); the drain
+                                                             lets its MIDI notes go once (a note-off on the old channel
+                                                             would not reach it anymore) */
 
 static uint32_t sm_mn_has(uint32_t t, uint32_t note) { return (sm_mn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
 static uint32_t sm_kn_has(uint32_t t, uint32_t note) { return (sm_kn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
@@ -59,6 +63,12 @@ static void sm_midi_release(uint32_t t)
         if (sm_mn_has(t, note) && !sm_seq_has(t, note) && !sm_kn_has(t, note) && !sm_arp_has(t, note))
             trk_note_off(&trk[t], note);
     memset(sm_mn[t], 0, sizeof sm_mn[0]);
+}
+
+/* a track's MIDI channel turned OFF (sm_input.c, the MIDI page): the drain lets its MIDI notes go once */
+void sm_midi_release_req(uint32_t t)
+{
+    sm_midi_ch_release |= (uint8_t)(1u << (t % SM_NTRK));
 }
 
 /* track t's keyboard notes let go, the same way (a muted track) */
@@ -108,6 +118,13 @@ static void sm_midi_drain(void)
             sm_midi_release(t);
             sm_kbd_release(t);
         }
+    if (sm_midi_ch_release) {                             /* a track's channel went OFF: its MIDI notes let go */
+        for (t = 0; t < SM_NTRK; t++)
+            if ((sm_midi_ch_release >> t) & 1u)
+                sm_midi_release(t);
+        RING_PUBLISH();
+        sm_midi_ch_release = 0;
+    }
     while (mi_r != mi_w) {
         uint32_t at = mi_r % MQ, pkt = midi_in_q[at];
         uint32_t src = midi_in_source[at] ? midi_in_source[at] : 1u;   /* (0: unknown, as USB, as seq.c reads it) */

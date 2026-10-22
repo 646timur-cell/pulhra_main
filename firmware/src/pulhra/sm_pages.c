@@ -4,16 +4,18 @@
  * STEP (SEQ tapped) is the one page whose knobs edit a step, not the sound (sm_input.c sm_step_page): K1 NOTE, K2 VEL,
  * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG; with no step selected (a SEQ tap drops the selection) K1..K4 are the
  * track's trig defaults and SELECT the track's own SWING. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
- * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both */
+ * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both.
+ * SETUP (SHIFT + HOME, sm_layer.c sm_shift_combo): MIDI (K1..K4 the channel of T1..T4, OFF + 1..16) and SETUP
+ * (K1 pattern change mode, K2 MIDI source), in turn on SHIFT + HOME. */
 #define SM_NOPARAM 0xFFu
 #define SM_GLB 0x80u                                      /* a page's parameter id with this bit is a GLOBAL (song.g[id & 0x7F]): the
                                                              FX page's SELECT and the deep FX pages; no locks, the project's */
 
 /* the families of the buttons (a tap of the button: the family's next page) and, after FX, the families of the SHIFT combos (no
  * button of their own: SHIFT + EDIT the VOICE page, SHIFT + FX the deep FX pages DLY / REV / CHORUS in turn, SHIFT + SEQ the
- * EUCLID page, SHIFT + HOME the MENU page; sm_layer.c) */
+ * EUCLID page, SHIFT + HOME the SETUP pages MIDI / SETUP; sm_layer.c) */
 enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_LFO, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_SCL, SMFAM_VOICE, SMFAM_DEEP, SMFAM_EUCL, SMFAM_MENU,
-       SMFAM_COUNT };
+       SMFAM_SETUP, SMFAM_COUNT };
 enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU, SMH_MIDI, SMH_SETUP };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
 
 typedef struct {
@@ -54,8 +56,8 @@ static const sm_page_t SM_PAGES[] = {
     {"EUCLID", SMFAM_EUCL, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_EUCLID},
     {"SCL", SMFAM_SCL, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}, SM_NOPARAM},
     {"MICRO", SMFAM_SCL, {P_FM4_LEVEL, P_MAMT, P_ROOT, SM_NOPARAM}, SM_NOPARAM},
-    {"MIDI", SMFAM_HOME, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_MIDI},
-    {"SETUP", SMFAM_HOME, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_SETUP},
+    {"MIDI", SMFAM_SETUP, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_MIDI},
+    {"SETUP", SMFAM_SETUP, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_SETUP},
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
@@ -80,7 +82,7 @@ static uint32_t sm_map_open(void) { return sm_layer != 0; }
 static uint32_t sm_fam_btn(uint32_t fam)
 {
     return fam == SMFAM_EDIT || fam == SMFAM_VOICE ? B_EDIT : fam == SMFAM_GLO ? B_GLO : fam == SMFAM_SEQ || fam == SMFAM_EUCL ? B_SEQ :
-           fam == SMFAM_HOME || fam == SMFAM_MENU ? B_HOME : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX || fam == SMFAM_DEEP ? B_FX :
+           fam == SMFAM_HOME || fam == SMFAM_MENU || fam == SMFAM_SETUP ? B_HOME : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX || fam == SMFAM_DEEP ? B_FX :
            fam == SMFAM_LFO ? B_LFO : fam == SMFAM_SCL ? B_SCL : B_ENV;
 }
 
@@ -104,16 +106,22 @@ static void sm_page_press(uint32_t fam)
     sm_dirty = 1;
 }
 
-/* SHIFT + HOME: open the SETUP page directly */
+/* SHIFT + HOME: the SETUP family's next page (MIDI / SETUP), wraps */
 void sm_page_open_setup(void)
 {
-    uint32_t i, n = sm_page_count();
-    for (i = 0; i < n; i++)
-        if (SM_PAGES[i].home == SMH_SETUP) {
-            sm_ui.page = (uint8_t)i;
-            sm_dirty = 1;
-            return;
-        }
+    uint32_t n = sm_page_count(), cur = sm_ui.page % n, i, first = n, next = n;
+    for (i = 0; i < n; i++) {
+        if (SM_PAGES[i].fam != SMFAM_SETUP)
+            continue;
+        if (first == n)
+            first = i;
+        if (i > cur && next == n && SM_PAGES[cur].fam == SMFAM_SETUP)
+            next = i;
+    }
+    if (first == n)
+        return;
+    sm_ui.page = (uint8_t)(SM_PAGES[cur].fam == SMFAM_SETUP ? (next != n ? next : first) : first);
+    sm_dirty = 1;
 }
 
 /* the parameter on knob k (0..3; 4: SELECT) of the page shown. FILTER is MONOFM's twin page (params.c): FILT HYB (5) on
