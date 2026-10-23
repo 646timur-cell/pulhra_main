@@ -378,6 +378,7 @@ static void sm_oct_single(uint32_t up)
                 s->nudge = (int8_t)v;                     /* (a byte the audio stream reads at the step's start) */
                 sm_dirty = 1;
             }
+            sm_msg_show_val(SM_MSG_NUDGE, s->nudge);      /* (shown only now, a second in the header: NUDGE+3) */
         }
     } else if (up && sm_page_home() == SMH_EUCLID) {
         sm_eu_gen();                                      /* (the EUCLID page: OCT+ generates) */

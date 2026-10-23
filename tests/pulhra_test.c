@@ -3992,8 +3992,8 @@ static int test_step_draw(void)
         nb += lint_frame(what);
     }
     bad += check("STEPDRAW: every text inside its cell (the widest values)", nb == 0u);
-    bad += check("STEPDRAW: ... the last frame: the page line (REST, N-8), NOTE C#-1, SELECT LEVEL",
-                 lint_has("STEP 13 REST N-8", 0, 0) && lint_has("C#-1", 0, 0) && lint_has("LEVEL", 0, 0));
+    bad += check("STEPDRAW: ... the last frame: the page line (REST, no NUDGE), NOTE C#-1, SELECT LEVEL",
+                 lint_has("STEP 13 REST", 0, 0) && lint_has("C#-1", 0, 0) && lint_has("LEVEL", 0, 0));
     {
         uint32_t a = smd_knob_sig(1), b = smd_page_sig();
         stp(0, 12)->vel = 64;
@@ -7722,7 +7722,7 @@ static int test_step_select_swing(void)
     bad += check("STEPSEL: a step held: OCT+ x 3 its NUDGE +3, the swing kept, no paste", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
     sm_ux_mk1();
     draw_full();
-    bad += check("STEPSEL: ... the page line N+3", lint_has("STEP 04 - N+3", 0, 0));
+    bad += check("STEPSEL: ... the header NUDGE+3 (only while OCT moves it), the page line without it", lint_has("NUDGE+3", 0, 0) && lint_has("STEP 04 -", 0, 0));
     key_up(WHITE[3]);
     sm_input_poll();
     oct_tap(B_OCTUP);

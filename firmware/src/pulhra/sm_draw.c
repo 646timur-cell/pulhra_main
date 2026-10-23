@@ -179,9 +179,9 @@ static void smd_header(void)
             mb[n++] = ' ';
             smd_int(mb + n, sm_msg_val, 1);
             m = mb;
-        } else if (sm_msg == SM_MSG_SHT || sm_msg == SM_MSG_TR) {   /* SEQ held: SHT+2, TR-1, SHT+0 (the net of all the tracks) */
+        } else if (sm_msg == SM_MSG_SHT || sm_msg == SM_MSG_TR || sm_msg == SM_MSG_NUDGE) {   /* SHT+2, TR-1, SHT+0, NUDGE-3 */
             uint32_t n = 0;
-            while (m[n] && n < 3u) {
+            while (m[n] && n < 5u) {
                 mb[n] = m[n];
                 n++;
             }
@@ -309,17 +309,11 @@ static void smd_page(void)
             b[n] = 0;
             smd_cat(b, &n, "DEFAULT");
         } else {
-            smd_two(b + n, (uint32_t)st + 1u);            /* STEP 05 ACCENT N+3: the step, its FLAG in full, its NUDGE */
+            smd_two(b + n, (uint32_t)st + 1u);            /* STEP 05 ACCENT: the step, its FLAG in full */
             n += 2;
             b[n++] = ' ';
             b[n] = 0;
-            smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");
-            if (p->n) {                                   /* ... and its NUDGE (OCT- / OCT+ with the key held): N+3 */
-                char v[6];
-                smd_int(v, p->nudge, 1);
-                smd_cat(b, &n, " N");
-                smd_cat(b, &n, v);
-            }
+            smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");   /* (the NUDGE: in the header while OCT moves it) */
         }
     } else if (sm_page_home() == SMH_EUCLID) {          /* EUCLID . OCT+ GEN (OCT+ generates the trigs) */
         n = 0;
