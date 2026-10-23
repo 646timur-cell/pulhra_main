@@ -108,7 +108,8 @@ static void sm_input_init(void)
     sm_dirty = 1;
 }
 
-static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);   /* sm_layer.c (after this file) */
+static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);
+static void sm_fx_poll(uint32_t notes, const int32_t *k);   /* sm_layer.c (after this file) */
 static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg, int32_t sel);
 static void sm_layer_end(void);
 static uint32_t sm_hold_btn(void);                        /* sm_layer.c: HOME / ARP / FX held (no layer) */
@@ -1015,6 +1016,7 @@ static void sm_input_poll(void)
     /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is
      * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
     sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);
+    sm_fx_poll(notes, k);                                 /* (FX held: the punch-in effects; a key let go ends its effect, FX held or not) */
     if (sm_layer) {
         sm_layer_keys(pressed, notes, k, alg, sel);
         if (sm_layer == SML_SEQ)

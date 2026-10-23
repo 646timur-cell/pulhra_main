@@ -171,21 +171,19 @@ static void smd_header(void)
     if (sm_msg) {                                         /* a message (LOCKS FULL, CLEARED, UNDO), inverted, the whole header for 1 s */
         char mb[16];
         const char *m = SM_MSG_TEXT[sm_msg % SM_MSG_COUNT];
-        if (sm_msg == SM_MSG_SHIFT || sm_msg == SM_MSG_TRN) {   /* the text and its signed value: SHIFT +2, TRN -3 */
-            uint32_t n = 0;
-            while (m[n] && n < 6u) {
-                mb[n] = m[n];
-                n++;
+        if (sm_msg == SM_MSG_SHIFT || sm_msg == SM_MSG_TRN || sm_msg == SM_MSG_SHT || sm_msg == SM_MSG_TR || sm_msg == SM_MSG_NUDGE) {
+            /* one style for every count: the word, the sign, the number, no space (SHT+0, TR-11, NUDGE-8); the selected track's
+             * own (SHIFT + D#4 F#4 / D#5 F#5) with the track before it: T1 SHT+2, T1 TR-3 */
+            static const char *const W[SM_MSG_COUNT] = {[SM_MSG_SHIFT] = "SHT", [SM_MSG_TRN] = "TR", [SM_MSG_SHT] = "SHT",
+                                                         [SM_MSG_TR] = "TR", [SM_MSG_NUDGE] = "NUDGE"};
+            uint32_t n = 0, i;
+            if (sm_msg == SM_MSG_SHIFT || sm_msg == SM_MSG_TRN) {
+                mb[n++] = 'T';
+                mb[n++] = (char)('1' + sm_ui.trk % SM_NTRK);
+                mb[n++] = ' ';
             }
-            mb[n++] = ' ';
-            smd_int(mb + n, sm_msg_val, 1);
-            m = mb;
-        } else if (sm_msg == SM_MSG_SHT || sm_msg == SM_MSG_TR || sm_msg == SM_MSG_NUDGE) {   /* SHT+2, TR-1, SHT+0, NUDGE-3 */
-            uint32_t n = 0;
-            while (m[n] && n < 5u) {
-                mb[n] = m[n];
-                n++;
-            }
+            for (i = 0; W[sm_msg][i]; i++)
+                mb[n++] = W[sm_msg][i];
             if (sm_msg_val >= 0)
                 mb[n++] = '+';
             smd_int(mb + n, sm_msg_val, 0);
@@ -266,7 +264,7 @@ static uint32_t smd_page_sig(void)
     if (smd_flag_held())                                  /* (a trig held on a sound page: its FLAG is the line) */
         h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
     if (sm_map_open())                                    /* (the title of the layer: its page of machines, the track's length) */
-        h = smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank);
+        h = smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank), perf_trk);
     return h;
 }
 static void smd_cat(char *d, uint32_t *n, const char *s)   /* s appended (upper case) at d[*n] */
@@ -286,6 +284,11 @@ static void smd_page(void)
         if (sm_layer == SML_EDIT) {
             smd_cat(b, &n, "MACHINE ");
             smd_cat(b, &n, MF_PAGE_NAME[sm_lay_epage % SM_NEPAGE]);
+        } else if (sm_layer == SML_FX) {                  /* FX . MASTER / FX . T2: the punch-in's target (D#4 steps it) */
+            static const char *const TG[SM_NTRK + 1u] = {"MASTER", "T1", "T2", "T3", "T4"};
+            smd_cat(b, &n, "FX \x12 ");
+            smd_cat(b, &n, TG[perf_trk % (SM_NTRK + 1u)]);
+            smd_cat(b, &n, " \x12 D#4");
         } else if (sm_layer == SML_GLO) {                 /* BANK A MUTE SOLO (the bank in view) */
             char bn[2] = {(char)('A' + sm_glo_bank % SM_NBANK), 0};
             smd_cat(b, &n, "BANK ");
@@ -512,6 +515,8 @@ static const char *smd_label(uint32_t id, const param_desc_t *d)
 {
     if (id == P_DIST && sm_cur_page()->id[0] == P_DTYPE)  /* DIST's page: the send is the drive */
         return "DRIVE";
+    if (sm_cur_page()->fam == SMFAM_ENV && sm_cur_page()->sel == P_FCUT && (id == P_LD_FLT || id == P_FLT))
+        return id == P_LD_FLT ? "LFO" : "TYPE";           /* (FILTER: K3 the LFO's depth onto the cutoff, K4 the filter's type) */
     return id == P_AHOLD ? "LATCH" : id == P_AORDER ? "ORDER" : id == P_DOUT ? "LVL" : id == P_ITYPE ? "TYPE" :
            id == (SM_GLB | G_DCOLOR) ? "COLOR" : id == (SM_GLB | G_CRATE) ? "RATE" : id == (SM_GLB | G_CDEPTH) ? "DEPTH" : d->label;
 }
@@ -589,10 +594,32 @@ static uint32_t smd_knob_sig(uint32_t k)
         h = smd_mix(h, (uint8_t)o.val[i]);
     return h;
 }
+/* a knob's label in at most 4 characters (48 of the column's 60 px: a gap of 12 to the next label, never a run-on such as
+ * "AINS BINS C"): the punctuation out, then the vowels after the first letter from the end (SWING SWNG, ORDER ORDR, DRIVE DRIV,
+ * COLOR COLR, DEPTH DPTH, LATCH LTCH, DTUNE DTUN, INS A INSA, ATK#2 ATK2), then cut */
+static void smd_lab4(char *l)
+{
+    uint32_t i, j, n;
+    for (i = j = 0; l[i]; i++)
+        if ((l[i] >= 'A' && l[i] <= 'Z') || (l[i] >= '0' && l[i] <= '9') || l[i] == '+' || l[i] == '-' || l[i] == '/')
+            l[j++] = l[i];
+    l[j] = 0;
+    n = j;
+    for (i = n; n > 4u && i-- > 1u;)
+        if (l[i] == 'A' || l[i] == 'E' || l[i] == 'I' || l[i] == 'O' || l[i] == 'U') {
+            for (j = i; l[j]; j++)
+                l[j] = l[j + 1];
+            n--;
+        }
+    if (n > 4u)
+        l[4] = 0;
+}
 static void smd_knob(uint32_t k)
 {
     smd_knob_t o;
     smd_knob_get(k, &o);
+    if (!sm_page_home() || sm_page_home() == SMH_CLOCK)
+        smd_lab4(o.lab);
     smd_begin(k * SMD_KNOB_W, SMD_KNOB_Y, SMD_KNOB_W, SMD_KNOB_H, T_BG);
     if (o.on) {
         sm_px_text((60 - 12 * smd_len(o.lab)) / 2, 4, 2u, o.lab, T_TEXT, o.inv);
@@ -715,6 +742,39 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             smd_cell(o, 0, r == 3u ? "M" : "S", 0);
             for (c = 0; c < 4u; c++)
                 smd_cell(o, c + 1u, TN[c], (on >> c) & 1u);
+        }
+    } else if (sm_layer == SML_FX) {                      /* rows 1..4: the 16 white keys' effects (held inverted, one the tempo
+                                                             cannot run dim); row 5: the macros on K1..K4 */
+        static const char *const PFN[PF_N + 1u] = {"1/8", "1/16", "1/32", "REV", "LPF", "HPF", "STOP", "FRZ", "OCT+", "OCT-",
+                                                    "FLNG", "PHSR", "VERB", "ECHO", "STUT", "", "", "", "", ""};
+        if (r < 4u) {
+            uint32_t ok = perf_avail();
+            for (c = 0; c < 4u; c++) {
+                uint32_t w = r * 4u + c, e = perf_map[w], key, held = 0;
+                for (key = 0; key < SM_NKEYS; key++)
+                    held |= ((sm_fx_keys >> key) & 1u) && sm_white_of(key) == (int32_t)w;
+                smd_cell(o, c, e < PF_N ? PFN[e] : "-", held);
+                o->dim |= (uint8_t)((e >= PF_N || !((ok >> e) & 1u)) ? 1u << c : 0u);
+            }
+        } else {
+            static const char *const KN[4] = {"FLT", "CRSH", "THRW", "DPTH"};
+            for (c = 0; c < 4u; c++) {
+                int32_t v = perf_k[c];
+                char cb[6];
+                if (!v) {
+                    smd_cell(o, c, KN[c], 0);
+                    o->dim |= (uint8_t)(1u << c);
+                    continue;
+                }
+                cb[0] = c == 0u ? (v < 0 ? 'L' : 'H') : KN[c][0];
+                cb[1] = c == 0u ? 'P' : KN[c][1];
+                v = v < 0 ? -v : v;
+                v = v > 99 ? 99 : v;
+                cb[2] = (char)('0' + v / 10);
+                cb[3] = (char)('0' + v % 10);
+                cb[4] = 0;
+                smd_cell(o, c, cb, 0);
+            }
         }
     } else if (sm_layer == SML_SEQ) {
         uint32_t play = sm_gid_of(smp.cur), vb = (sm_lay_pick < SM_NGPAT ? sm_lay_pick : play % SM_NGPAT) / SM_BPAT;

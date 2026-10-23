@@ -25,7 +25,13 @@
  *              (smp.chain, sm_chain_set), one link: that pattern is asked for; G#3 turns the chain off (the pattern
  *              playing plays on). Asking for one pattern turns a chain off too (MONOFM's)
  *   GLO + G5   FILL while held (sm_fill: COND FILL / !FILL)
- *   FX, ARP    tap: the family's next page (FX, DIST, INSERT; ARP, ARP 2). A hold has no layer (as HOME's)
+ *   FX         tap: the family's next page (FX, DIST, INSERT). Held: the punch-in effects, Felucca's FX hold layer (perform.c) on
+ *              the master or one track: the 16 white keys hold their effect while down (perf_map, Felucca's default: REPEAT 1/8 1/16
+ *              1/32, REVERSE, LPF, HPF, TAPE STOP, FREEZE, OCT UP, OCT DN, FLANGER, PHASER, REV THROW, ECHO THROW, SLCR, -), even
+ *              after FX is let go, until the key is; the black F#3 G#3 A#3 C#4 mute T1..T4 while held; D#4 steps the target
+ *              MASTER T1 .. T4 (perf_trk); K1..K4 the macros FILTER CRUSH THROW DEPTH (perf_k, back to 0 when FX is let go).
+ *              Nothing is recorded, nothing saved (sm_fx_poll)
+ *   ARP        tap: the family's next page (ARP, ARP 2). A hold has no layer (as HOME's)
  *   HOME held  white keys F3 .. B3: the selected track T1 .. T4 (sm_hold_keys); ARP held: F3 the selected track's note LATCH
  *   SHIFT (OCT- held, outside the keyboard mode) + EDIT / FX / SEQ / HOME: the VOICE page / the deep FX pages DLY REV CHORUS in turn /
  *              the EUCLID page / the MENU page (sm_shift_combo); no layer opens, the button is no tap
@@ -45,7 +51,7 @@ static uint32_t sm_lay_clr_t0;
 #define SM_NLBTN 8u
 static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
     {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ}, {B_HOME, SML_NONE, SMFAM_HOME},
-    {B_FX, SML_NONE, SMFAM_FX}, {B_ARP, SML_NONE, SMFAM_ARP}, {B_LFO, SML_NONE, SMFAM_LFO}, {B_SCL, SML_NONE, SMFAM_SCL},
+    {B_FX, SML_FX, SMFAM_FX}, {B_ARP, SML_NONE, SMFAM_ARP}, {B_LFO, SML_NONE, SMFAM_LFO}, {B_SCL, SML_NONE, SMFAM_SCL},
 };
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
@@ -80,7 +86,7 @@ static uint32_t sm_layer_busy(void) { return sm_layer || sm_lay_arm; }
 /* the button of layer l */
 static uint32_t sm_layer_button(uint32_t l)
 {
-    return l == SML_EDIT ? B_EDIT : l == SML_GLO ? B_GLO : B_SEQ;
+    return l == SML_EDIT ? B_EDIT : l == SML_GLO ? B_GLO : l == SML_FX ? B_FX : B_SEQ;
 }
 
 /* the page of machines (0..2) a machine is on, its first machine, how many it has */
@@ -137,6 +143,8 @@ static void sm_layer_close(void)
 {
     if (sm_layer == SML_SEQ)
         sm_seq_commit();
+    if (sm_layer == SML_FX)                               /* (the macros are FX held's alone; a key still down keeps its effect) */
+        perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
     sm_lay_pick = SM_PAT_NONE;
     sm_lay_nch = 0;
     sm_layer = SML_NONE;
@@ -194,6 +202,61 @@ static void sm_hold_keys(uint32_t notes)
 
 /* every poll, first: a layer button going down is remembered (let go again already: a tap at once); the one down is a layer
  * once HOLD_MS has gone or something was used (a key, a knob); ENV is its page at once. used: a key or a knob this poll */
+/* FX held: the punch-in effects (perform.c). Every poll, layer open or not: a key pressed in the FX layer holds its effect
+ * (perf_press) until that key is let go (sm_fx_key: the key's effect, PF_N none; the audio stream reads perf_held, only
+ * the main loop writes it); the macros on K1..K4. sm_fx_keys: bit per key held for an effect */
+#define SM_FX_TGT_KEY 10u                                 /* FX: D#4 (key 10), the target MASTER T1 .. T4 */
+static uint32_t sm_fx_keys;
+static uint8_t sm_fx_key[SM_NKEYS];
+static uint32_t sm_fx_effect(uint32_t key)               /* the effect of key (white: perf_map; black 1..4: the mutes), PF_N none */
+{
+    int32_t w = sm_white_of(key);
+    uint32_t b, n = 0;
+    if (w >= 0)
+        return (uint32_t)w < PF_KEYS ? perf_map[w] : PF_N;
+    for (b = 0; b < key; b++)
+        n += (SM_BLACK_KEYS >> b) & 1u;
+    return n < SM_NTRK ? PF_M1 + n : PF_N;
+}
+static void sm_fx_poll(uint32_t notes, const int32_t *k)
+{
+    uint32_t key, held = fm1_in.notes;
+    for (key = 0; key < SM_NKEYS; key++) {                /* the keys let go: their effects off (FX held or not) */
+        if (((sm_fx_keys >> key) & 1u) && !((held >> key) & 1u)) {
+            perf_press(sm_fx_key[key], 0);
+            sm_fx_keys &= ~(1u << key);
+            sm_dirty = 1;
+        }
+    }
+    if (sm_layer != SML_FX)
+        return;
+    for (key = 0; key < SM_NKEYS; key++) {
+        uint32_t e;
+        if (!((notes >> key) & 1u))
+            continue;
+        if (key == SM_FX_TGT_KEY) {                       /* the target: MASTER, T1 .. T4 */
+            perf_trk = (uint8_t)((perf_trk + 1u) % (SM_NTRK + 1u));
+            sm_dirty = 1;
+            continue;
+        }
+        e = sm_fx_effect(key);
+        if (e >= PF_N || ((sm_fx_keys >> key) & 1u))
+            continue;
+        sm_fx_key[key] = (uint8_t)e;
+        sm_fx_keys |= 1u << key;
+        perf_press(e, 1);
+        sm_dirty = 1;
+    }
+    for (key = 0; key < 4u; key++)                        /* the macros: FILTER -100..100 (- LPF, + HPF), CRUSH, THROW, DEPTH 0..100 */
+        if (k[key]) {
+            int32_t s = k[key];
+            if (key == 3u && !perf_harm_on())
+                s = -s;                                   /* (DEPTH: 100 - perf_k[3], rises to the right, as Felucca's) */
+            perf_k[key] = (int8_t)clamp(perf_k[key] + s * (key ? 2 : 4), key ? 0 : -100, 100);
+            sm_dirty = 1;
+        }
+}
+
 static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used)
 {
     uint32_t i, held = fm1_in.buttons;

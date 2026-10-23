@@ -4462,7 +4462,7 @@ static int test_home_draw(void)
     draw_full();
     nb += lint_frame("CLOCK");
     bad += check("HOMEDRAW: CLOCK: BPM and SWING labels, 300.0 and 75%",
-                 lint_has("BPM", 0, 0) && lint_has("SWING", 0, 0) && lint_has("300.0", 0, 0) && lint_has("75%", 0, 0));
+                 lint_has("BPM", 0, 0) && lint_has("SWNG", 0, 0) && lint_has("300.0", 0, 0) && lint_has("75%", 0, 0));
     {
         uint32_t a = smd_knob_sig(0), b = smd_knob_sig(1), c = smd_sel_sig();
         smp.bpm10 = 2999;
@@ -8237,12 +8237,12 @@ static int test_arp_pages(void)
     draw_setup();
     sm_ui.page = (uint8_t)sm_arp_page(1);
     draw_full();
-    bad += check("ARP 2 page: the screen says LATCH, SWG, PROB", lint_has("LATCH", 0, 0) && lint_has("PROB", 0, 0) && lint_frame("arp2") == 0);
+    bad += check("ARP 2 page: the screen says LATCH, SWG, PROB", lint_has("LTCH", 0, 0) && lint_has("PROB", 0, 0) && lint_frame("arp2") == 0);
     sm_ui.page = (uint8_t)sm_arp_page(0);
     ksnd(0)->p[P_AMODE] = 1;
     draw_full();
     bad += check("ARP page: the screen says GATE OCT MODE ORDER and RATE", lint_has("GATE", 0, 0) && lint_has("OCT", 0, 0) &&
-                 lint_has("MODE", 0, 0) && lint_has("ORDER", 0, 0) && lint_has("RATE", 0, 0) && lint_frame("arp1") == 0);
+                 lint_has("MODE", 0, 0) && lint_has("ORDR", 0, 0) && lint_has("RATE", 0, 0) && lint_frame("arp1") == 0);
     return bad;
 }
 
@@ -8570,7 +8570,7 @@ static int test_fx_deep_pages(void)
     fx_tap();
     bad += check("FX: the FX button tapped from a deep page: the FX page", !strcmp(sm_cur_page()->name, "FX"));
     layer_hold(B_FX);
-    bad += check("FX: FX held 500 ms: no layer (the FX button has none), no page change at its release", sm_layer == SML_NONE);
+    bad += check("FX: FX held 500 ms: the punch-in layer, no page change at its release", sm_layer == SML_FX);
     layer_let_go(B_FX);
     bad += check("FX: ... let go: still FX", !strcmp(sm_cur_page()->name, "FX") && sm_hold_btn() == 0xFFu);
     /* globals take no locks, REC or not, a trig held or not */
@@ -8756,7 +8756,7 @@ static int test_fx_draw(void)
                  lint_has("DLY", 0, 0) && lint_has("REV", 0, 0) && lint_has("MIX", 0, 0) && lint_frame("fx") == 0);
     sm_ui.page = (uint8_t)page_by_name("DIST");
     draw_full();
-    bad += check("FX draw: the DIST page says TYPE DRIVE TONE LVL and LCUT", lint_has("TYPE", 0, 0) && lint_has("DRIVE", 0, 0) &&
+    bad += check("FX draw: the DIST page says TYPE DRIVE TONE LVL and LCUT", lint_has("TYPE", 0, 0) && lint_has("DRIV", 0, 0) &&
                  lint_has("TONE", 0, 0) && lint_has("LVL", 0, 0) && lint_has("LCUT", 0, 0) && lint_frame("dist") == 0);
     sm_ui.page = (uint8_t)page_by_name("INSERT");
     ksnd(0)->p[P_ITYPE] = IT_CRUSH;
@@ -8765,13 +8765,13 @@ static int test_fx_draw(void)
                  lint_has("BITS", 0, 0) && lint_has("RATE", 0, 0) && lint_has("LPF", 0, 0) && lint_has("MIX", 0, 0) && lint_frame("ins") == 0);
     ksnd(0)->p[P_ITYPE] = IT_FLANGER;
     draw_full();
-    bad += check("FX draw: ... on FLANG: RATE DEPTH FDBK", lint_has("FLANG", 0, 0) && lint_has("DEPTH", 0, 0) && lint_has("FDBK", 0, 0));
+    bad += check("FX draw: ... on FLANG: RATE DEPTH FDBK", lint_has("FLANG", 0, 0) && lint_has("DPTH", 0, 0) && lint_has("FDBK", 0, 0));
     ksnd(0)->p[P_ITYPE] = 0;
     sm_ui.page = (uint8_t)page_by_name("DLY");
     save = song.g[G_DTIME];
     draw_full();
     bad += check("FX draw: SHIFT + FX: DLY page: TIME FDBK COLOR MIX, no layer map, the page line says DLY GLOBAL",
-                 lint_has("TIME", 0, 0) && lint_has("FDBK", 0, 0) && lint_has("COLOR", 0, 0) && lint_has("MIX", 0, 0) && lint_has("DLY \x12 GLOBAL", 0, 0) &&
+                 lint_has("TIME", 0, 0) && lint_has("FDBK", 0, 0) && lint_has("COLR", 0, 0) && lint_has("MIX", 0, 0) && lint_has("DLY \x12 GLOBAL", 0, 0) &&
                  lint_frame("dly") == 0);
     sm_ui.page = (uint8_t)page_by_name("REV");
     draw_full();
@@ -8779,7 +8779,7 @@ static int test_fx_draw(void)
                  lint_has("HALL", 0, 0) && lint_frame("rev") == 0);
     sm_ui.page = (uint8_t)page_by_name("CHORUS");
     draw_full();
-    bad += check("FX draw: ... CHORUS page: RATE DEPTH", lint_has("RATE", 0, 0) && lint_has("DEPTH", 0, 0) && lint_frame("cho") == 0);
+    bad += check("FX draw: ... CHORUS page: RATE DEPTH", lint_has("RATE", 0, 0) && lint_has("DPTH", 0, 0) && lint_frame("cho") == 0);
     song.g[G_DTIME] = save;
     return bad;
 }
@@ -9133,7 +9133,7 @@ static int test_shift_keys(void)
                  !stp(0, 0)->n && stp(0, 1)->n == 1u && stp(0, 5)->n == 1u && stp(0, 1)->note[0] == 60 && stp(0, 5)->note[0] == 64);
     bad += check("SHIFT keys: ... the header says SHIFT +1", sm_msg == SM_MSG_SHIFT && sm_msg_val == 1);
     draw_full();
-    bad += check("SHIFT keys: ... on the screen: SHIFT +1", lint_has("SHIFT +1", 0, 0));
+    bad += check("SHIFT keys: ... on the screen: T1 SHT+1", lint_has("T1 SHT+1", 0, 0));
     key_tap_p(10);
     key_tap_p(10);
     bad += check("SHIFT keys: SHIFT + D#4 twice: two back (15, 3), SHIFT -1 net, wrapping at the length",
@@ -9145,7 +9145,7 @@ static int test_shift_keys(void)
     key_tap_p(22);
     bad += check("SHIFT keys: SHIFT + D#5 twice: 59 and 63, TRN -1", stp(0, 15)->note[0] == 59 && stp(0, 3)->note[0] == 63 && sm_msg_val == -1);
     draw_full();
-    bad += check("SHIFT keys: ... the screen says TRN -1", lint_has("TRN -1", 0, 0));
+    bad += check("SHIFT keys: ... the screen says T1 TR-1", lint_has("T1 TR-1", 0, 0));
     ms(1100);
     sm_input_poll();
     bad += check("SHIFT keys: the value is gone from the header after 1 s", sm_msg == SM_MSG_NONE);
@@ -9804,6 +9804,60 @@ static int test_header_latch(void)
     return bad;
 }
 
+
+/* FX held: the punch-in effects (Felucca's FX hold layer, perform.c): a white key holds its effect until it is let go (FX let go
+ * first or not), the black F#3 .. C#4 mute T1..T4, D#4 the target, K1..K4 the macros (back to 0 with FX) */
+static int test_fx_punch(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    perf_trk = 0;
+    layer_hold(B_FX);
+    bad += check("PUNCH: FX held: the FX layer", sm_layer == SML_FX);
+    key_dn(WHITE[0]);                                     /* F3: REPEAT 1/8 */
+    sm_input_poll();
+    bad += check("PUNCH: F3: REPEAT 1/8 held", (perf_held & PF_BIT(PF_R8)) != 0u && !stp(0, 0)->n);
+    key_dn(WHITE[7]);                                     /* C4: FREEZE */
+    sm_input_poll();
+    sm_ux_mk1();
+    lint_zones = LZONES;
+    lint_nz = sizeof LZONES / sizeof LZONES[0];
+    draw_full();
+    bad += check("PUNCH: ... C4 FREEZE too; the map: 1/8 and FRZ, FX . MASTER", (perf_held & PF_BIT(PF_FRZ)) != 0u &&
+                 lint_has("1/8", 0, 0) && lint_has("FRZ", 0, 0) && lint_has("FX \x12 MASTER \x12 D#4", 0, 0) && lint_frame("punch") == 0);
+    key_up(WHITE[0]);
+    sm_input_poll();
+    bad += check("PUNCH: F3 let go: REPEAT off, FREEZE on", !(perf_held & PF_BIT(PF_R8)) && (perf_held & PF_BIT(PF_FRZ)));
+    turn(EN_K1, -10);
+    turn(EN_K2, 10);
+    sm_input_poll();
+    draw_full();
+    bad += check("PUNCH: K1 FILTER (LP), K2 CRUSH: the macros, the map LP40 CR20", perf_k[0] == -40 && perf_k[1] == 20 &&
+                 lint_has("LP40", 0, 0) && lint_has("CR20", 0, 0));
+    key_dn(1);                                            /* F#3: T1 muted while held */
+    sm_input_poll();
+    bad += check("PUNCH: F#3: T1 muted while held", (perf_held & PF_BIT(PF_M1)) != 0u);
+    key_up(1);
+    key_dn(10);                                           /* D#4: the target */
+    sm_input_poll();
+    key_up(10);
+    sm_input_poll();
+    draw_full();
+    bad += check("PUNCH: D#4: the target T1", perf_trk == 1u && !(perf_held & PF_BIT(PF_M1)) && lint_has("FX \x12 T1 \x12 D#4", 0, 0));
+    layer_let_go(B_FX);
+    bad += check("PUNCH: FX let go, C4 still down: FREEZE on, the macros back to 0", sm_layer == SML_NONE &&
+                 (perf_held & PF_BIT(PF_FRZ)) && !perf_k[0] && !perf_k[1]);
+    key_up(WHITE[7]);
+    sm_input_poll();
+    bad += check("PUNCH: C4 let go: nothing held, no trig toggled", !perf_held && !stp(0, 7)->n);
+    perf_trk = 0;
+    lint_zones = ZONES;
+    lint_nz = sizeof ZONES / sizeof ZONES[0];
+    in_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -9988,6 +10042,7 @@ int main(void)
     bad += test_shift_then_oct();
     bad += test_seq_all_tracks();
     bad += test_header_latch();
+    bad += test_fx_punch();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();

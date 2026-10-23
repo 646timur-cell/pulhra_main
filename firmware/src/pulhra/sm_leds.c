@@ -60,6 +60,10 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
                 sm_led_put(ni, 14u + k, 1);
                 sm_led_put(ng, 14u + k, 1);
             }
+            if (sm_layer == SML_FX && (nb < SM_NTRK || k == SM_FX_TGT_KEY)) {   /* FX: the mutes, the target */
+                sm_led_put(ni, 14u + k, 1);
+                sm_led_put((sm_fx_keys >> k) & 1u ? nl : ng, 14u + k, 1);
+            }
             if (sm_layer == SML_GLO && nb < SM_NTRK) {
                 sm_led_put(ni, 14u + k, 1);
                 sm_led_put((smp.mute >> nb) & 1u ? nl : ng, 14u + k, 1);
@@ -69,6 +73,16 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
                 sm_led_put(nb - SM_GLO_BANK0 == sm_glo_bank ? nl : nbr, 14u + k, 1);
             }
             nb++;
+            continue;
+        }
+        if (sm_layer == SML_FX) {                         /* FX: a key with an effect glows, held lit */
+            uint32_t e = w < PF_KEYS ? perf_map[w] : PF_N;
+            sm_led_put(ni, 14u + k, 1);
+            if ((sm_fx_keys >> k) & 1u)
+                sm_led_put(nl, 14u + k, 1);
+            else if (e < PF_N)
+                sm_led_put(ng, 14u + k, 1);
+            w++;
             continue;
         }
         if (sm_layer == SML_SEQ) {                        /* (SEQ held: the white keys keep the trigs, sm_leds; the black keys the tools) */
