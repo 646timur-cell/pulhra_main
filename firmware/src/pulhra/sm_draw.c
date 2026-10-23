@@ -475,6 +475,13 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
             o->v = (int32_t)sm_midi_src;
             o->pos = sm_midi_src * 256u / 2u;
             o->dim = 0; o->inv = 0;
+        } else if ((k & 3u) == 2u) {                      /* TRNS: the transport in, AUTO (on with JACK) / ON / OFF */
+            static const char *const TR_N[SM_TRN_COUNT] = {"AUTO", "ON", "OFF"};
+            o->lab[0] = 'T'; o->lab[1] = 'R'; o->lab[2] = 'N'; o->lab[3] = 'S'; o->lab[4] = 0;
+            smd_upper(o->val, TR_N[sm_midi_trn % SM_TRN_COUNT], 5u);
+            o->v = (int32_t)sm_midi_trn;
+            o->pos = sm_midi_trn * 256u / (SM_TRN_COUNT - 1u);
+            o->dim = !sm_midi_trn_on(); o->inv = 0;
         } else { o->on = 0; }
         return;
     }

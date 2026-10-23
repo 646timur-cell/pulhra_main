@@ -4599,6 +4599,7 @@ static void midi_reset(void)
     for (uint32_t t = 0; t < SM_NTRK; t++)               /* (the MIDI page's routing as at boot: an earlier test may turn it) */
         sm_midi_ch[t] = (uint8_t)(t + 1u);
     sm_midi_src = 1;
+    sm_midi_trn = SM_TRN_AUTO;
     seq_reset();
     host_ticks = 1000u;
 }
@@ -9933,6 +9934,59 @@ static int test_quick_save_msg(void)
     return bad;
 }
 
+
+/* the transport in (SETUP K3 TRNS): AUTO plays and stops on MIDI Start / Stop when the source is JACK; ON from any source the
+ * filter lets in; OFF never; saved with the project */
+static int test_midi_transport(void)
+{
+    int bad = 0;
+    midi_reset();
+    sm_midi_src = 2u;                                     /* JACK */
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);                  /* Start from the jack */
+    mix_blocks(1);
+    bad += check("TRNSIN: JACK, AUTO: MIDI Start from the jack plays", sm_playing);
+    midi_enqueue(0xFu | 0xFCu << 8, 2u);
+    mix_blocks(1);
+    bad += check("TRNSIN: ... Stop stops", !sm_playing);
+    midi_enqueue(0xFu | 0xFAu << 8, 1u);                  /* (USB: the source filter drops it) */
+    mix_blocks(1);
+    bad += check("TRNSIN: ... a Start from USB: nothing (the source is the jack)", !sm_playing);
+    midi_enqueue(0xFu | 0xFBu << 8, 2u);                  /* Continue */
+    mix_blocks(1);
+    bad += check("TRNSIN: ... Continue plays", sm_playing);
+    midi_enqueue(0xFu | 0xFCu << 8, 2u);
+    mix_blocks(1);
+    midi_reset();                                         /* (INT, AUTO) */
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);
+    mix_blocks(1);
+    bad += check("TRNSIN: INT, AUTO: a Start is no transport", !sm_playing);
+    sm_midi_trn = SM_TRN_ON;
+    midi_enqueue(0xFu | 0xFAu << 8, 1u);
+    mix_blocks(1);
+    bad += check("TRNSIN: INT, ON: a Start from USB plays", sm_playing);
+    midi_enqueue(0xFu | 0xFCu << 8, 1u);
+    mix_blocks(1);
+    sm_midi_src = 2u;
+    sm_midi_trn = SM_TRN_OFF;
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);
+    mix_blocks(1);
+    bad += check("TRNSIN: JACK, OFF: no transport", !sm_playing);
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    sm_midi_trn = SM_TRN_OFF;
+    sm_midi_src = 2u;
+    sm_phash ^= 1u;                                       /* (the flash wiped: whatever the RAM says is not saved yet) */
+    bad += check("TRNSIN: saved ...", sm_store_all() == 0);
+    sm_midi_trn = SM_TRN_ON;
+    bank_reboot();
+    bad += check("TRNSIN: ... power off, on: OFF, JACK back", sm_midi_trn == SM_TRN_OFF && sm_midi_src == 2u);
+    nor_wipe();
+    midi_reset();
+    in_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -10120,6 +10174,7 @@ int main(void)
     bad += test_fx_punch();
     bad += test_splash();
     bad += test_quick_save_msg();
+    bad += test_midi_transport();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();

@@ -1100,6 +1100,11 @@ static void sm_input_poll(void)
             sm_midi_src = w;
             sm_dirty = 1;
         }
+        w = (uint8_t)((((int32_t)sm_midi_trn + k[2]) % (int32_t)SM_TRN_COUNT + (int32_t)SM_TRN_COUNT) % (int32_t)SM_TRN_COUNT);
+        if (k[2] && w != sm_midi_trn) {                   /* K3 TRNS: AUTO / ON / OFF (round) */
+            sm_midi_trn = w;
+            sm_dirty = 1;
+        }
     } else if (sm_page_home()) {
         sm_preset_turn(pre);
         sm_home_page(k, sel, now);

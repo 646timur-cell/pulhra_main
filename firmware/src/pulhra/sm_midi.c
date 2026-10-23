@@ -28,6 +28,15 @@ static uint32_t sm_kn[SM_NTRK][4];                        /* the notes the keybo
  * inputs (a TRS-only rig works out of the box). */
 static uint8_t sm_midi_ch[SM_NTRK] = {1, 2, 3, 4};
 static uint8_t sm_midi_src = 1;
+/* the SETUP page's K3, TRNS: the transport in (MIDI Start / Continue / Stop play and stop the sequencer): 0 AUTO (on while
+ * the source is JACK, the TRS jack alone: a hardware rig's clock master; off for USB and INT), 1 ON (from the source),
+ * 2 OFF. The project saves it (sm_bank.c, version 3's byte after the source) */
+enum { SM_TRN_AUTO, SM_TRN_ON, SM_TRN_OFF, SM_TRN_COUNT };
+static uint8_t sm_midi_trn = SM_TRN_AUTO;
+static uint32_t sm_midi_trn_on(void)
+{
+    return sm_midi_trn == SM_TRN_ON || (sm_midi_trn == SM_TRN_AUTO && sm_midi_src == 2u);
+}
 static volatile uint8_t sm_midi_ch_release[SM_NTRK];     /* a track's channel changed (sm_input.c sets its byte, the drain
                                                              clears it: a byte each side, no read-modify-write between the
                                                              main loop and the audio stream); the drain lets its MIDI notes go
@@ -134,6 +143,18 @@ static void sm_midi_drain(void)
         /* the SETUP page's MIDI source: USB (0) the USB port alone, INT (1) both merged, JACK (2) the TRS jack alone */
         if ((sm_midi_src == 0u && src != 1u) || (sm_midi_src == 2u && src != 2u))
             continue;
+        if ((pkt & 0x0Fu) == 0x0Fu && status >= 0xFAu && status <= 0xFCu) {   /* realtime: the transport in (TRNS) */
+            if (sm_midi_trn_on()) {
+                if (status == 0xFCu) {
+                    sm_seq_stop();
+                } else {
+                    if (status == 0xFAu && sm_playing)
+                        sm_seq_stop();                    /* (Start: from the top, playing or not; Continue: on if stopped) */
+                    sm_seq_play();
+                }
+            }
+            continue;
+        }
         if ((hi != 0x80u && hi != 0x90u) || (pkt & 0x0Fu) != hi >> 4)
             continue;                                     /* (a SysEx byte, realtime, CC ..) */
         for (ch = 0; ch < SM_NTRK; ch++) {                /* the MIDI page: every track on the channel plays it (a layer) */

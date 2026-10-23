@@ -74,7 +74,8 @@ typedef struct {
     uint8_t chain[SM_NCHAIN];                             /* pattern ids */
     int16_t g[SM_NGFX];                                   /* version 2: the global effects (SM_GFX order) */
     uint8_t mch[SM_NTRK];                                 /* version 3: the MIDI page's channel of each track (0 OFF, 1..16) */
-    uint8_t msrc, rsv3;                                   /* version 3: the SETUP page's MIDI source (0 USB, 1 INT, 2 JACK) */
+    uint8_t msrc, mtrn;                                   /* version 3: the SETUP page's MIDI source (0 USB, 1 INT, 2 JACK) and
+                                                             transport in (0 AUTO, 1 ON, 2 OFF; a byte saved 0 before it: AUTO) */
 } sm_prec_t;
 #define SM_PREC1_BYTES 24u                                /* version 1's size: everything up to g */
 #define SM_PREC2_BYTES (SM_PREC1_BYTES + 2u * SM_NGFX)    /* version 2's: up to mch */
@@ -136,6 +137,7 @@ static void sm_prec_get(sm_prec_t *r)
     for (i = 0; i < SM_NTRK; i++)
         r->mch[i] = sm_midi_ch[i];
     r->msrc = sm_midi_src;
+    r->mtrn = sm_midi_trn;
 }
 static uint32_t sm_proj_hash(void)
 {
@@ -426,6 +428,7 @@ static void sm_store_boot(void)
         for (i = 0; i < SM_NTRK; i++)
             sm_midi_ch[i] = (uint8_t)(r.mch[i] <= 16u ? r.mch[i] : i + 1u);
         sm_midi_src = (uint8_t)(r.msrc < 3u ? r.msrc : 1u);
+        sm_midi_trn = (uint8_t)(r.mtrn < SM_TRN_COUNT ? r.mtrn : SM_TRN_AUTO);
         smp.bpm10 = (uint16_t)clamp(r.bpm10, 300, 3000);
         smp.swing = (uint8_t)clamp(r.swing, 50, 75);
         smp.mute = (uint8_t)(r.mute & ((1u << SM_NTRK) - 1u));
