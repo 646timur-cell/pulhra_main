@@ -9858,6 +9858,29 @@ static int test_fx_punch(void)
     return bad;
 }
 
+
+/* the boot splash (sm_splash.c): every frame 0..100 draws the whole screen in the four inks, the rain over the top, the title, the
+ * terminal at the end (the hardware hung on the old one: a canvas past CV_MAX, a full fill a frame) */
+static int test_splash(void)
+{
+    int bad = 0;
+    uint32_t t, i, badpx = 0, topink = 0, termink = 0;
+    for (t = 0; t <= 100u; t += 5u) {
+        draw_setup();
+        sm_splash_paint(t);
+        for (i = 0; i < 240u * 240u; i++) {
+            uint16_t c = host_screen[i];
+            badpx += c != INK && c != DIMC && c != BGC && c != SGND;
+        }
+    }
+    for (i = 0; i < 240u * 140u; i++)
+        topink += host_screen[i] != BGC;
+    for (i = 240u * 154u; i < 240u * 240u; i++)
+        termink += host_screen[i] != BGC;
+    bad += check("SPLASH: every frame in the four inks; the rain and the terminal drawn at the end", !badpx && topink > 2000u && termink > 1000u);
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -10043,6 +10066,7 @@ int main(void)
     bad += test_seq_all_tracks();
     bad += test_header_latch();
     bad += test_fx_punch();
+    bad += test_splash();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();

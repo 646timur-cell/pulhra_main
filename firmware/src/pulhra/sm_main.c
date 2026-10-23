@@ -116,50 +116,7 @@ static void persist_boot(void)
 
 static uint8_t sm_uboot;                              /* the UBOOT countdown shown (seconds left, 0 = none) */
 
-/* PULHRA's boot splash, minimal: "pulhra" in big clean pixel letters (the 5 x 7 font at scale 4), typed in one by one —
- * complete by about a second of the one and a half, then it stands — with a few large random characters drifting
- * silently down the margins (dim, sparse, one bright at a time), the ASCII spinner and the version below.
- * t: 0..100 the progress. The emulator's web_ms drives it too (web/emu/pulhra_web.c).
- * Drawn on the canvas in two bands of 240 x 120 (the canvas holds at most 240 x 124: gfx.c CV_MAX), each blitted whole: no
- * full-screen fill a frame (it flickered, and every frame cost a fill and a blit) and nothing past the canvas (one 240 x 240
- * band was cut to 124 rows: the spinner and the version never showed) */
-static void sm_splash_band(uint32_t t, int32_t y0)
-{
-    static const char *const W = "pulhra";
-    static const char spin[4] = {'|', '/', '-', '\\'};
-    static const char *const CH = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*+";
-    char b[8];
-    uint32_t i, c0, a, on, s = t * 2654435761u + 0x9E3779B9u;
-    smd_begin(0, (uint32_t)y0, 240u, 120u, T_BG);
-    /* the minimal shimmer: six large random characters (scale 3) drift down the two margins, dim; one bright turns */
-    for (c0 = 0; c0 < 6u; c0++) {
-        s = s * 1664525u + 1013904223u;
-        b[0] = CH[(s >> 8) % 40u]; b[1] = 0;
-        sm_px_text((int32_t)((c0 & 1u) ? 204 : 12), (int32_t)(4 + (c0 * 37u + t * 3u / 2u) % 196) - y0, 3u, b,
-                   (uint16_t)((c0 == (t / 15u) % 6u) ? T_TEXT : SM_DIM_INK), 0);
-    }
-    /* "pulhra": the letters typed in (complete by ~67 % of the time, so the word stands before the screen changes) */
-    a = t * 3u / 2u;
-    on = 6u * (a > 100u ? 100u : a) / 100u;
-    for (i = 0; i < 6u && i < on; i++)
-        b[i] = W[i];
-    b[i] = 0;
-    sm_px_text((240 - 24 * (int32_t)i) / 2, 88 - y0, 4u, b, T_TEXT, 0);
-    if (i == 0u || (i < 6u && ((t / 15u) & 1u)))       /* the blinking typing cursor */
-        cv_rect((240 - 24 * (int32_t)i) / 2 + 24 * (int32_t)i - 6, 114 - y0, 12, 8, T_TEXT);
-    b[0] = spin[(t / 25u) & 3u];                       /* the ASCII spinner: | / - \ */
-    b[1] = 0;
-    sm_px_text(114, 196 - y0, 2u, b, T_TEXT, 0);
-    sm_px_text((240 - (int32_t)(12 * smd_len(FELUCCA_VERSION))) / 2, 214 - y0, 2u, FELUCCA_VERSION, T_TEXT, 0);
-    smd_end();
-}
-void sm_splash_paint(uint32_t t)
-{
-    t = t > 100u ? 100u : t;
-    sm_splash_band(t, 0);
-    sm_splash_band(t, 120);
-    lcd_sync();
-}
+/* the boot splash: sm_splash.c (sm_app.c includes it: the host test draws it too) */
 
 static void fm1_main(void)
 {
