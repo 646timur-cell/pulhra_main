@@ -162,7 +162,9 @@ static const uint8_t SM_FLAGV[SM_NFLAG] = {
     0, SMF_ACCENT, SMF_SLIDE, SMF_ACCENT | SMF_SLIDE, 1u << 4, 2u << 4, 3u << 4,
     SMF_ACCENT | (1u << 4), SMF_ACCENT | (2u << 4), SMF_ACCENT | (3u << 4), SMF_REST, SMF_PSLIDE,
 };
-static const char *const SM_FLAGN[SM_NFLAG] = {"-", "ACC", "SLD", "A+S", "X2", "X3", "X4", "AX2", "AX3", "AX4", "REST", "PSLD"};
+/* (at most 8 characters: the STEP page line STEP 05 ACC+RTX3 N+3 is 20, the line's width) */
+static const char *const SM_FLAGN[SM_NFLAG] = {"-", "ACCENT", "SLIDE", "ACC+SLD", "RATCH X2", "RATCH X3", "RATCH X4", "ACC+RTX2",
+                                               "ACC+RTX3", "ACC+RTX4", "REST", "P.SLIDE"};
 static uint32_t sm_flag_place(uint32_t f)                 /* a flags byte's place in the list (one not in it: 0) */
 {
     uint32_t i;

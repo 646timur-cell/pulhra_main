@@ -299,15 +299,15 @@ static void smd_page(void)
             b[n] = 0;
             smd_cat(b, &n, "DEFAULT");
         } else {
-            smd_two(b + n, (uint32_t)st + 1u);
+            smd_two(b + n, (uint32_t)st + 1u);            /* STEP 05 ACCENT N+3: the step, its FLAG in full, its NUDGE */
             n += 2;
-            b[n++] = ' '; b[n++] = '\x12'; b[n++] = ' ';
+            b[n++] = ' ';
             b[n] = 0;
             smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");
-            if (p->n) {                                   /* ... and its NUDGE (OCT- / OCT+): N+3 */
+            if (p->n) {                                   /* ... and its NUDGE (OCT- / OCT+ with the key held): N+3 */
                 char v[6];
                 smd_int(v, p->nudge, 1);
-                smd_cat(b, &n, " \x12 N");
+                smd_cat(b, &n, " N");
                 smd_cat(b, &n, v);
             }
         }

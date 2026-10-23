@@ -3534,7 +3534,7 @@ static int test_flag_shown_while_held(void)
         const char *nm = SM_FLAGN[sm_flag_place(smd_held_step()->flags)];
         smd_cat(b, &n, "FLAG ");
         smd_cat(b, &n, nm);
-        bad += check("FLAGSHOWN: the text", !strcmp(b, "FLAG ACC"));
+        bad += check("FLAGSHOWN: the text", !strcmp(b, "FLAG ACCENT"));
     }
     key_up(WHITE[3]);
     sm_input_poll();
@@ -3904,6 +3904,8 @@ static int test_step_page(void)
     {
         uint32_t i;
         int8_t lv = ksnd(0)->p[P_LEVEL];
+        key_dn(WHITE[3]);                                 /* the NUDGE: OCT- / OCT+ with the step's key held */
+        sm_input_poll();
         for (i = 0; i < 10u; i++)
             oct_tap(B_OCTUP);
         bad += check("STEPPG: OCT+ tapped: the NUDGE up to +7", s->nudge == 7 && sm_ui.bank == 0u && !sm_ui.kbd);
@@ -3918,12 +3920,16 @@ static int test_step_page(void)
         sm_input_poll();
         oct_tap(B_OCTUP);
         bad += check("STEPPG: ... OCT- held (SHIFT): no NUDGE; OCT+ then +1: -7", s->nudge == -7);
+        key_up(WHITE[3]);
+        sm_input_poll();
+        oct_tap(B_OCTUP);
+        bad += check("STEPPG: ... the key let go: OCT+ is the page, not the NUDGE", s->nudge == -7);
         turn(EN_SELECT, -4);
         sm_input_poll();
         bad += check("STEPPG: SELECT: the track's LEVEL (the step untouched)", ksnd(0)->p[P_LEVEL] == lv - 4 && s->nudge == -7);
         turn(EN_SELECT, 4);
         sm_input_poll();
-        oct_tap(B_OCTDN);
+        s->nudge = -8;                                    /* (as the rest of the test had it) */
     }
     turn(EN_PRESET, 5);
     sm_input_poll();
@@ -3987,7 +3993,7 @@ static int test_step_draw(void)
     }
     bad += check("STEPDRAW: every text inside its cell (the widest values)", nb == 0u);
     bad += check("STEPDRAW: ... the last frame: the page line (REST, N-8), NOTE C#-1, SELECT LEVEL",
-                 lint_has("STEP 13 \x12 REST \x12 N-8", 0, 0) && lint_has("C#-1", 0, 0) && lint_has("LEVEL", 0, 0));
+                 lint_has("STEP 13 REST N-8", 0, 0) && lint_has("C#-1", 0, 0) && lint_has("LEVEL", 0, 0));
     {
         uint32_t a = smd_knob_sig(1), b = smd_page_sig();
         stp(0, 12)->vel = 64;
@@ -7716,11 +7722,11 @@ static int test_step_select_swing(void)
     bad += check("STEPSEL: a step held: OCT+ x 3 its NUDGE +3, the swing kept, no paste", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
     sm_ux_mk1();
     draw_full();
-    bad += check("STEPSEL: ... the page line N+3", lint_has("STEP 04 \x12 - \x12 N+3", 0, 0));
+    bad += check("STEPSEL: ... the page line N+3", lint_has("STEP 04 - N+3", 0, 0));
     key_up(WHITE[3]);
     sm_input_poll();
     oct_tap(B_OCTUP);
-    bad += check("STEPSEL: ... let go, still selected: NUDGE +4", stp(0, 3)->nudge == 4 && ksnd(0)->swing == 8u);
+    bad += check("STEPSEL: ... let go, still selected: OCT+ no NUDGE (the pages)", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
     /* the sequencer: the swing is the pattern's (CLOCK K2), every track the same; a sound's own swing byte plays no part */
     seq_reset();
     ksnd(0)->swing = 8u;                                  /* (ignored) */
