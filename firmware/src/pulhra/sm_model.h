@@ -80,7 +80,7 @@ typedef struct {
                                                              track of the pattern swings by it (no swing per track); 0 = none */
     uint8_t mlen;                                         /* master length in 1/16 steps 1..SM_MLEN_MAX, 0 AUTO (the longest track) */
     int8_t speed;                                         /* the pattern's speed (the SEQ layer's K1, Elektron's SCALE): SM_SPEED_*
-                                                             places as an offset from 1x, -3 .. +1 = 1/8x 1/4x 1/2x 1x 2x; 0 = 1x (the
+                                                             places as an offset from 1x, -3 .. +3 = /8 /4 /2 * *2 *4 *8; 0 = 1x (the
                                                              byte was a zeroed reserve: every saved pattern plays at 1x) */
     sm_lock_t lock[SM_NLOCK];
 } sm_pattern_t;
@@ -92,11 +92,12 @@ typedef struct {
 enum { SM_PM_SEQ, SM_PM_START, SM_PM_JUMP, SM_PM_COUNT };
 #define SM_PAT_NONE 0xFFu
 #define SM_MLEN_MAX 128u
-/* the pattern speeds (sm_pattern_t.speed): a step of 8 / m grid steps, m in eighths; the place 3 is 1x */
-#define SM_NSPEED 5u
+/* the pattern speeds (sm_pattern_t.speed, the SEQ layer's K1): a step of 8 / m grid steps, m in eighths; the place 3 is 1x.
+ * The names are the layer's two-character indicator: / divides, * multiplies, * alone is 1x */
+#define SM_NSPEED 7u
 #define SM_SPEED_ONE 3
-static const uint8_t SM_SPEED8[SM_NSPEED] = {1, 2, 4, 8, 16};
-static const char *const SM_SPEED_N[SM_NSPEED] = {"1/8", "1/4", "1/2", "1X", "2X"};
+static const uint8_t SM_SPEED8[SM_NSPEED] = {1, 2, 4, 8, 16, 32, 64};
+static const char *const SM_SPEED_N[SM_NSPEED] = {"/8", "/4", "/2", "*", "*2", "*4", "*8"};
 static uint32_t sm_speed_place(int32_t speed) { return (uint32_t)clamp(SM_SPEED_ONE + speed, 0, (int32_t)SM_NSPEED - 1); }
 
 /* smp.cur, smp.next, sm_play_pat: RAM slots (0..15); smp.chain: pattern ids (0..39, any bank: the audio stream finds a link's

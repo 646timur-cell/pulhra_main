@@ -359,6 +359,7 @@ static void sm_keys_release(uint32_t now)
  * generates); a trig held + OCT+: the trig copied pastes onto it (sm_oct_poll). Both within SM_OCT_PAIR_US: the keyboard mode on or off (the only way: ARP is pages only).
  * So a single press waits that long for the other before it acts (a page must not flip under a chord press). */
 static int32_t sm_step_edit(void);
+static uint32_t sm_key_held_trk(void);
 static void sm_oct_single(uint32_t up)
 {
     if (sm_ui.kbd) {
@@ -367,7 +368,7 @@ static void sm_oct_single(uint32_t up)
             sm_ui.oct = (int8_t)o;                        /* (notes sounding keep their pitch: the key's own note-off) */
             sm_dirty = 1;
         }
-    } else if (sm_page_is_step() && sm_step_edit() >= 0) {   /* STEP, a step edited: OCT- / OCT+ the NUDGE -1 / +1 */
+    } else if (sm_page_is_step() && sm_key_held_trk()) {   /* STEP, a trig key held: OCT- / OCT+ the NUDGE -1 / +1 */
         sm_step_t *s = &smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][sm_step_edit()];
         if (!up && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u))
             return;                                       /* (OCT- still down past the pair's window: SHIFT, not a tap) */
@@ -380,9 +381,13 @@ static void sm_oct_single(uint32_t up)
         }
     } else if (up && sm_page_home() == SMH_EUCLID) {
         sm_eu_gen();                                      /* (the EUCLID page: OCT+ generates) */
-    } else if (up && smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len > 16u) {
-        sm_ui.bank = (uint8_t)!sm_ui.bank;
-        sm_dirty = 1;
+    } else if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len > 16u) {
+        if (!up && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u))
+            return;                                       /* (OCT- still down past the pair's window: SHIFT, not a tap) */
+        if (sm_ui.bank != (up ? 1u : 0u)) {               /* OCT- the previous page of steps (1..16), OCT+ the next (17..32) */
+            sm_ui.bank = (uint8_t)(up ? 1u : 0u);
+            sm_dirty = 1;
+        }
     }
 }
 
@@ -599,6 +604,15 @@ static void sm_arp_poll(void)
 
 /* the step the STEP page edits on the selected track: the white key down on it pressed last, else the step selected last;
  * -1 none */
+/* a trig key of the selected track is down (armed): the STEP page's OCT- / OCT+ are its NUDGE then, not the pages */
+static uint32_t sm_key_held_trk(void)
+{
+    uint32_t k;
+    for (k = 0; k < SM_NKEYS; k++)
+        if (((sm_key_arm >> k) & 1u) && sm_key_trk[k] == sm_ui.trk)
+            return 1;
+    return 0;
+}
 static int32_t sm_step_edit(void)
 {
     uint32_t k, last = SM_NKEYS;

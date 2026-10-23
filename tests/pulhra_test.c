@@ -1038,12 +1038,12 @@ static int test_white_key_toggles_trig(void)
     host_notes = 1u << 3;                                 /* G#3: black */
     sm_input_poll();
     bad += check("INPUT: a black key: nothing", !smp.pat[smp.cur].step[0][3].n && !smp.pat[smp.cur].step[0][19].n);
-    oct_tap(B_OCTDN);                                     /* OCT-: SHIFT, no page */
-    bad += check("INPUT: OCT- tapped: SHIFT only, the bank stays 1", sm_ui.bank == 1u);
-    oct_tap(B_OCTUP);                                     /* OCT+ again: round to bank 0 */
+    oct_tap(B_OCTUP);                                     /* OCT+ on the last page: stays (no round) */
+    bad += check("INPUT: OCT+ on 17..32: the page stays (no round)", sm_ui.bank == 1u);
+    oct_tap(B_OCTDN);                                     /* OCT- tapped: the previous page */
     host_notes = 1u << WHITE[15];
     sm_input_poll();
-    bad += check("INPUT: OCT+ again: bank 0, the 16th white key: step 15", sm_ui.bank == 0u && smp.pat[smp.cur].step[0][15].n == 1u);
+    bad += check("INPUT: OCT- tapped: the page 1..16, the 16th white key: step 15", sm_ui.bank == 0u && smp.pat[smp.cur].step[0][15].n == 1u);
     turn(EN_ALGO, 1);
     sm_input_poll();
     host_notes = 1u << WHITE[0];
@@ -1748,29 +1748,28 @@ static int test_seq_len(void)
         sm_pattern_t *pt = &smp.pat[smp.cur];
         uint32_t m0 = smp.mode;
         before.len = 32u;
-        turn(EN_K1, 5);                                   /* K1: the pattern's speed, 1x .. 2x (no round) */
+        turn(EN_K1, 5);                                   /* K1: the pattern's speed, * .. *8 (no round) */
         turn(EN_K2, 1);                                   /* K2: the change mode, the next */
-        turn(EN_K3, 5);                                   /* K3: nothing */
-        turn(EN_K4, 24);                                  /* K4: the master length */
+        turn(EN_K3, 5);                                   /* K3, K4: nothing */
+        turn(EN_K4, 24);
         sm_input_poll();
         bad += check("SEQ: K1-K4 are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
-        bad += check("SEQ: ... K1 +5: the speed 2X (its top)", pt->speed == 1 && sm_step_q8() == sm_tempo_q8() / 2u);
+        bad += check("SEQ: ... K1 +5: the speed *8 (its top)", pt->speed == 3 && sm_step_q8() == sm_tempo_q8() / 8u);
         bad += check("SEQ: ... K2 +1: the next change mode", smp.mode == (m0 + 1u) % SM_PM_COUNT);
-        bad += check("SEQ: ... K4 +24: the master length 24", pt->mlen == 24u);
+        bad += check("SEQ: ... K3, K4: nothing (the master length AUTO)", pt->mlen == 0u);
         turn(EN_K1, -9);
         sm_input_poll();
-        bad += check("SEQ: ... K1 -9: the speed 1/8 (its bottom)", pt->speed == -3 && sm_step_q8() == sm_tempo_q8() * 8u);
+        bad += check("SEQ: ... K1 -9: the speed /8 (its bottom)", pt->speed == -3 && sm_step_q8() == sm_tempo_q8() * 8u);
         turn(EN_K1, 3);
         turn(EN_K2, -1);
-        turn(EN_K4, -24);
         sm_input_poll();
-        bad += check("SEQ: ... back: 1X, the mode, AUTO", pt->speed == 0 && smp.mode == m0 && pt->mlen == 0u);
+        bad += check("SEQ: ... back: *, the mode", pt->speed == 0 && smp.mode == m0);
     }
     layer_let_go(B_SEQ);
     oct_tap(B_OCTUP);                                     /* OCT+: the second bank: the gate opens with the length */
     bad += check("SEQ: the length 32: OCT+ selects the bank 1", sm_ui.bank == 1u);
-    oct_tap(B_OCTUP);
-    bad += check("SEQ: ... OCT+ again the bank 0 (round)", sm_ui.bank == 0u);
+    oct_tap(B_OCTDN);
+    bad += check("SEQ: ... OCT- the bank 0 (the previous page)", sm_ui.bank == 0u);
     sm_step_toggle(0, 20);
     sm_step_toggle(0, 31);
     seq_log_clear();
@@ -2525,6 +2524,12 @@ static int lint_has(const char *t, int32_t *y0, int32_t *y1)
         }
     return 0;
 }
+/* the SEQ layer's row 4 (y 150 .. 184): the indicators under K1 (the speed) and K2 (the change mode) */
+static int smd_has_cells(const char *k1, const char *k2)
+{
+    int32_t a0 = 0, a1 = 0, b0 = 0, b1 = 0;
+    return lint_has(k1, &a0, &a1) && lint_has(k2, &b0, &b1) && a0 >= 150 && a1 <= 184 && b0 >= 150 && b1 <= 184;
+}
 static uint32_t lint_machines(void)                       /* the machine cells of an EDIT map (not INIT, not the page key) */
 {
     uint32_t i, n = 0;
@@ -2596,7 +2601,7 @@ static int test_layer_maps(void)
     smp.pat[smp.cur].kit.snd[0].len = 24;
     layer_draw(SML_SEQ);
     bad += check("MAP: SEQ: the length (LEN 24), the pattern grid, the mode, the title", lint_frame("seq") == 0 && lint_has("LEN 24", 0, 0) &&
-                 lint_has("A01", 0, 0) && lint_has("SPD 1X SEQ ML AUTO", 0, 0) && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
+                 lint_has("A01", 0, 0) && smd_has_cells("*", "SEQ") && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
     sm_lay_cleared = 1;
     layer_draw(SML_SEQ);
     bad += check("MAP: SEQ: CLEARED after a clear", lint_has("CLEARED", 0, 0));
@@ -4224,8 +4229,8 @@ static int test_shift_oct(void)
     v0 = ksnd(0)->p[P_FCUT];
     turn(EN_SELECT, -2); sm_input_poll();
     bad += check("SHIFT: OCT- let go: SHIFT off, a detent a step again", !sm_shift && ksnd(0)->p[P_FCUT] == v0 - 2);
-    oct_tap(B_OCTUP);
-    bad += check("OCT+: round to the page 1..16", sm_ui.bank == 0u);
+    oct_tap(B_OCTDN);
+    bad += check("OCT- tapped: the previous page 1..16", sm_ui.bank == 0u);
     /* CLOCK: SHIFT turns the tempo 1.0 BPM a detent */
     sm_ui.page = (uint8_t)page_by_name("CLOCK");
     b0 = smp.bpm10;
@@ -4789,10 +4794,19 @@ static int test_oct_pages(void)
     sm_rec = 1;                                           /* (grid record) */
     lk_tap(2);
     bad += check("OCT: ... a white key is then step 18 (17..32)", smp.pat[smp.cur].step[0][18].n == 1u && !smp.pat[smp.cur].step[0][2].n);
-    oct_tap(B_OCTDN);
-    bad += check("OCT: OCT- (SHIFT): the page stays 17..32", sm_ui.bank == 1u);
     oct_tap(B_OCTUP);
-    bad += check("OCT: OCT+ again: round to steps 1..16", sm_ui.bank == 0u);
+    bad += check("OCT: OCT+ again: the last page stays (no round)", sm_ui.bank == 1u);
+    btn_down(B_OCTDN);                                    /* OCT- held as SHIFT (a knob turned): no page */
+    sm_input_poll();
+    turn(EN_K1, 1);
+    sm_input_poll();
+    ms(SM_OCT_PAIR_US / 1000u + 50u);
+    sm_input_poll();
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    bad += check("OCT: OCT- held as SHIFT: the page stays 17..32", sm_ui.bank == 1u);
+    oct_tap(B_OCTDN);
+    bad += check("OCT: OCT- tapped: the previous page, steps 1..16", sm_ui.bank == 0u);
     leds_setup(LEDS_DIM);
     ksnd(0)->len = 32u;
     sm_leds();
@@ -6212,7 +6226,7 @@ static int test_len_visible(void)
                  lint_has("LEN 32", &y0, &y1) && y1 - y0 == 21 && lint_frame("seq len") == 0);
     bad += check("LEN: ... the grid A01 .. A08 (the bank of the pick), the banks A .. E, the mode, the master length",
                  lint_has("A01", 0, 0) && lint_has("A08", 0, 0) && !lint_has("A09", 0, 0) && lint_has("E", 0, 0) &&
-                 lint_has("SPD 1X SEQ ML AUTO", 0, 0));
+                 smd_has_cells("*", "SEQ"));
     bad += check("LEN: ... A01 playing inverted, A04 (trigs) ink, A02 (empty) dim", SCR(12 + 2, 48 + 9) == INK &&
                  scr_count(192, 58, 36, 14, INK) > 20u && !scr_count(192, 58, 36, 14, DIMC) &&
                  scr_count(72, 58, 36, 14, DIMC) > 20u && !scr_count(72, 58, 36, 14, INK));

@@ -97,7 +97,7 @@ static uint32_t sm_tempo_q8(void)
     return (uint32_t)FS * 150u * 256u / b;
 }
 /* the sequencer's step: the tempo's 1/16 at the speed of the pattern playing (sm_pattern_t.speed, a byte the main loop
- * writes): 1/8x makes it 8 x longer, at most 5644800 x 8 = 45 M q8 (30 BPM), so two steps of pending time fit 32 bits and
+ * writes): *8 makes it 8 x shorter (300 BPM: 275 samples, still more than a block), /8 8 x longer, at most 5644800 x 8 = 45 M q8 (30 BPM), so two steps of pending time fit 32 bits and
  * every product below (the gate x 1024 / 64, the nudge x 7, the swing x 25) too */
 static uint32_t sm_step_q8(void)
 {

@@ -717,7 +717,11 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             }
         } else if (r == 2u) {
             smd_bank_row(o, vb);
-        } else if (r == 3u) {
+        } else if (r == 3u) {                             /* the knobs' indicators under K1 K2: the speed (*2, /4, * = 1x) and the
+                                                             change mode (SEQ, STR: direct start, JMP: direct jump); K3, K4 none */
+            static const char *const M3[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
+            smd_cell(o, 0, SM_SPEED_N[sm_speed_place(smp.pat[smp.cur % SM_NPAT].speed)], 0);
+            smd_cell(o, 1, M3[smp.mode % SM_PM_COUNT], 0);
         } else if (sm_lay_cleared) {
             smd_cat(o->w, &n, "CLEARED");
             o->winv = 1;
@@ -741,17 +745,6 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             smd_cat(o->w, &n, " NEXT ");
             smd_gname(l, smp.chain[(cp + 1u) % nc], 0);
             smd_cat(o->w, &n, l);
-        } else {                                          /* K1 the speed, K2 the change mode, K4 the master length: SPD 1/2 SEQ ML AUTO */
-            static const char *const M[SM_PM_COUNT] = {"SEQ", "DIR.S", "DIR.J"};
-            uint32_t ml = smp.pat[smp.cur % SM_NPAT].mlen;
-            char l[4];
-            smd_cat(o->w, &n, "SPD ");
-            smd_cat(o->w, &n, SM_SPEED_N[sm_speed_place(smp.pat[smp.cur % SM_NPAT].speed)]);
-            smd_cat(o->w, &n, " ");
-            smd_cat(o->w, &n, M[smp.mode % SM_PM_COUNT]);
-            smd_cat(o->w, &n, " ML ");
-            smd_lenstr(l, ml);
-            smd_cat(o->w, &n, ml ? l : "AUTO");
         }
     }
 }
