@@ -358,6 +358,7 @@ static void sm_keys_release(uint32_t now)
  * sm_shift, nothing on its own) and OCT+ turns the page of steps round, 1..16 / 17..32 (only on a track longer than 16; on the EUCLID page it
  * generates); a trig held + OCT+: the trig copied pastes onto it (sm_oct_poll). Both within SM_OCT_PAIR_US: the keyboard mode on or off (the only way: ARP is pages only).
  * So a single press waits that long for the other before it acts (a page must not flip under a chord press). */
+static int32_t sm_step_edit(void);
 static void sm_oct_single(uint32_t up)
 {
     if (sm_ui.kbd) {
@@ -365,6 +366,17 @@ static void sm_oct_single(uint32_t up)
         if ((int8_t)o != sm_ui.oct) {
             sm_ui.oct = (int8_t)o;                        /* (notes sounding keep their pitch: the key's own note-off) */
             sm_dirty = 1;
+        }
+    } else if (sm_page_is_step() && sm_step_edit() >= 0) {   /* STEP, a step edited: OCT- / OCT+ the NUDGE -1 / +1 */
+        sm_step_t *s = &smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][sm_step_edit()];
+        if (!up && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u))
+            return;                                       /* (OCT- still down past the pair's window: SHIFT, not a tap) */
+        if (s->n) {
+            int32_t v = clamp((int32_t)s->nudge + (up ? 1 : -1), -8, 7);
+            if ((int8_t)v != s->nudge) {
+                s->nudge = (int8_t)v;                     /* (a byte the audio stream reads at the step's start) */
+                sm_dirty = 1;
+            }
         }
     } else if (up && sm_page_home() == SMH_EUCLID) {
         sm_eu_gen();                                      /* (the EUCLID page: OCT+ generates) */
@@ -398,15 +410,20 @@ static void sm_oct_toggle(void)
     sm_dirty = 1;
 }
 
-static void sm_oct_poll(uint32_t pressed, uint32_t now)
+/* act: this poll another button, a key or a knob moved. OCT- held while one did is SHIFT (a combo, an accelerated turn): it is no
+ * longer the first half of a pair, so an OCT+ after it is a single OCT+ (SHIFT + SEQ, then OCT+ at once on EUCLID, generates) */
+static void sm_oct_poll(uint32_t pressed, uint32_t now, uint32_t act)
 {
     uint32_t dn = (pressed >> panel.btn[B_OCTDN]) & 1u, up = (pressed >> panel.btn[B_OCTUP]) & 1u;
+    if (act && sm_oct_pend == 1u && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u))
+        sm_oct_pend = 0;                                  /* (OCT- used as SHIFT: no pair, no single press of its own) */
     sm_shift = (uint8_t)(!sm_ui.kbd && !sm_layer_busy() && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u));
     if (sm_layer_busy()) {                         /* (the layers use OCT: EDIT's next page; a layer button down may open one) */
         sm_oct_pend = 0;
         return;
     }
-    if (up && !sm_ui.kbd && sm_key_arm) {                 /* a trig held: OCT+ pastes (no page, no pair with OCT-: SHIFT) */
+    if (up && !sm_ui.kbd && sm_key_arm && !sm_page_is_step()) {   /* a trig held: OCT+ pastes (no page, no pair with OCT-: SHIFT;
+                                                                     * STEP: OCT+ is the NUDGE, sm_oct_single) */
         sm_paste_held();
         sm_oct_pend = 0;
         return;
@@ -505,7 +522,12 @@ static void sm_kbd_poll(uint32_t edges)
         if (sm_kb_note[k] == 0xFFu) {
             if (sm_kb_pend & bit) {
                 sm_cmd_t c = {SMC_KEYON, (uint8_t)(sm_ui.trk % SM_NTRK), 0, SM_KEY_VEL, 0};
-                c.step = (uint8_t)clamp((int32_t)(SM_KEY_NOTE0 + k) + 12 * sm_ui.oct, 0, 127);
+                uint32_t pitch = sm_key_pitch(smp.pat[smp.cur % SM_NPAT].kit.snd[c.trk].p, k, sm_ui.oct);   /* (SCL: QNT, TRN) */
+                if (pitch == SM_KEY_SILENT) {             /* (a black key under QNT WHITE: nothing) */
+                    sm_kb_pend &= ~bit;
+                    continue;
+                }
+                c.step = (uint8_t)pitch;
                 c.val = (int16_t)(sm_live && sm_playing); /* (live record; the audio stream checks PLAY again) */
                 if (smp.pat[smp.cur % SM_NPAT].kit.snd[c.trk].p[P_AMODE] > 0) {   /* an arpeggiator on the track: the key is its input */
                     uint32_t j, others = 0;
@@ -973,6 +995,7 @@ static void sm_input_poll(void)
         k[i] = panel_enc(EN_K1 + (uint32_t)i);
     sm_pat_poll();
     sm_bank_poll(now);                                    /* (a bank brought in, a request served, SAVE at STOP, the autosave) */
+    fx_bpm10 = smp.bpm10;                                 /* (the delay's divisions, LFO SYNC, ESYNC: fx.c beat_samples) */
     /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is
      * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
     sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);
@@ -1010,7 +1033,8 @@ static void sm_input_poll(void)
         sm_ui.held_step = sm_ui.sel_step = 0xFFu;
         sm_dirty = 1;
     }
-    sm_oct_poll(pressed, now);
+    sm_oct_poll(pressed, now, (pressed & ~((1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]))) || notes || sel || alg ||
+                               pre || k[0] || k[1] || k[2] || k[3]);
     if (!sm_layer && sm_shift_held())
         sm_shift_keys(notes);                             /* (SHIFT + D#4 F#4 D#5 F#5) */
     sm_arp_poll();
@@ -1044,8 +1068,7 @@ static void sm_input_poll(void)
                 if ((uint8_t)v != sm_midi_ch[i]) {
                     sm_midi_ch[i] = (uint8_t)v;
                     sm_dirty = 1;
-                    if ((uint8_t)v == 0u)
-                        sm_midi_release_req(i);           /* (its channel went OFF: the drain lets its MIDI notes go) */
+                    sm_midi_release_req(i);               /* (a new channel or OFF: the drain lets the old channel's notes go) */
                 }
             }
     } else if (sm_page_home() == SMH_SETUP) {

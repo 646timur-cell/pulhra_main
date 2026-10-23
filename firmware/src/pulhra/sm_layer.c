@@ -278,8 +278,17 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_dirty = 1;
         }
     }
-    if (sm_layer == SML_SEQ && k[3]) {                    /* K4: the pattern change style (SEQ, DIR.S, DIR.J) */
-        smp.mode = (uint8_t)(((int32_t)smp.mode + k[3] + (int32_t)SM_PM_COUNT) % SM_PM_COUNT);
+    if (sm_layer == SML_SEQ && (k[0] || k[1] || k[3])) {  /* K1 the pattern's speed, K2 the change mode, K4 the master length */
+        sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+        int32_t v;
+        if (k[0]) {                                       /* (1/8x .. 2x, no round: a byte the audio stream reads every block) */
+            v = clamp((int32_t)sm_speed_place(pt->speed) + k[0], 0, (int32_t)SM_NSPEED - 1) - SM_SPEED_ONE;
+            pt->speed = (int8_t)v;
+        }
+        if (k[1])                                         /* (SEQ, DIR.S, DIR.J, round) */
+            smp.mode = (uint8_t)((((int32_t)smp.mode + k[1]) % (int32_t)SM_PM_COUNT + (int32_t)SM_PM_COUNT) % (int32_t)SM_PM_COUNT);
+        if (k[3])                                         /* (0 AUTO: the longest track, 1 .. 128; a byte read at a step's start) */
+            pt->mlen = (uint8_t)clamp((int32_t)pt->mlen + k[3], 0, (int32_t)SM_MLEN_MAX);
         sm_dirty = 1;
     }
     if (sm_layer == SML_SEQ && ((pressed >> panel.btn[B_OCTUP]) & 1u) && sm_lay_nch < SM_NCHAIN) {

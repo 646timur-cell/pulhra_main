@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* PULHRA pages: four knobs and SELECT per page, grouped in the families of the buttons EDIT / GLO / ENV / SEQ
- * (a second press of a family's button goes to its next page). The screen (sm_draw) reads sm_ui and sm_cur_page().
- * STEP (SEQ tapped) is the one page whose knobs edit a step, not the sound (sm_input.c sm_step_page): K1 NOTE, K2 VEL,
- * K3 LEN, K4 COND, SELECT NUDGE, PRESETS the FLAG; with no step selected (a SEQ tap drops the selection) K1..K4 are the
- * track's trig defaults and SELECT the track's own SWING. HOME (a family: a tap goes to its next page; sm_layer.c): MIXER, K1..K4 the
- * LEVEL of T1..T4, and CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %); SELECT is the tempo on both.
- * SETUP (SHIFT + HOME, sm_layer.c sm_shift_combo): MIDI (K1..K4 the channel of T1..T4, OFF + 1..16) and SETUP
- * (K1 pattern change mode, K2 MIDI source), in turn on SHIFT + HOME. */
+/* PULHRA pages: four knobs and SELECT per page, grouped in the families of the buttons EDIT / GLO / ENV / LFO / SEQ / HOME / ARP /
+ * FX / SCL (a second press of a family's button goes to its next page). The screen (sm_draw) reads sm_ui and sm_cur_page().
+ * STEP (SEQ tapped) is the one page whose knobs edit a step, not the sound (sm_input.c sm_step_page): K1 NOTE, K2 VEL, K3 LEN,
+ * K4 COND, PRESETS the FLAG, OCT- / OCT+ tapped the NUDGE -1 / +1 (sm_oct_single); with no step selected K1..K4 are the
+ * track's trig defaults. SELECT on STEP and on HOME's MIXER and CLOCK is the selected track's LEVEL (never the tempo).
+ * HOME: MIXER, K1..K4 the LEVEL of T1..T4; CLOCK, K1 BPM (30.0 .. 300.0), K2 SWING (50 .. 75 %).
+ * SHIFT + HOME (sm_layer.c sm_shift_combo), in turn: MIDI (K1..K4 the channel of T1..T4, OFF + 1..16) and SETUP (K1 the
+ * pattern change mode, K2 the MIDI source); the project saves both (sm_bank.c, version 3). */
 #define SM_NOPARAM 0xFFu
 #define SM_GLB 0x80u                                      /* a page's parameter id with this bit is a GLOBAL (song.g[id & 0x7F]): the
                                                              FX page's SELECT and the deep FX pages; no locks, the project's */
@@ -124,16 +124,23 @@ void sm_page_open_setup(void)
     sm_dirty = 1;
 }
 
-/* the parameter on knob k (0..3; 4: SELECT) of the page shown. FILTER is MONOFM's twin page (params.c): FILT HYB (5) on
- * the selected track's sound makes K2 / K3 HYBRID's BASE / RES (CUT / RES do nothing then: voice.c mf_filter_voice) and
- * SELECT its WIDTH (the low-pass above BASE). In OFF / LP / BP / HP / NOTCH SELECT is the LFO's depth onto the cutoff
- * (P_LD_FLT, LFO DEST's FLT): mf_filter_voice has no key tracking and no drive, its cutoff moves by ENV (K4), the LFO
- * and the accent, so LFO>FLT is the one filter control not on K1..K4 (the LFO page's FLT destination; the LFO runs at
- * its own RATE from the LFO page). Hardware 02:43: SELECT on FILTER was WIDTH in every FILT and did nothing outside HYB */
+/* the parameter on knob k (0..3; 4: SELECT) of the page shown. FILTER (SELECT CUTOFF, K1 RES, K2 ENV>FLT, K3 LFO>FLT, K4
+ * TYPE) with FILT HYB (5) on the selected track's sound: SELECT is HYBRID's BASE (the high-pass) and K1 its RES (CUT and
+ * RES do nothing then: voice.c mf_filter_voice; ENV and the LFO move BASE as they move CUT), and F.ENV's free K4 its WIDTH
+ * (the low-pass above BASE) */
 static uint32_t sm_page_param(uint32_t k)
 {
     const sm_page_t *pg = sm_cur_page();
-    return k < 4u ? pg->id[k] : pg->sel;
+    uint32_t id = k < 4u ? pg->id[k] : pg->sel;
+    if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5 && pg->fam == SMFAM_ENV) {
+        if (id == P_FCUT)
+            return P_HBASE;
+        if (id == P_FRES)
+            return P_HRES;
+        if (pg->id[0] == P_FATK && k == 3u)
+            return P_HWIDTH;
+    }
+    return id;
 }
 
 /* the ARP button's pages (ARP, ARP 2): the first page of the family, and the page after it (the tests') */

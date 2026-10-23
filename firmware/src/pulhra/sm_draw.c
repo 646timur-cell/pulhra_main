@@ -242,7 +242,7 @@ static uint32_t smd_page_sig(void)
     if (sm_page_is_step()) {
         int32_t st;
         const sm_step_t *p = smd_step(&st);
-        h = smd_mix(smd_mix(smd_mix(h, (uint32_t)st), p ? p->n : 0u), p ? p->flags : 0u);
+        h = smd_mix(smd_mix(smd_mix(smd_mix(h, (uint32_t)st), p ? p->n : 0u), p ? p->flags : 0u), p ? (uint32_t)(uint8_t)p->nudge : 0u);
     }
     if (smd_flag_held())                                  /* (a trig held on a sound page: its FLAG is the line) */
         h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
@@ -304,6 +304,12 @@ static void smd_page(void)
             b[n++] = ' '; b[n++] = '\x12'; b[n++] = ' ';
             b[n] = 0;
             smd_cat(b, &n, p->n ? SM_FLAGN[sm_flag_place(p->flags)] : "-");
+            if (p->n) {                                   /* ... and its NUDGE (OCT- / OCT+): N+3 */
+                char v[6];
+                smd_int(v, p->nudge, 1);
+                smd_cat(b, &n, " \x12 N");
+                smd_cat(b, &n, v);
+            }
         }
     } else if (sm_page_home() == SMH_EUCLID) {          /* EUCLID . OCT+ GEN (OCT+ generates the trigs) */
         n = 0;
@@ -628,28 +634,16 @@ static void smd_select(void)
     uint32_t id = sm_page_param(4);
     const param_desc_t *d = id == SM_NOPARAM ? 0 : (id & SM_GLB) ? &GP[(id & ~SM_GLB) % G_COUNT] : sm_desc_trk(s, id);
     smd_begin(0, SMD_SEL_Y, 240u, SMD_SEL_H, T_BG);
-    if (sm_page_is_step()) {
-        char lab[8], val[12];
+    if (sm_page_is_step() || (sm_page_home() && sm_page_home() != SMH_EUCLID && sm_page_home() != SMH_MIDI &&
+                              sm_page_home() != SMH_SETUP)) {   /* STEP and HOME (MIXER, CLOCK): the selected track's volume */
+        char val[12];
         const char *unit;
         int32_t x;
-        smd_upper(lab, "LEVEL", 5u);
         param_format(&TP[P_LEVEL], clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max), val, &unit);
-        x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
+        x = sm_px_text(4, 2, 2u, "LEVEL", T_TEXT, 0) + 4 + 12;
         val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
-    } else if (sm_page_home() == SMH_EUCLID || sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP) {
-        /* (nothing on SELECT for EUCLID / MIDI / SETUP) */
-    } else if (sm_page_home()) {                           /* all HOME pages: SELECT is the selected track's volume */
-        char lab[8], val[12];
-        const char *unit;
-        int32_t x;
-        const sm_sound_t *s = smd_snd();
-        smd_upper(lab, "LEVEL", 5u);
-        param_format(&TP[P_LEVEL], clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max), val, &unit);
-        x = sm_px_text(4, 2, 2u, lab, T_TEXT, 0) + 4 + 12;
-        val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
-        sm_px_text(x, 2, 2u, val, T_TEXT, 1);
-        sm_px_text(x, 2, 2u, val, T_TEXT, 1);
+    } else if (sm_page_home()) {                           /* (nothing on SELECT for EUCLID / MIDI / SETUP) */
     } else if (d) {
         char lab[8], val[12];
         const char *unit;
@@ -766,10 +760,13 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             smd_cat(o->w, &n, " NEXT ");
             smd_gname(l, smp.chain[(cp + 1u) % nc], 0);
             smd_cat(o->w, &n, l);
-        } else {                                          /* the change mode, the master length */
-            static const char *const M[SM_PM_COUNT] = {"SEQUENTIAL", "DIR START", "DIR JUMP"};
+        } else {                                          /* K1 the speed, K2 the change mode, K4 the master length: SPD 1/2 SEQ ML AUTO */
+            static const char *const M[SM_PM_COUNT] = {"SEQ", "DIR.S", "DIR.J"};
             uint32_t ml = smp.pat[smp.cur % SM_NPAT].mlen;
             char l[4];
+            smd_cat(o->w, &n, "SPD ");
+            smd_cat(o->w, &n, SM_SPEED_N[sm_speed_place(smp.pat[smp.cur % SM_NPAT].speed)]);
+            smd_cat(o->w, &n, " ");
             smd_cat(o->w, &n, M[smp.mode % SM_PM_COUNT]);
             smd_cat(o->w, &n, " ML ");
             smd_lenstr(l, ml);
@@ -879,7 +876,7 @@ static void smd_strip4(void)
                 cv_rect(x - 1, y, 3, 3, ink);
             } else if (d == 2u) {                         /* REST: a hollow dot (the corners and the edges, no centre) */
                 cv_rect(x - 1, y, 3, 3, ink);
-                cv_rect(x, y + 1, 1, 1, T_TEXT);
+                cv_rect(x, y + 1, 1, 1, SM_WHITE_DIM);    /* (the strip's ground inside) */
             } else if (i % 4u == 0) {
                 cv_rect(x, y + 1, 1, 1, (uint16_t)SM_DIM_INK);
             }
@@ -922,7 +919,7 @@ static void smd_strip1(void)
                 cv_rect(x, 16, 1, 1, (uint16_t)SM_DIM_INK);
         } else if (d == 5u) {                             /* REST: a hollow dot */
             cv_rect(x - 2, 14, 4, 4, T_BG);
-            cv_rect(x - 1, 15, 2, 2, T_TEXT);
+            cv_rect(x - 1, 15, 2, 2, SM_WHITE_DIM);       /* (hollow: the strip's ground inside) */
         } else {
             for (j = 0; j < d; j++)                       /* (the lowest dot: rows 15..17) */
                 cv_rect(x - 1, 15 - (int32_t)j * 4, 3, 3, T_BG);

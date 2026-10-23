@@ -268,7 +268,7 @@ static uint32_t sm_ar_pick(uint32_t t, uint32_t mode, uint32_t i, uint32_t len)
 static uint32_t sm_ar_period(uint32_t rate)
 {
     static const uint8_t DEN[6] = {1, 2, 4, 8, 3, 6};
-    uint32_t q = sm_step_q8() * 4u;                       /* a quarter note */
+    uint32_t q = sm_tempo_q8() * 4u;                       /* a quarter note */
     rate = rate > 9u ? 2u : rate;
     return rate < 6u ? q / DEN[rate] : q << (rate - 5u);
 }

@@ -269,9 +269,19 @@ static inline void master_out(int32_t *l, int32_t *r)
 /* length of one division (N_DIV order) in samples at the song tempo */
 static const uint8_t DIV_DEN[6] = {1, 2, 4, 8, 3, 6};    /* original IDs stay fixed; slow rates append */
 static uint32_t midi_beat_samples;                    /* zero until an external clock has a measured tempo */
+#if FELUCCA_SWAMP
+/* PULHRA's tempo (smp.bpm10, 0.1 BPM, 30.0 .. 300.0): its main loop copies it here every poll (sm_input.c), so the delay's
+ * divisions, LFO SYNC and ESYNC follow the PULHRA tempo, not song.g[G_BPM] (which PULHRA never writes) */
+static volatile uint16_t fx_bpm10 = 1200u;
+#endif
 static uint32_t beat_samples(void)
 {
+#if FELUCCA_SWAMP
+    uint32_t b = fx_bpm10 < 300u ? 300u : fx_bpm10 > 3000u ? 3000u : fx_bpm10;
+    return song.g[G_CLOCK] && midi_beat_samples ? midi_beat_samples : (uint32_t)FS * 600u / b;
+#else
     return song.g[G_CLOCK] && midi_beat_samples ? midi_beat_samples : (uint32_t)FS * 60u / (uint32_t)song.g[G_BPM];
+#endif
 }
 static uint32_t div_samples(uint32_t div)
 {

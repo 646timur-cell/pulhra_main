@@ -6,6 +6,7 @@
 #include "sm_model.h"
 #include "sm_model.c"
 #include "sm_kit.c"
+#include "sm_scale.c"                                     /* the SCL page in the notes: the keys' QNT and TRN, QNT SEQ */
 
 /* bit per track: release every sounding note (M-UPGRADE sets it before it takes the flash; events_block serves it) */
 static volatile uint8_t panic_req;

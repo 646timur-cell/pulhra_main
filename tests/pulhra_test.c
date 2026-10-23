@@ -813,14 +813,15 @@ static void in_reset(void)
 static void oct_pair(uint32_t gap_ms);
 static void turn(uint32_t role, int32_t n) { host_enc[panel.enc[role]] += n * panel.dir[role]; }
 static void press(uint32_t b) { host_pressed |= 1u << panel.btn[b]; }
-/* OCT- / OCT+ tapped alone (down, a poll, up, 150 ms, a poll: a single press acts after the 100 ms it waits for the other) */
+/* OCT- / OCT+ tapped alone (down, a poll, up, the pair's window + 50 ms, a poll: a single press acts after the window it
+ * waits for the other, SM_OCT_PAIR_US) */
 static void oct_tap(uint32_t b)
 {
     host_pressed |= 1u << panel.btn[b];
     fm1_in.buttons |= 1u << panel.btn[b];
     sm_input_poll();
     fm1_in.buttons &= ~(1u << panel.btn[b]);
-    host_ticks += 150000u * FM1_TICKS_PER_US;
+    host_ticks += (SM_OCT_PAIR_US + 50000u) * FM1_TICKS_PER_US;
     sm_input_poll();
 }
 static const uint8_t WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* F3 .. G5 */
@@ -974,13 +975,14 @@ static void flt_play(int32_t filt, double *b0, double *b1, double *r1)
     press(B_PLAY);
     sm_input_poll();
     *b0 = flt_bright(FS / 2u / CTL, &r0);
-    turn(EN_SELECT, -110);                                 /* SELECT is CUTOFF */
-    turn(EN_K1, 100);                                      /* K1 is RESONANCE */
+    turn(EN_SELECT, filt == 5 ? 100 : -110);               /* SELECT is CUTOFF (HYB: BASE, the high-pass, up) */
+    turn(EN_K1, 100);                                      /* K1 is RESONANCE (HYB: HYBRID's RES) */
     sm_input_poll();
     *b1 = flt_bright(FS / 2u / CTL, r1);
     press(B_PLAY);
     sm_input_poll();
 }
+static uint32_t page_by_name(const char *n);
 static int test_filter_play(void)
 {
     int bad = 0;
@@ -996,9 +998,17 @@ static int test_filter_play(void)
                  ksnd(1)->p[P_FRES] > 90 && b1 < 0.1 * b0 && r1 > 20.0);
     flt_play(5, &b0, &b1, &r1);
     printf("pulhra: FILT HYB: brightness %.4f -> %.4f\n", b0, b1);
-    bad += check("FILTER: FILT HYB: SELECT CUT -110 + K1 RES through the input: the core has them",
-                 trk[1].p[P_FLT] == 5 && trk[1].p[P_FCUT] == ksnd(1)->p[P_FCUT] && trk[1].p[P_FRES] == ksnd(1)->p[P_FRES] &&
-                 ksnd(1)->p[P_FRES] > 90);
+    bad += check("FILTER: FILT HYB: SELECT is BASE, K1 HYBRID's RES (CUT, RES untouched): the core has them, the sound moved",
+                 trk[1].p[P_FLT] == 5 && trk[1].p[P_HBASE] == ksnd(1)->p[P_HBASE] && trk[1].p[P_HRES] == ksnd(1)->p[P_HRES] &&
+                 ksnd(1)->p[P_HBASE] >= 100 && ksnd(1)->p[P_HRES] > 90 && ksnd(1)->p[P_FCUT] == TP[P_FCUT].def &&
+                 ksnd(1)->p[P_FRES] == TP[P_FRES].def && (b1 > 1.5 * b0 || b1 < 0.67 * b0));
+    {                                                     /* F.ENV's K4: WIDTH under HYB, nothing otherwise */
+        uint32_t w;
+        sm_ui.page = (uint8_t)page_by_name("F.ENV");
+        w = sm_page_param(3);
+        ksnd(sm_ui.trk)->p[P_FLT] = 1;
+        bad += check("FILTER: F.ENV K4 is HYBRID's WIDTH under HYB, none under LP", w == P_HWIDTH && sm_page_param(3) == SM_NOPARAM);
+    }
     return bad;
 }
 
@@ -1222,6 +1232,17 @@ static int test_held_step_bank_key(void)
 /* ----------------------------------------------------------- layers --- */
 static void btn_down(uint32_t b) { host_pressed |= 1u << panel.btn[b]; fm1_in.buttons |= 1u << panel.btn[b]; }
 static void btn_up(uint32_t b) { fm1_in.buttons &= ~(1u << panel.btn[b]); }
+/* REC held + PLAY (the live record: the keys, MIDI and the knobs record; REC tapped alone is ARM, grid record) */
+static void live_on(void)
+{
+    btn_down(B_REC);
+    sm_input_poll();
+    btn_down(B_PLAY);
+    sm_input_poll();
+    btn_up(B_PLAY);
+    btn_up(B_REC);
+    sm_input_poll();
+}
 static void ms(uint32_t n) { host_ticks += n * 1000u * FM1_TICKS_PER_US; }
 static void key_dn(uint32_t k) { host_notes |= 1u << k; fm1_in.notes |= 1u << k; }
 static void key_up(uint32_t k) { fm1_in.notes &= ~(1u << k); }
@@ -1724,12 +1745,26 @@ static int test_seq_len(void)
     bad += check("SEQ: SELECT +31: 32", ksnd(0)->len == 32u);
     {
         sm_sound_t before = *ksnd(0);
+        sm_pattern_t *pt = &smp.pat[smp.cur];
+        uint32_t m0 = smp.mode;
         before.len = 32u;
-        turn(EN_K1, 5);
-        turn(EN_K2, 5);
-        turn(EN_K3, 5);
+        turn(EN_K1, 5);                                   /* K1: the pattern's speed, 1x .. 2x (no round) */
+        turn(EN_K2, 1);                                   /* K2: the change mode, the next */
+        turn(EN_K3, 5);                                   /* K3: nothing */
+        turn(EN_K4, 24);                                  /* K4: the master length */
         sm_input_poll();
-        bad += check("SEQ: K1-K3 are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
+        bad += check("SEQ: K1-K4 are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
+        bad += check("SEQ: ... K1 +5: the speed 2X (its top)", pt->speed == 1 && sm_step_q8() == sm_tempo_q8() / 2u);
+        bad += check("SEQ: ... K2 +1: the next change mode", smp.mode == (m0 + 1u) % SM_PM_COUNT);
+        bad += check("SEQ: ... K4 +24: the master length 24", pt->mlen == 24u);
+        turn(EN_K1, -9);
+        sm_input_poll();
+        bad += check("SEQ: ... K1 -9: the speed 1/8 (its bottom)", pt->speed == -3 && sm_step_q8() == sm_tempo_q8() * 8u);
+        turn(EN_K1, 3);
+        turn(EN_K2, -1);
+        turn(EN_K4, -24);
+        sm_input_poll();
+        bad += check("SEQ: ... back: 1X, the mode, AUTO", pt->speed == 0 && smp.mode == m0 && pt->mlen == 0u);
     }
     layer_let_go(B_SEQ);
     oct_tap(B_OCTUP);                                     /* OCT+: the second bank: the gate opens with the length */
@@ -1800,6 +1835,9 @@ static int test_seq_clear(void)
 #define INK swap16(0xFFFFu)
 #define DIMC swap16(0x4208u)
 #define BGC swap16(0x0000u)
+/* the header and the step strip are inverted (sm_draw.c): their ground is SM_WHITE_DIM, their ink the black */
+#define SGND swap16(SM_WHITE_DIM)
+#define SINK BGC
 #define SCR(x, y) host_screen[(y) * 240u + (x)]
 static void draw_setup(void)
 {
@@ -1997,19 +2035,20 @@ static int test_header_rec(void)
     draw_full();
     for (y = 0; y < 18u; y++)
         for (x = 204; x < 240u; x++)
-            ink0 += host_screen[y * 240u + x] == INK;
+            ink0 += host_screen[y * 240u + x] == SINK;
     bad += check("HEADER: no REC: the right corner is not an ink box", ink0 < 36u * 18u / 3u);
     sm_rec = 1;
+    sm_live = 1;                                          /* (REC + PLAY: REC; armed alone it is ARM) */
     sm_dirty = 1;
     sm_draw();
     for (y = 0; y < 18u; y++)
         for (x = 204; x < 240u; x++)
-            ink1 += host_screen[y * 240u + x] == INK;
-    bad += check("HEADER: REC: the corner is inverted - an ink box", ink1 > 36u * 18u / 2u && host_screen[0 * 240u + 202] == INK &&
-                                                                   host_screen[17u * 240u + 239u] == INK);
+            ink1 += host_screen[y * 240u + x] == SINK;
+    bad += check("HEADER: REC: the corner is inverted - an ink box", ink1 > 36u * 18u / 2u && host_screen[0 * 240u + 202] == SINK &&
+                                                                   host_screen[17u * 240u + 239u] == SINK);
     bad += check("HEADER: REC: the R's stem is the ground, the space beside it and after the glyph ink",
-                 host_screen[4u * 240u + 204u] == BGC && host_screen[2u * 240u + 214u] == INK && host_screen[4u * 240u + 207u] == INK);
-    bad += check("HEADER: REC off again: the corner is plain", (sm_rec = 0, sm_dirty = 1, sm_draw(), host_screen[0 * 240u + 239u] == BGC));
+                 host_screen[4u * 240u + 204u] == SGND && host_screen[2u * 240u + 214u] == SINK && host_screen[4u * 240u + 207u] == SINK);
+    bad += check("HEADER: REC off again: the corner is plain", (sm_rec = 0, sm_live = 0, sm_dirty = 1, sm_draw(), host_screen[0 * 240u + 239u] == SGND));
     return bad;
 }
 
@@ -2032,11 +2071,11 @@ static int test_no_grime(void)
         for (y = 0; y < 240u; y++)
             for (x = 0; x < 240u; x++) {
                 uint16_t c = host_screen[y * 240u + x];
-                bad_px += c != INK && c != DIMC && c != BGC;
+                bad_px += c != INK && c != DIMC && c != BGC && c != SGND;
             }
         smp.pat[smp.cur].nlock = 0;
     }
-    bad += check("NOGRIME: every pixel of every page is white, dim or black", bad_px == 0);
+    bad += check("NOGRIME: every pixel of every page is white, dim, black or the header / strip ground", bad_px == 0);
     bad += check("NOGRIME: the grain is off", ux.grime == 0 && ux.bg == 0 && ux.text == 0xFFFFu && ux.dim == 0x4208u);
     return bad;
 }
@@ -2192,10 +2231,10 @@ static int test_draw_playhead_snapshot(void)
     begin_hook = hook_move_pos;                               /* the first cv_begin of the frame: after the signatures */
     px = frame_px();
     bad += check("playhead: the strip shows the step the frame read (3), not the one the audio stream moved to (9)",
-                 SCR(3 * SMD_STEP_W + 5, 239) == INK && SCR(9 * SMD_STEP_W + 5, 239) == BGC && begin_hook == 0);
+                 SCR(3 * SMD_STEP_W + 5, 239) == SINK && SCR(9 * SMD_STEP_W + 5, 239) == SGND && begin_hook == 0);
     px = frame_px();
     bad += check("playhead: the next frame sees the move and draws step 9",
-                 px > 0 && px <= 240u * 20u && SCR(9 * SMD_STEP_W + 5, 239) == INK && SCR(3 * SMD_STEP_W + 5, 239) == BGC);
+                 px > 0 && px <= 240u * 20u && SCR(9 * SMD_STEP_W + 5, 239) == SINK && SCR(3 * SMD_STEP_W + 5, 239) == SGND);
     return bad;
 }
 /* the 4 x 4 box at x, y: all ink / all ground */
@@ -2214,6 +2253,15 @@ static uint32_t scr_ink(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     for (j = 0; j < h; j++)
         for (i = 0; i < w; i++)
             n += SCR(x + i, y + j) != BGC;
+    return n;
+}
+/* scr_ink in the header or the strip: what is not their ground */
+static uint32_t scr_sink(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    uint32_t i, j, n = 0;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            n += SCR(x + i, y + j) != SGND;
     return n;
 }
 /* the strip's geometry: the pitch of a step, the offsets in its place of a dot, a bar, a REST's outline, a beat mark */
@@ -2236,22 +2284,22 @@ static int test_strip_dots(void)
     st[5].n = 1; st[5].flags = (uint8_t)(1u << 4);            /* x2 */
     draw_full();
     bad += check("strip: the strip is 20 px high, at the bottom of the screen", SMD_STRIP_H <= 20u && SMD_STRIP_Y + SMD_STRIP_H == 240u);
-    bad += check("strip: a trig is one filled 3 x 3 dot (the lowest place, rows 15..17)", box_is(SW + DO, 235, 3, 3, INK) && scr_ink(SW, 220, SW, 20) == 9u);
+    bad += check("strip: a trig is one filled 3 x 3 dot (the lowest place, rows 15..17)", box_is(SW + DO, 235, 3, 3, SINK) && scr_sink(SW, 220, SW, 20) == 9u);
     bad += check("strip: x3 is three 3 x 3 dots stacked at a pitch of 4 (a 1 px gap between)",
-                 box_is(2 * SW + DO, 235, 3, 3, INK) && box_is(2 * SW + DO, 231, 3, 3, INK) && box_is(2 * SW + DO, 227, 3, 3, INK) &&
-                 scr_ink(2 * SW, 220, SW, 20) == 27u && SCR(2 * SW + MO, 234) == BGC && SCR(2 * SW + MO, 230) == BGC);
+                 box_is(2 * SW + DO, 235, 3, 3, SINK) && box_is(2 * SW + DO, 231, 3, 3, SINK) && box_is(2 * SW + DO, 227, 3, 3, SINK) &&
+                 scr_sink(2 * SW, 220, SW, 20) == 27u && SCR(2 * SW + MO, 234) == SGND && SCR(2 * SW + MO, 230) == SGND);
     bad += check("strip: x4 is four dots (rows 3..17)",
-                 box_is(3 * SW + DO, 235, 3, 3, INK) && box_is(3 * SW + DO, 223, 3, 3, INK) && scr_ink(3 * SW, 220, SW, 20) == 36u);
-    bad += check("strip: x2 is two dots", box_is(5 * SW + DO, 235, 3, 3, INK) && box_is(5 * SW + DO, 231, 3, 3, INK) && scr_ink(5 * SW, 220, SW, 20) == 18u);
+                 box_is(3 * SW + DO, 235, 3, 3, SINK) && box_is(3 * SW + DO, 223, 3, 3, SINK) && scr_sink(3 * SW, 220, SW, 20) == 36u);
+    bad += check("strip: x2 is two dots", box_is(5 * SW + DO, 235, 3, 3, SINK) && box_is(5 * SW + DO, 231, 3, 3, SINK) && scr_sink(5 * SW, 220, SW, 20) == 18u);
     bad += check("strip: a REST is a hollow dot (the outline 4 x 4)",
-                 SCR(4 * SW + RO, 234) == INK && SCR(4 * SW + RO + 3, 237) == INK && SCR(4 * SW + RO, 236) == INK && SCR(4 * SW + RO + 3, 235) == INK &&
-                 box_is(4 * SW + RO + 1, 235, 2, 2, BGC) && scr_ink(4 * SW, 220, SW, 20) == 12u);
+                 SCR(4 * SW + RO, 234) == SINK && SCR(4 * SW + RO + 3, 237) == SINK && SCR(4 * SW + RO, 236) == SINK && SCR(4 * SW + RO + 3, 235) == SINK &&
+                 box_is(4 * SW + RO + 1, 235, 2, 2, SGND) && scr_sink(4 * SW, 220, SW, 20) == 12u);
     bad += check("strip: an empty step is nothing, the beats 1 5 9 13 a dim 1 x 1",
-                 scr_ink(6 * SW, 220, SW, 20) == 0 && SCR(MO, 236) == DIMC && scr_ink(0, 220, SW, 20) == 1u &&
-                 scr_ink(8 * SW, 220, SW, 20) == 1u && SCR(8 * SW + MO, 236) == DIMC && SCR(6 * SW + MO, 236) == BGC);
+                 scr_sink(6 * SW, 220, SW, 20) == 0 && SCR(MO, 236) == DIMC && scr_sink(0, 220, SW, 20) == 1u &&
+                 scr_sink(8 * SW, 220, SW, 20) == 1u && SCR(8 * SW + MO, 236) == DIMC && SCR(6 * SW + MO, 236) == SGND);
     for (i = 0; i < 240u * 20u; i++) {                        /* nothing but the three inks */
         uint16_t c = SCR(i % 240u, 220u + i / 240u);
-        if (c != INK && c != DIMC && c != BGC)
+        if (c != SINK && c != DIMC && c != SGND)
             bad++;
     }
     sm_playing = 1;
@@ -2260,10 +2308,10 @@ static int test_strip_dots(void)
     sm_dirty = 1;
     lcd_px = 0;
     sm_draw();
-    bad += check("strip: the step playing has a bar 8 x 1 under its place", box_is(SW + BO, 239, 8, 1, INK) && SCR(SW + BO - 1, 239) == BGC &&
-                                                                          SCR(SW + BO + 8, 239) == BGC && SCR(SW + BO, 238) == BGC);
-    bad += check("strip: the step held has a bar 8 x 2 over its place", box_is(2 * SW + BO, 220, 8, 2, INK) && SCR(2 * SW + BO - 1, 220) == BGC &&
-                                                                       SCR(2 * SW + BO + 8, 221) == BGC && box_is(2 * SW + DO, 227, 3, 3, INK));
+    bad += check("strip: the step playing has a bar 8 x 1 under its place", box_is(SW + BO, 239, 8, 1, SINK) && SCR(SW + BO - 1, 239) == SGND &&
+                                                                          SCR(SW + BO + 8, 239) == SGND && SCR(SW + BO, 238) == SGND);
+    bad += check("strip: the step held has a bar 8 x 2 over its place", box_is(2 * SW + BO, 220, 8, 2, SINK) && SCR(2 * SW + BO - 1, 220) == SGND &&
+                                                                       SCR(2 * SW + BO + 8, 221) == SGND && box_is(2 * SW + DO, 227, 3, 3, SINK));
     {   /* a x4 stack keeps a 1 px gap to the bar under it (playing) and to the one over it (held) */
         uint32_t x, gap = 1, bars;
         sm_pos[0] = 3;
@@ -2271,10 +2319,10 @@ static int test_strip_dots(void)
         sm_dirty = 1;
         sm_draw();
         for (x = 3 * SW + DO; x < 3 * SW + DO + 3u; x++)
-            gap &= SCR(x, 222) == BGC && SCR(x, 238) == BGC;
-        bars = box_is(3 * SW + BO, 220, 8, 2, INK) && box_is(3 * SW + BO, 239, 8, 1, INK);
+            gap &= SCR(x, 222) == SGND && SCR(x, 238) == SGND;
+        bars = box_is(3 * SW + BO, 220, 8, 2, SINK) && box_is(3 * SW + BO, 239, 8, 1, SINK);
         bad += check("strip: x4 playing and held at once: both bars, a 1 px gap to the stack on each side (rows 2 and 18)",
-                     bars && gap && box_is(3 * SW + DO, 223, 3, 3, INK) && box_is(3 * SW + DO, 235, 3, 3, INK));
+                     bars && gap && box_is(3 * SW + DO, 223, 3, 3, SINK) && box_is(3 * SW + DO, 235, 3, 3, SINK));
         sm_pos[0] = 1;
         sm_ui.held_step = 2;
         sm_dirty = 1;
@@ -2285,12 +2333,12 @@ static int test_strip_dots(void)
     sm_dirty = 1;
     px = frame_px();
     bad += check("strip: a step change is at most 240 x 20 px", px > 0 && px <= 240u * 20u);
-    bad += check("strip: a REST with the playing bar under it", SCR(4 * SW + RO, 234) == INK && box_is(4 * SW + BO, 239, 8, 1, INK));
+    bad += check("strip: a REST with the playing bar under it", SCR(4 * SW + RO, 234) == SINK && box_is(4 * SW + BO, 239, 8, 1, SINK));
     sm_ui.bank = 1;
     ksnd(0)->len = 32;
     sm_dirty = 1;
     sm_draw();
-    bad += check("strip: the second bank shows steps 16..31 (empty here: the four beat marks)", scr_ink(0, 220, 16 * SW, 20) == 4u);
+    bad += check("strip: the second bank shows steps 16..31 (empty here: the four beat marks)", scr_sink(0, 220, 16 * SW, 20) == 4u);
     ksnd(0)->len = 16;
     return bad;
 }
@@ -2548,7 +2596,7 @@ static int test_layer_maps(void)
     smp.pat[smp.cur].kit.snd[0].len = 24;
     layer_draw(SML_SEQ);
     bad += check("MAP: SEQ: the length (LEN 24), the pattern grid, the mode, the title", lint_frame("seq") == 0 && lint_has("LEN 24", 0, 0) &&
-                 lint_has("A01", 0, 0) && lint_has("SEQUENTIAL ML AUTO", 0, 0) && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
+                 lint_has("A01", 0, 0) && lint_has("SPD 1X SEQ ML AUTO", 0, 0) && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
     sm_lay_cleared = 1;
     layer_draw(SML_SEQ);
     bad += check("MAP: SEQ: CLEARED after a clear", lint_has("CLEARED", 0, 0));
@@ -2557,9 +2605,9 @@ static int test_layer_maps(void)
     ok = 1;
     for (i = 0; i < 240u * 240u; i++) {
         uint16_t c = host_screen[i];
-        ok &= c == INK || c == DIMC || c == BGC;
+        ok &= c == INK || c == DIMC || c == BGC || c == SGND;
     }
-    bad += check("MAP: nothing but the three inks", ok);
+    bad += check("MAP: nothing but the inks (and the header / strip ground)", ok);
     layer_close_draw();                                   /* (the map off the screen: the next test's picture is clean) */
     return bad;
 }
@@ -2597,20 +2645,20 @@ static int test_header_muted(void)
     int bad = 0;
     draw_setup();
     draw_full();
-    bad += check("HEADER: an unmuted track: T1 on the ground", SCR(0, 0) == BGC);
+    bad += check("HEADER: an unmuted track: T1 on the ground", SCR(0, 0) == SGND);
     smp.mute = 2;                                         /* T2 muted, T1 is shown */
     sm_dirty = 1;
     sm_draw();
-    bad += check("HEADER: another track muted: T1 not inverted", SCR(0, 0) == BGC);
+    bad += check("HEADER: another track muted: T1 not inverted", SCR(0, 0) == SGND);
     smp.mute = 1;
     sm_dirty = 1;
     sm_draw();
-    bad += check("HEADER: T1 muted: its label inverted", SCR(0, 0) == INK && SCR(1, 1) == INK);
+    bad += check("HEADER: T1 muted: its label inverted", SCR(0, 0) == SINK && SCR(1, 1) == SINK);
     sm_solo = 2;                                          /* T2 soloed: T1 does not play either */
     smp.mute = 0;
     sm_dirty = 1;
     sm_draw();
-    bad += check("HEADER: another track soloed: T1 inverted too", SCR(0, 0) == INK);
+    bad += check("HEADER: another track soloed: T1 inverted too", SCR(0, 0) == SINK);
     sm_solo = 0;
     smp.mute = 0;
     return bad;
@@ -3033,7 +3081,12 @@ static int test_rec_records_on_trigs(void)
     sm_input_poll();
     bad += check("REC: stopped: a turn moves the base, no lock", ksnd(0)->p[P_FCUT] == base + 3 && cpat()->nlock == 0u);
     base = ksnd(0)->p[P_FCUT];
-    press(B_PLAY);
+    btn_down(B_REC);                                      /* REC held + PLAY: live record (REC alone is ARM, grid record) */
+    sm_input_poll();
+    btn_down(B_PLAY);
+    sm_input_poll();
+    btn_up(B_PLAY);
+    btn_up(B_REC);
     sm_input_poll();
     run_block();
     for (i = 0; i < 64u; i++) {                           /* two bars at 120: a turn every ~43 blocks */
@@ -3054,6 +3107,9 @@ static int test_rec_records_on_trigs(void)
     for (s = 0, ok = 1; s < 16u; s += 4u)                 /* (each trig: the value the knob had as it played) */
         ok &= lk_val(0, s, P_FCUT) >= base - 64 && lk_val(0, s, P_FCUT) < base;
     bad += check("REC: ... each trig locked the base's value as it played", ok);
+    press(B_REC);
+    sm_input_poll();
+    bad += check("REC: the REC key while live: ARM (grid record), playing on", sm_rec == 1u && !sm_live && sm_playing);
     press(B_REC);
     sm_input_poll();
     bad += check("REC: the REC key again: off", sm_rec == 0u);
@@ -3208,9 +3264,7 @@ static int test_rec_preview(void)
     set_param(0, P_FCUT, 64);
     for (s = 0; s < 16u; s++)
         sm_step_toggle(0, s);
-    press(B_REC);
-    press(B_PLAY);
-    sm_input_poll();
+    live_on();
     run_to_step(0, 5);
     turn(EN_SELECT, 10);                                  /* SELECT is CUTOFF */
     sm_input_poll();
@@ -3314,6 +3368,11 @@ static int test_rec_live_gestures(void)
             }
             snprintf(what, sizeof what, "LIVE %s, %s: the base moved, the core at once", GN[lrg_gest], PN[lrg_pagei]);
             bad += check(what, ksnd(0)->p[id] == v0 + 16 && moved);
+            if (lrg_gest == 0u || lrg_gest == 2u) {       /* REC tapped (no REC held + PLAY): ARM, grid record, no live locks */
+                snprintf(what, sizeof what, "LIVE %s, %s: ARM, not live: no lock (the knob is the base)", GN[lrg_gest], PN[lrg_pagei]);
+                bad += check(what, nl == 0u && nempty == 0u && !sm_live);
+                continue;
+            }
             snprintf(what, sizeof what, "LIVE %s, %s: a lock on every trig (8), none on an empty step", GN[lrg_gest], PN[lrg_pagei]);
             if (check(what, nl == 8u && !nempty))
                 bad++, printf("  locks on trigs %u, on empty steps %u\n", nl, nempty);
@@ -3837,12 +3896,30 @@ static int test_step_page(void)
     turn(EN_K4, -51);
     sm_input_poll();
     bad += check("STEPPG: ... -51: 50%", s->cond == 50u);
-    turn(EN_SELECT, 20);
-    sm_input_poll();
-    bad += check("STEPPG: SELECT NUDGE up to +7", s->nudge == 7);
-    turn(EN_SELECT, -30);
-    sm_input_poll();
-    bad += check("STEPPG: ... down to -8", s->nudge == -8);
+    {
+        uint32_t i;
+        int8_t lv = ksnd(0)->p[P_LEVEL];
+        for (i = 0; i < 10u; i++)
+            oct_tap(B_OCTUP);
+        bad += check("STEPPG: OCT+ tapped: the NUDGE up to +7", s->nudge == 7 && sm_ui.bank == 0u && !sm_ui.kbd);
+        for (i = 0; i < 17u; i++)
+            oct_tap(B_OCTDN);
+        bad += check("STEPPG: ... OCT- tapped: down to -8", s->nudge == -8 && !sm_ui.kbd);
+        btn_down(B_OCTDN);                                /* OCT- held past the pair's window: SHIFT, no NUDGE */
+        sm_input_poll();
+        ms(400);
+        sm_input_poll();
+        btn_up(B_OCTDN);
+        sm_input_poll();
+        oct_tap(B_OCTUP);
+        bad += check("STEPPG: ... OCT- held (SHIFT): no NUDGE; OCT+ then +1: -7", s->nudge == -7);
+        turn(EN_SELECT, -4);
+        sm_input_poll();
+        bad += check("STEPPG: SELECT: the track's LEVEL (the step untouched)", ksnd(0)->p[P_LEVEL] == lv - 4 && s->nudge == -7);
+        turn(EN_SELECT, 4);
+        sm_input_poll();
+        oct_tap(B_OCTDN);
+    }
     turn(EN_PRESET, 5);
     sm_input_poll();
     bad += check("STEPPG: PRESETS FLAG +5: X3; no preset loaded", s->flags == (2u << 4) && ksnd(0)->preset == p0);
@@ -3904,8 +3981,8 @@ static int test_step_draw(void)
         nb += lint_frame(what);
     }
     bad += check("STEPDRAW: every text inside its cell (the widest values)", nb == 0u);
-    bad += check("STEPDRAW: ... the last frame: the page line, NOTE C#-1, NUDGE -8, REST",
-                 lint_has("STEP 13 \x12 REST", 0, 0) && lint_has("C#-1", 0, 0) && lint_has("-8", 0, 0) && lint_has("NUDGE", 0, 0));
+    bad += check("STEPDRAW: ... the last frame: the page line (REST, N-8), NOTE C#-1, SELECT LEVEL",
+                 lint_has("STEP 13 \x12 REST \x12 N-8", 0, 0) && lint_has("C#-1", 0, 0) && lint_has("LEVEL", 0, 0));
     {
         uint32_t a = smd_knob_sig(1), b = smd_page_sig();
         stp(0, 12)->vel = 64;
@@ -4139,7 +4216,7 @@ static int test_shift_oct(void)
     fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
     sm_input_poll();
     fm1_in.buttons &= ~(1u << panel.btn[B_OCTUP]);
-    ms(150);
+    ms(SM_OCT_PAIR_US / 1000u + 50u);
     sm_input_poll();
     bad += check("SHIFT: SHIFT held + OCT+: the page 17..32, not the keyboard mode", sm_ui.bank == 1u && !sm_ui.kbd);
     btn_up(B_OCTDN);
@@ -4167,7 +4244,7 @@ static int test_shift_oct(void)
     sm_input_poll();
     bad += check("SHIFT: the keyboard mode: OCT- down is no SHIFT", sm_ui.kbd && !sm_shift);
     btn_up(B_OCTDN);
-    ms(150);
+    ms(SM_OCT_PAIR_US / 1000u + 50u);
     sm_input_poll();
     bad += check("SHIFT: ... it is the octave -1", sm_ui.oct == -1);
     oct_pair(0);                                          /* (ARP's second tap is ARP 2 now, not off) */
@@ -4255,26 +4332,24 @@ static int test_home_bpm_select(void)
     press(B_HOME);
     sm_input_poll();
     bad += check("HOME: CLOCK page", !strcmp(sm_cur_page()->name, "CLOCK"));
-    turn(EN_SELECT, 3);
-    sm_input_poll();
-    bad += check("HOME: SELECT on CLOCK: tempo up", smp.bpm10 == 1203u);
+    {
+        int8_t lv = ksnd(0)->p[P_LEVEL];
+        turn(EN_SELECT, -3);
+        sm_input_poll();
+        bad += check("HOME: SELECT on CLOCK: the selected track's LEVEL, never the tempo", smp.bpm10 == 1200u && ksnd(0)->p[P_LEVEL] == lv - 3);
+    }
     turn(EN_K1, 2);
     sm_input_poll();
-    bad += check("HOME: K1 slowly (2 detents): 0.1 BPM each", smp.bpm10 == 1205u);
+    bad += check("HOME: K1 slowly (2 detents): 0.1 BPM each", smp.bpm10 == 1202u);
     turn(EN_K1, -5);
     sm_input_poll();
-    bad += check("HOME: K1 -5 in one poll (a new turn): 3 x 0.1, then 2 x 1.0", smp.bpm10 == 1205u - 23u);
+    bad += check("HOME: K1 -5 in one poll (a new turn): 3 x 0.1, then 2 x 1.0", smp.bpm10 == 1202u - 23u);
     turn(EN_K1, -5000);
     sm_input_poll();
     bad += check("HOME: K1 far down: 30.0 BPM", smp.bpm10 == 300u);
-    turn(EN_SELECT, -10);
-    sm_input_poll();
-    bad += check("HOME: ... SELECT below it stays at 30.0", smp.bpm10 == 300u);
     turn(EN_K1, 5000);
     sm_input_poll();
-    turn(EN_SELECT, 10);
-    sm_input_poll();
-    bad += check("HOME: K1 far up, SELECT above it: 300.0", smp.bpm10 == 3000u);
+    bad += check("HOME: K1 far up: 300.0", smp.bpm10 == 3000u);
     turn(EN_K2, 7);
     sm_input_poll();
     bad += check("HOME: K2 SWING +7: 57 %", smp.swing == 57u);
@@ -4289,9 +4364,13 @@ static int test_home_bpm_select(void)
     host_ticks = 1000u;
     press(B_HOME);
     sm_input_poll();
-    press(B_HOME);                                        /* CLOCK: SELECT is tempo */
+    press(B_HOME);                                        /* CLOCK: K1 is the tempo; SHIFT: 1.0 a detent */
     sm_input_poll();
-    turn(EN_SELECT, 300);
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    turn(EN_K1, 30);
+    sm_input_poll();
+    btn_up(B_OCTDN);
     sm_input_poll();
     sm_step_toggle(0, 0);
     sm_step_toggle(0, 4);
@@ -4299,7 +4378,7 @@ static int test_home_bpm_select(void)
     S = (double)FS * 150.0 / 1500.0;
     seq_run((uint32_t)(5.0 * S));
     b = on_n[0];
-    bad += check("HOME: 150.0 BPM from CLOCK SELECT: the trig on step 4 at 4 steps of that tempo",
+    bad += check("HOME: 150.0 BPM from CLOCK SHIFT + K1: the trig on step 4 at 4 steps of that tempo",
                  smp.bpm10 == 1500u && b == 2u && near_d(on_at[0][1], 4.0 * S));
     return bad;
 }
@@ -4376,7 +4455,7 @@ static int test_home_draw(void)
     {
         uint32_t a = smd_knob_sig(0), b = smd_knob_sig(1), c = smd_sel_sig();
         smp.bpm10 = 2999;
-        bad += check("HOMEDRAW: BPM changes the K1 ring's and SELECT's signatures", smd_knob_sig(0) != a && smd_sel_sig() != c);
+        bad += check("HOMEDRAW: BPM changes the K1 ring's signature (SELECT is the LEVEL: not)", smd_knob_sig(0) != a && smd_sel_sig() == c);
         smp.swing = 74;
         bad += check("HOMEDRAW: SWING changes the K2 ring's signature", smd_knob_sig(1) != b);
     }
@@ -4505,6 +4584,9 @@ static void midi_reset(void)
 {
     mi_r = mi_w = 0;
     midi_in_overflow = 0;
+    for (uint32_t t = 0; t < SM_NTRK; t++)               /* (the MIDI page's routing as at boot: an earlier test may turn it) */
+        sm_midi_ch[t] = (uint8_t)(t + 1u);
+    sm_midi_src = 1;
     seq_reset();
     host_ticks = 1000u;
 }
@@ -4677,7 +4759,7 @@ static void oct_pair(uint32_t gap_ms)
     fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
     sm_input_poll();
     fm1_in.buttons &= ~((1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]));
-    host_ticks += 150000u * FM1_TICKS_PER_US;
+    host_ticks += (SM_OCT_PAIR_US + 50000u) * FM1_TICKS_PER_US;
     sm_input_poll();
 }
 static void kb_key(uint32_t k, int down)
@@ -4699,9 +4781,9 @@ static int test_oct_pages(void)
     host_pressed |= 1u << panel.btn[B_OCTUP];
     fm1_in.buttons |= 1u << panel.btn[B_OCTUP];
     sm_input_poll();
-    bad += check("OCT: a press waits the 100 ms for the other button: the page has not turned yet", sm_ui.bank == 0u);
+    bad += check("OCT: a press waits the pair's window for the other button: the page has not turned yet", sm_ui.bank == 0u);
     fm1_in.buttons = 0;
-    host_ticks += 150000u;
+    host_ticks += (SM_OCT_PAIR_US + 50000u) * FM1_TICKS_PER_US;
     sm_input_poll();
     bad += check("OCT: ... then OCT+ turns to steps 17..32", sm_ui.bank == 1u && !sm_ui.kbd);
     sm_rec = 1;                                           /* (grid record) */
@@ -4796,13 +4878,13 @@ static int test_keyboard_mode(void)
     /* the header: KEYS inverted while the mode is on */
     draw_setup();
     draw_full();
-    printf("pulhra: KEYS header ink %u of %u without, ", scr_ink(34, 2, 48, 14), 48u * 14u);
-    bad += check("KEYS: header: not in the mode: no inverted box left of the tempo", scr_ink(34, 2, 48, 14) < 48u * 14u / 2u);
+    printf("pulhra: KEYS header ink %u of %u without, ", scr_sink(34, 2, 48, 14), 48u * 14u);
+    bad += check("KEYS: header: not in the mode: no inverted box left of the tempo", scr_sink(34, 2, 48, 14) < 48u * 14u / 2u);
     sm_ui.kbd = 1;
     sm_dirty = 1;
     sm_draw();
-    printf("pulhra: %u with\n", scr_ink(34, 2, 48, 14));
-    bad += check("KEYS: header: KEYS inverted (a box of ink)", scr_ink(34, 2, 48, 14) > 48u * 14u / 2u);
+    printf("pulhra: %u with\n", scr_sink(34, 2, 48, 14));
+    bad += check("KEYS: header: KEYS inverted (a box of ink)", scr_sink(34, 2, 48, 14) > 48u * 14u / 2u);
     sm_ui.kbd = 0;
     /* the track: ALGORITHM, then the keys play it; leaving the mode lets go of what is held */
     in_reset();
@@ -4830,8 +4912,8 @@ static int test_keyboard_mode(void)
     in_reset();
     host_ticks = 1000u;
     ksnd(0)->len = 32u;
-    oct_pair(150);
-    bad += check("KEYS: 150 ms apart: not the keyboard mode (OCT- then OCT+: the page)", !sm_ui.kbd && sm_ui.bank == 1u);
+    oct_pair(SM_OCT_PAIR_US / 1000u + 50u);
+    bad += check("KEYS: farther apart than the pair's window: not the keyboard mode (OCT- then OCT+: the page)", !sm_ui.kbd && sm_ui.bank == 1u);
     ksnd(0)->len = 16u;
     sm_ui.bank = 0;
     /* a muted track plays no keyboard note; a note held when it is muted is let go */
@@ -6130,7 +6212,7 @@ static int test_len_visible(void)
                  lint_has("LEN 32", &y0, &y1) && y1 - y0 == 21 && lint_frame("seq len") == 0);
     bad += check("LEN: ... the grid A01 .. A08 (the bank of the pick), the banks A .. E, the mode, the master length",
                  lint_has("A01", 0, 0) && lint_has("A08", 0, 0) && !lint_has("A09", 0, 0) && lint_has("E", 0, 0) &&
-                 lint_has("SEQUENTIAL ML AUTO", 0, 0));
+                 lint_has("SPD 1X SEQ ML AUTO", 0, 0));
     bad += check("LEN: ... A01 playing inverted, A04 (trigs) ink, A02 (empty) dim", SCR(12 + 2, 48 + 9) == INK &&
                  scr_count(192, 58, 36, 14, INK) > 20u && !scr_count(192, 58, 36, 14, DIMC) &&
                  scr_count(72, 58, 36, 14, DIMC) > 20u && !scr_count(72, 58, 36, 14, INK));
@@ -6148,7 +6230,7 @@ static int test_len_visible(void)
     bad += check("LEN: the strip: the length (12) at its right, inside the screen",
                  lint_has("12", &y0, &y1) && y0 >= 220 && y1 <= 240 && lint_frame("strip len") == 0);
     bad += check("LEN: ... nothing drawn past the length (steps 13 .. 16: no beat mark, no trig)",
-                 scr_ink(12 * SMD_STEP_W, 220, 4 * SMD_STEP_W, 20) == 0 && SCR(8 * SMD_STEP_W + SMD_STEP_W / 2, 236) == DIMC);
+                 scr_sink(12 * SMD_STEP_W, 220, 4 * SMD_STEP_W, 20) == 0 && SCR(8 * SMD_STEP_W + SMD_STEP_W / 2, 236) == DIMC);
     ksnd(0)->len = 16;
     smp.pat[0].step[0][13].n = 0;
     return bad;
@@ -6254,15 +6336,21 @@ static int hw_knob_matrix(const char *what, uint32_t trk_n, int sel, int trigs, 
         sm_input_poll();
         ms(5);
     }
-    if (rec) {
-        press(B_REC);
-        sm_input_poll();
-    }
-    if (play) {
-        press(B_PLAY);
-        sm_input_poll();
+    if (rec && play) {                                    /* (REC held + PLAY: live record, the knobs lock the trig playing) */
+        live_on();
         for (s = 0; s < 20u; s++)
             run_block();
+    } else {
+        if (rec) {
+            press(B_REC);
+            sm_input_poll();
+        }
+        if (play) {
+            press(B_PLAY);
+            sm_input_poll();
+            for (s = 0; s < 20u; s++)
+                run_block();
+        }
     }
     for (p = 0; p < 7u; p++) {
         hw_page(PG[p]);
@@ -6297,6 +6385,10 @@ static int hw_knob_matrix(const char *what, uint32_t trk_n, int sel, int trigs, 
     if (rec) {
         press(B_REC);
         sm_input_poll();
+        if (sm_rec) {                                     /* (live: the first press is ARM, the second off) */
+            press(B_REC);
+            sm_input_poll();
+        }
     }
     snprintf(line, sizeof line, "KNOBS: %s: all %u knobs move the base (dead %u), core has it (%u off)%s", what, n, dead, core,
              rec && play && trigs ? ", the trig playing locked to it" : "");
@@ -6395,8 +6487,8 @@ static int test_strip_len8(void)
         smp.pat[smp.cur].step[0][s].n = 1;
     ksnd(0)->len = 8;
     draw_full();
-    bad += check("STRIP8: length 8: a dot on each of the 8 places", scr_count(0, 220, 8 * SMD_STEP_W, 20, INK) == 8u * 9u);
-    bad += check("STRIP8: ... nothing past them (places 9 .. 16)", scr_ink(8 * SMD_STEP_W, 220, 8 * SMD_STEP_W, 20) == 0u);
+    bad += check("STRIP8: length 8: a dot on each of the 8 places", scr_count(0, 220, 8 * SMD_STEP_W, 20, SINK) == 8u * 9u);
+    bad += check("STRIP8: ... nothing past them (places 9 .. 16)", scr_sink(8 * SMD_STEP_W, 220, 8 * SMD_STEP_W, 20) == 0u);
     ksnd(0)->len = 16;
     return bad;
 }
@@ -6458,14 +6550,14 @@ static int test_mixer_four(void)
                  SCR(60 + 17, 48 + 3) == INK && SCR(17, 48 + 3) == BGC && SCR(120 + 17, 48 + 3) == BGC);
     for (t = 0; t < SM_NTRK; t++) {
         uint32_t x = t * SMD_STEP_W + SMD_STEP_W / 2u, y = 220u + t * 5u;
-        r = t == 2u ? DIMC : INK;
+        r = t == 2u ? DIMC : SINK;
         bad += check("MIXER4: the strip: a row per track, its trig a 3 x 3 dot (T3 muted: dim)", box_is(x - 1u, y, 3, 3, (uint16_t)r));
     }
     bad += check("MIXER4: ... T1's trig on step 13 drawn, T4's (length 8) not",
-                 box_is(12u * SMD_STEP_W + 5u, 220u, 3, 3, INK) && scr_ink(8u * SMD_STEP_W, 220u + 15u, 8u * SMD_STEP_W, 5) == 0u);
+                 box_is(12u * SMD_STEP_W + 5u, 220u, 3, 3, SINK) && scr_sink(8u * SMD_STEP_W, 220u + 15u, 8u * SMD_STEP_W, 5) == 0u);
     bad += check("MIXER4: ... each row's playing step: a bar under it",
-                 SCR(4u * SMD_STEP_W + 6u, 220u + 3u) == INK && SCR(5u * SMD_STEP_W + 6u, 220u + 8u) == INK &&
-                 SCR(7u * SMD_STEP_W + 6u, 220u + 18u) == INK);
+                 SCR(4u * SMD_STEP_W + 6u, 220u + 3u) == SINK && SCR(5u * SMD_STEP_W + 6u, 220u + 8u) == SINK &&
+                 SCR(7u * SMD_STEP_W + 6u, 220u + 18u) == SINK);
     bad += check("MIXER4: the frame's texts inside their cells", lint_frame("MIXER4") == 0);
     {
         uint32_t a = smd_strip_sig();
@@ -7345,8 +7437,7 @@ static int test_live_rec_keys(void)
     sm_step_toggle(0, 9);                                 /* a trig (NOTE 40) with a lock on step 10, to be replaced before it plays */
     stp(0, 9)->note[0] = 40;
     sm_lock_set(0, 9, P_FRES, 77);
-    press(B_PLAY);
-    sm_input_poll();
+    live_on();                                            /* (REC held + PLAY: live record) */
     into_step(0, 4, 0.10);                                /* 10 % into step 5: that step */
     kb_key(WHITE[0], 1);                                  /* F3 = 53 */
     run_block();
@@ -7427,7 +7518,7 @@ static int test_live_rec_keys(void)
         bad += check("LIVEREC: ... and no lock of a replaced trig ever applied", !lk_bad_dead);
     }
     lk_on = 0;
-    /* REC off, playing, the keyboard mode: nothing written */
+    /* REC pressed while live: ARM (grid record), playing, the keyboard mode: nothing written */
     press(B_REC);
     sm_input_poll();
     into_step(0, 1, 0.10);
@@ -7437,11 +7528,9 @@ static int test_live_rec_keys(void)
     kb_key(WHITE[3], 0);
     run_block();
     sm_input_poll();
-    bad += check("LIVEREC: REC off: a key plays, writes nothing", !stp(0, 1)->n && !stp(0, 2)->n);
+    bad += check("LIVEREC: ARM (REC pressed while live): a key plays, writes nothing", sm_rec && !sm_live && !stp(0, 1)->n && !stp(0, 2)->n);
     /* stopped + REC: nothing */
-    press(B_REC);
-    sm_input_poll();
-    press(B_PLAY);
+    press(B_PLAY);                                        /* (stop: REC stays armed) */
     sm_input_poll();
     run_block();
     kb_key(WHITE[3], 1);
@@ -7470,8 +7559,7 @@ static int test_live_rec_edge(void)
     smp.nchain = 0;
     smp.pat[1] = smp.pat[0];
     smp.next = 1;                                         /* pattern 2 asked for: it comes at the end of this one */
-    press(B_PLAY);
-    sm_input_poll();
+    live_on();                                            /* (REC held + PLAY: live record) */
     into_step(0, 15, 0.70);
     kb_key(WHITE[0], 1);
     run_block();
@@ -7493,8 +7581,7 @@ static int test_live_rec_edge(void)
     smp.nchain = 0;
     smp.next = SM_PAT_NONE;
     smp.pat[smp.cur].mlen = 8;                            /* a master length of 8: the tracks start again from step 1 there */
-    press(B_PLAY);
-    sm_input_poll();
+    live_on();                                            /* (REC held + PLAY: live record) */
     into_step(0, 7, 0.70);
     kb_key(WHITE[0], 1);
     run_block();
@@ -7517,8 +7604,7 @@ static int test_live_rec_edge(void)
     smp.next = SM_PAT_NONE;
     smp.pat[smp.cur].mlen = 0;
     smp.pat[smp.cur].kit.snd[0].len = 4;                  /* a track of 4 in a master of 16: its own loop, no edge */
-    press(B_PLAY);
-    sm_input_poll();
+    live_on();                                            /* (REC held + PLAY: live record) */
     into_step(0, 3, 0.70);
     kb_key(WHITE[0], 1);
     run_block();
@@ -7543,8 +7629,7 @@ static int test_live_rec_midi(void)
     host_ticks = 1000u;
     press(B_REC);
     sm_input_poll();
-    press(B_PLAY);
-    sm_input_poll();
+    live_on();                                            /* (REC held + PLAY: live record) */
     into_step(0, 5, 0.10);
     midi_on(0, 70, 90);
     midi_on(1, 71, 90);                                   /* T2's channel: T2 is not selected */
@@ -7569,7 +7654,7 @@ static int test_live_rec_midi(void)
     blocks_of(0.6);
     bad += check("MIDIREC: at 70 % of step 10: step 11, no second note on the recording pass",
                  stp(0, 10)->n == 1u && stp(0, 10)->note[0] == 72u && ev_notes(0, 72) == 1u && sm_pos[0] == 10u);
-    press(B_PLAY);
+    press(B_PLAY);                                        /* (stop) */
     sm_input_poll();
     run_block();
     midi_on(0, 74, 90);
@@ -7596,18 +7681,14 @@ static int test_step_select_swing(void)
     in_reset();
     host_ticks = 1000u;
     seq_tap();
-    turn(EN_SELECT, 8);
-    sm_input_poll();
-    bad += check("STEPSEL: no step: SELECT is the track's SWING (+8: 58 %), no step touched",
-                 ksnd(0)->swing == 8u && sm_step_edit() < 0 && smp.swing == 50u);
-    turn(EN_SELECT, 40);
-    sm_input_poll();
-    bad += check("STEPSEL: ... up to 75 % at most", ksnd(0)->swing == 25u);
-    turn(EN_SELECT, -17);
-    sm_input_poll();
-    sm_ux_mk1();
-    draw_full();
-    bad += check("STEPSEL: ... the label SWNG 58%", lint_has("SWNG", 0, 0) && lint_has("58%", 0, 0) && !lint_has("NUDGE", 0, 0));
+    {
+        int8_t lv = ksnd(0)->p[P_LEVEL];
+        turn(EN_SELECT, -8);
+        sm_input_poll();
+        bad += check("STEPSEL: no step: SELECT is the track's LEVEL (-8), no step touched, the swing kept",
+                     ksnd(0)->p[P_LEVEL] == lv - 8 && ksnd(0)->swing == 0u && sm_step_edit() < 0 && smp.swing == 50u);
+    }
+    ksnd(0)->swing = 8u;
     sm_sound_load(ksnd(0)->machine, 1);
     bad += check("STEPSEL: a preset load keeps the track's swing (the sequencer's)", ksnd(0)->swing == 8u);
     press(B_REC);
@@ -7615,15 +7696,16 @@ static int test_step_select_swing(void)
     sm_step_toggle(0, 3);
     key_dn(WHITE[3]);
     sm_input_poll();
-    turn(EN_SELECT, 3);
-    sm_input_poll();
-    bad += check("STEPSEL: a step held: SELECT is its NUDGE (+3), the swing kept", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
+    oct_tap(B_OCTUP);
+    oct_tap(B_OCTUP);
+    oct_tap(B_OCTUP);
+    bad += check("STEPSEL: a step held: OCT+ x 3 its NUDGE +3, the swing kept, no paste", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
+    sm_ux_mk1();
     draw_full();
-    bad += check("STEPSEL: ... the label NUDGE +3", lint_has("NUDGE", 0, 0) && lint_has("+3", 0, 0) && !lint_has("SWNG", 0, 0));
+    bad += check("STEPSEL: ... the page line N+3", lint_has("STEP 04 \x12 - \x12 N+3", 0, 0));
     key_up(WHITE[3]);
     sm_input_poll();
-    turn(EN_SELECT, 1);
-    sm_input_poll();
+    oct_tap(B_OCTUP);
     bad += check("STEPSEL: ... let go, still selected: NUDGE +4", stp(0, 3)->nudge == 4 && ksnd(0)->swing == 8u);
     /* the sequencer: T1's own 58 % on the global 50, T2 none; then the global 60: T1 68 %, T2 60 % */
     seq_reset();
@@ -8069,8 +8151,7 @@ static int test_arp_rec(void)
     arp_setup(1, 2, 1, 64);
     press(B_REC);
     sm_input_poll();
-    press(B_PLAY);
-    sm_input_poll();
+    live_on();                                            /* (REC held + PLAY: live record) */
     kb_key(WHITE[0], 1);                                   /* 53 and 57 held: the arp alternates */
     kb_key(WHITE[2], 1);
     blocks_of(10.0);
@@ -8178,7 +8259,7 @@ static void shift_press(uint32_t b)
     sm_input_poll();
     btn_up(B_OCTDN);
     sm_input_poll();
-    ms(200);                                              /* (OCT-'s single press has waited out its pair window) */
+    ms(SM_OCT_PAIR_US / 1000u + 50u);                     /* (OCT-'s single press has waited out its pair window) */
     sm_input_poll();
 }
 /* a turn of one control, a poll; the parameter ids of the knobs K1..K4 and SELECT, and what changed in the selected track's model */
@@ -8579,7 +8660,7 @@ static int test_fx_global_persist(void)
         song.g[SM_GFX[i]] = V[i];
     smp.bpm10 = 1313;
     bad += check("FX: a global changed makes the project dirty (the autosave takes it)", sm_proj_hash() != sm_phash);
-    bad += check("FX: save writes the project object: version 2", sm_store_all() == 0 && sm_fp_ok[0] + sm_fp_ok[1] >= 1);
+    bad += check("FX: save writes the project object: version 3", sm_store_all() == 0 && sm_fp_ok[0] + sm_fp_ok[1] >= 1);
     bank_reboot();
     for (i = 0; i < SM_NGFX; i++)
         ok &= song.g[SM_GFX[i]] == V[i];
@@ -8641,11 +8722,11 @@ static int test_fx_project_migration(void)
     bad += check("MIGRATE: ... the nine global effects at their defaults (GP[i].def)", ok);
     bad += check("MIGRATE: ... the bank format unchanged: the pattern loads byte for byte", smp.hbank[0] == 0u && !memcmp(&smp.pat[0], a, sizeof a));
     song.g[G_DMIX] = 12;
-    bad += check("MIGRATE: a save after it writes version 2 (the version 1 copy stays valid until then)", sm_store_all() == 0);
+    bad += check("MIGRATE: a save after it writes version 3 (the version 1 copy stays valid until then)", sm_store_all() == 0);
     {
         uint32_t newest = sm_seq_newer(sm_fp_seq[0], sm_fp_seq[1]) ? 0u : 1u;
         st_read(SM_FL_PROJ + newest * SM_FL_SEC, &hd, sizeof hd);
-        bad += check("MIGRATE: ... the newer copy's header: version 2, 42 bytes", hd.version == SM_PROJ_VER && hd.size == sizeof(sm_prec_t) && sizeof(sm_prec_t) == 42u);
+        bad += check("MIGRATE: ... the newer copy's header: version 3, 48 bytes", hd.version == SM_PROJ_VER && SM_PROJ_VER == 3u && hd.size == sizeof(sm_prec_t) && sizeof(sm_prec_t) == 48u);
     }
     bank_reboot();
     bad += check("MIGRATE: ... reboot: DMIX 12, BPM 150.0 kept", song.g[G_DMIX] == 12 && smp.bpm10 == 1500u);
@@ -8886,6 +8967,7 @@ static int test_midi_pages(void)
     mix_blocks(2);
     bad += check("MIDI page: T3 set to channel 10: a note on channel 10 plays T3", on_n[2] == 1u && notes_on_core(2) == 1u);
     midi_reset();
+    sm_midi_ch[2] = 10u;                                  /* (midi_reset put the boot routing back) */
     midi_put(0x90u | 2u, 62, 100, 1);                     /* channel 3: T3's old channel, now dead */
     mix_blocks(2);
     bad += check("MIDI page: ... and a note on channel 3 (T3's old): nothing", seq_nev == 0u);
@@ -8914,10 +8996,13 @@ static int test_midi_pages(void)
     host_ticks = 1000u;
     shift_press(B_HOME);                                  /* MIDI (the first page of the MENU family) */
     bad += check("SETUP knob: SHIFT+HOME: the MIDI page", !strcmp(sm_cur_page()->name, "MIDI"));
-    turn(EN_K1, -1);                                      /* T1: 1 -> 16 */
+    turn(EN_K1, -1);                                      /* T1: 1 -> OFF */
     sm_input_poll();
-    bad += check("SETUP knob: MIDI page K1 down: T1's channel wraps to 16", sm_midi_ch[0] == 16u);
-    turn(EN_K1, 1);                                       /* back to 1 */
+    bad += check("SETUP knob: MIDI page K1 down: T1's channel OFF (0)", sm_midi_ch[0] == 0u);
+    turn(EN_K1, -1);                                      /* OFF -> 16 */
+    sm_input_poll();
+    bad += check("SETUP knob: ... down again: wraps to 16, never 255", sm_midi_ch[0] == 16u);
+    turn(EN_K1, 2);                                       /* 16 -> OFF -> 1 */
     sm_input_poll();
     bad += check("SETUP knob: ... K1 up: back to 1", sm_midi_ch[0] == 1u);
     shift_press(B_HOME);                                  /* SETUP (the next page of the MENU family) */
@@ -9113,9 +9198,9 @@ static int test_shift_accel(void)
     sm_ui.page = (uint8_t)page_by_name("CLOCK");
     {
         uint32_t b0 = smp.bpm10;
-        turn(EN_SELECT, 3);
+        turn(EN_K1, 3);
         sm_input_poll();
-        bad += check("ACCEL: CLOCK SELECT: 1.0 BPM a detent", smp.bpm10 == b0 + 30u);
+        bad += check("ACCEL: CLOCK K1: 1.0 BPM a detent", smp.bpm10 == b0 + 30u);
     }
     sm_ui.page = (uint8_t)page_by_name("STEP");
     sm_step_toggle(0, 3);
@@ -9376,9 +9461,15 @@ static int test_rec_arm(void)
     bad += check("ARM: ... the REC LED steady", led_of(fm1_led, panel.btn[B_REC]) == 1 && led_of(fm1_led_breath, panel.btn[B_REC]) == 0);
     sm_playing = 1;
     draw_full();
-    bad += check("REC: REC on, playing: REC in the header, not ARM", lint_has("REC", 0, 0) && !lint_has("ARM", 0, 0));
+    bad += check("ARM: REC on, playing, not live: still ARM", lint_has("ARM", 0, 0) && !lint_has("REC", 0, 0));
+    sm_leds();
+    bad += check("ARM: ... the REC LED steady", led_of(fm1_led, panel.btn[B_REC]) == 1 && led_of(fm1_led_breath, panel.btn[B_REC]) == 0);
+    sm_live = 1;                                          /* REC held + PLAY: recording */
+    draw_full();
+    bad += check("REC: live, playing: REC in the header, not ARM", lint_has("REC", 0, 0) && !lint_has("ARM", 0, 0));
     sm_leds();
     bad += check("REC: ... the REC LED breathes (not steady)", led_of(fm1_led, panel.btn[B_REC]) == 0 && led_of(fm1_led_breath, panel.btn[B_REC]) == 1);
+    sm_live = 0;
     sm_playing = 0;
     sm_rec = 0;
     sm_leds();
@@ -9386,9 +9477,191 @@ static int test_rec_arm(void)
     return bad;
 }
 
+
+/* ---------------------------------------------------------------------------- review 23.10 (Tim's answers) --- */
+/* the delay's divisions, LFO SYNC and ESYNC follow PULHRA's tempo (smp.bpm10 -> fx_bpm10 every poll -> fx.c beat_samples) */
+static int test_fx_tempo(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    smp.bpm10 = 1500;
+    sm_input_poll();
+    bad += check("TEMPO: 150.0 BPM: the delay's quarter is FS x 60 / 150", fx_bpm10 == 1500u && beat_samples() == (uint32_t)FS * 60u / 150u);
+    smp.bpm10 = 905;
+    sm_input_poll();
+    bad += check("TEMPO: ... 90.5 BPM, the tenths too", beat_samples() == (uint32_t)FS * 600u / 905u);
+    smp.bpm10 = 1200;
+    sm_input_poll();
+    return bad;
+}
+
+/* SCL: the keyboard mode's QNT and TRN, QNT SEQ on the trigs; ROOT, SCALE, QNT, TRN the sound's (a byte each) */
+static int test_scale(void)
+{
+    int bad = 0;
+    int8_t p[P_COUNT];
+    uint32_t k;
+    const seq_ev_t *e;
+    memset(p, 0, sizeof p);
+    bad += check("SCL: QNT OFF: a key plays itself (F#3 = 54)", sm_key_pitch(p, 1, 0) == 54u);
+    p[P_SCALE] = 1;                                       /* MAJ, ROOT C */
+    p[P_QUANT] = SM_QN_SNAP;
+    bad += check("SCL: SNAP C MAJ: F#3 down onto F (53), G3 stays (55), C#4 onto C (60)",
+                 sm_key_pitch(p, 1, 0) == 53u && sm_key_pitch(p, 2, 0) == 55u && sm_key_pitch(p, 8, 0) == 60u);
+    p[P_TRANS] = 2;
+    bad += check("SCL: ... TRN +2 before the snap: F#3 + 2 = G#3 onto G (55)", sm_key_pitch(p, 1, 0) == 55u);
+    p[P_TRANS] = 0;
+    p[P_ROOT] = 2;                                        /* D MAJ */
+    bad += check("SCL: SNAP D MAJ: F3 down onto E (52), F#3 stays (54)", sm_key_pitch(p, 0, 0) == 52u && sm_key_pitch(p, 1, 0) == 54u);
+    p[P_ROOT] = 0;
+    p[P_QUANT] = SM_QN_WHITE;
+    bad += check("SCL: WHITE C MAJ: the white keys play C MAJ from C4 (C4 = 60, D4 = 62), a black key is silent",
+                 sm_key_pitch(p, 7, 0) == 60u && sm_key_pitch(p, 9, 0) == 62u && sm_key_pitch(p, 8, 0) == SM_KEY_SILENT);
+    p[P_SCALE] = 5;                                       /* PEN: 5 notes */
+    bad += check("SCL: WHITE C PEN: C4 D4 E4 F4 G4 = 60 62 64 67 69", sm_key_pitch(p, 7, 0) == 60u && sm_key_pitch(p, 9, 0) == 62u &&
+                 sm_key_pitch(p, 11, 0) == 64u && sm_key_pitch(p, 12, 0) == 67u && sm_key_pitch(p, 14, 0) == 69u);
+    p[P_QUANT] = SM_QN_OFF;
+    p[P_TRANS] = -12;
+    bad += check("SCL: QNT OFF, TRN -12: an octave down, at octave +1: the key", sm_key_pitch(p, 7, 0) == 48u && sm_key_pitch(p, 7, 1) == 60u);
+    /* the keyboard mode on the panel: QNT WHITE, a black key plays nothing */
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    ksnd(0)->p[P_SCALE] = 1;
+    ksnd(0)->p[P_QUANT] = SM_QN_WHITE;
+    oct_pair(0);
+    kb_key(8, 1);                                         /* C#4: black */
+    kb_key(8, 0);
+    kb_key(9, 1);                                         /* D4 */
+    mix_blocks(2);
+    bad += check("SCL: the keyboard mode, QNT WHITE: the black key silent, D4 plays 62", ev_nth(1, 0, 0) && ev_nth(1, 0, 0)->note == 62u &&
+                 !ev_nth(1, 0, 1));
+    kb_key(9, 0);
+    mix_blocks(2);
+    oct_pair(0);
+    /* QNT SEQ: a trig's notes snap as they play (two snapping together play once) */
+    in_reset();
+    seq_reset();
+    ksnd(0)->p[P_SCALE] = 1;                              /* C MAJ */
+    ksnd(0)->p[P_QUANT] = SM_QN_SEQ;
+    sm_param_push(0, P_SCALE);
+    sm_param_push(0, P_QUANT);
+    sm_step_toggle(0, 0);
+    stp(0, 0)->n = 2;
+    stp(0, 0)->note[0] = 61;                              /* C# -> C */
+    stp(0, 0)->note[1] = 60;                              /* C: the same, once */
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(0.5 * S120));
+    e = ev_nth(1, 0, 0);
+    bad += check("SCL: QNT SEQ C MAJ: a trig of C# and C plays C once", e && e->note == 60u && !ev_nth(1, 0, 1));
+    push(SMC_STOP, 0, 0, 0, 0);
+    seq_run(CTL);
+    ksnd(0)->p[P_QUANT] = SM_QN_OFF;
+    ksnd(0)->p[P_SCALE] = 0;
+    sm_param_push(0, P_SCALE);
+    sm_param_push(0, P_QUANT);
+    seq_run(CTL);
+    return bad;
+}
+
+/* the SEQ layer's K1: the pattern's speed; the trigs at 1/2x come at twice the step */
+static int test_pattern_speed(void)
+{
+    int bad = 0;
+    in_reset();
+    seq_reset();
+    smp.pat[smp.cur].speed = -1;                          /* 1/2x */
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(5.0 * S120));
+    bad += check("SPEED: 1/2X: step 3 at 4 sixteenths (2 x 2)", on_n[0] == 2u && near_d(on_at[0][1], 4.0 * S120));
+    push(SMC_STOP, 0, 0, 0, 0);
+    seq_run(CTL);
+    seq_reset();
+    smp.pat[smp.cur].speed = 1;                           /* 2X */
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(1.5 * S120));
+    bad += check("SPEED: 2X: step 3 at 1 sixteenth (2 x 1/2)", on_n[0] == 2u && near_d(on_at[0][1], 1.0 * S120));
+    bad += check("SPEED: ... the arp's clock is the tempo's (not the pattern's)", sm_tempo_q8() == (uint32_t)FS * 150u * 256u / 1200u);
+    push(SMC_STOP, 0, 0, 0, 0);
+    seq_run(CTL);
+    smp.pat[smp.cur].speed = 0;
+    return bad;
+}
+
+/* MIDI: a channel changed lets the old channel's notes go; two tracks on one channel both play; the routing is saved */
+static int test_midi_routing(void)
+{
+    int bad = 0;
+    uint32_t k;
+    midi_reset();
+    midi_on(0, 60, 100);                                  /* T1 on channel 1: a note held */
+    mix_blocks(2);
+    bad += check("MIDIROUTE: T1 holds 60 from channel 1", notes_on_core(0) == 1u);
+    sm_midi_ch[0] = 5u;                                   /* the MIDI page: T1 to channel 5 (not OFF) */
+    sm_midi_release_req(0);
+    mix_blocks(2);
+    bad += check("MIDIROUTE: T1 moved to channel 5: the note of channel 1 let go (nothing hangs)", notes_on_core(0) == 0u);
+    midi_reset();
+    sm_midi_ch[1] = 1u;                                   /* T1 and T2 both on channel 1 */
+    midi_on(0, 64, 100);
+    mix_blocks(2);
+    bad += check("MIDIROUTE: T1 and T2 on channel 1: both play the note", on_n[0] == 1u && on_n[1] == 1u);
+    midi_off(0, 64);
+    mix_blocks(2);
+    bad += check("MIDIROUTE: ... both let it go", notes_on_core(0) == 0u && notes_on_core(1) == 0u);
+    /* saved with the project (version 3), back after a power cycle */
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    sm_midi_ch[0] = 0u; sm_midi_ch[1] = 7u; sm_midi_ch[2] = 16u; sm_midi_ch[3] = 4u;
+    sm_midi_src = 2u;
+    bad += check("MIDIROUTE: a routing change makes the project dirty", sm_proj_hash() != sm_phash);
+    bad += check("MIDIROUTE: saved", sm_store_all() == 0);
+    sm_midi_ch[0] = sm_midi_ch[1] = sm_midi_ch[2] = sm_midi_ch[3] = 9u;
+    sm_midi_src = 0u;
+    bank_reboot();
+    bad += check("MIDIROUTE: ... power off, on: OFF 7 16 4, JACK back",
+                 sm_midi_ch[0] == 0u && sm_midi_ch[1] == 7u && sm_midi_ch[2] == 16u && sm_midi_ch[3] == 4u && sm_midi_src == 2u);
+    for (k = 0; k < SM_NTRK; k++)
+        sm_midi_ch[k] = (uint8_t)(k + 1u);
+    sm_midi_src = 1u;
+    nor_wipe();
+    in_reset();
+    return bad;
+}
+
+/* OCT- used as SHIFT is no half of a pair: SHIFT + SEQ (EUCLID), then OCT+ at once generates, no keyboard mode */
+static int test_shift_then_oct(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    btn_down(B_SEQ);
+    sm_input_poll();
+    ms(30);
+    btn_up(B_SEQ);
+    sm_input_poll();
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    ms(30);
+    oct_tap(B_OCTUP);
+    bad += check("SHIFTOCT: SHIFT + SEQ, OCT+ 60 ms later: EUCLID generated, not the keyboard mode",
+                 sm_page_home() == SMH_EUCLID && !sm_ui.kbd && ed_trigs(cpat(), 0) == 4u);
+    in_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
+    setvbuf(stdout, NULL, _IOLBF, 0);                     /* (a crash keeps every line printed before it) */
     bad += test_core_silent();
     bad += test_kit_boot();
     bad += test_kit_sounds();
@@ -9562,6 +9835,11 @@ int main(void)
     bad += test_lfo_pages();
     bad += test_midi_pages();
     bad += test_euclid();
+    bad += test_fx_tempo();
+    bad += test_scale();
+    bad += test_pattern_speed();
+    bad += test_midi_routing();
+    bad += test_shift_then_oct();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();

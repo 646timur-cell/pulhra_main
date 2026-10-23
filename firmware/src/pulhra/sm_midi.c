@@ -28,9 +28,10 @@ static uint32_t sm_kn[SM_NTRK][4];                        /* the notes the keybo
  * inputs (a TRS-only rig works out of the box). */
 static uint8_t sm_midi_ch[SM_NTRK] = {1, 2, 3, 4};
 static uint8_t sm_midi_src = 1;
-static volatile uint8_t sm_midi_ch_release;               /* bit per track: its channel went OFF (sm_input.c); the drain
-                                                             lets its MIDI notes go once (a note-off on the old channel
-                                                             would not reach it anymore) */
+static volatile uint8_t sm_midi_ch_release[SM_NTRK];     /* a track's channel changed (sm_input.c sets its byte, the drain
+                                                             clears it: a byte each side, no read-modify-write between the
+                                                             main loop and the audio stream); the drain lets its MIDI notes go
+                                                             once (a note-off on the old channel would not reach it anymore) */
 
 static uint32_t sm_mn_has(uint32_t t, uint32_t note) { return (sm_mn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
 static uint32_t sm_kn_has(uint32_t t, uint32_t note) { return (sm_kn[t][(note >> 5) & 3u] >> (note & 31u)) & 1u; }
@@ -65,10 +66,10 @@ static void sm_midi_release(uint32_t t)
     memset(sm_mn[t], 0, sizeof sm_mn[0]);
 }
 
-/* a track's MIDI channel turned OFF (sm_input.c, the MIDI page): the drain lets its MIDI notes go once */
-void sm_midi_release_req(uint32_t t)
+/* a track's MIDI channel changed (sm_input.c, the MIDI page): the drain lets its MIDI notes go once */
+static void sm_midi_release_req(uint32_t t)
 {
-    sm_midi_ch_release |= (uint8_t)(1u << (t % SM_NTRK));
+    sm_midi_ch_release[t % SM_NTRK] = 1u;
 }
 
 /* track t's keyboard notes let go, the same way (a muted track) */
@@ -118,51 +119,48 @@ static void sm_midi_drain(void)
             sm_midi_release(t);
             sm_kbd_release(t);
         }
-    if (sm_midi_ch_release) {                             /* a track's channel went OFF: its MIDI notes let go */
-        for (t = 0; t < SM_NTRK; t++)
-            if ((sm_midi_ch_release >> t) & 1u)
-                sm_midi_release(t);
-        RING_PUBLISH();
-        sm_midi_ch_release = 0;
-    }
+    for (t = 0; t < SM_NTRK; t++)                         /* a track's channel changed: its MIDI notes let go */
+        if (sm_midi_ch_release[t]) {
+            sm_midi_release(t);
+            sm_midi_ch_release[t] = 0;
+        }
     while (mi_r != mi_w) {
         uint32_t at = mi_r % MQ, pkt = midi_in_q[at];
         uint32_t src = midi_in_source[at] ? midi_in_source[at] : 1u;   /* (0: unknown, as USB, as seq.c reads it) */
         uint32_t status = (pkt >> 8) & 0xFFu, hi = status & 0xF0u, chan = (status & 0x0Fu) + 1u;
-        uint32_t note = (pkt >> 16) & 0x7Fu, vel = (pkt >> 24) & 0x7Fu, ch = SM_NTRK, i;
+        uint32_t note = (pkt >> 16) & 0x7Fu, vel = (pkt >> 24) & 0x7Fu, ch;
         RING_PUBLISH();
         mi_r++;
         /* the SETUP page's MIDI source: USB (0) the USB port alone, INT (1) both merged, JACK (2) the TRS jack alone */
         if ((sm_midi_src == 0u && src != 1u) || (sm_midi_src == 2u && src != 2u))
             continue;
-        for (i = 0; i < SM_NTRK; i++)                     /* the MIDI page: the channel each track listens on (1..16) */
-            if (sm_midi_ch[i] == chan) {
-                ch = i;
-                break;
-            }
-        if ((hi != 0x80u && hi != 0x90u) || (pkt & 0x0Fu) != hi >> 4 || ch >= SM_NTRK)
-            continue;                                     /* (a SysEx byte, realtime, CC .., another channel) */
-        if (hi == 0x90u && vel) {
-            if (sm_arp_mode(ch)) {                        /* (an arpeggiator on the track: the note is its input, it records its own) */
-                if (!((mute >> ch) & 1u))
-                    sm_arp_midi_on(ch, note, vel);
+        if ((hi != 0x80u && hi != 0x90u) || (pkt & 0x0Fu) != hi >> 4)
+            continue;                                     /* (a SysEx byte, realtime, CC ..) */
+        for (ch = 0; ch < SM_NTRK; ch++) {                /* the MIDI page: every track on the channel plays it (a layer) */
+            if (sm_midi_ch[ch] != chan)
+                continue;
+            if (hi == 0x90u && vel) {
+                if (sm_arp_mode(ch)) {                    /* (an arpeggiator on the track: the note is its input, it records its own) */
+                    if (!((mute >> ch) & 1u))
+                        sm_arp_midi_on(ch, note, vel);
+                    continue;
+                }
+                if (ch == sm_rec_mtrk)                    /* (REC on, the selected track's channel: recorded while playing) */
+                    sm_rec_on(ch, note, vel);
+                if ((mute >> ch) & 1u)
+                    continue;
+                sm_mn[ch][note >> 5] |= 1u << (note & 31u);
+                trk_note_on(&trk[ch], note, vel);
                 continue;
             }
-            if (ch == sm_rec_mtrk)                        /* (REC on, the selected track's channel: recorded while playing) */
-                sm_rec_on(ch, note, vel);
-            if ((mute >> ch) & 1u)
+            if (sm_arp_midi_off(ch, note))
                 continue;
-            sm_mn[ch][note >> 5] |= 1u << (note & 31u);
-            trk_note_on(&trk[ch], note, vel);
-            continue;
-        }
-        if (sm_arp_midi_off(ch, note))
-            continue;
-        sm_rec_off(ch, note);
-        if (sm_mn_has(ch, note)) {
-            sm_mn[ch][note >> 5] &= ~(1u << (note & 31u));
-            if (!sm_seq_has(ch, note) && !sm_kn_has(ch, note) && !sm_arp_has(ch, note))
-                trk_note_off(&trk[ch], note);
+            sm_rec_off(ch, note);
+            if (sm_mn_has(ch, note)) {
+                sm_mn[ch][note >> 5] &= ~(1u << (note & 31u));
+                if (!sm_seq_has(ch, note) && !sm_kn_has(ch, note) && !sm_arp_has(ch, note))
+                    trk_note_off(&trk[ch], note);
+            }
         }
     }
 }

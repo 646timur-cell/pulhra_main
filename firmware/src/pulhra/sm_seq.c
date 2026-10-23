@@ -90,10 +90,18 @@ static volatile uint8_t sm_rec_mtrk = 0xFFu;
 /* the step playing on track t (the screen's playhead) */
 static uint32_t sm_seq_pos(uint32_t t) { return sm_pos[t % SM_NTRK]; }
 
-static uint32_t sm_step_q8(void)
+/* a 1/16 at the tempo, in q8 samples (the arpeggiator's clock: the tempo's alone) */
+static uint32_t sm_tempo_q8(void)
 {
     uint32_t b = (uint32_t)clamp(smp.bpm10, 300, 3000);   /* 30.0 .. 300.0 BPM */
     return (uint32_t)FS * 150u * 256u / b;
+}
+/* the sequencer's step: the tempo's 1/16 at the speed of the pattern playing (sm_pattern_t.speed, a byte the main loop
+ * writes): 1/8x makes it 8 x longer, at most 5644800 x 8 = 45 M q8 (30 BPM), so two steps of pending time fit 32 bits and
+ * every product below (the gate x 1024 / 64, the nudge x 7, the swing x 25) too */
+static uint32_t sm_step_q8(void)
+{
+    return sm_tempo_q8() * 8u / SM_SPEED8[sm_speed_place(smp.pat[sm_play_pat % SM_NPAT].speed)];
 }
 
 static uint32_t sm_midi_has(uint32_t t, uint32_t note);   /* sm_midi.c: the notes MIDI holds on track t */
@@ -395,19 +403,26 @@ static void sm_ps_block(uint32_t t, uint32_t nq8)
 static void sm_seq_notes(uint32_t t, const sm_step_t *s, uint32_t vel, uint32_t slide)
 {
     uint8_t old[4];
-    uint32_t nold = sm_nheld[t], k, j, n = s->n < 4u ? s->n : 4u;
+    uint8_t nn[4];
+    uint32_t nold = sm_nheld[t], k, j, n = 0, q = sm_qseq(t);
+    for (k = 0; k < s->n && k < 4u; k++) {                /* the notes that sound: QNT SEQ snaps them (two together play once) */
+        uint32_t x = q ? (uint32_t)clamp(sm_scale_snap(trk[t].p[P_ROOT], trk[t].p[P_SCALE], s->note[k]), 0, 127) : s->note[k];
+        for (j = 0; j < n && nn[j] != x; j++) {}
+        if (j == n)
+            nn[n++] = (uint8_t)x;
+    }
     if (!slide)
         sm_seq_release(t);
     memcpy(old, sm_held[t], sizeof old);
     trk[t].slide_glide = (uint8_t)(slide != 0);
     for (k = 0; k < n; k++) {
-        sm_held[t][k] = s->note[k];
-        trk_note_on(&trk[t], s->note[k], vel);
+        sm_held[t][k] = nn[k];
+        trk_note_on(&trk[t], nn[k], vel);
     }
     trk[t].slide_glide = 0;                               /* (a live note after it must not glide) */
     if (slide)
         for (j = 0; j < nold; j++) {
-            for (k = 0; k < n && s->note[k] != old[j]; k++) {}
+            for (k = 0; k < n && nn[k] != old[j]; k++) {}
             if (k == n && !sm_midi_has(t, old[j]))
                 trk_note_off(&trk[t], old[j]);
         }
