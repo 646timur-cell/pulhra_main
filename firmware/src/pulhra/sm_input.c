@@ -209,7 +209,7 @@ static void sm_turn(uint32_t id, int32_t s)
         return;
     }
     sm_turn_base(t, id, s);
-    if (sm_live && sm_playing) {                          /* live record only (ARM plays on without it) */
+    if (sm_rec && sm_playing) {                           /* REC on (ARM or live), playing: the knob records onto the trig playing */
         uint32_t st = *(volatile uint8_t *)&sm_pos[t];
         sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};
         c.val = sm_ui_sound()->p[id];

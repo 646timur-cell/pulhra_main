@@ -3281,7 +3281,9 @@ static int test_rec_preview(void)
     bad += check("FIX1: REC turn on step 5: lock 74, the base 74 too (a turn is the base, 02:43)", v == 74 && ksnd(0)->p[P_FCUT] == 74);
     run_block();
     bad += check("FIX1: ... the core has it after the next block", sm_pos[0] == 5u && trk[0].p[P_FCUT] == 74);
-    press(B_REC);                                         /* REC off: the base back to 64, step 5 keeps its 74 */
+    press(B_REC);                                         /* REC: live -> ARM (still recording the knobs) ... */
+    sm_input_poll();
+    press(B_REC);                                         /* ... -> off: the base back to 64, step 5 keeps its 74 */
     sm_input_poll();
     turn(EN_SELECT, -10);
     sm_input_poll();
@@ -3377,11 +3379,6 @@ static int test_rec_live_gestures(void)
             }
             snprintf(what, sizeof what, "LIVE %s, %s: the base moved, the core at once", GN[lrg_gest], PN[lrg_pagei]);
             bad += check(what, ksnd(0)->p[id] == v0 + 16 && moved);
-            if (lrg_gest == 0u || lrg_gest == 2u) {       /* REC tapped (no REC held + PLAY): ARM, grid record, no live locks */
-                snprintf(what, sizeof what, "LIVE %s, %s: ARM, not live: no lock (the knob is the base)", GN[lrg_gest], PN[lrg_pagei]);
-                bad += check(what, nl == 0u && nempty == 0u && !sm_live);
-                continue;
-            }
             snprintf(what, sizeof what, "LIVE %s, %s: a lock on every trig (8), none on an empty step", GN[lrg_gest], PN[lrg_pagei]);
             if (check(what, nl == 8u && !nempty))
                 bad++, printf("  locks on trigs %u, on empty steps %u\n", nl, nempty);
