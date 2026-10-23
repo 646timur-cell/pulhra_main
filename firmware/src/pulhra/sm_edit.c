@@ -35,12 +35,16 @@ static void sm_edit_init(void)
 }
 
 /* sm_input.c sm_pat_poll: another pattern plays now (the snapshot is of the one before) */
+static int8_t sm_sh_all, sm_tr_all;                       /* SEQ held + A#3 / C#4, D#4 / F#4: the net shift / transpose of all the tracks
+                                                             since the pattern came (the header's SHT+N, TR+N) */
 static void sm_acc_reset(uint32_t mask)                   /* the net SHIFT / TRN shown of the tracks of mask: rewritten, back to 0 */
 {
     uint32_t t;
     for (t = 0; t < SM_NTRK; t++)
         if ((mask >> t) & 1u)
             sm_sh_acc[t] = sm_trn_acc[t] = 0;
+    if (mask)                                             /* (a track rewritten: the net of all of them is no longer what it says) */
+        sm_sh_all = sm_tr_all = 0;
 }
 static void sm_edit_pat_changed(void)
 {
@@ -206,6 +210,41 @@ static void sm_shift_trk(uint32_t t, int32_t dir)
     sm_undo_snap();
     sm_put_begin(1u << (t % SM_NTRK));
     sm_put_track(t, &sm_undo_buf, t, dir < 0 ? -1 : 1, 0);   /* (the snapshot is the track as it was) */
+}
+
+/* SEQ held + A#3 / C#4: every track's steps (and locks) one step left (-1) or right (+1), each wrapping at its own length; one
+ * UNDO for all of them. The header shows the net count: SHT+N */
+static void sm_shift_all(int32_t dir)
+{
+    uint32_t t;
+    sm_undo_snap();
+    sm_put_begin((1u << SM_NTRK) - 1u);
+    for (t = 0; t < SM_NTRK; t++)
+        sm_put_track(t, &sm_undo_buf, t, dir < 0 ? -1 : 1, 0);
+    sm_sh_all = (int8_t)clamp((int32_t)sm_sh_all + (dir < 0 ? -1 : 1), -99, 99);
+    sm_msg_show_val(SM_MSG_SHT, sm_sh_all);
+    sm_dirty = 1;
+}
+static void sm_trn(uint32_t t, int32_t d);
+/* SEQ held + D#4 / F#4: every track's trigs a semitone down / up (sm_trn, one UNDO for all). The header: TR+N */
+static void sm_trn_all(int32_t d)
+{
+    uint32_t t;
+    sm_trn(0, d);                                         /* (its snapshot, before any track moved, is the UNDO) */
+    for (t = 1; t < SM_NTRK; t++) {
+        sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+        uint32_t s, k;
+        p->kit.snd[t].dnote = (uint8_t)clamp((int32_t)p->kit.snd[t].dnote + d, 0, 127);
+        for (s = 0; s < SM_NSTEP; s++) {
+            sm_step_t *x = &p->step[t][s];
+            for (k = 0; k < x->n && k < 4u; k++)
+                if (x->note[k] != SM_INH)
+                    x->note[k] = (uint8_t)clamp((int32_t)x->note[k] + d, 0, 127);
+        }
+    }
+    sm_tr_all = (int8_t)clamp((int32_t)sm_tr_all + (d < 0 ? -1 : 1), -99, 99);
+    sm_msg_show_val(SM_MSG_TR, sm_tr_all);
+    sm_dirty = 1;
 }
 
 /* TRN: the notes of track t's trigs d semitones (0 .. 127), in place; the track's default NOTE too, so the trigs that inherit it

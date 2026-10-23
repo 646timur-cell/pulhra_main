@@ -50,6 +50,10 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
 #define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
 #define SM_LAY_CHOFF_KEY 3u                               /* SEQ: G#3 (key 3), the chain off */
+#define SM_LAY_SHL_KEY 5u                                 /* SEQ: A#3 (key 5), every track's trigs a step back */
+#define SM_LAY_SHR_KEY 8u                                 /* SEQ: C#4 (key 8), ... a step forward */
+#define SM_LAY_TDN_KEY 10u                                /* SEQ: D#4 (key 10), every track's trigs a semitone down */
+#define SM_LAY_TUP_KEY 13u                                /* SEQ: F#4 (key 13), ... up */
 #define SM_LAY_F3_KEY 0u                                  /* SEQ: F3 (key 0), CLEAR (held: all) */
 #define SM_LAY_FILL_KEY 26u                               /* GLO: G5 (key 26), FILL while held */
 enum { SM_W_CLEAR = 0, SM_W_COPY_PAT = 1, SM_W_COPY_TRK = 4, SM_W_PASTE_TRK = 5, SM_W_PASTE_PAT = 2, SM_W_SHL = 6, SM_W_SHR = 7,
@@ -360,6 +364,10 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_chain_npend = 0;
             sm_lay_nch = 0;
             sm_dirty = 1;
+        } else if (sm_layer == SML_SEQ && (key == SM_LAY_SHL_KEY || key == SM_LAY_SHR_KEY)) {
+            sm_shift_all(key == SM_LAY_SHR_KEY ? 1 : -1);
+        } else if (sm_layer == SML_SEQ && (key == SM_LAY_TDN_KEY || key == SM_LAY_TUP_KEY)) {
+            sm_trn_all(key == SM_LAY_TUP_KEY ? 1 : -1);
         } else if (sm_layer == SML_SEQ && w >= 0) {
             sm_seq_tool((uint32_t)w, t);
         }

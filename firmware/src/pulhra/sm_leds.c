@@ -55,7 +55,8 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
     uint32_t gcur = sm_gid_of(smp.cur);
     for (k = 0; k < SM_NKEYS; k++) {
         if ((SM_BLACK_KEYS >> k) & 1u) {
-            if (sm_layer == SML_SEQ && k == SM_LAY_MODE_KEY) {   /* (SEQ: F#3 the change mode) */
+            if (sm_layer == SML_SEQ && (k == SM_LAY_MODE_KEY || k == SM_LAY_SHL_KEY || k == SM_LAY_SHR_KEY || k == SM_LAY_TDN_KEY ||
+                                        k == SM_LAY_TUP_KEY)) {   /* (SEQ: F#3 the change mode; A#3 C#4 shift all, D#4 F#4 transpose all) */
                 sm_led_put(ni, 14u + k, 1);
                 sm_led_put(ng, 14u + k, 1);
             }

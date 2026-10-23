@@ -179,6 +179,16 @@ static void smd_header(void)
             mb[n++] = ' ';
             smd_int(mb + n, sm_msg_val, 1);
             m = mb;
+        } else if (sm_msg == SM_MSG_SHT || sm_msg == SM_MSG_TR) {   /* SEQ held: SHT+2, TR-1, SHT+0 (the net of all the tracks) */
+            uint32_t n = 0;
+            while (m[n] && n < 3u) {
+                mb[n] = m[n];
+                n++;
+            }
+            if (sm_msg_val >= 0)
+                mb[n++] = '+';
+            smd_int(mb + n, sm_msg_val, 0);
+            m = mb;
         }
         sm_px_text((240 - 12 * smd_len(m)) / 2, 2, 2u, m, T_BG, 1);
         smd_end();

@@ -9669,6 +9669,61 @@ static int test_shift_then_oct(void)
     return bad;
 }
 
+
+/* SEQ held + A#3 / C#4: every track's trigs a step back / forward; + D#4 / F#4: a semitone down / up; the header SHT+N, TR+N */
+static void seq_key(uint32_t k)
+{
+    key_dn(k);
+    sm_input_poll();
+    key_up(k);
+    sm_input_poll();
+}
+static int test_seq_all_tracks(void)
+{
+    int bad = 0;
+    uint32_t t;
+    in_reset();
+    host_ticks = 1000u;
+    for (t = 0; t < SM_NTRK; t++) {
+        sm_step_toggle(t, 4);
+        stp(t, 4)->note[0] = (uint8_t)(60u + t);
+    }
+    layer_hold(B_SEQ);
+    seq_key(8);                                           /* C#4: forward */
+    seq_key(8);
+    {
+        int ok = 1;
+        for (t = 0; t < SM_NTRK; t++)
+            ok &= stp(t, 6)->n == 1u && !stp(t, 4)->n;
+        bad += check("SEQALL: SEQ + C#4 twice: every track's trig two steps forward", ok);
+    }
+    bad += check("SEQALL: ... the header SHT+2", sm_msg == SM_MSG_SHT && sm_msg_val == 2);
+    seq_key(5);                                           /* A#3: back */
+    seq_key(5);
+    bad += check("SEQALL: SEQ + A#3 twice: back where they were, SHT+0", stp(0, 4)->n == 1u && stp(3, 4)->n == 1u && sm_msg_val == 0);
+    sm_ux_mk1();
+    draw_full();
+    bad += check("SEQALL: ... drawn SHT+0", lint_has("SHT+0", 0, 0));
+    seq_key(13);                                          /* F#4: up */
+    {
+        int ok = 1;
+        for (t = 0; t < SM_NTRK; t++)
+            ok &= stp(t, 4)->note[0] == 61u + t;
+        bad += check("SEQALL: SEQ + F#4: every track's notes a semitone up, TR+1", ok && sm_msg == SM_MSG_TR && sm_msg_val == 1);
+    }
+    seq_key(10);                                          /* D#4: down */
+    seq_key(10);
+    draw_full();
+    bad += check("SEQALL: SEQ + D#4 twice: a semitone below the start, TR-1 drawn", stp(2, 4)->note[0] == 61u && lint_has("TR-1", 0, 0));
+    layer_let_go(B_SEQ);
+    ms(1200);
+    sm_input_poll();
+    draw_full();
+    bad += check("SEQALL: a second later the header is back (no SHT, no TR)", !lint_has("TR-1", 0, 0) && sm_msg == SM_MSG_NONE);
+    in_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -9851,6 +9906,7 @@ int main(void)
     bad += test_pattern_speed();
     bad += test_midi_routing();
     bad += test_shift_then_oct();
+    bad += test_seq_all_tracks();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();
