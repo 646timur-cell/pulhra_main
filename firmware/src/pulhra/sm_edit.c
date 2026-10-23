@@ -196,6 +196,7 @@ static void sm_paste_pat(void)
         sm_put_track(t, &sm_clip, t, 0, 1);
     smp.pat[smp.cur % SM_NPAT].mlen = sm_clip.mlen;       /* (a byte) */
     smp.pat[smp.cur % SM_NPAT].speed = sm_clip.speed;
+    smp.pat[smp.cur % SM_NPAT].swing = sm_clip.swing;
     sm_acc_reset(0xFu);
 }
 
@@ -236,6 +237,7 @@ static void sm_undo(void)
         sm_put_track(t, &sm_undo_buf, t, 0, 1);
     smp.pat[smp.cur % SM_NPAT].mlen = sm_undo_buf.mlen;
     smp.pat[smp.cur % SM_NPAT].speed = sm_undo_buf.speed;
+    smp.pat[smp.cur % SM_NPAT].swing = sm_undo_buf.swing;
     sm_undo_ok = 0;
     sm_acc_reset(0xFu);
     sm_msg_show(SM_MSG_UNDO);

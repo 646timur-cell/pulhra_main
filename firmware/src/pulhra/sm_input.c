@@ -27,10 +27,10 @@
  * SHIFT (OCT- held outside the keyboard mode: sm_shift) + a trig key: that trig copied (sm_edit.c sm_trig_copy; no toggle, no
  * hold; REC on or off); a trig held (REC on) + OCT+: the copy pasted onto it. SHIFT + a knob: the turn accelerated x4 / x8 (sm_accel); SHIFT + a family button / SAVE / D#4 F#4 D#5 F#5: the combos (sm_layer.c sm_shift_combo,
  * sm_save_poll, sm_shift_keys). ARP held + F3: the keyboard notes' LATCH (sm_latch_toggle); HOME held + F3 .. B3: the track (sm_layer.c sm_hold_keys).
- * The STEP page's SELECT: a step edited, its NUDGE; none, the track's own SWING (sm_sound_t swing, on top of the project's).
- * HOME (sm_home_page): MIXER's knobs are the LEVEL of T1..T4 (a base value, no locks), CLOCK's K1 the tempo (SHIFT: 1.0 a detent) and K2 the swing,
- * SELECT the tempo on both. smp.bpm10 and smp.swing are written here, in the main loop, 16 and 8 bits at once; the audio
- * stream reads each once per block (sm_seq.c). */
+ * The STEP page: OCT- / OCT+ tapped the NUDGE of the step edited; SELECT the track's LEVEL.
+ * HOME (sm_home_page): MIXER's knobs are the LEVEL of T1..T4 (a base value, no locks), CLOCK's K1 the tempo (SHIFT: 1.0 a detent) and K2 the
+ * current pattern's swing; SELECT the selected track's LEVEL on both (never the tempo). smp.bpm10 and the pattern's swing are written
+ * here, in the main loop, 16 and 8 bits at once; the audio stream reads each once per block (sm_seq.c). */
 #define SM_HOLD_US 350000u                                /* a key held longer is a select, not a tap */
 #define SM_BLACK_KEYS 0x252A52Au                          /* the black keys of F3 .. G5, bit n = key n (ui_input.c) */
 #define SM_NKEYS 27u
@@ -655,12 +655,12 @@ static uint32_t sm_field_turn(uint32_t f, uint32_t v, int32_t d)
     return sm_cond_of_place((uint32_t)clamp((int32_t)sm_cond_place(v) + d, 0, (int32_t)SM_COND_PLACES - 1));
 }
 
-/* the STEP page's knobs: K1 NOTE, K2 VEL, K3 LEN, K4 COND (sm_field_turn), SELECT NUDGE -8..+7 (no step: the track's SWING), PRESETS the FLAG list round
- * (sm_step_flag). A step edited (sm_step_edit): a field turned starts from what the trig plays (its own, else the track's
- * default) and is the step's own from then on (no longer SM_INH); the fields not turned keep inheriting. An empty step: PRESETS
- * a REST trig, the rest nothing. No step selected: K1..K4 are the track's trig defaults (sm_sound_t dnote .. dcond: the new
- * trigs' fields, and every trig's that inherits them); SELECT the track's own SWING (0..25 on top of the
- * project's, shown SWNG 50+n %); PRESETS nothing. Each a byte the audio stream reads at a fire (the swing once a block) */
+/* the STEP page's knobs: K1 NOTE, K2 VEL, K3 LEN, K4 COND (sm_field_turn), SELECT the track's LEVEL, PRESETS the FLAG list round
+ * (sm_step_flag), OCT- / OCT+ tapped the NUDGE (sm_oct_single). A step edited (sm_step_edit): a field turned starts from what the
+ * trig plays (its own, else the track's default) and is the step's own from then on (no longer SM_INH); the fields not turned keep
+ * inheriting. An empty step: PRESETS a REST trig, the rest nothing. No step selected: K1..K4 are the track's trig defaults
+ * (sm_sound_t dnote .. dcond: the new trigs' fields, and every trig's that inherits them). Each a byte the audio stream reads at a
+ * fire. (The swing is the pattern's: CLOCK K2) */
 static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
 {
     int32_t st = sm_step_edit();
@@ -894,10 +894,11 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
             sm_turn_base(sm_ui.trk % SM_NTRK, P_LEVEL, sel);
     } else {
         sm_bpm_turn(sm_shift ? k[0] * 10 : sm_bpm_accel(k[0], now));   /* (SHIFT: 1.0 a detent) */
-        if (k[1]) {
-            int32_t v = clamp((int32_t)smp.swing + k[1], 50, 75);
-            if ((uint8_t)v != smp.swing) {
-                smp.swing = (uint8_t)v;
+        if (k[1]) {                                       /* K2: the current pattern's swing, 50 .. 75 % (a byte read once a block) */
+            sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+            int32_t v = clamp((int32_t)(pt->swing < 25u ? pt->swing : 25u) + k[1], 0, 25);
+            if ((uint8_t)v != pt->swing) {
+                pt->swing = (uint8_t)v;
                 sm_dirty = 1;
             }
         }

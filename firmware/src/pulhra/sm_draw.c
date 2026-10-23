@@ -11,7 +11,7 @@
  *   y  48..159  the four knobs, a column of 60 each: the label, a ring of 16 dots, the value. A ring of a value locked on the
  *               held step is a filled disc; a dot in its centre: locked on another step
  *   y 168..187  SELECT: its label and value
- *   (STEP: the knobs NOTE VEL LEN COND, SELECT NUDGE (NUDGE +3; no step edited: the track's SWNG 58%), of the step edited, a ring filled where the step holds its own value,
+ *   (STEP: the knobs NOTE VEL LEN COND, SELECT the track's LEVEL, the page line STEP 05 . X3 . N+3 (OCT- / OCT+ the NUDGE), of the step edited, a ring filled where the step holds its own value,
  *   plain where it inherits the track's default; an empty step: "-"; none selected: the track's trig defaults)
  *   y  48..217  (a layer open: its key map over the knobs and SELECT, five rows of 34, the labels of the keys at scale 2;
  *               SEQ: the title LEN 32 large (scale 3), the grid A01 .. A16 in four rows (the one playing inverted, the one
@@ -481,12 +481,14 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         for (i = 0; w[i]; i++)
             o->lab[i] = w[i];
         o->lab[i] = 0;
-        smd_int(o->val, clamp(smp.swing, 50, 75), 0);
+        uint32_t sw = smp.pat[smp.cur % SM_NPAT].swing;   /* (the current pattern's) */
+        sw = sw < 25u ? sw : 25u;
+        smd_int(o->val, 50 + (int32_t)sw, 0);
         for (i = 0; o->val[i]; i++) {}
         o->val[i] = '%';
         o->val[i + 1u] = 0;
-        o->v = smp.swing;
-        o->pos = ((uint32_t)clamp(smp.swing, 50, 75) - 50u) * 256u / 25u;
+        o->v = (int32_t)sw;
+        o->pos = sw * 256u / 25u;
     } else {
         o->on = 0;
     }
@@ -595,27 +597,6 @@ static int32_t smd_sel_val(uint32_t id)                  /* SELECT's value: the 
     if (id & SM_GLB)
         return song.g[(id & ~SM_GLB) % G_COUNT];
     return li >= 0 ? pt->lock[li].val : smd_snd()->p[id];
-}
-/* the STEP page's SELECT: a step edited, NUDGE and its value ("-" an empty step); none, SWNG and the track's swing ("58%");
- * returns the label */
-static const char *smd_step_nudge(char *b)
-{
-    int32_t st;
-    const sm_step_t *p = smd_step(&st);
-    if (!p) {
-        uint32_t w = smd_snd()->swing;
-        smd_int(b, 50 + (int32_t)(w < 25u ? w : 25u), 0);
-        b[2] = '%';
-        b[3] = 0;
-        return "SWNG";
-    }
-    if (p->n)
-        smd_int(b, p->nudge, 1);
-    else {
-        b[0] = '-';
-        b[1] = 0;
-    }
-    return "NUDGE";
 }
 static uint32_t smd_sel_sig(void)
 {

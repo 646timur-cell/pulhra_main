@@ -60,7 +60,8 @@ typedef struct {
 
 typedef struct {
     uint8_t machine, preset, len;
-    uint8_t swing;                                        /* the track's own swing on top of the project's (smp.swing): 0..25
+    uint8_t swing;                                        /* (unused: the swing is the pattern's, sm_pattern_t.swing; kept for the bank
+                                                             format) the track's own swing on top of the project's (smp.swing): 0..25
                                                              percent more, 0 none (the STEP page's SELECT with no step: SWNG
                                                              50+swing %); the sequencer's, as len (a preset load keeps it) */
     uint8_t dnote, dvel, dlen, dcond;                     /* the track's trig defaults (SM_INH above); the sequencer's, as len:
@@ -73,7 +74,10 @@ typedef struct { sm_sound_t snd[SM_NTRK]; } sm_kit_t;     /* (master inserts and
 typedef struct {
     sm_kit_t kit;
     sm_step_t step[SM_NTRK][SM_NSTEP];
-    uint16_t nlock;
+    uint8_t nlock;                                        /* (at most SM_NLOCK = 192: a byte. It was a uint16_t, its high byte
+                                                             always 0 in a saved bank: that byte is swing now) */
+    uint8_t swing;                                        /* the pattern's swing (CLOCK K2): 0..25 percent over 50 (50 .. 75 %); every
+                                                             track of the pattern swings by it (no swing per track); 0 = none */
     uint8_t mlen;                                         /* master length in 1/16 steps 1..SM_MLEN_MAX, 0 AUTO (the longest track) */
     int8_t speed;                                         /* the pattern's speed (the SEQ layer's K1, Elektron's SCALE): SM_SPEED_*
                                                              places as an offset from 1x, -3 .. +1 = 1/8x 1/4x 1/2x 1x 2x; 0 = 1x (the

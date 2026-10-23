@@ -773,12 +773,11 @@ static void events_block(uint32_t n)
     if (!sm_playing)
         return;
     {
-        uint32_t step_q8 = sm_step_q8(), nq8 = n << 8, mute = sm_mute_eff(), gsw = (uint32_t)clamp(smp.swing, 50, 75);
+        uint32_t step_q8 = sm_step_q8(), nq8 = n << 8, mute = sm_mute_eff();
         const sm_pattern_t *pp = &smp.pat[sm_play_pat % SM_NPAT];
-        for (t = 0; t < SM_NTRK; t++) {                   /* (the swing: once per block, as the tempo; a track's own on top) */
-            uint32_t w = gsw + (pp->kit.snd[t].swing < 25u ? pp->kit.snd[t].swing : 25u);
-            sm_swd_q8[t] = step_q8 * ((w < 75u ? w : 75u) - 50u) / 50u;
-        }
+        uint32_t w = pp->swing < 25u ? pp->swing : 25u;  /* (the pattern's swing, once per block, as the tempo) */
+        for (t = 0; t < SM_NTRK; t++)
+            sm_swd_q8[t] = step_q8 * w / 50u;
         for (t = 0; t < SM_NTRK; t++)                     /* LEN run out at this block's start; a muted track lets go (a LEN INF */
             {
             if (sm_nheld[t] && (((mute >> t) & 1u) || (sm_gate[t] != SM_GATE_INF && sm_gate[t] <= 0))) {   /* note would ring on) */

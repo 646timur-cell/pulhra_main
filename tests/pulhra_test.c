@@ -4352,13 +4352,13 @@ static int test_home_bpm_select(void)
     bad += check("HOME: K1 far up: 300.0", smp.bpm10 == 3000u);
     turn(EN_K2, 7);
     sm_input_poll();
-    bad += check("HOME: K2 SWING +7: 57 %", smp.swing == 57u);
+    bad += check("HOME: K2 SWING +7: 57 %", smp.pat[smp.cur].swing == 7u);
     turn(EN_K2, -30);
     sm_input_poll();
-    bad += check("HOME: K2 -30: 50 % at least", smp.swing == 50u);
+    bad += check("HOME: K2 -30: 50 % at least", smp.pat[smp.cur].swing == 0u);
     turn(EN_K2, 100);
     sm_input_poll();
-    bad += check("HOME: K2 +100: 75 % at most", smp.swing == 75u);
+    bad += check("HOME: K2 +100: 75 % at most", smp.pat[smp.cur].swing == 25u);
     /* the sequencer takes the tempo set on the panel: 150.0 BPM = FS x 150 / 1500 samples a 1/16 */
     in_reset();
     host_ticks = 1000u;
@@ -4447,7 +4447,7 @@ static int test_home_draw(void)
     draw_setup();
     sm_ui.page = (uint8_t)page_by_name("CLOCK");
     smp.bpm10 = 3000;
-    smp.swing = 75;
+    smp.pat[smp.cur].swing = 25u;
     draw_full();
     nb += lint_frame("CLOCK");
     bad += check("HOMEDRAW: CLOCK: BPM and SWING labels, 300.0 and 75%",
@@ -4456,7 +4456,7 @@ static int test_home_draw(void)
         uint32_t a = smd_knob_sig(0), b = smd_knob_sig(1), c = smd_sel_sig();
         smp.bpm10 = 2999;
         bad += check("HOMEDRAW: BPM changes the K1 ring's signature (SELECT is the LEVEL: not)", smd_knob_sig(0) != a && smd_sel_sig() == c);
-        smp.swing = 74;
+        smp.pat[smp.cur].swing = 24u;
         bad += check("HOMEDRAW: SWING changes the K2 ring's signature", smd_knob_sig(1) != b);
     }
     draw_setup();
@@ -4477,7 +4477,7 @@ static int test_swing(void)
     seq_reset();
     for (k = 0; k < 8u; k++)
         sm_step_toggle(0, k);
-    smp.swing = 66;
+    smp.pat[smp.cur].swing = 16u;
     push(SMC_PLAY, 0, 0, 0, 0);
     seq_run((uint32_t)(8.9 * S120));
     for (k = 0; k < 8u; k++) {
@@ -4492,7 +4492,7 @@ static int test_swing(void)
     seq_reset();
     for (k = 0; k < 2u; k++)
         sm_step_toggle(0, k);
-    smp.swing = 75;
+    smp.pat[smp.cur].swing = 25u;
     push(SMC_PLAY, 0, 0, 0, 0);
     seq_run((uint32_t)(2.9 * S120));
     bad += check("SWING 75: the odd step half a step late", near_d(ev_nth(1, 0, 1)->at, 1.5 * S120));
@@ -4501,7 +4501,7 @@ static int test_swing(void)
     smp.pat[smp.cur].kit.snd[1].len = 5;                 /* 5 long: its pass 2 starts on an odd grid step */
     for (k = 0; k < 5u; k++)
         sm_step_toggle(1, k);
-    smp.swing = 60;
+    smp.pat[smp.cur].swing = 10u;
     push(SMC_PLAY, 0, 0, 0, 0);
     seq_run((uint32_t)(10.9 * S120));
     ok = 1;
@@ -4519,7 +4519,7 @@ static int test_swing_with_nudge_ratchet(void)
     const seq_ev_t *e;
     int bad = 0;
     seq_reset();
-    smp.swing = 66;                                       /* 0.32 of a step */
+    smp.pat[smp.cur].swing = 16u;                                       /* 0.32 of a step */
     sm_step_toggle(0, 1);
     stp(0, 1)->nudge = 4;                                 /* + a quarter: 1.57 */
     sm_step_toggle(0, 3);
@@ -4562,10 +4562,10 @@ static int test_swing_read_once(void)
     seq_reset();
     for (k = 0; k < 4u; k++)
         sm_step_toggle(0, k);
-    smp.swing = 50;
+    smp.pat[smp.cur].swing = 0u;
     push(SMC_PLAY, 0, 0, 0, 0);
     seq_run((uint32_t)(1.5 * S120));
-    smp.swing = 75;                                       /* the main loop between two blocks */
+    smp.pat[smp.cur].swing = 25u;                                       /* the main loop between two blocks */
     seq_run((uint32_t)(3.0 * S120));
     ok = on_n[0] == 4u && near_d(ev_nth(1, 0, 3)->at, 3.5 * S120);
     bad += check("SWING: turned up while playing: the next odd step takes it (3.5), no step lost or doubled", ok);
@@ -7101,7 +7101,7 @@ static int test_bank_roundtrip(void)
         int lk;
         smp.nchain = 0;
         smp.mute = 0;
-        smp.swing = 50;                                   /* (step 4 is a swung one) */
+        smp.pat[smp.cur].swing = 0;                       /* (step 4 is a swung one) */
         push(SMC_PLAY, 0, 0, 0, 0);
         lk = run_to_step(0, 3) && trk[0].p[P_FCUT] == 90;
 
@@ -7707,9 +7707,10 @@ static int test_step_select_swing(void)
     sm_input_poll();
     oct_tap(B_OCTUP);
     bad += check("STEPSEL: ... let go, still selected: NUDGE +4", stp(0, 3)->nudge == 4 && ksnd(0)->swing == 8u);
-    /* the sequencer: T1's own 58 % on the global 50, T2 none; then the global 60: T1 68 %, T2 60 % */
+    /* the sequencer: the swing is the pattern's (CLOCK K2), every track the same; a sound's own swing byte plays no part */
     seq_reset();
-    ksnd(0)->swing = 8u;
+    ksnd(0)->swing = 8u;                                  /* (ignored) */
+    smp.pat[smp.cur].swing = 10u;                         /* 60 % */
     for (k = 0; k < 4u; k++) {
         sm_step_toggle(0, k);
         sm_step_toggle(1, k);
@@ -7717,21 +7718,11 @@ static int test_step_select_swing(void)
     push(SMC_PLAY, 0, 0, 0, 0);
     seq_run((uint32_t)(4.9 * S120));
     for (k = 0; k < 4u; k++) {
-        ok &= (e = ev_nth(1, 0, k)) != 0 && near_d(e->at, ((double)k + (k & 1u ? 0.16 : 0.0)) * S120);
-        ok &= (e = ev_nth(1, 1, k)) != 0 && near_d(e->at, (double)k * S120);
+        ok &= (e = ev_nth(1, 0, k)) != 0 && near_d(e->at, ((double)k + (k & 1u ? 0.2 : 0.0)) * S120);
+        ok &= (e = ev_nth(1, 1, k)) != 0 && near_d(e->at, ((double)k + (k & 1u ? 0.2 : 0.0)) * S120);
     }
-    bad += check("STEPSEL: T1 SWNG 58 % on the global 50: its odd steps 0.16 late, T2 on the grid", ok);
-    seq_reset();
-    ksnd(0)->swing = 8u;
-    smp.swing = 60u;
-    for (k = 0; k < 2u; k++) {
-        sm_step_toggle(0, k);
-        sm_step_toggle(1, k);
-    }
-    push(SMC_PLAY, 0, 0, 0, 0);
-    seq_run((uint32_t)(2.9 * S120));
-    bad += check("STEPSEL: global 60 + T1's 8: T1 0.36 late, T2 0.2", near_d(ev_nth(1, 0, 1)->at, 1.36 * S120) &&
-                 near_d(ev_nth(1, 1, 1)->at, 1.2 * S120));
+    bad += check("STEPSEL: the pattern's swing 60 %: T1 and T2 alike, odd steps 0.2 late (no swing per track)", ok);
+    smp.pat[smp.cur].swing = 0;
     return bad;
 }
 
