@@ -53,6 +53,7 @@ static uint8_t sm_zvalid;                                 /* the bit per zone: s
 static uint8_t sm_last_pos = 0xFFu, sm_last_play = 0xFFu; /* the playing step and transport seen by the last frame */
 /* the playing step of the selected track and the transport, read ONCE per frame (the audio stream moves them at any time):
  * every signature and every zone of the frame uses these two, so what is drawn is what the signature said */
+static uint8_t smd_lat;                                   /* the selected track's keyboard LATCH (sm_klatch), read once per frame */
 static uint8_t smd_pos, smd_play, smd_rec, smd_live;      /* (and REC / live: the REC key sets them from the main loop) */
 static uint8_t smd_pos4[SM_NTRK];                         /* HOME > MIXER: every track's playing step, read once per frame too */
 static uint32_t sm_last_pos4 = 0xFFFFFFFFu;
@@ -127,7 +128,7 @@ static uint32_t smd_hdr_sig(void)
     h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg); h = smd_mix(h, (uint32_t)(uint16_t)sm_msg_val);
     h = smd_mix(h, (uint32_t)(uint8_t)sm_ui.oct);
     h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
-    return smd_mix(smd_mix(h, smd_rec), smd_live);
+    return smd_mix(smd_mix(smd_mix(h, smd_rec), smd_live), smd_lat);
 }
 static void smd_two(char *b, uint32_t v)
 {
@@ -209,15 +210,23 @@ static void smd_header(void)
         l[2] = 0;
         sm_px_text(x, 2, 2u, l, T_BG, 0);
     }
-    /* right, from the right edge: A01 120.0 >   (while recording: 120.0 > REC, the pattern gives way) */
+    /* right, from the right edge: A01 120.0 >   (while recording: 120.0 > REC, the pattern gives way). The keyboard's LATCH on the
+     * selected track (ARP held + F3): LAT, inverted, in the pattern's place (the pattern gives way to it as to REC); with REC on
+     * too, in the tempo's place (the tempo gives way): the left side (T1 KEYS +2, at most x 110) is never covered */
     fmt_fix(t, smp.bpm10, 1);
     smd_gname(a, sm_gid_of(smp.cur), 0);
     x = 240 - (rec ? 12 * 3 + 6 : 0) - 12;
     sm_px_text(x, 2, 2u, smd_play ? "\x10" : "\x11", T_BG, 0);
-    x -= 6 + 12 * smd_len(t);
-    sm_px_text(x, 2, 2u, t, T_BG, 0);
+    if (smd_lat && rec) {
+        sm_px_text(x - 6 - 36, 2, 2u, "LAT", T_BG, 1);
+    } else {
+        x -= 6 + 12 * smd_len(t);
+        sm_px_text(x, 2, 2u, t, T_BG, 0);
+    }
     if (rec)
         sm_px_text(240 - 36, 2, 2u, smd_live ? "REC" : "ARM", T_BG, 1);   /* (armed, grid record: ARM, even while playing; REC + PLAY: REC) */
+    else if (smd_lat)
+        sm_px_text(x - 6 - 36, 2, 2u, "LAT", T_BG, 1);
     else
         sm_px_text(x - 6 - 36, 2, 2u, a, T_BG, smp.nchain >= 2u);   /* (a chain plays: the pattern inverted) */
     smd_end();
@@ -937,6 +946,7 @@ static void sm_draw(void)
     smd_pos = *(volatile uint8_t *)&sm_pos[sm_ui.trk % SM_NTRK];
     smd_rec = *(volatile uint8_t *)&sm_rec != 0;
     smd_live = *(volatile uint8_t *)&sm_live != 0;
+    smd_lat = (uint8_t)((sm_klatch >> (sm_ui.trk % SM_NTRK)) & 1u);
     for (z = 0; z < SM_NTRK; z++)                         /* (the selected track's: the one read above, the same in both) */
         smd_pos4[z] = z == sm_ui.trk % SM_NTRK ? smd_pos : *(volatile uint8_t *)&sm_pos[z];
     for (z = 0, pk = 0; z < SM_NTRK; z++)

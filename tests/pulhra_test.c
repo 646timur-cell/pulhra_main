@@ -9728,6 +9728,82 @@ static int test_seq_all_tracks(void)
     return bad;
 }
 
+
+/* the header's indicators: KEYS +N on the left, LAT (ARP held + F3) in the pattern's place, REC / ARM in the corner, LAT in the
+ * tempo's place with REC; every combination inside its cells, none over another (and a dump of a few for the eye) */
+static void hdr_dump(const char *name)
+{
+    char path[96];
+    FILE *f;
+    uint32_t i;
+    snprintf(path, sizeof path, "build/host/hdr_%s.ppm", name);
+    f = fopen(path, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6 240 20 255\n");
+    for (i = 0; i < 240u * 20u; i++) {
+        uint16_t c = (uint16_t)((host_screen[i] >> 8) | (host_screen[i] << 8));
+        fputc(((c >> 11) & 31u) * 255u / 31u, f);
+        fputc(((c >> 5) & 63u) * 255u / 63u, f);
+        fputc((c & 31u) * 255u / 31u, f);
+    }
+    fclose(f);
+}
+static int test_header_latch(void)
+{
+    int bad = 0;
+    uint32_t kbd, lat, rec, live, bpm, oct, nb = 0, n = 0;
+    static const uint16_t BPMS[3] = {300, 1200, 3000};
+    for (kbd = 0; kbd < 2u; kbd++)
+        for (lat = 0; lat < 2u; lat++)
+            for (rec = 0; rec < 2u; rec++)
+                for (live = 0; live < 2u; live++)
+                    for (bpm = 0; bpm < 3u; bpm++)
+                        for (oct = 0; oct < 7u; oct += 3u) {
+                            char what[64];
+                            draw_setup();
+                            sm_ui.kbd = (uint8_t)kbd;
+                            sm_ui.oct = (int8_t)((int32_t)oct - 3);
+                            sm_klatch = (uint8_t)(lat ? 1u : 0u);
+                            sm_rec = (uint8_t)rec;
+                            sm_live = (uint8_t)(rec && live);
+                            sm_playing = (uint8_t)live;
+                            smp.bpm10 = BPMS[bpm];
+                            draw_full();
+                            snprintf(what, sizeof what, "hdr k%u l%u r%u v%u b%u o%u", kbd, lat, rec, live, bpm, oct);
+                            nb += lint_frame(what) != 0;
+                            n++;
+                            if (kbd && lat && bpm == 2u && oct == 6u && live == rec)
+                                hdr_dump(rec ? "keys_lat_rec" : "keys_lat");
+                            if (kbd && !lat && !rec && bpm == 1u && oct == 6u)
+                                hdr_dump("keys");
+                        }
+    bad += check("HDRLAT: every header (KEYS, LAT, REC/ARM, the tempo, the octave): inside its cells, nothing over another", nb == 0u && n > 100u);
+    draw_setup();
+    sm_playing = 0;
+    sm_live = 0;
+    sm_rec = 0;
+    smp.bpm10 = 1200;
+    sm_ui.kbd = 1;
+    sm_klatch = 1;
+    draw_full();
+    bad += check("HDRLAT: LAT on: LAT in the header, the pattern gives way", lint_has("LAT", 0, 0) && !lint_has("A01", 0, 0) && lint_has("120.0", 0, 0));
+    sm_rec = 1;
+    draw_full();
+    bad += check("HDRLAT: ... and REC on: ARM in the corner, LAT in the tempo's place", lint_has("LAT", 0, 0) && lint_has("ARM", 0, 0) && !lint_has("120.0", 0, 0));
+    sm_rec = 0;
+    sm_klatch = 0;
+    draw_full();
+    bad += check("HDRLAT: LAT off: the pattern back", !lint_has("LAT", 0, 0) && lint_has("A01", 0, 0));
+    sm_ui.kbd = 0;
+    sm_playing = 0;
+    sm_live = 0;
+    sm_rec = 0;
+    smp.bpm10 = 1200;
+    in_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -9911,6 +9987,7 @@ int main(void)
     bad += test_midi_routing();
     bad += test_shift_then_oct();
     bad += test_seq_all_tracks();
+    bad += test_header_latch();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();
