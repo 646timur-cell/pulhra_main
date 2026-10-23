@@ -71,6 +71,10 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
             nb++;
             continue;
         }
+        if (sm_layer == SML_SEQ) {                        /* (SEQ held: the white keys keep the trigs, sm_leds; the black keys the tools) */
+            w++;
+            continue;
+        }
         sm_led_put(ni, 14u + k, 1);
         if (sm_layer == SML_EDIT) {
             if (w == SM_LAY_INIT_KEY)
@@ -85,8 +89,6 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
                 sm_led_put(nl, 14u + k, 1);
             else if (sm_pat_used(g))
                 sm_led_put(nbr, 14u + k, 1);
-        } else if (sm_layer == SML_SEQ && w == 0u) {
-            sm_led_put(ng, 14u + k, 1);
         }
         w++;
     }
@@ -123,7 +125,7 @@ static void sm_leds(void)
     }
     len = pt->kit.snd[t].len;
     len = len < 1u ? 1u : len > SM_NSTEP ? SM_NSTEP : len;
-    for (k = 0; k < SM_NKEYS && !sm_layer && !sm_ui.kbd && sm_hold_btn() == 0xFFu; k++) {
+    for (k = 0; k < SM_NKEYS && (!sm_layer || sm_layer == SML_SEQ) && !sm_ui.kbd && sm_hold_btn() == 0xFFu; k++) {   /* (SEQ held: the trigs stay lit) */
         const sm_step_t *st;
         uint32_t s;
         if ((SM_BLACK_KEYS >> k) & 1u)

@@ -9689,6 +9689,10 @@ static int test_seq_all_tracks(void)
         stp(t, 4)->note[0] = (uint8_t)(60u + t);
     }
     layer_hold(B_SEQ);
+    settings_leds = LEDS_DIM;
+    memset(fm1_led, 0xAA, sizeof fm1_led);
+    sm_leds();
+    bad += check("SEQALL: SEQ held: the trigs stay lit on the white keys (step 5)", sm_layer == SML_SEQ && wl(4) == 1 && wl(3) == 0);
     seq_key(8);                                           /* C#4: forward */
     seq_key(8);
     {
