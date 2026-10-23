@@ -594,6 +594,8 @@ static void sm_save_ask(void)
 {
     sm_save_pend = 1;
     sm_flash_hold = 0;
+    if (*(volatile uint8_t *)&sm_playing)
+        sm_msg_show(SM_MSG_SAVEPEND);                     /* (playing: written at STOP, SAVED then; stopped: SAVED at the next poll) */
 }
 
 /* every poll, after sm_pat_poll: a request or a chain whose bank came in is asked for; the next link's bank brought in on the

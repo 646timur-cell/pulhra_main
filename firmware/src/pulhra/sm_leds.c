@@ -174,8 +174,8 @@ static void sm_leds(void)
         sm_led_put(nb, panel.btn[sm_layer_button(sm_layer)], 1);
     if (*(volatile uint8_t *)&sm_rec != 0u)               /* REC on: steady while armed (even playing), breathing while live (REC + PLAY) */
         sm_led_put((play && *(volatile uint8_t *)&sm_live) ? nb : nl, panel.btn[B_REC], 1);
-    if (sm_msg == SM_MSG_SAVED)                            /* SAVED: the SAVE button breathes (OCT- + SAVE) */
-        sm_led_put(nb, panel.btn[B_SAVE], 1);
+    if ((sm_msg == SM_MSG_SAVED || sm_msg == SM_MSG_SAVEPEND || sm_msg == SM_MSG_FLASH) && !smd_blink())
+        sm_led_put(nl, panel.btn[B_SAVE], 1);              /* (the save's message: the SAVE button blinks with it) */
     if (play) {                                           /* playing: PLAY's green, its own LED dark in every mode */
         sm_led_clear(ng, panel.btn[B_PLAY]);
         sm_led_clear(ni, panel.btn[B_PLAY]);

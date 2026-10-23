@@ -130,7 +130,7 @@ static uint32_t smd_hdr_sig(void)
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, sm_gid_of(smp.cur));
     h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg); h = smd_mix(h, (uint32_t)(uint16_t)sm_msg_val);
-    if (sm_msg == SM_MSG_CLEARED)
+    if (sm_msg_blinks(sm_msg))
         h = smd_mix(h, 0xB1u + smd_blink());
     h = smd_mix(h, (uint32_t)(uint8_t)sm_ui.oct);
     h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
@@ -195,7 +195,7 @@ static void smd_header(void)
             smd_int(mb + n, sm_msg_val, 0);
             m = mb;
         }
-        sm_px_text((240 - 12 * smd_len(m)) / 2, 2, 2u, m, T_BG, sm_msg == SM_MSG_CLEARED ? (int)(smd_blink() == 0u) : 1);
+        sm_px_text((240 - 12 * smd_len(m)) / 2, 2, 2u, m, T_BG, sm_msg_blinks(sm_msg) ? (int)(smd_blink() == 0u) : 1);
         smd_end();
         return;
     }

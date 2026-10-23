@@ -9892,6 +9892,47 @@ static int test_splash(void)
     return bad;
 }
 
+
+/* SHIFT + SAVE: the quick save; SAVED blinks in the header (and the SAVE button with it); playing: SAVE AT STOP, then SAVED */
+static int test_quick_save_msg(void)
+{
+    int bad = 0;
+    uint32_t on, off;
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    shift_press(B_SAVE);
+    sm_input_poll();
+    bad += check("QSAVE: stopped, SHIFT + SAVE: SAVED", sm_msg == SM_MSG_SAVED && sm_fp_ok[0] + sm_fp_ok[1] >= 1);
+    settings_leds = LEDS_DIM;
+    sm_msg_t0 = fm1_ticks();
+    sm_leds();
+    on = led_of(fm1_led, panel.btn[B_SAVE]);
+    host_ticks += SM_MSG_BLINK_US * FM1_TICKS_PER_US;
+    sm_leds();
+    off = led_of(fm1_led, panel.btn[B_SAVE]);
+    bad += check("QSAVE: ... the SAVE button blinks with it (on, then off)", on == 1 && off == 0 && smd_blink() == 1u);
+    ms(1100);
+    sm_input_poll();
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    shift_press(B_SAVE);
+    bad += check("QSAVE: playing: SAVE AT STOP", sm_msg == SM_MSG_SAVEPEND && sm_save_pend);
+    sm_ux_mk1();
+    draw_full();
+    bad += check("QSAVE: ... drawn, inside the header", lint_has("SAVE AT STOP", 0, 0) && lint_frame("qsave") == 0);
+    press(B_PLAY);
+    sm_input_poll();
+    run_block();
+    sm_input_poll();
+    sm_input_poll();
+    bad += check("QSAVE: ... STOP: written, SAVED", sm_msg == SM_MSG_SAVED && !sm_save_pend);
+    nor_wipe();
+    in_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -10078,6 +10119,7 @@ int main(void)
     bad += test_header_latch();
     bad += test_fx_punch();
     bad += test_splash();
+    bad += test_quick_save_msg();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();
