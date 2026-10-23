@@ -194,7 +194,7 @@ static void sm_hold_keys(uint32_t notes)
             sm_ui.held_step = sm_ui.sel_step = 0xFFu;
             sm_key_arm = sm_key_used = 0;
             sm_dirty = 1;
-        } else if (b == B_ARP && w == 0) {
+        } else if (b == B_ARP && w == 0 && sm_ui.kbd) {    /* (the keyboard's LATCH: in the keyboard mode only; leaving it turns it off) */
             sm_latch_toggle();
         }
     }

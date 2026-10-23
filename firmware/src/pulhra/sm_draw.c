@@ -120,12 +120,18 @@ static uint32_t smd_muted(void)                           /* the selected track 
 {
     return (sm_mute_eff() >> (sm_ui.trk % SM_NTRK)) & 1u;
 }
+static uint32_t smd_blink(void)                           /* CLEAN's blink: 0 inverted, 1 plain */
+{
+    return (uint32_t)(fm1_ticks() - sm_msg_t0) / (SM_MSG_BLINK_US * FM1_TICKS_PER_US) & 1u;
+}
 static uint32_t smd_hdr_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, sm_gid_of(smp.cur));
     h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg); h = smd_mix(h, (uint32_t)(uint16_t)sm_msg_val);
+    if (sm_msg == SM_MSG_CLEARED)
+        h = smd_mix(h, 0xB1u + smd_blink());
     h = smd_mix(h, (uint32_t)(uint8_t)sm_ui.oct);
     h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
     return smd_mix(smd_mix(smd_mix(h, smd_rec), smd_live), smd_lat);
@@ -189,7 +195,7 @@ static void smd_header(void)
             smd_int(mb + n, sm_msg_val, 0);
             m = mb;
         }
-        sm_px_text((240 - 12 * smd_len(m)) / 2, 2, 2u, m, T_BG, 1);
+        sm_px_text((240 - 12 * smd_len(m)) / 2, 2, 2u, m, T_BG, sm_msg == SM_MSG_CLEARED ? (int)(smd_blink() == 0u) : 1);
         smd_end();
         return;
     }
@@ -793,11 +799,29 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
         } else if (r == 3u) {                             /* the knobs' indicators under K1 K2: the speed (*2, /4, * = 1x) and the
                                                              change mode (SEQ, STR: direct start, JMP: direct jump); K3, K4 none */
             static const char *const M3[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
+            char sh[8], tr[8];
+            int32_t v = sm_sh_all, a = v < 0 ? -v : v;
             smd_cell(o, 0, SM_SPEED_N[sm_speed_place(smp.pat[smp.cur % SM_NPAT].speed)], 0);
             smd_cell(o, 1, M3[smp.mode % SM_PM_COUNT], 0);
-        } else if (sm_lay_cleared) {
-            smd_cat(o->w, &n, "CLEARED");
-            o->winv = 1;
+            /* under K3 / K4: the net shift and transpose of every track (A#3 C#4 / D#4 F#4) since the pattern came: SHT+2, TR-1
+             * (five characters at most: SH+12 past 9) */
+            sh[0] = 'S'; sh[1] = 'H';
+            if (a < 10) {
+                sh[2] = 'T';
+                sh[3] = v < 0 ? '-' : '+';
+                smd_int(sh + 4, a, 0);
+            } else {
+                sh[2] = v < 0 ? '-' : '+';
+                smd_int(sh + 3, a > 99 ? 99 : a, 0);
+            }
+            v = sm_tr_all;
+            a = v < 0 ? -v : v;
+            tr[0] = 'T'; tr[1] = 'R'; tr[2] = v < 0 ? '-' : '+';
+            smd_int(tr + 3, a > 99 ? 99 : a, 0);
+            smd_cell(o, 2, sh, 0);
+            smd_cell(o, 3, tr, 0);
+            smd_upper(o->c[2], sh, 5u);                   /* (five here: SHT+2 fills its 60 px cell, K4's is the screen's edge) */
+            o->dim |= (uint8_t)((sm_sh_all ? 0u : 4u) | (sm_tr_all ? 0u : 8u));   /* (0: dim) */
         } else if (sm_lay_nch) {                          /* the chain being built: + A01 A01 B02 (its last four links) */
             char l[4];
             smd_cat(o->w, &n, "+");
@@ -1006,7 +1030,7 @@ static void sm_draw(void)
     smd_pos = *(volatile uint8_t *)&sm_pos[sm_ui.trk % SM_NTRK];
     smd_rec = *(volatile uint8_t *)&sm_rec != 0;
     smd_live = *(volatile uint8_t *)&sm_live != 0;
-    smd_lat = (uint8_t)((sm_klatch >> (sm_ui.trk % SM_NTRK)) & 1u);
+    smd_lat = (uint8_t)(sm_ui.kbd && ((sm_klatch >> (sm_ui.trk % SM_NTRK)) & 1u));   /* (LAT: the keyboard mode's alone) */
     for (z = 0; z < SM_NTRK; z++)                         /* (the selected track's: the one read above, the same in both) */
         smd_pos4[z] = z == sm_ui.trk % SM_NTRK ? smd_pos : *(volatile uint8_t *)&sm_pos[z];
     for (z = 0, pk = 0; z < SM_NTRK; z++)

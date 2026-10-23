@@ -16,6 +16,7 @@
  * off removes its locks. */
 #define SM_LOCK_DEAD 0xFFu
 #define SM_MSG_US 1000000u                                /* a message: 1 s in the header */
+#define SM_MSG_BLINK_US 125000u                           /* CLEAN (SEQ + F3): inverted / plain every 125 ms of its second */
 #ifndef SM_LOCK_PREEMPT
 #define SM_LOCK_PREEMPT() ((void)0)                       /* (the host test runs an audio block here: the interrupt's moment) */
 #endif
@@ -24,7 +25,7 @@
  * for SM_MSG_US, the header inverted */
 enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_SAVED, SM_MSG_FLASH, SM_MSG_SHIFT, SM_MSG_TRN, SM_MSG_SHT, SM_MSG_TR,
        SM_MSG_NUDGE, SM_MSG_COUNT };
-static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEARED", "UNDO", "SAVED", "FLASH ERROR", "SHIFT", "TRN", "SHT", "TR", "NUDGE"};
+static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEAN", "UNDO", "SAVED", "FLASH ERROR", "SHIFT", "TRN", "SHT", "TR", "NUDGE"};
 /* NUDGE: the STEP page's OCT- / OCT+ with a trig key held: NUDGE+3, shown only then (a second) */
 /* SHT, TR: SEQ held + A#3 / C#4 (all the tracks shifted), D#4 / F#4 (transposed); the net count follows with its sign: SHT+2, TR-1, SHT+0 */
 static int16_t sm_msg_val;                                /* SHIFT, TRN: the signed value shown after the text ("SHIFT +2") */
@@ -80,6 +81,8 @@ static void sm_msg_poll(uint32_t now)
     if (sm_msg && (uint32_t)(now - sm_msg_t0) >= SM_MSG_US * FM1_TICKS_PER_US) {
         sm_msg = SM_MSG_NONE;
         sm_dirty = 1;
+    } else if (sm_msg == SM_MSG_CLEARED) {
+        sm_dirty = 1;                                     /* (CLEAN blinks: the header's signature has the phase) */
     }
 }
 

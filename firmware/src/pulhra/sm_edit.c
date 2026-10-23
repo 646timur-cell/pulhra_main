@@ -213,7 +213,7 @@ static void sm_shift_trk(uint32_t t, int32_t dir)
 }
 
 /* SEQ held + A#3 / C#4: every track's steps (and locks) one step left (-1) or right (+1), each wrapping at its own length; one
- * UNDO for all of them. The header shows the net count: SHT+N */
+ * UNDO for all of them. The SEQ map shows the net count under K3: SHT+N */
 static void sm_shift_all(int32_t dir)
 {
     uint32_t t;
@@ -222,11 +222,10 @@ static void sm_shift_all(int32_t dir)
     for (t = 0; t < SM_NTRK; t++)
         sm_put_track(t, &sm_undo_buf, t, dir < 0 ? -1 : 1, 0);
     sm_sh_all = (int8_t)clamp((int32_t)sm_sh_all + (dir < 0 ? -1 : 1), -99, 99);
-    sm_msg_show_val(SM_MSG_SHT, sm_sh_all);
     sm_dirty = 1;
 }
 static void sm_trn(uint32_t t, int32_t d);
-/* SEQ held + D#4 / F#4: every track's trigs a semitone down / up (sm_trn, one UNDO for all). The header: TR+N */
+/* SEQ held + D#4 / F#4: every track's trigs a semitone down / up (sm_trn, one UNDO for all). The SEQ map: TR+N under K4 */
 static void sm_trn_all(int32_t d)
 {
     uint32_t t;
@@ -243,7 +242,6 @@ static void sm_trn_all(int32_t d)
         }
     }
     sm_tr_all = (int8_t)clamp((int32_t)sm_tr_all + (d < 0 ? -1 : 1), -99, 99);
-    sm_msg_show_val(SM_MSG_TR, sm_tr_all);
     sm_dirty = 1;
 }
 

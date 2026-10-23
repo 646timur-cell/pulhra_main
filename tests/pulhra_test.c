@@ -2602,10 +2602,14 @@ static int test_layer_maps(void)
     layer_draw(SML_SEQ);
     bad += check("MAP: SEQ: the length (LEN 24), the pattern grid, the mode, the title", lint_frame("seq") == 0 && lint_has("LEN 24", 0, 0) &&
                  lint_has("A01", 0, 0) && smd_has_cells("*", "SEQ") && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
-    sm_lay_cleared = 1;
+    sm_msg_show(SM_MSG_CLEARED);
     layer_draw(SML_SEQ);
-    bad += check("MAP: SEQ: CLEARED after a clear", lint_has("CLEARED", 0, 0));
-    sm_lay_cleared = 0;
+    bad += check("MAP: SEQ: CLEAN (inverted) in the header after a clear", lint_has("CLEAN", 0, 0) && !lint_has("CLEARED", 0, 0));
+    host_ticks += SM_MSG_BLINK_US * FM1_TICKS_PER_US;
+    bad += check("MAP: ... it blinks: 125 ms on, the header's signature changes", smd_blink() == 1u);
+    host_ticks += SM_MSG_US * FM1_TICKS_PER_US;
+    sm_msg_poll(fm1_ticks());
+    bad += check("MAP: ... a second on: gone", sm_msg == SM_MSG_NONE);
     smp.pat[smp.cur].kit.snd[0].len = 16;
     ok = 1;
     for (i = 0; i < 240u * 240u; i++) {
@@ -9255,6 +9259,16 @@ static int test_kbd_latch(void)
     in_reset();
     host_ticks = 1000u;
     sm_rec = 1;                                           /* (a key would toggle a trig, if it were one) */
+    btn_down(B_ARP);                                      /* out of the keyboard mode: ARP held + F3 does nothing */
+    sm_input_poll();
+    key_dn(WHITE[0]);
+    sm_input_poll();
+    key_up(WHITE[0]);
+    btn_up(B_ARP);
+    sm_input_poll();
+    bad += check("LATCH: not in the keyboard mode: ARP held + F3 is no LATCH (and no trig)", !sm_klatch && !stp(0, 0)->n);
+    ms(1000);
+    sm_input_poll();
     oct_pair(0);
     bad += check("LATCH: the keyboard mode on, ARP MODE OFF", sm_ui.kbd && !ksnd(0)->p[P_AMODE]);
     btn_down(B_ARP);
@@ -9701,29 +9715,29 @@ static int test_seq_all_tracks(void)
             ok &= stp(t, 6)->n == 1u && !stp(t, 4)->n;
         bad += check("SEQALL: SEQ + C#4 twice: every track's trig two steps forward", ok);
     }
-    bad += check("SEQALL: ... the header SHT+2", sm_msg == SM_MSG_SHT && sm_msg_val == 2);
+    bad += check("SEQALL: ... the net SHT+2 (no header message)", sm_sh_all == 2 && sm_msg == SM_MSG_NONE);
     seq_key(5);                                           /* A#3: back */
     seq_key(5);
-    bad += check("SEQALL: SEQ + A#3 twice: back where they were, SHT+0", stp(0, 4)->n == 1u && stp(3, 4)->n == 1u && sm_msg_val == 0);
+    bad += check("SEQALL: SEQ + A#3 twice: back where they were, SHT+0", stp(0, 4)->n == 1u && stp(3, 4)->n == 1u && sm_sh_all == 0);
     sm_ux_mk1();
     draw_full();
-    bad += check("SEQALL: ... drawn SHT+0", lint_has("SHT+0", 0, 0));
+    bad += check("SEQALL: ... the map's row under K3 / K4: SHT+0 TR+0", smd_has_cells("SHT+0", "TR+0"));
     seq_key(13);                                          /* F#4: up */
     {
         int ok = 1;
         for (t = 0; t < SM_NTRK; t++)
             ok &= stp(t, 4)->note[0] == 61u + t;
-        bad += check("SEQALL: SEQ + F#4: every track's notes a semitone up, TR+1", ok && sm_msg == SM_MSG_TR && sm_msg_val == 1);
+        bad += check("SEQALL: SEQ + F#4: every track's notes a semitone up, TR+1", ok && sm_tr_all == 1);
     }
     seq_key(10);                                          /* D#4: down */
     seq_key(10);
     draw_full();
-    bad += check("SEQALL: SEQ + D#4 twice: a semitone below the start, TR-1 drawn", stp(2, 4)->note[0] == 61u && lint_has("TR-1", 0, 0));
+    bad += check("SEQALL: SEQ + D#4 twice: a semitone below the start, TR-1 drawn under K4", stp(2, 4)->note[0] == 61u && smd_has_cells("SHT+0", "TR-1"));
     layer_let_go(B_SEQ);
     ms(1200);
     sm_input_poll();
     draw_full();
-    bad += check("SEQALL: a second later the header is back (no SHT, no TR)", !lint_has("TR-1", 0, 0) && sm_msg == SM_MSG_NONE);
+    bad += check("SEQALL: SEQ let go: the map gone (no TR-1 on the screen)", !lint_has("TR-1", 0, 0));
     in_reset();
     return bad;
 }
