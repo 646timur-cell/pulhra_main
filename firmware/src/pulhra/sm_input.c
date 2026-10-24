@@ -124,6 +124,7 @@ static uint32_t sm_layer_busy(void);                      /* a layer open, or it
 static void sm_undo(void);                                /* sm_edit.c (after this file) */
 static int sm_trig_copy(uint32_t t, uint32_t st);
 static void sm_paste_held(void);
+static uint8_t sm_tclip_ok;                               /* (sm_edit.c: a trig copied) */
 static void sm_edit_pat_changed(void);
 static void sm_eu_gen(void);
 static void sm_acc_reset(uint32_t mask);
@@ -883,7 +884,7 @@ static void sm_rec_poll(uint32_t pressed)
         uint32_t k;
         for (k = 0; k < SM_NKEYS; k++)
             if ((sm_key_arm >> k) & 1u) {
-                (void)sm_trig_copy(sm_key_trk[k], sm_key_step[k]);
+                sm_msg_show(sm_trig_copy(sm_key_trk[k], sm_key_step[k]) ? SM_MSG_GCOPY : SM_MSG_GEMPTY);   /* (an empty step: nothing) */
                 break;
             }
         sm_key_used |= sm_key_arm;                        /* (no toggle at the release) */
@@ -1186,6 +1187,7 @@ static void sm_input_poll(void)
     sm_rec_poll(pressed);
     sm_lrec_poll();                                       /* (live record: the notes the audio stream placed) */
     if (((pressed >> panel.btn[B_PLAY]) & 1u) && sm_key_arm) {   /* a trig held + PLAY (Tim): the trig copied pasted there, no transport */
+        sm_msg_show(sm_tclip_ok ? SM_MSG_GPASTE : SM_MSG_GEMPTY);
         sm_paste_held();
         sm_dirty = 1;
     } else if (((pressed >> panel.btn[B_PLAY]) & 1u) && ((fm1_in.buttons >> panel.btn[B_REC]) & 1u)) {

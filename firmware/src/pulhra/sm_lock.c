@@ -24,8 +24,8 @@
 /* the header's messages (the only ones: LOCKS FULL, CLEARED, UNDO; SAVED and the flash's error come with the storage), each
  * for SM_MSG_US, the header inverted */
 enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_SAVED, SM_MSG_FLASH, SM_MSG_SHIFT, SM_MSG_TRN, SM_MSG_SHT, SM_MSG_TR,
-       SM_MSG_NUDGE, SM_MSG_SAVEPEND, SM_MSG_PTNCLR, SM_MSG_FILL, SM_MSG_TCOPY, SM_MSG_TPASTE, SM_MSG_TCOPYP, SM_MSG_TPASTEP, SM_MSG_CHORDIN, SM_MSG_CHORDSET, SM_MSG_COUNT };
-static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEAR", "UNDO", "SAVED", "FLASH ERROR", "SHIFT", "TRN", "SHT", "TR", "NUDGE", "SAVE AT STOP", "PTN CLEAR", "FILL", "TRACK COPIED", "TRACK PASTED", "HOLD: COPY TRACK", "HOLD: PASTE TRACK", "PLAY CHORD", "CHORD SET"};
+       SM_MSG_NUDGE, SM_MSG_SAVEPEND, SM_MSG_PTNCLR, SM_MSG_FILL, SM_MSG_TCOPY, SM_MSG_TPASTE, SM_MSG_TCOPYP, SM_MSG_TPASTEP, SM_MSG_CHORDIN, SM_MSG_CHORDSET, SM_MSG_GCOPY, SM_MSG_GPASTE, SM_MSG_GEMPTY, SM_MSG_COUNT };
+static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEAR", "UNDO", "SAVED", "FLASH ERROR", "SHIFT", "TRN", "SHT", "TR", "NUDGE", "SAVE AT STOP", "PTN CLEAR", "FILL", "TRACK COPIED", "TRACK PASTED", "HOLD: COPY TRACK", "HOLD: PASTE TRACK", "PLAY CHORD", "CHORD SET", "TRIG COPIED", "TRIG PASTED", "NO TRIG COPIED"};
 /* NUDGE: the STEP page's OCT- / OCT+ with a trig key held: NUDGE+3, shown only then (a second) */
 /* SHT, TR: SEQ held + A#3 / C#4 (all the tracks shifted), D#4 / F#4 (transposed); the net count follows with its sign: SHT+2, TR-1, SHT+0 */
 static int16_t sm_msg_val;                                /* SHIFT, TRN: the signed value shown after the text ("SHIFT +2") */
@@ -79,7 +79,7 @@ static void sm_lock_full_msg(void) { sm_msg_show(SM_MSG_LOCKS); }   /* (the only
 /* the messages that blink (inverted / plain every SM_MSG_BLINK_US): CLEAR, PTN CLEAR, and the save's: SAVED, SAVE AT STOP, FLASH ERROR */
 static uint32_t sm_msg_blinks(uint32_t m)
 {
-    return m == SM_MSG_CLEARED || m == SM_MSG_PTNCLR || m == SM_MSG_CHORDIN || m == SM_MSG_CHORDSET || m == SM_MSG_TCOPY || m == SM_MSG_TPASTE || m == SM_MSG_SAVED || m == SM_MSG_SAVEPEND || m == SM_MSG_FLASH;
+    return m == SM_MSG_CLEARED || m == SM_MSG_PTNCLR || m == SM_MSG_CHORDIN || m == SM_MSG_CHORDSET || m == SM_MSG_GCOPY || m == SM_MSG_GPASTE || m == SM_MSG_TCOPY || m == SM_MSG_TPASTE || m == SM_MSG_SAVED || m == SM_MSG_SAVEPEND || m == SM_MSG_FLASH;
 }
 static void sm_msg_poll(uint32_t now)
 {

@@ -4156,6 +4156,7 @@ static int test_trig_copy_paste(void)
     sm_input_poll();
     key_up(WHITE[2]);
     sm_input_poll();
+    bad += check("TCOPY: ... TRIG COPIED in the header", sm_msg == SM_MSG_GCOPY);
     bad += check("TCOPY: trig key 3 held + REC: copied (VEL, flags, two locks), the trig not toggled, REC still on",
                  sm_rec && stp(0, 2)->n == 1u && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip.flags == SMF_ACCENT && sm_tclip_nl == 2u);
     key_dn(WHITE[6]);
