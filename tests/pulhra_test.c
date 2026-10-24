@@ -1552,7 +1552,13 @@ static int test_edit_layer_every_machine(void)
                     if (b % 50u == 0u)
                         sm_draw();
                 }
-                ok &= ksnd(t)->machine == m && trk[t].engine == sm_engine_of(m) && !trk[t].xf_on;
+                if (!sm_mach_ok(m, t))                    /* (the DRUM page: T4's alone; elsewhere its keys load nothing) */
+                    ok &= ksnd(t)->machine != m;
+                else if (!(ksnd(t)->machine == m && trk[t].engine == sm_engine_of(m) && !trk[t].xf_on)) {
+                    printf("  every machine: T%u machine %u (%s) play %u: model %u core %u xf %u\n", t + 1u, m,
+                           ENGINES[sm_engine_of(m)]->name, play, ksnd(t)->machine, trk[t].engine, trk[t].xf_on);
+                    ok = 0;
+                }
                 for (pg = 0; pg < sm_page_count(); pg++) {   /* every page of the new machine drawn, its knobs turned */
                     sm_ui.page = (uint8_t)pg;
                     for (k = EN_K1; k <= EN_K4; k++)
@@ -1597,7 +1603,7 @@ static int test_edit_layer_every_machine(void)
                 trk_note_on(&trk[t], 64, 100);
                 for (b = 0; b < 60u; b++)
                     run_block();
-                ok &= trk[t].engine == sm_engine_of(m);
+                ok &= trk[t].engine == sm_engine_of(sm_mach_ok(m, t) ? m : pg);   /* (the DRUM page off T4: no switch) */
                 trk_all_off(&trk[t]);
             }
     printf("pulhra: every machine through the EDIT layer: peak %u\n", peak);
@@ -8641,6 +8647,168 @@ static int test_drum_machines(void)
     return bad;
 }
 
+/* KIT on T4: four lanes in one track. ALGORITHM walks T3 > T4 L1 .. L4 > T1; a trig key toggles the lane in edit's hit
+ * (the others of the step stay); the step plays each lane that hits as its note (C2 + lane) together; the strip / LEDs show
+ * the lane in edit; TRN leaves the lanes alone; a KIT is T4's alone */
+static int test_drum_kit(void)
+{
+    int bad = 0;
+    uint32_t i, n36 = 0, n37 = 0, n38 = 0, n39 = 0, at36 = 0, at38 = 1;
+    sm_step_t tmp;
+    sm_pattern_t *pt;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(40);
+    pt = cpat();
+    bad += check("KIT: the DRUM page's sixth machine, on T4", eng_vis(SM_KIT_MACH) == ENGI_DKIT && trk[3].engine == ENGI_DKIT &&
+                 sm_trk_kit(3, pt) && !sm_trk_kit(2, pt));
+    sm_ui.trk = 2;
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    bad += check("KIT: ALGORITHM from T3: T4 L1", sm_ui.trk == 3u && sm_kit_lane == 0u);
+    turn(EN_ALGO, 2);
+    sm_input_poll();
+    bad += check("KIT: ... two more: T4 L3", sm_ui.trk == 3u && sm_kit_lane == 2u);
+    turn(EN_ALGO, 2);
+    sm_input_poll();
+    bad += check("KIT: ... two more: past L4, T1", sm_ui.trk == 0u && sm_kit_lane == 0u);
+    turn(EN_ALGO, -1);
+    sm_input_poll();
+    bad += check("KIT: ... back one: T4 L4", sm_ui.trk == 3u && sm_kit_lane == 3u);
+    sm_kit_lane = 0;
+    sm_step_toggle(3, 0);
+    sm_kit_lane = 2;
+    sm_step_toggle(3, 0);
+    sm_step_toggle(3, 8);
+    sm_kit_lane = 1;
+    sm_step_toggle(3, 4);
+    bad += check("KIT: trigs: step 1 lanes 1 and 3, step 5 lane 2, step 9 lane 3",
+                 pt->step[3][0].n && sm_kit_mask(&pt->step[3][0]) == 5u && sm_kit_mask(&pt->step[3][4]) == 2u &&
+                 sm_kit_mask(&pt->step[3][8]) == 4u);
+    bad += check("KIT: the strip shows the lane in edit (L2: step 5 yes, step 1 no)",
+                 sm_step_view(pt, 3, 4, &tmp)->n && !sm_step_view(pt, 3, 0, &tmp)->n && !sm_step_view(pt, 3, 8, &tmp)->n);
+    sm_kit_lane = 2;
+    sm_step_toggle(3, 8);
+    bad += check("KIT: the last lane of a step off: the trig off", !pt->step[3][8].n);
+    sm_trn_all(1);
+    bad += check("KIT: SEQ + F#4 (every track up a semitone): the lanes unchanged", sm_kit_mask(&pt->step[3][0]) == 5u &&
+                 pt->step[3][0].note[0] == SM_INH && pt->step[3][0].note[2] == SM_INH);
+    seq_log_clear();
+    press(B_PLAY);
+    sm_input_poll();
+    for (i = 0; i < 1000u; i++) {                         /* (0.73 s: steps 1 .. 6 at 120 BPM) */
+        run_block();
+        seq_clock += CTL;
+    }
+    for (i = 0; i < seq_nev && i < 1024u; i++)
+        if (seq_ev[i].on && seq_ev[i].t == 3u) {
+            n36 += seq_ev[i].note == 36u;
+            n37 += seq_ev[i].note == 37u;
+            n38 += seq_ev[i].note == 38u;
+            n39 += seq_ev[i].note == 39u;
+            if (seq_ev[i].note == 36u && !at36)
+                at36 = seq_ev[i].at + 1u;
+            if (seq_ev[i].note == 38u && at38 == 1u)
+                at38 = seq_ev[i].at + 1u;
+        }
+    printf("  kit: lanes heard %u %u %u %u\n", n36, n37, n38, n39);
+    bad += check("KIT: playing: lanes 1 and 3 together on step 1, lane 2 on step 5, lane 4 never",
+                 n36 >= 1u && n38 >= 1u && n37 >= 1u && n39 == 0u && at36 == at38);
+    press(B_PLAY);
+    sm_input_poll();
+    {                                                     /* the four lanes at once: four voices, each sounds, all ring out */
+        uint32_t b, pk = 0, act, q = 0;
+        trk[0].p[P_LEVEL] = trk[1].p[P_LEVEL] = trk[2].p[P_LEVEL] = 0;
+        trk[3].p[P_LEVEL] = 100;
+        kit_dry();
+        fx_flush();
+        for (i = 0; i < 4u; i++)
+            trk_note_on(&trk[3], 36u + i, 100);
+        act = dr_active(3);
+        for (b = 0; b < 6000u; b++) {
+            uint32_t a = block_peak(0, 0);
+            pk = a > pk ? a : pk;
+            if (b >= 5950u)
+                q = a > q ? a : q;
+        }
+        printf("  kit: four lanes: %u voices, peak %u, %u left after 4.4 s\n", act, pk, dr_active(3));
+        bad += check("KIT: the four lanes at once: four voices, loud, no clip, all rung out", act == 4u && pk > 3000u &&
+                     pk < 65534u && dr_active(3) == 0u && q <= 2u);
+        trk_note_on(&trk[3], 36u, 100);
+        trk_note_on(&trk[3], 38u, 100);
+        trk_note_on(&trk[3], 36u, 100);
+        for (b = 0; b < 30u; b++)
+            block_peak(0, 0);
+        bad += check("KIT: a lane's hit chokes only its own lane (BD again: SD rings on)", dr_active(3) == 2u);
+    }
+    sm_ui.trk = 0;
+    sm_sound_load(SM_KIT_MACH, 0);                        /* (sm_sound_load itself is not the guard: the EDIT layer is) */
+    bad += check("KIT: sm_mach_ok: the DRUM page on T4 alone", sm_mach_ok(SM_KIT_MACH, 3) && !sm_mach_ok(SM_KIT_MACH, 0) &&
+                 !sm_mach_ok(MF_PAGE[3], 2) && sm_mach_ok(MF_PAGE[3] - 1u, 0));
+    return bad;
+}
+
+/* FILL (Tim): SHIFT (OCT- held) + G5 held, REC / ARM off: sm_fill on while both are, FILL in the header, no copy of step 16;
+ * REC on: no FILL (SHIFT + G5 copies step 16 as ever); let go: off */
+static int test_shift_fill(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    draw_setup();
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    ms(150);
+    sm_input_poll();
+    key_dn(26);
+    sm_input_poll();
+    draw_full();
+    bad += check("FILL: SHIFT + G5 held: FILL on, FILL in the header", sm_fill == 1u && lint_has("FILL", 0, 0));
+    ms(1500);
+    sm_input_poll();
+    bad += check("FILL: ... still on (and shown) after 1.5 s held", sm_fill == 1u && sm_msg == SM_MSG_FILL);
+    key_up(26);
+    sm_input_poll();
+    bad += check("FILL: G5 let go: off, the header back", sm_fill == 0u && sm_msg != SM_MSG_FILL);
+    sm_rec = 1;
+    key_dn(26);
+    sm_input_poll();
+    bad += check("FILL: REC on: SHIFT + G5 is no FILL", sm_fill == 0u);
+    key_up(26);
+    sm_input_poll();
+    sm_rec = 0;
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    return bad;
+}
+
+/* MIDI and SETUP (OCT- + HOME) show no sequencer under them (Tim): the strip's zone black */
+static int test_setup_nostrip(void)
+{
+    int bad = 0;
+    uint32_t k;
+    static const char *const PG[2] = {"MIDI", "SETUP"};
+    for (k = 0; k < 2u; k++) {
+        char w[80];
+        draw_setup();
+        smp.pat[smp.cur].step[0][2].n = 1;
+        sm_ui.page = (uint8_t)page_by_name(PG[k]);
+        draw_full();
+        snprintf(w, sizeof w, "NOSTRIP: %s: no strip (its zone black)", PG[k]);
+        bad += check(w, scr_count(0, SMD_STRIP_Y, 240, SMD_STRIP_H, BGC) == 240u * SMD_STRIP_H);
+    }
+    sm_ui.page = (uint8_t)page_by_name("STEP");
+    draw_full();
+    bad += check("NOSTRIP: ... the STEP page: the strip again", scr_count(0, SMD_STRIP_Y, 240, SMD_STRIP_H, SGND) > 1000u);
+    smp.pat[smp.cur].step[0][2].n = 0;
+    return bad;
+}
+
 static int test_fx_dist_types(void)
 {
     double br[4], rm[4], base_br, base_rm, b2, r2, nul;
@@ -10450,6 +10618,9 @@ int main(void)
     bad += test_draw_shots();
     bad += test_drum_kick();                              /* (last: it leaves a KICK on T1) */
     bad += test_drum_machines();
+    bad += test_drum_kit();
+    bad += test_shift_fill();
+    bad += test_setup_nostrip();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

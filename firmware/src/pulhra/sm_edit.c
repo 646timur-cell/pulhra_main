@@ -233,6 +233,8 @@ static void sm_trn_all(int32_t d)
     for (t = 1; t < SM_NTRK; t++) {
         sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
         uint32_t s, k;
+        if (sm_trk_kit(t, p))                             /* (KIT: its note bytes are the lanes' hits, no pitch) */
+            continue;
         p->kit.snd[t].dnote = (uint8_t)clamp((int32_t)p->kit.snd[t].dnote + d, 0, 127);
         for (s = 0; s < SM_NSTEP; s++) {
             sm_step_t *x = &p->step[t][s];
@@ -253,6 +255,8 @@ static void sm_trn(uint32_t t, int32_t d)
     uint32_t s, k;
     t %= SM_NTRK;
     sm_undo_snap();
+    if (sm_trk_kit(t, p))                                 /* (KIT: no pitch to move) */
+        return;
     p->kit.snd[t].dnote = (uint8_t)clamp((int32_t)p->kit.snd[t].dnote + d, 0, 127);   /* (a byte) */
     for (s = 0; s < SM_NSTEP; s++) {
         sm_step_t *x = &p->step[t][s];

@@ -268,6 +268,19 @@ static void sm_step_rec(uint32_t t, uint32_t st, uint32_t note, uint32_t vel)
     if (t >= SM_NTRK || st >= SM_NSTEP)
         return;
     s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    if (sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {     /* KIT: the note's lane joins the step (the others stay) */
+        uint32_t L = dr_lane(note);
+        if (!s->n) {
+            sm_lock_clear_step(t, st);
+            sm_step_fresh(t, st, 0);
+            s->note[0] = 0;
+        }
+        s->note[L] = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);
+        s->flags &= (uint8_t)~SMF_REST;
+        SM_BARRIER();
+        s->n = 1;
+        return;
+    }
     had = s->n;
     s->n = 0;
     SM_BARRIER();
@@ -288,6 +301,12 @@ static int sm_step_rec_add(uint32_t t, uint32_t st, uint32_t note)
     if (t >= SM_NTRK || st >= SM_NSTEP)
         return 0;
     s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    if (sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {     /* KIT: another lane on the step */
+        if (!s->n || s->note[dr_lane(note)])
+            return 0;
+        s->note[dr_lane(note)] = SM_INH;
+        return 1;
+    }
     if (!s->n || s->n >= 4u || (s->flags & SMF_REST))
         return 0;
     for (k = 0; k < s->n; k++)
@@ -311,6 +330,27 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     if (t >= SM_NTRK || st >= SM_NSTEP)
         return;
     s = &pt->step[t][st];
+    if (sm_trk_kit(t, pt)) {                              /* KIT: the lane in edit's hit on / off; the last one off: the trig off */
+        uint32_t L = sm_kit_lane % SM_NLANE;
+        if (s->n && (s->flags & SMF_REST) == 0 && (sm_kit_mask(s) & ~(1u << L))) {   /* (other lanes hit: this one alone) */
+            s->note[L] = (uint8_t)(s->note[L] ? 0u : SM_INH);
+            return;
+        }
+        if (s->n && !s->note[L]) {                        /* (a lock trig, or no lane: this lane joins it) */
+            s->note[L] = SM_INH;
+            s->flags &= (uint8_t)~SMF_REST;
+            return;
+        }
+        if (!s->n) {
+            sm_lock_clear_step(t, st);
+            sm_step_fresh(t, st, 0);
+            s->note[0] = 0;
+            s->note[L] = SM_INH;
+            SM_BARRIER();
+            s->n = 1;
+            return;
+        }
+    }
     if (s->n) {
         s->n = 0;
         SM_BARRIER();

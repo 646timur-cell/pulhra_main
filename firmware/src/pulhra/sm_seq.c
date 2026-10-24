@@ -417,6 +417,16 @@ static void sm_seq_notes(uint32_t t, const sm_step_t *s, uint32_t vel, uint32_t 
     uint8_t old[4];
     uint8_t nn[4];
     uint32_t nold = sm_nheld[t], k, j, n = 0, q = sm_qseq(t);
+    if (sm_trk_kit(t, &smp.pat[sm_play_pat % SM_NPAT])) {   /* KIT: each lane that hits, its note (C2 + lane), its velocity */
+        sm_seq_release(t);
+        for (k = 0; k < SM_NLANE; k++)
+            if (s->note[k]) {
+                trk_note_on(&trk[t], DR_KIT_NOTE + k, s->note[k] == SM_INH || vel == 127u ? vel : s->note[k]);
+                sm_held[t][n++] = (uint8_t)(DR_KIT_NOTE + k);
+            }
+        sm_nheld[t] = (uint8_t)n;
+        return;
+    }
     for (k = 0; k < s->n && k < 4u; k++) {                /* the notes that sound: QNT SEQ snaps them (two together play once) */
         uint32_t x = q ? (uint32_t)clamp(sm_scale_snap(trk[t].p[P_ROOT], trk[t].p[P_SCALE], s->note[k]), 0, 127) : s->note[k];
         for (j = 0; j < n && nn[j] != x; j++) {}

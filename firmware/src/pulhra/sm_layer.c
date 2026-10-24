@@ -409,8 +409,11 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             continue;
         w = sm_white_of(key);
         if (sm_layer == SML_EDIT) {
-            if (w >= 0 && (uint32_t)w < sm_epage_n(sm_lay_epage))
+            if (w >= 0 && (uint32_t)w < sm_epage_n(sm_lay_epage) &&
+                sm_mach_ok(sm_epage_first(sm_lay_epage) + (uint32_t)w, t)) {   /* (the DRUM page: T4's alone) */
                 sm_sound_load(sm_epage_first(sm_lay_epage) + (uint32_t)w, 0);
+                sm_kit_lane = 0;
+            }
         } else if (sm_layer == SML_GLO) {
             uint32_t b, n = 0;                            /* the black key's place among the black keys, 0 .. 3: T1 .. T4 (the
                                                              banks' keys: sm_glo_poll) */

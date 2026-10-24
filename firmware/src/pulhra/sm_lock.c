@@ -24,8 +24,8 @@
 /* the header's messages (the only ones: LOCKS FULL, CLEARED, UNDO; SAVED and the flash's error come with the storage), each
  * for SM_MSG_US, the header inverted */
 enum { SM_MSG_NONE, SM_MSG_LOCKS, SM_MSG_CLEARED, SM_MSG_UNDO, SM_MSG_SAVED, SM_MSG_FLASH, SM_MSG_SHIFT, SM_MSG_TRN, SM_MSG_SHT, SM_MSG_TR,
-       SM_MSG_NUDGE, SM_MSG_SAVEPEND, SM_MSG_PTNCLR, SM_MSG_COUNT };
-static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEAR", "UNDO", "SAVED", "FLASH ERROR", "SHIFT", "TRN", "SHT", "TR", "NUDGE", "SAVE AT STOP", "PTN CLEAR"};
+       SM_MSG_NUDGE, SM_MSG_SAVEPEND, SM_MSG_PTNCLR, SM_MSG_FILL, SM_MSG_COUNT };
+static const char *const SM_MSG_TEXT[SM_MSG_COUNT] = {"", "LOCKS FULL", "CLEAR", "UNDO", "SAVED", "FLASH ERROR", "SHIFT", "TRN", "SHT", "TR", "NUDGE", "SAVE AT STOP", "PTN CLEAR", "FILL"};
 /* NUDGE: the STEP page's OCT- / OCT+ with a trig key held: NUDGE+3, shown only then (a second) */
 /* SHT, TR: SEQ held + A#3 / C#4 (all the tracks shifted), D#4 / F#4 (transposed); the net count follows with its sign: SHT+2, TR-1, SHT+0 */
 static int16_t sm_msg_val;                                /* SHIFT, TRN: the signed value shown after the text ("SHIFT +2") */

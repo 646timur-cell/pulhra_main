@@ -56,6 +56,7 @@ static uint8_t sm_arp_lseen[SM_NTRK], sm_arp_mseen[SM_NTRK];   /* each track's L
 /* sm_midi_ch (the MIDI page's channel per track) and sm_midi_src (the SETUP page's source) live in sm_midi.c, which the
  * audio stream reads; the MIDI and SETUP pages here write them, the screen reads them */
 static uint8_t sm_shift;                                  /* SHIFT: OCT- held outside the keyboard mode and the layers (sm_oct_poll) */
+#define SM_SHK_FILL 26u                                   /* SHIFT + G5 (REC off): FILL while held (sm_fill_poll) */
 static int8_t sm_sh_acc[SM_NTRK], sm_trn_acc[SM_NTRK];    /* SHIFT + D#4 / F#4, D#5 / F#5: the net shift and transpose of a track since the pattern came (the header's value) */
 #define SM_KL_N 8u
 static uint8_t sm_kl_note[SM_NTRK][SM_KL_N];              /* LATCH (ARP held + F3, sm_klatch): the notes held on after their keys, 0xFF none */
@@ -315,6 +316,8 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
             continue;
         if ((sm_key_arm >> k) & 1u)                       /* (down again before its release was seen: that release first) */
             continue;
+        if (sm_shift && k == SM_SHK_FILL && !sm_rec)      /* (SHIFT + G5, REC off: FILL, sm_fill_poll; REC on: the copy as ever) */
+            continue;
         if (sm_shift) {                                   /* SHIFT + a trig key: the trig copied, no toggle */
             (void)sm_trig_copy(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);
             continue;
@@ -530,6 +533,10 @@ static void sm_kbd_poll(uint32_t edges)
             if (sm_kb_pend & bit) {
                 sm_cmd_t c = {SMC_KEYON, (uint8_t)(sm_ui.trk % SM_NTRK), 0, SM_KEY_VEL, 0};
                 uint32_t pitch = sm_key_pitch(smp.pat[smp.cur % SM_NPAT].kit.snd[c.trk].p, k, sm_ui.oct);   /* (SCL: QNT, TRN) */
+                if (sm_trk_kit(c.trk, &smp.pat[smp.cur % SM_NPAT])) {   /* KIT: F3 G3 A3 B3 its four lanes, the rest nothing */
+                    int32_t kn = dkit_keys(&trk[c.trk], k);
+                    pitch = kn < 0 ? SM_KEY_SILENT : (uint32_t)kn;
+                }
                 if (pitch == SM_KEY_SILENT) {             /* (a black key under QNT WHITE: nothing) */
                     sm_kb_pend &= ~bit;
                     continue;
@@ -922,6 +929,23 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
     }
 }
 
+/* FILL (Tim: SHIFT + G5, REC / ARM off): while both are held, COND FILL / !FILL play their FILL side; FILL in the header the while. (GLO
+ * held + G5 too: sm_layer.c) */
+static void sm_fill_poll(void)
+{
+    uint32_t f;
+    if (sm_layer)                                         /* (a layer's own: GLO + G5) */
+        return;
+    f = sm_shift && !sm_rec && ((fm1_in.notes >> SM_SHK_FILL) & 1u);   /* (Tim: with REC / ARM off only) */
+    if (f != sm_fill) {
+        sm_fill = (uint8_t)f;                             /* (a byte: the audio stream reads it at a COND) */
+        if (!f && sm_msg == SM_MSG_FILL)
+            sm_msg = SM_MSG_NONE;
+        sm_dirty = 1;
+    }
+    if (f && (sm_msg != SM_MSG_FILL || (uint32_t)(fm1_ticks() - sm_msg_t0) > SM_MSG_US * FM1_TICKS_PER_US / 2u))
+        sm_msg_show(SM_MSG_FILL);                         /* (shown on while held) */
+}
 /* SHIFT: OCT- held outside the keyboard mode (sm_shift is this, minus a layer open: sm_oct_poll) */
 static uint32_t sm_shift_held(void) { return !sm_ui.kbd && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u); }
 
@@ -1045,16 +1069,20 @@ static void sm_input_poll(void)
     } else if ((pressed >> panel.btn[B_PLAY]) & 1u) {     /* (against a PLAY / STOP not pushed yet, if there is one) */
         sm_tr_pend = (uint8_t)(sm_tr_pend ? (sm_tr_pend == 1u ? 2u : 1u) : (sm_playing ? 2u : 1u));
     }
-    if (alg) {
-        int32_t t = ((int32_t)sm_ui.trk + alg) % (int32_t)SM_NTRK;
-        sm_ui.trk = (uint8_t)(t < 0 ? t + (int32_t)SM_NTRK : t);
+    if (alg) {                                            /* the track; KIT on T4: T4's lanes on the way (T3, T4 BD, .. T4 CP, T1) */
+        int32_t kit = sm_trk_kit(SM_KIT_TRK, &smp.pat[smp.cur % SM_NPAT]), np = (int32_t)SM_NTRK + (kit ? 3 : 0);
+        int32_t pos = (int32_t)(sm_ui.trk % SM_NTRK) + (kit && sm_ui.trk % SM_NTRK == SM_KIT_TRK ? (int32_t)(sm_kit_lane % SM_NLANE) : 0);
+        pos = ((pos + alg) % np + np) % np;
+        sm_ui.trk = (uint8_t)(pos < (int32_t)SM_KIT_TRK ? pos : (int32_t)SM_KIT_TRK);
+        sm_kit_lane = (uint8_t)(pos < (int32_t)SM_KIT_TRK ? 0 : pos - (int32_t)SM_KIT_TRK);
         sm_ui.held_step = sm_ui.sel_step = 0xFFu;
         sm_dirty = 1;
     }
     sm_oct_poll(pressed, now, (pressed & ~((1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]))) || notes || sel || alg ||
                                pre || k[0] || k[1] || k[2] || k[3]);
     if (!sm_layer && sm_shift_held())
-        sm_shift_keys(notes);                             /* (SHIFT + D#4 F#4 D#5 F#5) */
+        sm_shift_keys(notes);
+    sm_fill_poll();                             /* (SHIFT + D#4 F#4 D#5 F#5) */
     sm_arp_poll();
     sm_kbd_poll(sm_ui.kbd ? notes : 0);
     if (!sm_ui.kbd)                                       /* (the keyboard mode: the keys play, they are no trigs) */

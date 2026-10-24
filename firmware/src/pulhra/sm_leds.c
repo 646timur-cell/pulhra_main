@@ -91,8 +91,8 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
         }
         sm_led_put(ni, 14u + k, 1);
         if (sm_layer == SML_EDIT) {
-            if (w < sm_epage_n(sm_lay_epage))
-                sm_led_put(sm_epage_first(sm_lay_epage) + w == cur ? nl : ng, 14u + k, 1);
+            if (w < sm_epage_n(sm_lay_epage) && sm_mach_ok(sm_epage_first(sm_lay_epage) + w, sm_ui.trk))
+                sm_led_put(sm_epage_first(sm_lay_epage) + w == cur ? nl : ng, 14u + k, 1);   /* (the DRUM page: dark off T4) */
         } else if (sm_layer == SML_GLO && w < SM_NTRK) {
             sm_led_put((sm_solo >> w) & 1u ? nl : ng, 14u + k, 1);
         } else if (sm_layer == SML_GLO && w >= SM_GLO_PAT0 && w < SM_GLO_PAT0 + SM_BPAT) {   /* the patterns of the bank in view: */
@@ -143,7 +143,10 @@ static void sm_leds(void)
         if ((SM_BLACK_KEYS >> k) & 1u)
             continue;
         s = bank + w++;
-        st = &pt->step[t][s];
+        {
+            static sm_step_t tmp;
+            st = sm_step_view(pt, t, s, &tmp);            /* (KIT: the lane in edit's) */
+        }
         sm_led_put(ni, 14u + k, 1);
         if ((play && ph == s) || sm_ui.held_step == s)    /* the soft running light: mid, in place of lit and of breath */
             sm_led_put(nm, 14u + k, 1);

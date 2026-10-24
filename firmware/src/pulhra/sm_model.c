@@ -6,6 +6,38 @@ static sm_project_t smp;
 /* machine (0..SM_NMACHINE-1) -> the engine's ENGI_* */
 static uint32_t sm_engine_of(uint32_t machine) { return eng_vis(machine); }
 
+/* KIT (eng_dr.c): the DRUM page's sixth machine, on T4 only (the EDIT layer loads it nowhere else); on it the track's steps
+ * are four lanes: a step's note[k] the hit of lane k (0 none, SM_INH the track's velocity, 1..127 its own), n 1 while
+ * any lane hits (or a lock trig) */
+#define SM_KIT_MACH (MF_PAGE_4 + 5u)
+#define SM_KIT_TRK 3u
+#define SM_NLANE 4u
+static uint8_t sm_kit_lane;                               /* the KIT lane in edit (the trig keys, the strip): ALGORITHM picks it */
+/* machine m may go on track t: the DRUM page's (MF_PAGE_4 on: KICK .. KIT) on T4 alone (Tim: the drums are T4's) */
+static int sm_mach_ok(uint32_t m, uint32_t t) { return m < MF_PAGE_4 || t % SM_NTRK == SM_KIT_TRK; }
+static int sm_snd_kit(const sm_sound_t *d) { return d->machine == SM_KIT_MACH; }
+/* track t of pattern pt plays the KIT */
+static int sm_trk_kit(uint32_t t, const sm_pattern_t *pt) { return t == SM_KIT_TRK && sm_snd_kit(&pt->kit.snd[t]); }
+/* step s of track t in pattern pt as the trig keys, their LEDs and the strip show it: on the KIT, the lane in edit's (a trig
+ * where that lane hits; a lock trig as it is) */
+static const sm_step_t *sm_step_view(const sm_pattern_t *pt, uint32_t t, uint32_t s, sm_step_t *tmp)
+{
+    const sm_step_t *st = &pt->step[t % SM_NTRK][s % SM_NSTEP];
+    if (!sm_trk_kit(t, pt) || (st->flags & SMF_REST))
+        return st;
+    *tmp = *st;
+    tmp->n = (uint8_t)(st->n && st->note[sm_kit_lane % 4u] != 0);
+    return tmp;
+}
+/* a KIT step's lanes that hit (bit per lane) */
+static uint32_t sm_kit_mask(const sm_step_t *s)
+{
+    uint32_t k, m = 0;
+    for (k = 0; k < SM_NLANE; k++)
+        m |= (s->note[k] != 0) << k;
+    return m;
+}
+
 /* the descriptor of parameter id on engine e, 0 when there is none: P_E8 of a machine without a ninth value (param_desc_of
  * would read edit[8], past the array), an id out of range */
 static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
@@ -90,7 +122,7 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
 static void sm_step_eff(const sm_step_t *s, const sm_sound_t *d, sm_step_t *o)
 {
     *o = *s;
-    if (o->note[0] == SM_INH)
+    if (o->note[0] == SM_INH && !sm_snd_kit(d))             /* (KIT: note[] are the lanes' hits, nothing inherited) */
         o->note[0] = d->dnote;
     if (o->vel == SM_INH)
         o->vel = d->dvel;

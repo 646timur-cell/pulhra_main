@@ -134,6 +134,7 @@ static uint32_t smd_hdr_sig(void)
         h = smd_mix(h, 0xB1u + smd_blink());
     h = smd_mix(h, (uint32_t)(uint8_t)sm_ui.oct);
     h = smd_mix(h, sm_ui.kbd); h = smd_mix(h, smp.nchain >= 2u);
+    h = smd_mix(h, sm_kit_lane * 131u + (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u]);   /* (KIT: the lane, its sound) */
     return smd_mix(smd_mix(smd_mix(h, smd_rec), smd_live), smd_lat);
 }
 static void smd_two(char *b, uint32_t v)
@@ -207,6 +208,11 @@ static void smd_header(void)
         x += sm_px_text(x, 2, 2u, "KEYS", T_BG, 1) + 6;
         smd_int(o, sm_ui.oct, 1);
         sm_px_text(x, 2, 2u, o, T_BG, 0);
+    } else if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {   /* KIT: T4 BD1 L1 - the lane in edit, its sound */
+        smd_upper(nm, N_DR_KSND[clamp(s->p[P_E0 + sm_kit_lane % 4u], 0, DR_NKSND - 1)], 4u);
+        x += sm_px_text(x, 2, 2u, nm, T_BG, 0) + 6;
+        l[0] = 'L'; l[1] = (char)('1' + sm_kit_lane % 4u); l[2] = 0;
+        sm_px_text(x, 2, 2u, l, T_BG, 1);
     } else {
         smd_upper(nm, ENGINES[sm_engine_of(s->machine)]->name, 4u);
         x += sm_px_text(x, 2, 2u, nm, T_BG, 0) + 6;
@@ -237,6 +243,7 @@ static void smd_header(void)
 }
 
 /* -------------------------------------------------------------- page --- */
+static int smd_panel(void);
 /* the STEP page's step: the step edited (sm_step_edit), 0 none; *st its index */
 static const sm_step_t *smd_step(int32_t *st)
 {
@@ -659,7 +666,7 @@ static void smd_select(void)
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_page_param(4);
     const param_desc_t *d = id == SM_NOPARAM ? 0 : (id & SM_GLB) ? &GP[(id & ~SM_GLB) % G_COUNT] : sm_desc_trk(s, id);
-    if (sm_page_home() == SMH_MIXER)                      /* (MIXER: the four tracks' panel is there, smd_strip4) */
+    if (smd_panel())                                      /* (MIXER, the KIT's STEP page: the four-row panel is there, smd_strip4) */
         return;
     smd_begin(0, SMD_SEL_Y, 240u, SMD_SEL_H, T_BG);
     if (sm_page_is_step() || (sm_page_home() && sm_page_home() != SMH_EUCLID && sm_page_home() != SMH_MIDI &&
@@ -723,8 +730,11 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
         }
         for (c = 0; c < 4u; c++) {
             i = r * 4u + c;
-            if (i < cnt)
+            if (i < cnt) {
                 smd_cell(o, c, ENGINES[sm_engine_of(sm_epage_first(pg) + i)]->name, sm_epage_first(pg) + i == s->machine);
+                if (!sm_mach_ok(sm_epage_first(pg) + i, sm_ui.trk))
+                    o->dim |= (uint8_t)(1u << c);         /* (the DRUM page off T4: dim, its keys load nothing) */
+            }
         }
         o->cells = 4;
     } else if (sm_layer == SML_GLO) {                     /* the bank in view: patterns 1..8 (two rows), the banks, mute, solo */
@@ -925,17 +935,38 @@ static uint32_t smd_strip_len(void) { return (uint32_t)clamp(smd_snd()->len, 1, 
  * length; the step playing a bar 5 x 1 under its place (rows 3, 8, 13, 18); a track not heard (muted, another soloed) dim;
  * the selected track a tick at the right of its row. The bank in view (OCT) for all four */
 static char smd_step_ch(const sm_step_t *st);
+/* the four-row panel under the knobs (in SELECT's and the strip's place): HOME > MIXER's four tracks, the STEP page's four KIT
+ * lanes when T4 plays a KIT and is selected (smd_kitp); never under a layer's map */
+static int smd_kitp(void)
+{
+    return sm_page_is_step() && sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT]);
+}
+static int smd_panel(void) { return !sm_map_open() && (sm_page_home() == SMH_MIXER || smd_kitp()); }
+/* row r of the panel: its step i as a character (KIT: lane r's; a lock trig on every row) */
+static char smd_prow_ch(const sm_pattern_t *pt, uint32_t r, uint32_t i, int kit)
+{
+    const sm_step_t *st = &pt->step[kit ? SM_KIT_TRK : r % SM_NTRK][i % SM_NSTEP];
+    sm_step_t v;
+    if (!kit || (st->flags & SMF_REST))
+        return smd_step_ch(st);
+    v = *st;
+    v.n = (uint8_t)(st->n && st->note[r % 4u]);
+    return smd_step_ch(&v);
+}
 static uint32_t smd_strip4_sig(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t b = sm_ui.bank ? 16u : 0u, t, i, h = smd_mix(2166136261u, 0x4D4958u + b);
+    int kit = smd_kitp();
+    uint32_t b = sm_ui.bank ? 16u : 0u, t, i, h = smd_mix(2166136261u, 0x4D4958u + b + (kit ? 0x100u : 0u));
     for (t = 0; t < SM_NTRK; t++) {
-        uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP);
+        uint32_t tt = kit ? SM_KIT_TRK : t, len = (uint32_t)clamp(pt->kit.snd[tt].len, 1, SM_NSTEP);
         for (i = 0; i < 16u; i++)
-            h = smd_mix(h, b + i < len ? (uint32_t)(uint8_t)smd_step_ch(&pt->step[t][b + i]) : 9u);
-        h = smd_mix(smd_mix(h, len), smd_play && smd_pos4[t] >= b && smd_pos4[t] < b + 16u ? smd_pos4[t] : 0xFFu);
+            h = smd_mix(h, b + i < len ? (uint32_t)(uint8_t)smd_prow_ch(pt, t, b + i, kit) : 9u);
+        h = smd_mix(smd_mix(h, len), smd_play && smd_pos4[tt] >= b && smd_pos4[tt] < b + 16u ? smd_pos4[tt] : 0xFFu);
+        if (kit)
+            h = smd_mix(h, (uint32_t)(uint8_t)pt->kit.snd[tt].p[P_E0 + t]);
     }
-    return smd_mix(smd_mix(h, sm_mute_eff()), sm_ui.trk);
+    return smd_mix(smd_mix(smd_mix(h, sm_mute_eff()), sm_ui.trk), sm_kit_lane);
 }
 /* HOME > MIXER: the four tracks in ASCII (as the selected track's strip, smd_strip1), a panel from under the rings to the bottom
  * (y 166 .. 239, a gap under the rings' values; SELECT and the strip there on the other pages): a row of 18 px a track, T1 .. T4 at the left (the selected
@@ -947,19 +978,20 @@ static uint8_t smd_mix_drawn;
 static void smd_strip4(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    int kit = smd_kitp();
     uint32_t b = sm_ui.bank ? 16u : 0u, t, i, mute = sm_mute_eff();
-    char c[2] = {0, 0}, l[3] = {'T', 0, 0};
+    char c[2] = {0, 0}, l[3] = {kit ? 'L' : 'T', 0, 0};
     smd_begin(0, SMD_MIX_Y, 240u, SMD_MIX_H, SM_WHITE_DIM);
-    for (t = 0; t < SM_NTRK; t++) {
-        uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP);
+    for (t = 0; t < SM_NTRK; t++) {                       /* (KIT: the rows its lanes L1 .. L4, the lane in edit's label inverted) */
+        uint32_t tt = kit ? SM_KIT_TRK : t, len = (uint32_t)clamp(pt->kit.snd[tt].len, 1, SM_NSTEP);
         int32_t y = 3 + (int32_t)t * 18;
-        uint16_t ink = (uint16_t)(((mute >> t) & 1u) ? SM_DIM_INK : T_BG);
+        uint16_t ink = (uint16_t)(((mute >> tt) & 1u) ? SM_DIM_INK : T_BG);
         l[1] = (char)('1' + t);
-        sm_px_text(2, y + 4, 1u, l, ink, t == sm_ui.trk % SM_NTRK);
+        sm_px_text(2, y + 4, 1u, l, ink, kit ? t == sm_kit_lane % 4u : t == sm_ui.trk % SM_NTRK);
         for (i = 0; i < 16u && b + i < len; i++) {
             int32_t x = 16 + (int32_t)i * 14;
-            c[0] = smd_step_ch(&pt->step[t][b + i]);
-            if (smd_play && smd_pos4[t] == b + i) {
+            c[0] = smd_prow_ch(pt, t, b + i, kit);
+            if (smd_play && smd_pos4[tt] == b + i) {
                 cv_rect(x, y - 1, 13, 16, ink);
                 sm_px_text(x + 2, y, 2u, c, SM_WHITE_DIM, 0);
             } else {
@@ -975,14 +1007,17 @@ static uint32_t smd_strip1_sig(void)                     /* the selected track's
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, h = 2166136261u;
     int32_t ph = smd_playhead();
+    sm_step_t tmp;
     for (i = 0; i < 16u; i++)
-        h = smd_mix(h, b + i < smd_strip_len() ? (uint32_t)(uint8_t)smd_step_ch(&pt->step[t][b + i]) : 9u);
-    h = smd_mix(h, smd_strip_len());
+        h = smd_mix(h, b + i < smd_strip_len() ? (uint32_t)(uint8_t)smd_step_ch(sm_step_view(pt, t, b + i, &tmp)) : 9u);
+    h = smd_mix(h, smd_strip_len() + sm_kit_lane * 256u);
     h = smd_mix(h, ph >= (int32_t)b && ph < (int32_t)b + 16 ? (uint32_t)ph : 0xFFu);
     h = smd_mix(h, smd_mark() >= b && smd_mark() < b + 16u ? smd_mark() : 0xFFu);
     return smd_mix(h, t * 2u + (b != 0));
 }
-static uint32_t smd_strip_sig(void) { return sm_page_home() == SMH_MIXER ? smd_strip4_sig() : smd_strip1_sig(); }
+/* the pages with no sequencer under them (Tim): MIDI and SETUP (OCT- + HOME): the strip's zone black */
+static int smd_nostrip(void) { return !sm_map_open() && (sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP); }
+static uint32_t smd_strip_sig(void) { return smd_nostrip() ? 0x5E7u : smd_panel() ? smd_strip4_sig() : smd_strip1_sig(); }
 /* the selected track's strip in ASCII (Tim's): a character per step in its 13 px cell, the ink on the strip's ground:
  *   . an empty step (dim)   bullet a trig   ^ an accent   degree a REST (a lock trig)   x a ratchet   * a slide (or PSLIDE)
  * (one character a step: REST, then the ratchet, then the accent, then the slide win); the step playing inverted (a box of ink,
@@ -1015,7 +1050,10 @@ static void smd_strip1(void)
         uint32_t s = b + i;
         if (s >= len)                                     /* past the track's length: nothing */
             continue;
-        c[0] = smd_step_ch(&pt->step[t][s]);
+        {
+            sm_step_t tmp;
+            c[0] = smd_step_ch(sm_step_view(pt, t, s, &tmp));   /* (KIT: the lane in edit's) */
+        }
         if (ph == (int32_t)s) {                           /* the step playing: inverted */
             cv_rect(x, 3, (int32_t)SMD_STEP_W - 1, 16, T_BG);
             sm_px_text(x + 1, 4, 2u, c, SM_WHITE_DIM, 0);
@@ -1038,7 +1076,10 @@ static void smd_strip1(void)
 }
 static void smd_strip(void)
 {
-    if (sm_page_home() == SMH_MIXER)
+    if (smd_nostrip()) {
+        smd_begin(0, SMD_STRIP_Y, 240u, SMD_STRIP_H, T_BG);
+        smd_end();
+    } else if (smd_panel())
         smd_strip4();
     else
         smd_strip1();
@@ -1060,7 +1101,7 @@ static void sm_draw(void)
         smd_pos4[z] = z == sm_ui.trk % SM_NTRK ? smd_pos : *(volatile uint8_t *)&sm_pos[z];
     for (z = 0, pk = 0; z < SM_NTRK; z++)
         pk = pk << 8 | smd_pos4[z];
-    if (sm_page_home() != SMH_MIXER)
+    if (!smd_panel() || smd_kitp())
         pk = sm_last_pos4;                                /* (the other tracks' steps are drawn on MIXER only) */
     if (!sm_dirty && smd_pos == sm_last_pos && smd_play == sm_last_play && pk == sm_last_pos4)
         return;
@@ -1068,7 +1109,7 @@ static void sm_draw(void)
     sm_last_pos4 = pk;
     sm_last_pos = smd_pos;
     sm_last_play = smd_play;
-    if (smd_mix_drawn && sm_page_home() != SMH_MIXER) {   /* (MIXER left: its panel cleared, SELECT and the strip drawn anew) */
+    if (smd_mix_drawn && !smd_panel()) {                  /* (the panel gone: cleared, SELECT and the strip drawn anew) */
         smd_begin(0, SMD_MIX_Y, 240u, SMD_STRIP_Y - SMD_MIX_Y, T_BG);
         smd_end();
         smd_mix_drawn = 0;
