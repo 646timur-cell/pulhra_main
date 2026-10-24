@@ -726,12 +726,12 @@ static void smd_cell(smd_mrow_t *o, uint32_t i, const char *s, uint32_t inv)
 }
 /* the pattern asked for (its id), SM_PAT_NONE none */
 static uint32_t smd_next_g(void) { return smp.next < SM_NPAT ? sm_gid_of(smp.next) : SM_PAT_NONE; }
-/* the banks A .. E, five cells, the bank in view vb inverted, the current pattern's bank underlined */
+/* the banks A .. D, four cells, the bank in view vb inverted, the current pattern's bank underlined */
 static void smd_bank_row(smd_mrow_t *o, uint32_t vb)
 {
-    static const char *const BN[SM_NBANK] = {"A", "B", "C", "D", "E"};
+    static const char *const BN[SM_NBANK] = {"A", "B", "C", "D"};
     uint32_t b, cur = sm_gid_of(smp.cur);
-    o->cols = 5;
+    o->cols = SM_NBANK;
     for (b = 0; b < SM_NBANK; b++) {
         smd_cell(o, b, BN[b], b == vb);
         o->und |= (uint8_t)((cur < SM_NGPAT && cur / SM_BPAT == b ? 1u : 0u) << b);
@@ -982,7 +982,7 @@ static uint32_t smd_strip4_sig(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     int kit = smd_kitp();
-    uint32_t b = sm_ui.bank ? 16u : 0u, t, i, h = smd_mix(2166136261u, 0x4D4958u + b + (kit ? 0x100u : 0u));
+    uint32_t b = sm_ui.bank * 16u, t, i, h = smd_mix(2166136261u, 0x4D4958u + b + (kit ? 0x100u : 0u));
     for (t = 0; t < SM_NTRK; t++) {
         uint32_t tt = kit ? SM_KIT_TRK : t, len = (uint32_t)clamp(pt->kit.snd[tt].len, 1, SM_NSTEP);
         for (i = 0; i < 16u; i++)
@@ -1004,7 +1004,7 @@ static void smd_strip4(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     int kit = smd_kitp();
-    uint32_t b = sm_ui.bank ? 16u : 0u, t, i, mute = sm_mute_eff();
+    uint32_t b = sm_ui.bank * 16u, t, i, mute = sm_mute_eff();
     char c[2] = {0, 0}, l[3] = {kit ? 'L' : 'T', 0, 0};
     smd_begin(0, SMD_MIX_Y, 240u, SMD_MIX_H, SM_WHITE_DIM);
     for (t = 0; t < SM_NTRK; t++) {                       /* (KIT: the rows its lanes L1 .. L4, the lane in edit's label inverted) */
@@ -1030,7 +1030,7 @@ static void smd_strip4(void)
 static uint32_t smd_strip1_sig(void)                     /* the selected track's strip */
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, h = 2166136261u;
+    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank * 16u, i, h = 2166136261u;
     int32_t ph = smd_playhead();
     sm_step_t tmp;
     for (i = 0; i < 16u; i++)
@@ -1065,7 +1065,7 @@ static char smd_step_ch(const sm_step_t *st)
 static void smd_strip1(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i;
+    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank * 16u, i;
     int32_t ph = smd_playhead();
     uint32_t len = smd_strip_len();
     char l[4], c[2] = {0, 0};
@@ -1088,9 +1088,9 @@ static void smd_strip1(void)
         if (smd_mark() == s)
             cv_rect(x + 2, 0, 8, 2, T_BG);
     }
-    if (len > 16u) {                                      /* two pages of steps: the page number, large (P2 inverted) */
+    if (len > 16u) {                                      /* pages of steps: the page in view, large (past P1 inverted) */
         l[0] = 'P';
-        l[1] = (char)('1' + (b ? 1 : 0));
+        l[1] = (char)('1' + b / 16u);
         l[2] = 0;
         sm_px_text(238 - 24, 3, 2u, l, T_BG, b ? 1 : 0);
     } else {

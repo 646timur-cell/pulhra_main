@@ -340,7 +340,7 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         int32_t len = clamp((int32_t)sd->len + sel, 1, (int32_t)SM_NSTEP);
         if ((uint8_t)len != sd->len) {
             sd->len = (uint8_t)len;
-            if (len <= 16)
+            if (sm_ui.bank >= sm_npages())
                 sm_ui.bank = 0;
             sm_dirty = 1;
         }

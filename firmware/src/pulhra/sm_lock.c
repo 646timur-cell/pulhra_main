@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* PULHRA parameter locks: the pattern's pool of SM_NLOCK entries {ts = trk << 5 | step, param, val}, nlock of them
+/* PULHRA parameter locks: the pattern's pool of SM_NLOCK entries {ts = trk << 6 | step, param, val}, nlock of them
  * in use. Ownership (sm_model.h): the main loop is the ONLY writer of the pool; the audio stream reads it when a trig
  * fires (sm_seq.c sm_seq_locks) and is never preempted by the main loop, so it sees the pool between two stores of the
  * main loop, never inside one. Every write below keeps each of those in-between states whole:
@@ -35,7 +35,7 @@ static uint32_t sm_msg_t0;
 /* the index in p->lock[] of the lock of (track t, step s, parameter param), -1: none */
 static int32_t sm_lock_find(const sm_pattern_t *p, uint32_t t, uint32_t s, uint32_t param)
 {
-    uint32_t i, ts = (t << 5) | s, n = p->nlock;
+    uint32_t i, ts = SM_TS(t, s), n = p->nlock;
     if (param >= SM_LOCK_DEAD)
         return -1;
     if (n > SM_NLOCK)
@@ -56,7 +56,7 @@ static int sm_param_locked_any(uint32_t t, uint32_t param)
     if (n > SM_NLOCK)
         n = SM_NLOCK;
     for (i = 0; i < n; i++)
-        if ((uint32_t)(p->lock[i].ts >> 5) == t && p->lock[i].param == param)
+        if (SM_TS_T(p->lock[i].ts) == t && p->lock[i].param == param)
             return 1;
     return 0;
 }
@@ -130,7 +130,7 @@ static int sm_lock_set(uint32_t t, uint32_t s, uint32_t param, int32_t v)
         if (p->lock[k].param == SM_LOCK_DEAD)
             break;
     if (k < n) {                                          /* a removed slot: still skipped until its param byte lands */
-        p->lock[k].ts = (uint8_t)((t << 5) | s);
+        p->lock[k].ts = SM_TS(t, s);
         p->lock[k].val = (int16_t)v;
         SM_LOCK_PREEMPT();
         SM_BARRIER();
@@ -141,7 +141,7 @@ static int sm_lock_set(uint32_t t, uint32_t s, uint32_t param, int32_t v)
         sm_lock_full_msg();
         return 0;
     }
-    p->lock[n].ts = (uint8_t)((t << 5) | s);
+    p->lock[n].ts = SM_TS(t, s);
     p->lock[n].param = (uint8_t)param;
     p->lock[n].val = (int16_t)v;
     SM_LOCK_PREEMPT();
@@ -154,7 +154,7 @@ static int sm_lock_set(uint32_t t, uint32_t s, uint32_t param, int32_t v)
 static void sm_lock_clear_step(uint32_t t, uint32_t s)
 {
     sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t i, n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock, ts = (t << 5) | s, any = 0;
+    uint32_t i, n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock, ts = SM_TS(t, s), any = 0;
     for (i = 0; i < n; i++)
         if (p->lock[i].ts == ts && p->lock[i].param != SM_LOCK_DEAD) {
             SM_LOCK_PREEMPT();

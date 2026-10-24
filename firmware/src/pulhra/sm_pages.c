@@ -162,6 +162,8 @@ static uint32_t __attribute__((unused)) sm_arp_page(uint32_t second)
 }
 
 static int sm_page_is_step(void) { return sm_cur_page()->fam == SMFAM_SEQ; }
+/* the selected track's pages of 16 steps (1 .. 4: 64 steps) */
+static uint32_t sm_npages(void) { return ((uint32_t)clamp(smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len, 1, SM_NSTEP) + 15u) / 16u; }
 static uint32_t sm_page_home(void) { return sm_cur_page()->home; }   /* SMH_*: 0 not a HOME page */
 
 /* the STEP page's FLAG list (the PRESETS knob, round): the flags byte of each place, its name */

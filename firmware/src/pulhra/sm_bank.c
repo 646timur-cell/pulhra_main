@@ -13,37 +13,37 @@
  * one that differs from it is "dirty" and is written before it leaves RAM (stopped), at SAVE and by the autosave (8 s with no
  * edit and no note sounding, stopped). With no flash (the part not recognised at boot) a bank left is forgotten.
  *
- * Flash (0xB4000..0xDC000: MONOFM's project area (mf_pat.c MFP_A 0xB4000) and Felucca / STRANGE's user sample slots USR2 / USR3.
+ * Flash (0xB4000..0xE0000: MONOFM's project area (mf_pat.c MFP_A 0xB4000) and Felucca / STRANGE's user sample slots USR2 / USR3.
  * PULHRA plays USR1 only, eng_sample.c SMP_USER_LIVE, but its first SAVE or autosave erases a MONOFM project and user samples
  * saved there, and installing MONOFM later wipes PULHRA's banks: the two do not share a part. The bank format is
- * version 1, unmigrated: a future firmware may drop banks saved on it if the pattern layout grows; the project object is
+ * version 3 (64 steps), unmigrated: older banks are not loaded; the project object is
  * versioned (stage 4: version 2 adds the global effects, a version 1 object loads with their defaults)): the project
  * object (BPM, swing, mutes, change mode, chain, the current pattern) in two copies, one sector each (A 0xB4000, B 0xB5000);
- * the banks in a pool of 7 places of 5 sectors (0xB6000 + 0x5000 * i): a bank is 8 x sm_pattern_t = 20352 B, so ten copies
- * (two per bank) would need 200 KiB of the 160. Each place: a 32-byte header at +0 {magic "SWB1", version, bank, used, seq,
+ * the banks in a pool of 5 places of 8 sectors (0xB6000 + 0x8000 * i, to 0xDE000: over Felucca's user presets, which PULHRA
+ * has not, and below the update loader's staging at 0xE0000 (ota.c)): a bank is 8 x sm_pattern_t of 64 steps = 30592 B (version 3: banks A..D
+ * of 64 steps; a bank of an older version, another size, is not loaded: Tim, the banks start empty). Each place: a 32-byte header at +0 {magic "SWB1", version, bank, used, seq,
  * size, crc32 of the payload, hcrc} and the payload at +64. A save of bank b goes to a place that holds no bank's newest
- * copy (its own older copy first: "the older one", else an empty place, else the oldest other copy); with 7 places and 5
- * banks there are always two such places, so a bank's newest copy is never erased. The payload is written first, the header
+ * copy (its own older copy first: "the older one", else an empty place, else the oldest other copy); with 5 places and 4
+ * banks there is always one such place, so a bank's newest copy is never erased. The payload is written first, the header
  * last and read back: a write cut at any point leaves a place with no valid header (or a bad CRC), and the bank's newest
  * copy before it is the one loaded at power-on (per bank, the valid copy with the highest seq). The project likewise (A/B,
  * the older written). Every write only while stopped. */
 #define SM_FL_LO 0xB4000u                                 /* PULHRA's flash */
-#define SM_FL_HI 0xDC000u                                 /* (the user presets of Task 5 from here) */
+#define SM_FL_HI 0xE0000u                                 /* (the OTA staging from here, ota.c OTA_AREA) */
 #define SM_FL_SEC 0x1000u
 #define SM_FL_PROJ 0xB4000u                               /* the project: copy A, copy B a sector above */
 #define SM_FL_SLOT0 0xB6000u                              /* the bank places */
-#define SM_FL_SPAN 0x5000u                                /* 5 sectors a place */
-#define SM_FL_NSLOT 7u
+#define SM_FL_SPAN 0x8000u                                /* 8 sectors a place */
+#define SM_FL_NSLOT 5u
 #define SM_FL_DATA 64u                                    /* the payload's offset in a place (the header at +0) */
 #define SM_BANK_BYTES (SM_BPAT * (uint32_t)sizeof(sm_pattern_t))
 #define SM_BMAGIC 0x31425753u                             /* "SWB1" */
 #define SM_PMAGIC 0x31505753u                             /* "SWP1" */
 #define SM_STORE_VER 1u                                   /* version 1 of the project object (and of the banks) */
-#define SM_BANK_VER 2u                                    /* the banks': 2 = the speed per track (sm_sound_t.speed, the byte of the
-                                                             unused track swing), 183 locks and the KIT's lanes in the space of the
-                                                             last nine (sm_pattern_t.lane); a version 1 bank loads converted
-                                                             (sm_bank_v1) */
-_Static_assert(sizeof(sm_pattern_t) == 2544u, "a pattern's size is the banks' layout (version 2 the same bytes as 1)");
+#define SM_BANK_VER 3u                                    /* the banks': 3 = 64 steps (a lock's place trk << 6 | step), the speed per
+                                                             track, 183 locks and the KIT's lanes. Versions 1 and 2 (32 steps, other
+                                                             places) are not loaded */
+_Static_assert(sizeof(sm_pattern_t) == 3824u, "a pattern's size is the banks' layout (version 3)");
 #define SM_PROJ_VER 3u                                    /* the project object's: version 2 adds the global effects, 3 the MIDI routing */
 #define SM_AUTOSAVE_US 8000000u                           /* 8 s of quiet, stopped: the autosave */
 #define SM_STORE_CHECK_US 200000u                         /* how often the autosave looks (a hash of both halves) */
@@ -59,13 +59,13 @@ typedef struct {
 } sm_fhdr_t;
 _Static_assert(sizeof(sm_fhdr_t) == 32u, "PULHRA flash header");
 _Static_assert(SM_FL_DATA >= sizeof(sm_fhdr_t), "the header before the payload");
-_Static_assert(SM_FL_DATA + SM_BANK_BYTES <= SM_FL_SPAN, "a bank fits its place (5 sectors)");
+_Static_assert(SM_FL_DATA + SM_BANK_BYTES <= SM_FL_SPAN, "a bank fits its place (8 sectors)");
 _Static_assert(SM_FL_PROJ == SM_FL_LO && SM_FL_PROJ + 2u * SM_FL_SEC <= SM_FL_SLOT0, "the project's two sectors, then the banks");
-_Static_assert(SM_FL_SLOT0 + SM_FL_NSLOT * SM_FL_SPAN <= SM_FL_HI, "the bank places stay below 0xDC000");
-_Static_assert(SM_FL_NSLOT >= SM_NBANK + 2u, "a save always has a place holding no bank's newest copy");
+_Static_assert(SM_FL_SLOT0 + SM_FL_NSLOT * SM_FL_SPAN <= SM_FL_HI, "the bank places stay below SM_FL_HI");
+_Static_assert(SM_FL_NSLOT >= SM_NBANK + 1u, "a save always has a place holding no bank's newest copy");
 _Static_assert(SMP_USER_BASE + SMP_USER_LIVE * SMP_USER_SIZE <= SM_FL_LO, "the live user sample slots stay below PULHRA's flash");
-_Static_assert(SM_FL_LO >= 0xB4000u && SM_FL_HI <= 0xDC000u && (SM_FL_SLOT0 & 0xFFFu) == 0u && (SM_FL_SPAN & 0xFFFu) == 0u,
-               "PULHRA's flash: 0xB4000..0xDC000, whole sectors");
+_Static_assert(SM_FL_LO >= 0xB4000u && SM_FL_HI <= 0xE0000u && (SM_FL_SLOT0 & 0xFFFu) == 0u && (SM_FL_SPAN & 0xFFFu) == 0u,
+               "PULHRA's flash: 0xB4000..0xE0000 (the OTA staging), whole sectors");
 
 /* the project object: what is not a pattern's. Version 1 (stage 3) ended at chain (SM_PREC1_BYTES); version 2 adds the global
  * effects, song.g[SM_GFX[i]] (the delay, the reverb, the chorus: the deep FX pages). The bank format is untouched (the banks
@@ -360,31 +360,6 @@ static void sm_bank_clamp(uint32_t s0)
         }
 }
 
-/* a version 1 bank in RAM slots s0..: each pattern's speed onto its four tracks (the byte they had was the unused track swing),
- * its live locks squeezed into the first 183 places (the space of the last nine is the KIT's lanes now; a pattern of more than
- * 183 live locks keeps its first 183), the lanes their default */
-static void sm_lanes_default(sm_pattern_t *p);
-static void sm_bank_v1(uint32_t s0)
-{
-    uint32_t i, t, j, k, n;
-    for (i = 0; i < SM_BPAT; i++) {
-        sm_pattern_t *p = &smp.pat[s0 + i];
-        sm_lock_t old[192];
-        memcpy(old, p->lock, sizeof old);                 /* (192 x 4: the locks and the lanes' bytes, the same size) */
-        for (t = 0; t < SM_NTRK; t++)
-            p->kit.snd[t].speed = (int8_t)clamp(p->speed, -3, 3);
-        p->speed = 0;
-        n = p->nlock > 192u ? 192u : p->nlock;
-        for (j = k = 0; j < n; j++)
-            if (old[j].param != SM_LOCK_DEAD && k < SM_NLOCK)
-                p->lock[k++] = old[j];
-        for (j = k; j < SM_NLOCK; j++)
-            p->lock[j].param = SM_LOCK_DEAD;
-        p->nlock = (uint8_t)k;
-        sm_lanes_default(p);
-    }
-}
-
 /* RAM half h <- bank b (the newest valid copy in the flash, else 8 empty patterns with the default kit). The half is free:
  * no pattern of it plays or is asked for (the caller's check); hbank SM_BANK_NONE while it is written, so the audio stream
  * finds no link in it meanwhile */
@@ -400,8 +375,6 @@ static void sm_bank_fill(uint32_t h, uint32_t b)
         if (!ok)
             sm_msg_show(SM_MSG_FLASH);
         else {
-            if (sm_fs_ver[sl] < SM_BANK_VER)
-                sm_bank_v1(s0);
             sm_bank_clamp(s0);
         }
     }
@@ -429,7 +402,7 @@ static void sm_store_boot(void)
     memset(sm_fs_top, SM_BANK_NONE, sizeof sm_fs_top);
     memset(sm_fp_ok, 0, sizeof sm_fp_ok);
     for (i = 0; flash_ok && i < SM_FL_NSLOT; i++) {
-        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || (hd.version != SM_STORE_VER && hd.version != SM_BANK_VER) || hd.bank >= SM_NBANK ||
+        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || hd.version != SM_BANK_VER || hd.bank >= SM_NBANK ||
             hd.size != SM_BANK_BYTES || sm_flash_crc(sm_slot_addr(i) + SM_FL_DATA, hd.size) != hd.crc)
             continue;
         sm_fs_bank[i] = hd.bank;

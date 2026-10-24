@@ -72,7 +72,7 @@ static void sm_put_begin(uint32_t mask)
     SM_BARRIER();
     n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock;
     for (i = 0; i < n; i++)
-        if (p->lock[i].param != SM_LOCK_DEAD && ((mask >> (p->lock[i].ts >> 5)) & 1u)) {
+        if (p->lock[i].param != SM_LOCK_DEAD && ((mask >> SM_TS_T(p->lock[i].ts)) & 1u)) {
             p->lock[i].param = SM_LOCK_DEAD;              /* (one byte) */
             SM_LOCK_PREEMPT();
         }
@@ -112,9 +112,9 @@ static void sm_put_track(uint32_t t, const sm_pattern_t *src, uint32_t st, int32
         n = src->nlock > SM_NLOCK ? SM_NLOCK : src->nlock;
         for (i = 0; i < n; i++) {
             const sm_lock_t *l = &src->lock[i];
-            if (l->param >= P_COUNT || (uint32_t)(l->ts >> 5) != st)
+            if (l->param >= P_COUNT || SM_TS_T(l->ts) != st)
                 continue;
-            if (!sm_lock_set(t, sm_rot(l->ts & 31u, rot, len), l->param, l->val))
+            if (!sm_lock_set(t, sm_rot(SM_TS_S(l->ts), rot, len), l->param, l->val))
                 break;                                    /* (the pool full: LOCKS FULL, the rest not placed) */
         }
     }
@@ -168,9 +168,9 @@ static void sm_copy_trk(uint32_t t)
     sm_clip.kit.snd[0] = p->kit.snd[t];
     memcpy(sm_clip.step[0], p->step[t], sizeof sm_clip.step[0]);
     for (i = 0; i < n; i++)
-        if (p->lock[i].param != SM_LOCK_DEAD && (uint32_t)(p->lock[i].ts >> 5) == t) {
+        if (p->lock[i].param != SM_LOCK_DEAD && SM_TS_T(p->lock[i].ts) == t) {
             sm_clip.lock[k] = p->lock[i];
-            sm_clip.lock[k++].ts = (uint8_t)(p->lock[i].ts & 31u);
+            sm_clip.lock[k++].ts = SM_TS(0, SM_TS_S(p->lock[i].ts));
         }
     sm_clip.nlock = (uint16_t)k;
     memcpy(sm_clip.lane, p->lane, sizeof sm_clip.lane);  /* (a KIT's lanes go with T4's sound) */
@@ -302,7 +302,7 @@ static int sm_trig_copy(uint32_t t, uint32_t st)
     st %= SM_NSTEP;
     if (!p->step[t][st].n)
         return 0;
-    ts = (t << 5) | st;
+    ts = SM_TS(t, st);
     sm_tclip = p->step[t][st];
     sm_tclip_nl = 0;
     for (i = 0; i < n && sm_tclip_nl < P_COUNT; i++)

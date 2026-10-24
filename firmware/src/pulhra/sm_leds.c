@@ -127,7 +127,7 @@ static void sm_leds_hold(uint8_t *nl, uint8_t *ng, uint8_t *ni)
 static void sm_leds(void)
 {
     uint8_t nl[FM1_NCOL] = {0}, ng[FM1_NCOL] = {0}, nb[FM1_NCOL] = {0}, nm[FM1_NCOL] = {0}, ni[FM1_NCOL] = {0};
-    uint32_t mode = settings_leds, t = sm_ui.trk % SM_NTRK, k, c, w = 0, len, bank = sm_ui.bank ? 16u : 0u;
+    uint32_t mode = settings_leds, t = sm_ui.trk % SM_NTRK, k, c, w = 0, len, bank = sm_ui.bank * 16u;
     uint32_t play = *(volatile uint8_t *)&sm_playing != 0u, ph = *(volatile uint8_t *)&sm_pos[t];
     static uint8_t ready;
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];

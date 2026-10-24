@@ -87,7 +87,7 @@ typedef struct { uint8_t kind, trk, step, note, vel, pat; uint32_t at; } sm_rev_
 static sm_rev_t sm_rev[SM_NREV];
 static volatile uint8_t sm_rev_w, sm_rev_r;               /* w: this side's, r: the main loop's (free-running) */
 static uint32_t sm_rclk;                                  /* samples since power-on (this side's) */
-static uint32_t sm_rskip[SM_NTRK];
+static uint64_t sm_rskip[SM_NTRK];
 static uint32_t sm_ropen[SM_NTRK][4];
 static volatile uint8_t sm_rec_mtrk = 0xFFu;
 
@@ -168,7 +168,7 @@ static void sm_seq_locks(uint32_t t, uint32_t st)
 {
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint8_t now[SM_LKB];
-    uint32_t i, n = pt->nlock, ts = (t << 5) | st, b;
+    uint32_t i, n = pt->nlock, ts = SM_TS(t, st), b;
     memset(now, 0, sizeof now);
     if (n > SM_NLOCK)
         n = SM_NLOCK;
@@ -379,7 +379,7 @@ static void sm_ps_begin(uint32_t t, uint32_t st, int32_t at, uint32_t step_q8)
             const sm_lock_t *l = &pt->lock[i];
             uint32_t p = l->param, q;
             int32_t to;
-            if (p >= P_COUNT || l->ts != ((t << 5) | (pass ? j : st)))
+            if (p >= P_COUNT || l->ts != SM_TS(t, pass ? j : st))
                 continue;
             for (q = 0; q < m && sm_ps[t].p[q] != p; q++) {}
             if (q < m)
@@ -566,8 +566,8 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
         sm_loop[t] = (uint16_t)(sm_loop[t] == 0xFFFEu ? 840u + 0xFFFFu % 840u : sm_loop[t] + 1u);   /* (same A:B, not 1ST) */
     sm_late_q8[t] = SM_Q8_NONE;
     s = &pt->step[t][i];
-    skip = (sm_rskip[t] >> i) & 1u;                       /* (live record: the key played this step's note already) */
-    sm_rskip[t] &= ~(1u << i) & (len < 32u ? (1u << len) - 1u : 0xFFFFFFFFu);   /* (none left past a shortened length) */
+    skip = (uint32_t)(sm_rskip[t] >> i) & 1u;                       /* (live record: the key played this step's note already) */
+    sm_rskip[t] &= ~((uint64_t)1u << i) & (len < 64u ? ((uint64_t)1u << len) - 1u : ~(uint64_t)0);   /* (none left past a shortened length) */
     if (sm_done[t] == i) {                                /* fired early already */
         sm_done[t] = 0xFFu;
     } else {
@@ -590,7 +590,7 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
     j = sm_next[t];
     s = &pt->step[t][j];
     sm_early_q8[t] = SM_Q8_NONE;
-    if (!muted && s->n && !((sm_rskip[t] >> j) & 1u) && (off = (int32_t)swn + sm_nudge_of(s) * (int32_t)step_q8 / 16) < 0) {
+    if (!muted && s->n && !((uint32_t)(sm_rskip[t] >> j) & 1u) && (off = (int32_t)swn + sm_nudge_of(s) * (int32_t)step_q8 / 16) < 0) {
         sm_early_q8[t] = at + step_q8 + (uint32_t)off;    /* (a sum below 0: before the step's start; else its own start does it) */
         sm_early_st[t] = (uint8_t)j;
     }
@@ -757,7 +757,7 @@ static void sm_rec_on(uint32_t t, uint32_t note, uint32_t vel)
         if (sm_early_q8[t] != SM_Q8_NONE && sm_early_st[t] == st)
             sm_early_q8[t] = SM_Q8_NONE;
         if (sm_done[t] != st)                             /* (fired early already: its start plays nothing anyway) */
-            sm_rskip[t] |= 1u << st;
+            sm_rskip[t] |= (uint64_t)1u << st;
     }
     sm_ropen[t][note >> 5] |= 1u << (note & 31u);
     sm_rev_put(SM_REV_ON, t, st, note, vel);

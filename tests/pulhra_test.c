@@ -1039,8 +1039,9 @@ static int test_white_key_toggles_trig(void)
     host_notes = 1u << 3;                                 /* G#3: black */
     sm_input_poll();
     bad += check("INPUT: a black key: nothing", !smp.pat[smp.cur].step[0][3].n && !smp.pat[smp.cur].step[0][19].n);
-    oct_tap(B_OCTUP);                                     /* OCT+ on the last page: stays (no round) */
-    bad += check("INPUT: OCT+ on 17..32: the page stays (no round)", sm_ui.bank == 1u);
+    oct_tap(B_OCTUP);                                     /* OCT+ on the last page: round to the first */
+    bad += check("INPUT: OCT+ on the last page (17..32 of 32): round to 1..16", sm_ui.bank == 0u);
+    oct_tap(B_OCTUP);
     oct_tap(B_OCTDN);                                     /* OCT- tapped: the previous page */
     host_notes = 1u << WHITE[15];
     sm_input_poll();
@@ -1749,9 +1750,9 @@ static int test_seq_len(void)
     turn(EN_SELECT, 16);                                  /* SELECT is track length */
     sm_input_poll();
     bad += check("SEQ: SELECT +16: the track's length 32", ksnd(0)->len == 32u && ksnd(1)->len == 16u);
-    turn(EN_SELECT, 5);
+    turn(EN_SELECT, 40);
     sm_input_poll();
-    bad += check("SEQ: SELECT +5 more: stays 32", ksnd(0)->len == 32u);
+    bad += check("SEQ: SELECT +40 more: stays 64", ksnd(0)->len == 64u);
     turn(EN_SELECT, -100);
     sm_input_poll();
     bad += check("SEQ: SELECT -100: 1", ksnd(0)->len == 1u);
@@ -2018,9 +2019,9 @@ static int test_lock_find(void)
     draw_setup();
     pt = &smp.pat[smp.cur];
     pt->nlock = 3;
-    pt->lock[0].ts = (1u << 5) | 4u; pt->lock[0].param = 0xFFu; pt->lock[0].val = 5;           /* a removed one */
-    pt->lock[1].ts = (1u << 5) | 4u; pt->lock[1].param = P_FCUT; pt->lock[1].val = 60;
-    pt->lock[2].ts = (0u << 5) | 4u; pt->lock[2].param = P_FCUT; pt->lock[2].val = 70;
+    pt->lock[0].ts = SM_TS(1u, 4u); pt->lock[0].param = 0xFFu; pt->lock[0].val = 5;           /* a removed one */
+    pt->lock[1].ts = SM_TS(1u, 4u); pt->lock[1].param = P_FCUT; pt->lock[1].val = 60;
+    pt->lock[2].ts = SM_TS(0u, 4u); pt->lock[2].param = P_FCUT; pt->lock[2].val = 70;
     pt->lock[3].ts = 0; pt->lock[3].param = P_FRES; pt->lock[3].val = 1;                       /* past nlock */
     bad += check("LOCK: finds (track, step, param)", sm_lock_find(pt, 1, 4, P_FCUT) == 1 && sm_lock_find(pt, 0, 4, P_FCUT) == 2);
     bad += check("LOCK: another step, track or param: -1", sm_lock_find(pt, 1, 5, P_FCUT) < 0 && sm_lock_find(pt, 2, 4, P_FCUT) < 0 &&
@@ -2041,7 +2042,7 @@ static int test_ring_lock_fill(void)
     sm_ui.page = (uint8_t)pg;
     sm_ui.held_step = 4;
     pt->nlock = 1;
-    pt->lock[0].ts = (0u << 5) | 4u; pt->lock[0].param = P_FRES; pt->lock[0].val = 99;  /* K1 is RES */
+    pt->lock[0].ts = SM_TS(0u, 4u); pt->lock[0].param = P_FRES; pt->lock[0].val = 99;  /* K1 is RES */
     draw_full();
     for (k = 0; k < 4; k++) {
         uint16_t c = host_screen[122u * 240u + (uint32_t)(60 * k + 30)];   /* (12 px below the centre: the pointer never points down) */
@@ -2602,8 +2603,8 @@ static int test_layer_maps(void)
     layer_draw(SML_EDIT);
     bad += check("MAP: EDIT page 2: the 9 SOMA machines", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == 9u);
     layer_draw(SML_GLO);
-    bad += check("MAP: GLO: the bank's patterns A1..A8, the banks A..E, the M and S rows with T1..T4, the title",
-                 lint_frame("glo") == 0 && lint_has("A1", 0, 0) && lint_has("A8", 0, 0) && lint_has("E", 0, 0) &&
+    bad += check("MAP: GLO: the bank's patterns A1..A8, the banks A..D, the M and S rows with T1..T4, the title",
+                 lint_frame("glo") == 0 && lint_has("A1", 0, 0) && lint_has("A8", 0, 0) && lint_has("D", 0, 0) && !lint_has("E", 0, 0) &&
                  lint_has("M", 0, 0) && lint_has("S", 0, 0) && lint_has("T1", 0, 0) && lint_has("T4", 0, 0) &&
                  lint_has("BANK A MUTE SOLO", 0, 0));
     bad += check("MAP: ... nothing muted: no T cell inverted", SCR(62, 159) == BGC && SCR(62, 193) == BGC);
@@ -3024,7 +3025,7 @@ static int test_lock_stress(void)
                 ts = cpat()->lock[i].ts;
                 break;
             }
-        sm_lock_clear_step(ts >> 5, ts & 31u);
+        sm_lock_clear_step(SM_TS_T(ts), SM_TS_S(ts));
     }
     bad += check("LOCK/STRESS: stopped, a clear compacts: nlock == the live locks", cpat()->nlock == lk_count_live());
     return bad;
@@ -4852,7 +4853,8 @@ static int test_oct_pages(void)
     lk_tap(2);
     bad += check("OCT: ... a white key is then step 18 (17..32)", smp.pat[smp.cur].step[0][18].n == 1u && !smp.pat[smp.cur].step[0][2].n);
     oct_tap(B_OCTUP);
-    bad += check("OCT: OCT+ again: the last page stays (no round)", sm_ui.bank == 1u);
+    bad += check("OCT: OCT+ again: round to the first page", sm_ui.bank == 0u);
+    oct_tap(B_OCTUP);
     btn_down(B_OCTDN);                                    /* OCT- held as SHIFT (a knob turned): no page */
     sm_input_poll();
     turn(EN_K1, 1);
@@ -5578,7 +5580,7 @@ static int test_pat_seq_layer(void)
                  sm_ui.trk == 0u && smp.next == SM_PAT_NONE);
     turn(EN_ALGO, -3);
     sm_input_poll();
-    bad += check("PAT: ... -3: wraps to E08 (all 40 patterns)", sm_lay_pick == 39u);
+    bad += check("PAT: ... -3: wraps to D08 (all 32 patterns)", sm_lay_pick == 31u);
     turn(EN_ALGO, 3);
     sm_input_poll();
     key_dn(1);                                            /* F#3: the mode */
@@ -5867,7 +5869,7 @@ static uint32_t ed_live(const sm_pattern_t *p, uint32_t t)  /* the live locks of
 {
     uint32_t i, n = 0;
     for (i = 0; i < p->nlock && i < SM_NLOCK; i++)
-        n += p->lock[i].param != 0xFFu && (t >= SM_NTRK || (uint32_t)(p->lock[i].ts >> 5) == t);
+        n += p->lock[i].param != 0xFFu && (t >= SM_NTRK || SM_TS_T(p->lock[i].ts) == t);
     return n;
 }
 static uint32_t ed_trigs(const sm_pattern_t *p, uint32_t t)
@@ -6293,8 +6295,8 @@ static int test_len_visible(void)
     layer_draw(SML_SEQ);
     bad += check("LEN: SEQ held: LEN 32 in the title, large (scale 3: 21 px high), the map inside its rows",
                  lint_has("LEN 32", &y0, &y1) && y1 - y0 == 21 && lint_frame("seq len") == 0);
-    bad += check("LEN: ... the grid A01 .. A08 (the bank of the pick), the banks A .. E, the mode, the master length",
-                 lint_has("A01", 0, 0) && lint_has("A08", 0, 0) && !lint_has("A09", 0, 0) && lint_has("E", 0, 0) &&
+    bad += check("LEN: ... the grid A01 .. A08 (the bank of the pick), the banks A .. D, the mode, the master length",
+                 lint_has("A01", 0, 0) && lint_has("A08", 0, 0) && !lint_has("A09", 0, 0) && lint_has("D", 0, 0) && !lint_has("E", 0, 0) &&
                  smd_has_cells("*", "SEQ"));
     bad += check("LEN: ... A01 playing inverted, A04 (trigs) ink, A02 (empty) dim", SCR(12 + 2, 48 + 9) == INK &&
                  scr_count(192, 58, 36, 14, INK) > 20u && !scr_count(192, 58, 36, 14, DIMC) &&
@@ -7269,7 +7271,7 @@ static int test_bank_flash_fail(void)
     int bad = 0, mode;
     uint32_t e0, e1, i, lim;
     for (mode = 1; mode <= 2; mode++) {
-        lim = mode == 1 ? 3u : 12u;                       /* (one try of both halves and the project: 5 erases each when they work) */
+        lim = mode == 1 ? 3u : 2u * (SM_FL_SPAN / SM_FL_SEC) + 2u; /* (one try of both halves and the project: a place's sectors each when they work) */
         nor_wipe();
         in_reset();
         host_ticks = 1000u;
@@ -7372,17 +7374,17 @@ static int test_bank_kit_clamp(void)
     return bad;
 }
 
-/* the flash map: PULHRA's objects inside 0xB4000 .. 0xDC000, none overlapping (also pinned by _Static_assert) */
+/* the flash map: PULHRA's objects inside 0xB4000 .. 0xE0000 (the OTA staging), none overlapping (also pinned by _Static_assert) */
 static int test_bank_flash_map(void)
 {
     uint32_t i, ok = 1;
     for (i = 0; i < SM_FL_NSLOT; i++)
-        ok &= sm_slot_addr(i) >= SM_FL_PROJ + 2u * SM_FL_SEC && sm_slot_addr(i) + SM_FL_SPAN <= 0xDC000u &&
+        ok &= sm_slot_addr(i) >= SM_FL_PROJ + 2u * SM_FL_SEC && sm_slot_addr(i) + SM_FL_SPAN <= 0xE0000u &&
               (i == 0u || sm_slot_addr(i) == sm_slot_addr(i - 1u) + SM_FL_SPAN);
-    printf("pulhra: flash: project 0x%X 0x%X, banks 0x%X .. 0x%X (7 x 0x%X), a bank %u B; RAM: smp %u B\n", SM_FL_PROJ,
-           SM_FL_PROJ + SM_FL_SEC, SM_FL_SLOT0, SM_FL_SLOT0 + SM_FL_NSLOT * SM_FL_SPAN, SM_FL_SPAN, (unsigned)SM_BANK_BYTES,
+    printf("pulhra: flash: project 0x%X 0x%X, banks 0x%X .. 0x%X (%u x 0x%X), a bank %u B; RAM: smp %u B\n", SM_FL_PROJ,
+           SM_FL_PROJ + SM_FL_SEC, SM_FL_SLOT0, SM_FL_SLOT0 + SM_FL_NSLOT * SM_FL_SPAN, (unsigned)SM_FL_NSLOT, SM_FL_SPAN, (unsigned)SM_BANK_BYTES,
            (unsigned)sizeof smp);
-    return check("BANK: the flash map inside 0xB4000 .. 0xDC000, the places in a row, a bank fits its place", ok &&
+    return check("BANK: the flash map inside 0xB4000 .. 0xE0000, the places in a row, a bank fits its place", ok &&
                  SM_FL_DATA + SM_BANK_BYTES <= SM_FL_SPAN);
 }
 
@@ -8973,50 +8975,32 @@ static int test_step_chord_note(void)
     return bad;
 }
 
-/* a version 1 bank (before the speed per track and the KIT's lanes): loaded converted. Its pattern's speed onto the four tracks
- * (the byte they had was the unused track swing: zeroed), its 192 locks squeezed to the first 183 live ones, the lanes their
- * default; saved again: version 2 */
-static int test_bank_v1(void)
+/* 64 steps (version 3): a bank of an older version (32 steps, another layout) is not loaded: its patterns come up empty (Tim:
+ * "начать с чистых банков"); a trig on step 64 of a saved bank comes back */
+static int test_bank_old(void)
 {
     int bad = 0;
-    uint32_t i, sl, ok = 1;
+    uint32_t sl, found = 0;
     sm_fhdr_t hd;
-    sm_lock_t old[192];
     nor_wipe();
     in_reset();
     host_ticks = 1000u;
-    smp.pat[2].speed = 1;                                 /* (A03: version 1's pattern speed *2) */
-    for (i = 0; i < SM_NTRK; i++)
-        smp.pat[2].kit.snd[i].speed = 0;
-    for (i = 0; i < 192u; i++) {                          /* 192 locks, every 10th a removed one: 172 live */
-        old[i].ts = (uint8_t)(((i & 3u) << 5) | (i / 4u % 32u));
-        old[i].param = (uint8_t)(i % 10u == 9u ? 0xFFu : P_FCUT);
-        old[i].val = (int16_t)i;
-    }
-    memcpy(smp.pat[2].lock, old, sizeof old);             /* (the lanes' bytes too: version 1's last nine locks) */
-    smp.pat[2].nlock = 192;
-    bad += check("BANKV1: crafted, saved", sm_bank_save(0) == 0);
-    for (sl = 0; sl < SM_FL_NSLOT; sl++) {                /* (the header made version 1's) */
+    sm_step_toggle(1, 63);
+    bad += check("BANKOLD: a trig on step 64 of A01", smp.pat[0].step[1][63].n > 0);
+    bad += check("BANKOLD: saved", sm_bank_save(0) == 0);
+    bank_reboot();
+    bad += check("BANKOLD: ... back after a reboot (version 3)", smp.pat[0].step[1][63].n > 0);
+    for (sl = 0; sl < SM_FL_NSLOT; sl++) {                /* (the header made version 2's) */
         memcpy(&hd, nor + sm_slot_addr(sl), sizeof hd);
         if (hd.magic == SM_BMAGIC && hd.bank == 0u) {
-            hd.version = 1;
+            hd.version = 2;
             hd.hcrc = st_crc32(&hd, sizeof hd - 4u);
             memcpy(nor + sm_slot_addr(sl), &hd, sizeof hd);
+            found++;
         }
     }
     bank_reboot();
-    for (i = 0; i < SM_NTRK; i++)
-        ok &= smp.pat[2].kit.snd[i].speed == 1;
-    bad += check("BANKV1: loaded: the pattern's speed on its four tracks, the pattern's 0", ok && smp.pat[2].speed == 0);
-    ok = smp.pat[2].nlock == 173u;                        /* (192 - 19 removed: 173 live, all kept) */
-    for (i = 0; i < smp.pat[2].nlock; i++)
-        ok &= smp.pat[2].lock[i].param == P_FCUT;
-    bad += check("BANKV1: ... the locks squeezed: the 173 live ones, in order, none removed", ok);
-    {
-        int8_t want[9];
-        dr_lane_init(want, (uint32_t)ENG_DKIT.edit[0].def, 0);
-        bad += check("BANKV1: ... the KIT's lanes their default", !memcmp(smp.pat[2].lane[0], want, 9));
-    }
+    bad += check("BANKOLD: a version 2 bank is not loaded: A01 empty", found && smp.pat[0].step[1][63].n == 0);
     return bad;
 }
 
@@ -9753,10 +9737,10 @@ static int test_euclid(void)
     turn(EN_K3, 50);
     sm_input_poll();
     bad += check("EUCLID: HITS stop at STEPS, ROT at STEPS - 1", sm_eu_hits == 8u && sm_eu_rot == 7u);
-    turn(EN_K1, 40);
+    turn(EN_K1, 70);
     sm_input_poll();
-    bad += check("EUCLID: STEPS stop at 32", sm_eu_steps == 32u);
-    turn(EN_K1, -40);
+    bad += check("EUCLID: STEPS stop at 64", sm_eu_steps == 64u);
+    turn(EN_K1, -70);
     turn(EN_K2, -50);
     sm_input_poll();
     bad += check("EUCLID: STEPS 1, HITS follow to 0, ROT to 0", sm_eu_steps == 1u && sm_eu_hits == 0u && sm_eu_rot == 0u);
@@ -10944,7 +10928,7 @@ int main(void)
     bad += test_msg_age();
     bad += test_seq_track_copy();
     bad += test_step_chord_note();
-    bad += test_bank_v1();
+    bad += test_bank_old();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;

@@ -250,7 +250,7 @@ static void sm_pat_poll(void)
     if (p != smp.cur) {
         smp.cur = (uint8_t)(p % SM_NPAT);
         sm_edit_pat_changed();                            /* (UNDO's snapshot was of the pattern before) */
-        if (smp.pat[smp.cur].kit.snd[sm_ui.trk % SM_NTRK].len <= 16u)
+        if (sm_ui.bank >= sm_npages())
             sm_ui.bank = 0;
         sm_dirty = 1;
     }
@@ -349,7 +349,7 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
             continue;
         if (sm_shift) {                                   /* SHIFT + a trig key (Tim): a lock trig there (no note, the locks only), or
                                                              back: an empty step a new one, a trig made one, a lock trig made a trig */
-            sm_step_rest(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);
+            sm_step_rest(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);   /* (the page in view) */
             sm_dirty = 1;
             continue;
         }
@@ -418,12 +418,11 @@ static void sm_oct_single(uint32_t up)
     } else if (up && sm_page_home() == SMH_EUCLID) {
         sm_eu_gen();                                      /* (the EUCLID page: OCT+ generates) */
     } else if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len > 16u) {
+        uint32_t np = sm_npages();                        /* OCT- the previous page of steps, OCT+ the next (round: 1..16, 17..32, ..) */
         if (!up && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u))
             return;                                       /* (OCT- still down past the pair's window: SHIFT, not a tap) */
-        if (sm_ui.bank != (up ? 1u : 0u)) {               /* OCT- the previous page of steps (1..16), OCT+ the next (17..32) */
-            sm_ui.bank = (uint8_t)(up ? 1u : 0u);
-            sm_dirty = 1;
-        }
+        sm_ui.bank = (uint8_t)((sm_ui.bank + (up ? 1u : np - 1u)) % np);
+        sm_dirty = 1;
     }
 }
 
