@@ -2093,12 +2093,23 @@ static const zone_t LZONES[] = {
     {0, 48, 240, 82, "row0"}, {0, 82, 240, 116, "row1"}, {0, 116, 240, 150, "row2"}, {0, 150, 240, 184, "row3"}, {0, 184, 240, 218, "row4"},
     {208, 220, 240, 240, "len"}, {0, 220, 208, 240, "strip"},
 };
+/* HOME > MIXER: the knobs as everywhere, then the four tracks' panel (smd_strip4) under them: a row of 19 px a track */
+static const zone_t MZONES[] = {
+    {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "page"},
+    {0, 48, 60, 160, "knob0"}, {60, 48, 120, 160, "knob1"}, {120, 48, 180, 160, "knob2"}, {180, 48, 240, 160, "knob3"},
+    {0, 160, 240, 179, "mix0"}, {0, 179, 240, 198, "mix1"}, {0, 198, 240, 217, "mix2"}, {0, 217, 240, 240, "mix3"},
+};
 static const zone_t *lint_zones = ZONES;
 static uint32_t lint_nz = sizeof ZONES / sizeof ZONES[0];
 static uint32_t lint_shown;
 static int lint_frame(const char *what)
 {
-    uint32_t i, j, bad = 0;
+    uint32_t i, j, bad = 0, nz = lint_nz;
+    const zone_t *zs = lint_zones;
+    if (zs == ZONES && sm_page_home() == SMH_MIXER) {      /* (MIXER: the panel where SELECT and the strip are elsewhere) */
+        zs = MZONES;
+        nz = sizeof MZONES / sizeof MZONES[0];
+    }
     if (lint_n < 4u) {                                       /* a header, a page line, a label and a value at least */
         printf("  lint %s: only %u texts drawn\n", what, lint_n);
         return 1;
@@ -2108,9 +2119,9 @@ static int lint_frame(const char *what)
         const zone_t *z = 0;
         if (b->x1 <= b->x0)
             continue;
-        for (j = 0; j < lint_nz; j++)
-            if (b->x0 >= lint_zones[j].x0 && b->x0 < lint_zones[j].x1 && b->y0 >= lint_zones[j].y0 && b->y0 < lint_zones[j].y1)
-                z = &lint_zones[j];
+        for (j = 0; j < nz; j++)
+            if (b->x0 >= zs[j].x0 && b->x0 < zs[j].x1 && b->y0 >= zs[j].y0 && b->y0 < zs[j].y1)
+                z = &zs[j];
         if (!z || (b->flags & 3u) || b->x0 < z->x0 || b->x1 > z->x1 || b->y1 > z->y1) {
             if (lint_shown++ < 15u) printf("  lint %s: '%s' box %d,%d..%d,%d flags %u zone %s\n", what, b->s, b->x0, b->y0, b->x1, b->y1, b->flags,
                    z ? z->name : "none");
@@ -2586,7 +2597,7 @@ static int test_layer_maps(void)
                  lint_has("A01", 0, 0) && smd_has_cells("*", "SEQ") && lint_has("SEQ T1", 0, 0) && !lint_has("CLEARED", 0, 0));
     sm_msg_show(SM_MSG_CLEARED);
     layer_draw(SML_SEQ);
-    bad += check("MAP: SEQ: CLEAN (inverted) in the header after a clear", lint_has("CLEAN", 0, 0) && !lint_has("CLEARED", 0, 0));
+    bad += check("MAP: SEQ: CLEAR (inverted) in the header after a clear", lint_has("CLEAR", 0, 0) && !lint_has("CLEARED", 0, 0));
     host_ticks += SM_MSG_BLINK_US * FM1_TICKS_PER_US;
     bad += check("MAP: ... it blinks: 125 ms on, the header's signature changes", smd_blink() == 1u);
     host_ticks += SM_MSG_US * FM1_TICKS_PER_US;
@@ -4431,7 +4442,7 @@ static int test_home_draw(void)
     nb += lint_frame("MIXER");
     bad += check("HOMEDRAW: MIXER: the page line and the four rings' labels T1 T2 T3 T4",
                  lint_has("MIXER", 0, 0) && lint_has("T1", 0, 0) && lint_has("T2", 0, 0) && lint_has("T3", 0, 0) && lint_has("T4", 0, 0));
-    bad += check("HOMEDRAW: ... SELECT is LEVEL with the track volume", lint_has("LEVEL", 0, 0));
+    bad += check("HOMEDRAW: ... no SELECT on MIXER (the four tracks' panel there)", !lint_has("LEVEL", 0, 0));
     ksnd(2)->p[P_LEVEL] = 40;
     {
         uint32_t a = smd_knob_sig(2);
@@ -6553,16 +6564,18 @@ static int test_mixer_four(void)
                  scr_count(120, 48 + 20, 60, 70, DIMC) > 0u);
     bad += check("MIXER4: the selected track's label (T2) inverted, the others not",
                  SCR(60 + 17, 48 + 3) == INK && SCR(17, 48 + 3) == BGC && SCR(120 + 17, 48 + 3) == BGC);
-    for (t = 0; t < SM_NTRK; t++) {
-        uint32_t x = t * SMD_STEP_W + SMD_STEP_W / 2u, y = 220u + t * 5u;
+    for (t = 0; t < SM_NTRK; t++) {                       /* (the panel from y 160: a row of 19 px, cells of 14 px from x 16) */
+        uint32_t x = 16u + t * 14u, y = 160u + 4u + t * 19u;
         r = t == 2u ? DIMC : SINK;
-        bad += check("MIXER4: the strip: a row per track, its trig a 3 x 3 dot (T3 muted: dim)", box_is(x - 1u, y, 3, 3, (uint16_t)r));
+        bad += check("MIXER4: the panel: a row per track, its trig a bullet (T3 muted: dim)",
+                     t == 2u ? scr_count(x, y, 13, 14, DIMC) > 6u && scr_count(x, y, 13, 14, SINK) == 0u : scr_count(x, y, 13, 14, SINK) > 6u);
+        bad += check("MIXER4: ... each row's label T1 .. T4 at the left", lint_has(t == 0u ? "T1" : t == 1u ? "T2" : t == 2u ? "T3" : "T4", 0, 0));
     }
-    bad += check("MIXER4: ... T1's trig on step 13 drawn, T4's (length 8) not",
-                 box_is(12u * SMD_STEP_W + 5u, 220u, 3, 3, SINK) && scr_sink(8u * SMD_STEP_W, 220u + 15u, 8u * SMD_STEP_W, 5) == 0u);
-    bad += check("MIXER4: ... each row's playing step: a bar under it",
-                 SCR(4u * SMD_STEP_W + 6u, 220u + 3u) == SINK && SCR(5u * SMD_STEP_W + 6u, 220u + 8u) == SINK &&
-                 SCR(7u * SMD_STEP_W + 6u, 220u + 18u) == SINK);
+    bad += check("MIXER4: ... T1's trig on step 13 drawn, T4 nothing past its length 8",
+                 scr_sink(16u + 12u * 14u, 164u, 13, 14) > 6u && scr_sink(16u + 8u * 14u, 164u + 3u * 19u, 8u * 14u, 14) == 0u);
+    bad += check("MIXER4: ... each row's playing step inverted (a block of ink)",
+                 scr_sink(16u + 4u * 14u, 163u, 13, 16) > 120u && scr_sink(16u + 5u * 14u, 163u + 19u, 13, 16) > 120u &&
+                 scr_sink(16u + 7u * 14u, 163u + 57u, 13, 16) > 120u);
     bad += check("MIXER4: the frame's texts inside their cells", lint_frame("MIXER4") == 0);
     {
         uint32_t a = smd_strip_sig();
@@ -6572,6 +6585,10 @@ static int test_mixer_four(void)
         smp.mute = 1u;
         bad += check("MIXER4: a mute changes the ring's signature", smd_knob_sig(0) != a);
     }
+    sm_ui.page = (uint8_t)page_by_name("CLOCK");
+    draw_full();
+    bad += check("MIXER4: leaving MIXER clears its panel (nothing of it left between SELECT and the strip)",
+                 scr_count(0, 160, 240, 8, SGND) == 0u && scr_count(0, 190, 240, 28, SGND) == 0u);
     smp.mute = 0;
     sm_playing = 0;
     ksnd(3)->len = 16;
