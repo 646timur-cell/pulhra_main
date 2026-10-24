@@ -934,11 +934,11 @@ static uint32_t smd_strip4_sig(void)
     return smd_mix(smd_mix(h, sm_mute_eff()), sm_ui.trk);
 }
 /* HOME > MIXER: the four tracks in ASCII (as the selected track's strip, smd_strip1), a panel from under the rings to the bottom
- * (y 160 .. 239, where SELECT and the strip are on the other pages): a row of 19 px a track, T1 .. T4 at the left (the selected
+ * (y 166 .. 239, a gap under the rings' values; SELECT and the strip there on the other pages): a row of 18 px a track, T1 .. T4 at the left (the selected
  * one inverted), 16 cells of 14 px from x 16 (the bank in view, OCT), a track not heard (muted, another soloed) dim, nothing past
  * a track's length, the step playing inverted. Leaving MIXER clears the panel (sm_draw: smd_mix_drawn) */
-#define SMD_MIX_Y 160u
-#define SMD_MIX_H 80u
+#define SMD_MIX_Y 166u
+#define SMD_MIX_H 74u
 static uint8_t smd_mix_drawn;
 static void smd_strip4(void)
 {
@@ -948,7 +948,7 @@ static void smd_strip4(void)
     smd_begin(0, SMD_MIX_Y, 240u, SMD_MIX_H, SM_WHITE_DIM);
     for (t = 0; t < SM_NTRK; t++) {
         uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP);
-        int32_t y = 4 + (int32_t)t * 19;
+        int32_t y = 3 + (int32_t)t * 18;
         uint16_t ink = (uint16_t)(((mute >> t) & 1u) ? SM_DIM_INK : T_BG);
         l[1] = (char)('1' + t);
         sm_px_text(2, y + 4, 1u, l, ink, t == sm_ui.trk % SM_NTRK);

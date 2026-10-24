@@ -2097,7 +2097,7 @@ static const zone_t LZONES[] = {
 static const zone_t MZONES[] = {
     {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "page"},
     {0, 48, 60, 160, "knob0"}, {60, 48, 120, 160, "knob1"}, {120, 48, 180, 160, "knob2"}, {180, 48, 240, 160, "knob3"},
-    {0, 160, 240, 179, "mix0"}, {0, 179, 240, 198, "mix1"}, {0, 198, 240, 217, "mix2"}, {0, 217, 240, 240, "mix3"},
+    {0, 166, 240, 184, "mix0"}, {0, 184, 240, 202, "mix1"}, {0, 202, 240, 220, "mix2"}, {0, 220, 240, 240, "mix3"},
 };
 static const zone_t *lint_zones = ZONES;
 static uint32_t lint_nz = sizeof ZONES / sizeof ZONES[0];
@@ -6564,18 +6564,18 @@ static int test_mixer_four(void)
                  scr_count(120, 48 + 20, 60, 70, DIMC) > 0u);
     bad += check("MIXER4: the selected track's label (T2) inverted, the others not",
                  SCR(60 + 17, 48 + 3) == INK && SCR(17, 48 + 3) == BGC && SCR(120 + 17, 48 + 3) == BGC);
-    for (t = 0; t < SM_NTRK; t++) {                       /* (the panel from y 160: a row of 19 px, cells of 14 px from x 16) */
-        uint32_t x = 16u + t * 14u, y = 160u + 4u + t * 19u;
+    for (t = 0; t < SM_NTRK; t++) {                       /* (the panel from y 160: a row of 19 px, cells of 14 px from x 16; from y 166) */
+        uint32_t x = 16u + t * 14u, y = 169u + t * 18u;
         r = t == 2u ? DIMC : SINK;
         bad += check("MIXER4: the panel: a row per track, its trig a bullet (T3 muted: dim)",
                      t == 2u ? scr_count(x, y, 13, 14, DIMC) > 6u && scr_count(x, y, 13, 14, SINK) == 0u : scr_count(x, y, 13, 14, SINK) > 6u);
         bad += check("MIXER4: ... each row's label T1 .. T4 at the left", lint_has(t == 0u ? "T1" : t == 1u ? "T2" : t == 2u ? "T3" : "T4", 0, 0));
     }
     bad += check("MIXER4: ... T1's trig on step 13 drawn, T4 nothing past its length 8",
-                 scr_sink(16u + 12u * 14u, 164u, 13, 14) > 6u && scr_sink(16u + 8u * 14u, 164u + 3u * 19u, 8u * 14u, 14) == 0u);
+                 scr_sink(16u + 12u * 14u, 169u, 13, 14) > 6u && scr_sink(16u + 8u * 14u, 169u + 3u * 18u, 8u * 14u, 14) == 0u);
     bad += check("MIXER4: ... each row's playing step inverted (a block of ink)",
-                 scr_sink(16u + 4u * 14u, 163u, 13, 16) > 120u && scr_sink(16u + 5u * 14u, 163u + 19u, 13, 16) > 120u &&
-                 scr_sink(16u + 7u * 14u, 163u + 57u, 13, 16) > 120u);
+                 scr_sink(16u + 4u * 14u, 168u, 13, 16) > 120u && scr_sink(16u + 5u * 14u, 168u + 18u, 13, 16) > 120u &&
+                 scr_sink(16u + 7u * 14u, 168u + 54u, 13, 16) > 120u);
     bad += check("MIXER4: the frame's texts inside their cells", lint_frame("MIXER4") == 0);
     {
         uint32_t a = smd_strip_sig();
@@ -6585,6 +6585,7 @@ static int test_mixer_four(void)
         smp.mute = 1u;
         bad += check("MIXER4: a mute changes the ring's signature", smd_knob_sig(0) != a);
     }
+    bad += check("MIXER4: a gap of black between the rings' values and the panel", scr_count(0, 160, 240, 6, SGND) == 0u);
     sm_ui.page = (uint8_t)page_by_name("CLOCK");
     draw_full();
     bad += check("MIXER4: leaving MIXER clears its panel (nothing of it left between SELECT and the strip)",
