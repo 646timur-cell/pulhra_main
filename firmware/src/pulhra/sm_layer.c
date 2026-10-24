@@ -8,7 +8,7 @@
  *   hold       the button down for HOLD_MS, or a key pressed / a knob turned while it is down (even at 50 ms): the layer is
  *              open until the button is let go; the page under it stays as it was
  *   EDIT       white keys from F3: the machines of the page (MONO 13, SOMA 9, SLICE 5: engines.c MF_PAGE, in the order of
- *              eng_vis), OCT+ the next page, G5 INIT (the machine's preset 0). Loads as the PRESETS knob does
+ *              eng_vis), OCT+ the next page, OCT- the previous (no INIT key). Loads as the PRESETS knob does
  *   GLO        black keys 1..4 (F#3 G#3 A#3 C#4) toggle the mute of T1..T4 (smp.mute); the white keys F3 .. B3 solo T1..T4
  *              while they are held (sm_solo); the banks and patterns (sm_bank.c sm_glo_poll): the black G#4 A#4 C#5 D#5 F#5 put
  *              bank A..E in view, the white C4 D4 E4 F4 G4 A4 B4 C5 are its patterns 1..8: a tap on a used one asks for it (as
@@ -53,7 +53,6 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
     {B_EDIT, SML_EDIT, SMFAM_EDIT}, {B_GLO, SML_GLO, SMFAM_GLO}, {B_SEQ, SML_SEQ, SMFAM_SEQ}, {B_HOME, SML_NONE, SMFAM_HOME},
     {B_FX, SML_FX, SMFAM_FX}, {B_ARP, SML_NONE, SMFAM_ARP}, {B_LFO, SML_NONE, SMFAM_LFO}, {B_SCL, SML_NONE, SMFAM_SCL},
 };
-#define SM_LAY_INIT_KEY 15u                               /* the white key of INIT: G5 */
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
 #define SM_LAY_CHOFF_KEY 3u                               /* SEQ: G#3 (key 3), the chain off */
 #define SM_LAY_SHL_KEY 5u                                 /* SEQ: A#3 (key 5), every track's trigs a step back */
@@ -408,9 +407,7 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             continue;
         w = sm_white_of(key);
         if (sm_layer == SML_EDIT) {
-            if (w == (int32_t)SM_LAY_INIT_KEY)
-                sm_sound_load(sm_ui_sound()->machine, 0);
-            else if (w >= 0 && (uint32_t)w < sm_epage_n(sm_lay_epage))
+            if (w >= 0 && (uint32_t)w < sm_epage_n(sm_lay_epage))
                 sm_sound_load(sm_epage_first(sm_lay_epage) + (uint32_t)w, 0);
         } else if (sm_layer == SML_GLO) {
             uint32_t b, n = 0;                            /* the black key's place among the black keys, 0 .. 3: T1 .. T4 (the

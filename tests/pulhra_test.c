@@ -1412,19 +1412,14 @@ static int test_edit_layer_loads_machine(void)
             ok &= ksnd(0)->machine == 22u + 4u;           /* (a white key with no machine: nothing happens) */
     }
     bad += check("EDIT: SLICE: its 5 machines on the first 5 white keys, the rest of the keys nothing", ok);
-    /* INIT: G5 is the machine's preset 0 (length kept) */
+    /* no INIT: G5 (past the page's machines) loads nothing */
     layer_let_go(B_EDIT);
-    turn(EN_PRESET, 2);
-    sm_input_poll();
-    ksnd(0)->p[P_FCUT] = 5;
-    ksnd(0)->len = 24u;
+    ref = *ksnd(0);
     layer_hold(B_EDIT);
     key_dn(WHITE[15]);
     sm_input_poll();
     key_up(WHITE[15]);
-    sm_sound_from_preset(&ref, ksnd(0)->machine, 0);
-    ref.len = 24u;
-    bad += check("EDIT: G5 INIT: the machine's preset 0, the track length kept", !memcmp(&ref, ksnd(0), sizeof ref));
+    bad += check("EDIT: G5: no INIT any more (nothing loaded)", !memcmp(&ref, ksnd(0), sizeof ref));
     layer_let_go(B_EDIT);
     ksnd(0)->len = 16u;
     /* the layer opens on the page of the track's own machine */
@@ -2564,16 +2559,16 @@ static int test_layer_maps(void)
     layer_draw(SML_EDIT);
     sm_lay_epage = 0;
     layer_draw(SML_EDIT);
-    bad += check("MAP: EDIT: the machines of the page, INIT, the page key, the title (all inside their rows, none cut)",
-                 lint_frame("edit") == 0 && lint_has("SAW", 0, 0) && lint_has("INIT", 0, 0) && lint_has("OCT+ NEXT PAGE", 0, 0) &&
+    bad += check("MAP: EDIT: the machines of the page, the page keys, the title (all inside their rows, none cut), no INIT",
+                 lint_frame("edit") == 0 && lint_has("SAW", 0, 0) && !lint_has("INIT", 0, 0) && lint_has("OCT- OCT+ PAGE", 0, 0) &&
                  lint_has("MACHINE MONO", 0, 0) && lint_machines() == 13u);
-    ok = lint_has("INIT", &y0, &y1);
+    ok = lint_has("SAW", &y0, &y1);
     bad += check("MAP: the labels of the keys are scale 2 (14 px high)", ok && y1 - y0 == 14);
     bad += check("MAP: the track's machine (SAW) is inverted, its neighbour is not", SCR(10, 56) == INK && SCR(64, 56) == BGC);
     sm_lay_epage = 2;
     layer_draw(SML_EDIT);
-    bad += check("MAP: EDIT page 3: the 5 SLICE machines (GLIT first) and INIT", lint_frame("slice") == 0 &&
-                 lint_has("MACHINE SLICE", 0, 0) && lint_machines() == 5u && lint_has("GLIT", 0, 0) && lint_has("INIT", 0, 0));
+    bad += check("MAP: EDIT page 3: the 5 SLICE machines (GLIT first), no INIT", lint_frame("slice") == 0 &&
+                 lint_has("MACHINE SLICE", 0, 0) && lint_machines() == 5u && lint_has("GLIT", 0, 0) && !lint_has("INIT", 0, 0));
     sm_lay_epage = 1;
     layer_draw(SML_EDIT);
     bad += check("MAP: EDIT page 2: the 9 SOMA machines", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == 9u);
@@ -2715,7 +2710,7 @@ static int test_leds_layer(void)
     sm_layer = SML_EDIT;
     sm_lay_epage = 0;
     sm_leds();
-    keys &= wl(0) == 1 && wd(1) == 1 && wl(1) == 0 && wd(12) == 1 && wd(13) == 0 && wd(15) == 1 && wm(0) == 0;   /* SAW lit, 13 machines, INIT */
+    keys &= wl(0) == 1 && wd(1) == 1 && wl(1) == 0 && wd(12) == 1 && wd(13) == 0 && wd(15) == 0 && wm(0) == 0;   /* SAW lit, 13 machines, no INIT */
     smp.pat[smp.cur].step[0][5].n = 1;                    /* (the steps are not shown in a layer) */
     sm_leds();
     keys &= wany(5) == 1 && wl(5) == 0;

@@ -719,14 +719,12 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
         const sm_sound_t *s = smd_snd();
         uint32_t pg = sm_lay_epage % SM_NEPAGE, cnt = sm_epage_n(pg);
         if (r == 4u) {
-            smd_cat(o->w, &n, "OCT+ NEXT PAGE");
+            smd_cat(o->w, &n, "OCT- OCT+ PAGE");
             return;
         }
         for (c = 0; c < 4u; c++) {
             i = r * 4u + c;
-            if (i == SM_LAY_INIT_KEY)
-                smd_cell(o, c, "INIT", 0);
-            else if (i < cnt)
+            if (i < cnt)
                 smd_cell(o, c, ENGINES[sm_engine_of(sm_epage_first(pg) + i)]->name, sm_epage_first(pg) + i == s->machine);
         }
         o->cells = 4;

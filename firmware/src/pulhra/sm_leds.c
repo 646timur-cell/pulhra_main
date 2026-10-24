@@ -91,9 +91,7 @@ static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
         }
         sm_led_put(ni, 14u + k, 1);
         if (sm_layer == SML_EDIT) {
-            if (w == SM_LAY_INIT_KEY)
-                sm_led_put(ng, 14u + k, 1);
-            else if (w < sm_epage_n(sm_lay_epage))
+            if (w < sm_epage_n(sm_lay_epage))
                 sm_led_put(sm_epage_first(sm_lay_epage) + w == cur ? nl : ng, 14u + k, 1);
         } else if (sm_layer == SML_GLO && w < SM_NTRK) {
             sm_led_put((sm_solo >> w) & 1u ? nl : ng, 14u + k, 1);
