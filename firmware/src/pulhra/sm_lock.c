@@ -83,7 +83,11 @@ static uint32_t sm_msg_blinks(uint32_t m)
 }
 static void sm_msg_poll(uint32_t now)
 {
-    if (sm_msg && (uint32_t)(now - sm_msg_t0) >= SM_MSG_US * FM1_TICKS_PER_US) {
+    /* (signed: a message shown later in this poll than `now` was read, as every one the poll's own handlers show, is
+     * younger than now - that must not wrap round to "four billion ticks old" and end it at once: on the FM-1 the ticks run
+     * on within a poll, CLEAR and SAVED were never seen. SAVED / SAVE AT STOP / FLASH ERROR: two seconds) */
+    uint32_t dur = (sm_msg == SM_MSG_SAVED || sm_msg == SM_MSG_SAVEPEND || sm_msg == SM_MSG_FLASH) ? 2u * SM_MSG_US : SM_MSG_US;
+    if (sm_msg && (int32_t)(now - sm_msg_t0) >= (int32_t)(dur * FM1_TICKS_PER_US)) {
         sm_msg = SM_MSG_NONE;
         sm_dirty = 1;
     } else if (sm_msg_blinks(sm_msg)) {

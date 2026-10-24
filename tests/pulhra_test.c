@@ -8869,6 +8869,24 @@ static int test_setup_nostrip(void)
     return bad;
 }
 
+/* a message shown later in a poll than the poll's own `now` (the FM-1's ticks run on within a poll: the SEQ layer's CLEAR,
+ * a save's SAVED) stays its second, not ended at once by a wrap of now - t0; SAVED two seconds */
+static int test_msg_age(void)
+{
+    int bad = 0;
+    uint32_t now = fm1_ticks();
+    host_ticks += 1000u;                                  /* (the message after now) */
+    sm_msg_show(SM_MSG_CLEARED);
+    sm_msg_poll(now);
+    bad += check("MSG: shown after the poll's now: still shown", sm_msg == SM_MSG_CLEARED);
+    sm_msg_show(SM_MSG_SAVED);
+    sm_msg_poll(fm1_ticks() + 1500000u * FM1_TICKS_PER_US);
+    bad += check("MSG: SAVED still at 1.5 s", sm_msg == SM_MSG_SAVED);
+    sm_msg_poll(fm1_ticks() + 2100000u * FM1_TICKS_PER_US);
+    bad += check("MSG: ... gone at 2.1 s", sm_msg == SM_MSG_NONE);
+    return bad;
+}
+
 static int test_fx_dist_types(void)
 {
     double br[4], rm[4], base_br, base_rm, b2, r2, nul;
@@ -10681,6 +10699,7 @@ int main(void)
     bad += test_drum_kit();
     bad += test_shift_fill();
     bad += test_setup_nostrip();
+    bad += test_msg_age();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }
