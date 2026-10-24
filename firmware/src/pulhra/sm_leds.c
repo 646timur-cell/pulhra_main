@@ -165,6 +165,11 @@ static void sm_leds(void)
     } else {                                                   /* OCT+ the second page of steps in view, OCT- SHIFT held */
         sm_led_put(nl, panel.btn[B_OCTUP], len > 16u && bank);
         sm_led_put(nl, panel.btn[B_OCTDN], sm_shift != 0u);
+        if (t == SM_KIT_TRK && sm_trk_kit(t, pt)) {           /* the KIT: its lane keys, the lane in edit lit, the others a glow */
+            uint32_t L;
+            for (L = 0; L < SM_NLANE; L++)
+                sm_led_put(L == sm_kit_lane % SM_NLANE ? nl : ng, 14u + SM_LANE_KEY[L], 1);
+        }
     }
     for (k = 0; k < NB; k++) {
         sm_led_put(ng, panel.btn[k], 1);

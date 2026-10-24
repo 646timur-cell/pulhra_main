@@ -8712,16 +8712,28 @@ static int test_drum_kit(void)
     sm_ui.trk = 2;
     turn(EN_ALGO, 1);
     sm_input_poll();
-    bad += check("KIT: ALGORITHM from T3: T4 L1", sm_ui.trk == 3u && sm_kit_lane == 0u);
-    turn(EN_ALGO, 2);
+    bad += check("KIT: ALGORITHM: the tracks as ever (T3 +1: T4, +1: T1)", sm_ui.trk == 3u);
+    key_dn(5);                                            /* A#3: L3 */
     sm_input_poll();
-    bad += check("KIT: ... two more: T4 L3", sm_ui.trk == 3u && sm_kit_lane == 2u);
-    turn(EN_ALGO, 2);
+    key_up(5);
     sm_input_poll();
-    bad += check("KIT: ... two more: past L4, T1", sm_ui.trk == 0u && sm_kit_lane == 0u);
-    turn(EN_ALGO, -1);
+    bad += check("KIT: the black A#3: lane L3", sm_kit_lane == 2u && !pt->step[3][0].n);
+    sm_leds();
+    bad += check("KIT: ... its LED lit, F#3 G#3 C#4 a glow", led_of(fm1_led, 14u + 5u) == 1u && led_of(fm1_led, 14u + 1u) == 0u && led_of(fm1_led_dim, 14u + 1u) == 1u);
+    key_dn(8);                                            /* C#4: L4 */
     sm_input_poll();
-    bad += check("KIT: ... back one: T4 L4", sm_ui.trk == 3u && sm_kit_lane == 3u);
+    key_up(8);
+    sm_input_poll();
+    bad += check("KIT: ... C#4: L4", sm_kit_lane == 3u);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    bad += check("KIT: ... ALGORITHM +1 from T4: T1, the black keys no lanes there", sm_ui.trk == 0u);
+    key_dn(1);
+    sm_input_poll();
+    key_up(1);
+    sm_input_poll();
+    bad += check("KIT: ... (F#3 on T1: the lane stays L4)", sm_kit_lane == 3u);
+    sm_ui.trk = 3;
     sm_kit_lane = 0;
     sm_step_toggle(3, 0);
     sm_kit_lane = 2;

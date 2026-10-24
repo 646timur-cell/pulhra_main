@@ -929,6 +929,22 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
     }
 }
 
+/* the KIT on T4, selected: the black F#3 G#3 A#3 C#4 pick its lane in edit, L1 .. L4 (Tim; ALGORITHM stays the track's).
+ * Not in a layer, the keyboard mode, a hold (HOME / ARP) or with SHIFT (its black-key combos) */
+static const uint8_t SM_LANE_KEY[SM_NLANE] = {1, 3, 5, 8};
+static void sm_lane_keys(uint32_t notes)
+{
+    uint32_t L;
+    if (sm_layer || sm_ui.kbd || sm_hold_btn() != 0xFFu || sm_ui.trk % SM_NTRK != SM_KIT_TRK ||
+        !sm_trk_kit(SM_KIT_TRK, &smp.pat[smp.cur % SM_NPAT]))
+        return;
+    for (L = 0; L < SM_NLANE; L++)
+        if ((notes >> SM_LANE_KEY[L]) & 1u) {
+            sm_kit_lane = (uint8_t)L;
+            sm_ui.held_step = sm_ui.sel_step = 0xFFu;
+            sm_dirty = 1;
+        }
+}
 /* FILL (Tim: SHIFT + G5, REC / ARM off): while both are held, COND FILL / !FILL play their FILL side; FILL in the header the while. (GLO
  * held + G5 too: sm_layer.c) */
 static void sm_fill_poll(void)
@@ -1069,12 +1085,9 @@ static void sm_input_poll(void)
     } else if ((pressed >> panel.btn[B_PLAY]) & 1u) {     /* (against a PLAY / STOP not pushed yet, if there is one) */
         sm_tr_pend = (uint8_t)(sm_tr_pend ? (sm_tr_pend == 1u ? 2u : 1u) : (sm_playing ? 2u : 1u));
     }
-    if (alg) {                                            /* the track; KIT on T4: T4's lanes on the way (T3, T4 BD, .. T4 CP, T1) */
-        int32_t kit = sm_trk_kit(SM_KIT_TRK, &smp.pat[smp.cur % SM_NPAT]), np = (int32_t)SM_NTRK + (kit ? 3 : 0);
-        int32_t pos = (int32_t)(sm_ui.trk % SM_NTRK) + (kit && sm_ui.trk % SM_NTRK == SM_KIT_TRK ? (int32_t)(sm_kit_lane % SM_NLANE) : 0);
-        pos = ((pos + alg) % np + np) % np;
-        sm_ui.trk = (uint8_t)(pos < (int32_t)SM_KIT_TRK ? pos : (int32_t)SM_KIT_TRK);
-        sm_kit_lane = (uint8_t)(pos < (int32_t)SM_KIT_TRK ? 0 : pos - (int32_t)SM_KIT_TRK);
+    if (alg) {                                            /* the track (T1 .. T4 as ever; a KIT's lane: the black keys, sm_lane_keys) */
+        int32_t t = ((int32_t)sm_ui.trk + alg) % (int32_t)SM_NTRK;
+        sm_ui.trk = (uint8_t)(t < 0 ? t + (int32_t)SM_NTRK : t);
         sm_ui.held_step = sm_ui.sel_step = 0xFFu;
         sm_dirty = 1;
     }
@@ -1082,6 +1095,8 @@ static void sm_input_poll(void)
                                pre || k[0] || k[1] || k[2] || k[3]);
     if (!sm_layer && sm_shift_held())
         sm_shift_keys(notes);
+    else
+        sm_lane_keys(notes);
     sm_fill_poll();                             /* (SHIFT + D#4 F#4 D#5 F#5) */
     sm_arp_poll();
     sm_kbd_poll(sm_ui.kbd ? notes : 0);
