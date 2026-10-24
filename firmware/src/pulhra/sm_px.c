@@ -71,6 +71,14 @@ static void sm_px_ring(int32_t cx, int32_t cy, int32_t r, uint32_t pos256, int f
     for (i = 0; i < 16 && (!dim || i < lit); i++)
         cv_rect(cx + sm_ring_off(r, SM_RING_COS[i]) - 1, cy - sm_ring_off(r, SM_RING_SIN[i]) - 1, 3, 3,
                 i < lit && !dim ? T_TEXT : (uint16_t)SM_DIM_INK);
+    {                                                     /* the pointer (Tim: a knob's mark): from r/3 out to r - 7, 2 px wide, at
+                                                             the value's angle (225 degrees at 0 round to -45 at 256, continuous) */
+        uint32_t ph = (uint32_t)((225 * 65536 / 360 - (int32_t)pos256 * (270 * 65536 / 360) / 256) & 0xFFFF) << 16;
+        int32_t co = sine_i(ph + 0x40000000u), si = sine_i(ph), q;
+        uint16_t ink = filled ? T_BG : dim ? (uint16_t)SM_DIM_INK : T_TEXT;
+        for (q = r / 3; q <= r - 7; q++)
+            cv_rect(cx + ((q * co + (co < 0 ? -16384 : 16384)) >> 15) - 1, cy - ((q * si + (si < 0 ? -16384 : 16384)) >> 15) - 1, 2, 2, ink);
+    }
     if (lockdot)
         cv_rect(cx - 1, cy - 1, 3, 3, filled ? T_BG : T_TEXT);
 }

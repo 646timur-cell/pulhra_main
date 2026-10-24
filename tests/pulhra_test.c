@@ -1925,8 +1925,13 @@ static int test_ring_dots(void)
             for (x = 0; x < RW; x++) {
                 uint32_t sp = 0, n = 0;
                 uint16_t c = cvp(x, y);
+                int32_t ddx = (int32_t)x - SMD_RING_CX, ddy = (int32_t)y - SMD_RING_CY;
                 if (c == BGC || seen[y * RW + x])
                     continue;
+                if (ddx * ddx + ddy * ddy < (SMD_RING_R - 4) * (SMD_RING_R - 4)) {   /* (inside: the pointer, below) */
+                    seen[y * RW + x] = 1;
+                    continue;
+                }
                 stk[sp++] = (uint16_t)(y * RW + x);        /* a flood fill of this dot */
                 seen[y * RW + x] = 1;
                 while (sp) {
@@ -1947,6 +1952,16 @@ static int test_ring_dots(void)
                 if (c == INK) lit++; else if (c == DIMC) dim++;
             }
         bad += check("RING: exactly 16 dots on the canvas (the real radius)", comps == 16u && lit + dim == 16u);
+        {                                                 /* the pointer: ink half way out at the value's angle */
+            double an = (225.0 - pos[k] * 270.0 / 256.0) * 3.14159265 / 180.0;
+            int32_t px = SMD_RING_CX + (int32_t)lround(cos(an) * 12.0), py = SMD_RING_CY - (int32_t)lround(sin(an) * 12.0);
+            uint32_t hit = 0;
+            int32_t ax, ay;
+            for (ay = -1; ay <= 1; ay++)
+                for (ax = -1; ax <= 1; ax++)
+                    hit |= cvp((uint32_t)(px + ax), (uint32_t)(py + ay)) == INK;
+            bad += check("RING: the pointer at the value's angle (12 px out)", hit && cvp(SMD_RING_CX, SMD_RING_CY) == BGC);
+        }
         bad += check("RING: the lit ones are the first 1 + pos * 15 / 256", lit == want[k]);
     }
     {   /* the centre: empty, a lock dot, a filled disc */
@@ -2024,7 +2039,7 @@ static int test_ring_lock_fill(void)
     pt->lock[0].ts = (0u << 5) | 4u; pt->lock[0].param = P_FRES; pt->lock[0].val = 99;  /* K1 is RES */
     draw_full();
     for (k = 0; k < 4; k++) {
-        uint16_t c = host_screen[94u * 240u + (uint32_t)(60 * k + 30)];
+        uint16_t c = host_screen[122u * 240u + (uint32_t)(60 * k + 30)];   /* (12 px below the centre: the pointer never points down) */
         bad += check(k == 0 ? "RING: RES, locked on the held step, is a filled disc" : "RING: the others are not filled",
                      (k == 0 && c == INK) || (k != 0 && c == BGC));
     }
