@@ -89,7 +89,8 @@
 #define ENGI_DHAT 45u            /* HAT: six squares (the 808's), CL / OP */
 #define ENGI_DCYM 46u            /* CYM: crash, ride, china */
 #define ENGI_DKIT 47u            /* KIT: four lanes of them on T4 (its sequencer four rows) */
-#define SWAMP_NDRUM 6            /* (how many: ENGINES, the DRUM page) */
+#define ENGI_DPERC 48u           /* PERC: TOM CONGA RIM BELL CLAVE (the KIT's sixth lane machine) */
+#define SWAMP_NDRUM 7            /* (how many: ENGINES, the DRUM page's places: the KIT one of them, not on the page) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (FELUCCA_MONOFM ? 27 + SWAMP_NDRUM * FELUCCA_SWAMP : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,

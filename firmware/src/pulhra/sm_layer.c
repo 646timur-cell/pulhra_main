@@ -92,7 +92,14 @@ static uint32_t sm_layer_button(uint32_t l)
 /* the page of machines (0..2) a machine is on, its first machine, how many it has */
 static uint32_t sm_epage_of(uint32_t machine) { return machine >= MF_PAGE[3] ? 3u : machine >= MF_PAGE[2] ? 2u : machine >= MF_PAGE[1] ? 1u : 0u; }
 static uint32_t sm_epage_first(uint32_t pg) { return MF_PAGE[pg % SM_NEPAGE]; }
-static uint32_t sm_epage_n(uint32_t pg) { return (uint32_t)MF_PAGE[pg % SM_NEPAGE + 1u] - MF_PAGE[pg % SM_NEPAGE]; }
+static uint32_t sm_epage_n(uint32_t pg)                  /* (the DRUM page: its lane machines, the KIT's own place not on it) */
+{
+    return (uint32_t)MF_PAGE[pg % SM_NEPAGE + 1u] - MF_PAGE[pg % SM_NEPAGE] - (pg % SM_NEPAGE == 3u ? 1u : 0u);
+}
+static uint32_t sm_epage_mach(uint32_t pg, uint32_t w)  /* the machine on white key w of page pg */
+{
+    return pg % SM_NEPAGE == 3u ? sm_kmach_place(w) : sm_epage_first(pg) + w;
+}
 
 static void sm_layer_open(uint32_t l)
 {
@@ -416,13 +423,13 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         w = sm_white_of(key);
         if (sm_layer == SML_EDIT) {
             if (w >= 0 && (uint32_t)w < sm_epage_n(sm_lay_epage) &&
-                sm_mach_ok(sm_epage_first(sm_lay_epage) + (uint32_t)w, t)) {   /* (the DRUM page: T4's alone) */
-                uint32_t m = sm_epage_first(sm_lay_epage) + (uint32_t)w;
-                if (m >= MF_PAGE_4 && m < SM_KIT_MACH) {  /* KICK .. CYM on T4 (Tim): the KIT's lane in edit that machine; */
+                sm_mach_ok(sm_epage_mach(sm_lay_epage, (uint32_t)w), t)) {   /* (the DRUM page: T4's alone) */
+                uint32_t m = sm_epage_mach(sm_lay_epage, (uint32_t)w);
+                if (m >= MF_PAGE_4 && m != SM_KIT_MACH) {  /* KICK .. CYM on T4 (Tim): the KIT's lane in edit that machine; */
                     sm_sound_t *sd = sm_ui_sound();        /* T4 not a KIT yet: a KIT first */
                     if (!sm_snd_kit(sd))
                         sm_sound_load(SM_KIT_MACH, 0);
-                    sd->p[P_E0 + sm_kit_lane % 4u] = (int8_t)(m - MF_PAGE_4);
+                    sd->p[P_E0 + sm_kit_lane % 4u] = (int8_t)sm_place_kmach(m);
                     sm_param_push(SM_KIT_TRK, P_E0 + sm_kit_lane % 4u);
                     sm_lane_machine(sm_kit_lane % 4u);
                 } else {

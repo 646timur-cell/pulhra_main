@@ -10,6 +10,10 @@ static uint32_t sm_engine_of(uint32_t machine) { return eng_vis(machine); }
  * are four lanes: a step's note[k] the hit of lane k (0 none, SM_INH the track's velocity, 1..127 its own), n 1 while
  * any lane hits (or a lock trig) */
 #define SM_KIT_MACH (MF_PAGE_4 + 5u)
+/* the DRUM places (ENGINE_ORDER): KICK SNARE CLAP HAT CYM, the KIT (+5, not on the page), PERC (+6); a lane machine (DR_KM_*)
+ * <-> its place */
+static uint32_t sm_kmach_place(uint32_t km) { return MF_PAGE_4 + (km < 5u ? km : km + 1u); }
+static uint32_t sm_place_kmach(uint32_t m) { uint32_t o = m - MF_PAGE_4; return o < 5u ? o : o - 1u; }
 #define SM_KIT_TRK 3u
 #define SM_NLANE 4u
 static uint8_t sm_kit_lane;                               /* the KIT lane in edit (the trig keys, the strip): ALGORITHM picks it */
@@ -35,7 +39,7 @@ static const sm_step_t *sm_step_view(const sm_pattern_t *pt, uint32_t t, uint32_
 static uint32_t sm_mach_shown(const sm_pattern_t *pt, uint32_t t)
 {
     const sm_sound_t *s = &pt->kit.snd[t % SM_NTRK];
-    return sm_trk_kit(t % SM_NTRK, pt) ? MF_PAGE_4 + dr_kmach(s->p[P_E0 + sm_kit_lane % 4u]) : s->machine;
+    return sm_trk_kit(t % SM_NTRK, pt) ? sm_kmach_place(dr_kmach(s->p[P_E0 + sm_kit_lane % 4u])) : s->machine;
 }
 /* a KIT step's lanes that hit (bit per lane) */
 static uint32_t sm_kit_mask(const sm_step_t *s)

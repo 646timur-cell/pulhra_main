@@ -775,8 +775,8 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
         for (c = 0; c < 4u; c++) {
             i = r * 4u + c;
             if (i < cnt) {
-                smd_cell(o, c, ENGINES[sm_engine_of(sm_epage_first(pg) + i)]->name, sm_epage_first(pg) + i == sm_mach_shown(&smp.pat[smp.cur % SM_NPAT], sm_ui.trk));
-                if (!sm_mach_ok(sm_epage_first(pg) + i, sm_ui.trk))
+                smd_cell(o, c, ENGINES[sm_engine_of(sm_epage_mach(pg, i))]->name, sm_epage_mach(pg, i) == sm_mach_shown(&smp.pat[smp.cur % SM_NPAT], sm_ui.trk));
+                if (!sm_mach_ok(sm_epage_mach(pg, i), sm_ui.trk))
                     o->dim |= (uint8_t)(1u << c);         /* (the DRUM page off T4: dim, its keys load nothing) */
             }
         }

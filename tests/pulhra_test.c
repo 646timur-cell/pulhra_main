@@ -1526,6 +1526,8 @@ static int test_edit_layer_every_machine(void)
     for (play = 0; play < 2u; play++)
         for (t = 0; t < SM_NTRK; t++)
             for (m = 0; m < SM_NMACHINE; m++) {
+                if (m == SM_KIT_MACH)                     /* (the KIT: not on the DRUM page, its lane machines are) */
+                    continue;
                 in_reset();
                 voices_power_on();
                 host_ticks = 1000u;
@@ -1541,9 +1543,9 @@ static int test_edit_layer_every_machine(void)
                     press(B_OCTUP);
                     sm_input_poll();
                 }
-                key_dn(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                key_dn(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
                 sm_input_poll();
-                key_up(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                key_up(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
                 sm_draw();
                 layer_let_go(B_EDIT);
                 trk_note_on(&trk[t], 64, 100);            /* (during the fade: xp_note) */
@@ -1556,8 +1558,8 @@ static int test_edit_layer_every_machine(void)
                 }
                 if (!sm_mach_ok(m, t))                    /* (the DRUM page: T4's alone; elsewhere its keys load nothing) */
                     ok &= ksnd(t)->machine != m;
-                else if (m >= MF_PAGE_4 && m < SM_KIT_MACH)   /* (KICK .. CYM on T4: the KIT, its lane in edit that machine) */
-                    ok &= ksnd(t)->machine == SM_KIT_MACH && trk[t].engine == ENGI_DKIT && ksnd(t)->p[P_E0 + sm_kit_lane % 4u] == (int8_t)(m - MF_PAGE_4);
+                else if (m >= MF_PAGE_4)                  /* (KICK .. CYM, PERC on T4: the KIT, its lane in edit that machine) */
+                    ok &= ksnd(t)->machine == SM_KIT_MACH && trk[t].engine == ENGI_DKIT && ksnd(t)->p[P_E0 + sm_kit_lane % 4u] == (int8_t)sm_place_kmach(m);
                 else if (!(ksnd(t)->machine == m && trk[t].engine == sm_engine_of(m) && !trk[t].xf_on)) {
                     printf("  every machine: T%u machine %u (%s) play %u: model %u core %u xf %u\n", t + 1u, m,
                            ENGINES[sm_engine_of(m)]->name, play, ksnd(t)->machine, trk[t].engine, trk[t].xf_on);
@@ -1583,6 +1585,8 @@ static int test_edit_layer_every_machine(void)
     for (t = 0; t < SM_NTRK; t++)                             /* every machine to every machine, notes on through the switch */
         for (pg = 0; pg < SM_NMACHINE; pg++)
             for (m = 0; m < SM_NMACHINE; m++) {
+                if (m == SM_KIT_MACH)                     /* (the KIT: not on the DRUM page, its lane machines are) */
+                    continue;
                 in_reset();
                 voices_power_on();
                 host_ticks = 1000u;
@@ -1600,9 +1604,9 @@ static int test_edit_layer_every_machine(void)
                     press(B_OCTUP);
                     sm_input_poll();
                 }
-                key_dn(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                key_dn(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
                 sm_input_poll();
-                key_up(WHITE[m - sm_epage_first(sm_lay_epage)]);
+                key_up(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
                 layer_let_go(B_EDIT);
                 trk_note_on(&trk[t], 64, 100);
                 for (b = 0; b < 60u; b++)
@@ -8673,6 +8677,27 @@ static int test_drum_machines(void)
         bad += check(w, pk > 2500u && pk < 65534u && act == 0u && quiet <= 2u);
     }
     bad += check("DRUM: every machine on the DRUM page, loaded", ok);
+    {                                                     /* PERC: each mode a hit that rings out by itself, never past full scale */
+        uint32_t md, pkc, lc, okp = 1, lens[DR_PM_N];
+        double bb, bm[DR_PM_N];
+        for (md = 0; md < DR_PM_N; md++) {
+            uint32_t b;
+            dr_load(ENGI_DPERC);
+            trk[0].p[P_E0] = (int16_t)md;
+            dr_hit(L, 6000, &pkc, &bm[md], &lens[md]);
+            act = dr_active(0);
+            quiet = 0;
+            for (b = 0; b < 50u; b++) {
+                uint32_t a = block_peak(0, 0);
+                quiet = a > quiet ? a : quiet;
+            }
+            printf("  PERC %s: peak %u, brightness %.4f, rings %.0f ms\n", N_DR_PMODE[md], pkc, bm[md], lens[md] * 1000.0 / FS);
+            okp &= pkc > 2500u && pkc < 65534u && act == 0u && quiet <= 2u;
+        }
+        bad += check("DRUM: PERC: TOM CONGA RIM BELL CLAVE each a hit, rings out, never past full scale", okp);
+        bad += check("DRUM: PERC: the TOM rings longer than the RIM and the CLAVE, darker than the CLAVE",
+                     lens[DR_PM_TOM] > lens[DR_PM_RIM] && lens[DR_PM_TOM] > lens[DR_PM_CLAVE] && bm[DR_PM_TOM] < bm[DR_PM_CLAVE]);
+    }
     bad += check("DRUM: KICK the darkest, HAT brighter than SNARE and KICK, CYM brighter than SNARE",
                  br[0] < br[1] && br[0] < br[2] && br[3] > br[1] && br[4] > br[1]);
     {
