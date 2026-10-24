@@ -128,7 +128,7 @@ static void fm1_main(void)
     fm1_led_dim_level(settings_leds == LEDS_DIM_LO);    /* the glow level of the LEDS setting (Felucca's boot_leds) */
     sm_ux_mk1();                                        /* white on black over whatever palette the settings picked */
     lcd_init();
-    sm_splash_paint(100u);                              /* the first frame at once: the whole word */
+    sm_splash_paint(0u);                                /* the first frame at once: the animation's own first (no word yet) */
     if (felucca_dbg.magic != DBG_MAGIC) {
         memset(&felucca_dbg, 0, sizeof felucca_dbg);
         felucca_dbg.magic = DBG_MAGIC;
