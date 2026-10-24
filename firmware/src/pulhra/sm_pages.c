@@ -52,8 +52,10 @@ static const sm_page_t SM_PAGES[] = {
      * K2 HITS, K3 ROT, OCT+ generates the trigs into the selected track (sm_input.c sm_eu_gen); MENU: a stub until the menu */
     {"VOICE", SMFAM_VOICE, {P_VOICE, P_GLIDE, P_DETUNE, P_PRIO}, SM_NOPARAM},
     {"DLY", SMFAM_DEEP, {SM_GLB | G_DTIME, SM_GLB | G_DFDBK, SM_GLB | G_DCOLOR, SM_GLB | G_DMIX}, SM_NOPARAM},
-    {"REV", SMFAM_DEEP, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RDAMP, SM_NOPARAM}, SM_NOPARAM},
+    {"REV", SMFAM_DEEP, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RDAMP, SM_GLB | G_RPRE}, SM_NOPARAM},   /* K4 PRE-DELAY */
     {"CHORUS", SMFAM_DEEP, {SM_GLB | G_CRATE, SM_GLB | G_CDEPTH, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
+    /* COMP (Tim): the master compressor's amount; DUCK: T1..T3 ducked by the kick: SC its level, TRIG each hit; DPTH, LEN */
+    {"COMP", SMFAM_DEEP, {SM_GLB | G_COMP, SM_GLB | G_DUCK, SM_GLB | G_DKDEP, SM_GLB | G_DKLEN}, SM_NOPARAM},
     {"EUCLID", SMFAM_EUCL, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_EUCLID},
     {"SCL", SMFAM_SCL, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}, SM_NOPARAM},
     {"MICRO", SMFAM_SCL, {P_FM4_LEVEL, P_MAMT, P_ROOT, SM_NOPARAM}, SM_NOPARAM},

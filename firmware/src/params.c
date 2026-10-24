@@ -53,7 +53,10 @@ static const char *const N_ROUTE[] = {FELUCCA_MODULE ? "TRACK CH" : "CH1-4", "SE
                                         * now each track's own channel, MENU > MIDI > T1 CH .. T4 CH; 1..4 by default) */
 static const char *const N_NOTE[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const N_DASH[] = {"--"};
-static const char *const N_RTYPE[] = {"ROOM", "SPRING", "HALL"};   /* G_RTYPE: the reverb bus's model (fx.c) */
+static const char *const N_RTYPE[] = {"ROOM", "SPRING", "HALL"};
+#if FELUCCA_SWAMP
+static const char *const N_DUCK[] = {"OFF", "SC", "TRIG"};   /* G_DUCK (PULHRA, fx.c duck_prep) */
+#endif   /* G_RTYPE: the reverb bus's model (fx.c) */
 static const char *const N_GO[] = {"--", "GO"};
 #if FELUCCA_STRANGE
 static const char *const N_XYLINK[] = {"OFF", "ON", "INV", "CROSS"};   /* XY LINK (G_XYLINK) */
@@ -356,9 +359,15 @@ static const param_desc_t GP[G_COUNT] = {
      * stored with the project as before. (was "--": stored 0 = CH1-4, as MIDI IN always was) */
     [G_ROUTE] = PE("ROUT", N_ROUTE, 0),
     [G_INFO] = PD("CPU", F_INT, 0, 0, 0),
+#if FELUCCA_SWAMP
+    [G_DUCK] = PE("DUCK", N_DUCK, 0),            /* PULHRA: the kick's ducking of T1..T3 (fx.c duck_prep) */
+    [G_DKDEP] = PD("DPTH", F_PCT, 0, 127, 80),
+    [G_DKLEN] = PD("LEN", F_TIME, 50, 95, 72),   /* 30 ms .. 1 s (TIME_MS_X10) */
+#else
     [G_SLOT] = PD("SLOT", F_INT, 1, 4, 1),
     [G_NAME] = PE("NAME", N_DASH, 0),
     [G_LOAD] = PE("LOAD", N_GO, 0),
+#endif
     [G_SAVE] = PE("SAVE", N_GO, 0),
     [G_ENGSEL] = PE("ENG", N_ENGNAME, 0),
 #if FELUCCA_STRANGE
@@ -376,6 +385,9 @@ static const param_desc_t GP[G_COUNT] = {
 #if FELUCCA_DARK
     [G_MHPF] = PD("HPF", F_HPF, 0, 127, 0),     /* STRANGE: the master filters (fx.c master_filter) */
     [G_MLPF] = PD("LPF", F_LPF, 0, 127, 0),
+#elif FELUCCA_SWAMP
+    [G_RPRE] = PD("PRE", F_INT, 0, 90, 0),       /* PULHRA: the reverb's pre-delay in ms (fx.c rev_pre) */
+    [G_COMP] = PD("COMP", F_PCT, 0, 127, 0),     /* PULHRA: the master compressor (fx.c master_comp), 0 off */
 #else
     [G_DRLVL] = PD("-", F_INT, 0, 0, 0),
     [G_DRREV] = PD("-", F_INT, 0, 0, 0),

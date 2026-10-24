@@ -592,6 +592,55 @@ static __attribute__((noinline)) void rev_switch(const int32_t *rev_in, int32_t 
 }
 
 /* process the three buses for one block; sends in, wet stereo-equal out */
+#if FELUCCA_SWAMP
+/* PULHRA: the reverb's pre-delay (REV's PRE, G_RPRE: 0 .. 90 ms): the reverb's send through a ring of 4096 samples (93 ms),
+ * always written (a PRE turned up has its past at once) */
+#define RP_LEN 4096u
+static int16_t rp_buf[RP_LEN] __attribute__((section(".pool")));
+static int32_t rp_out[CTL] __attribute__((section(".pool")));
+static uint32_t rp_w;
+static __attribute__((noinline)) const int32_t *rev_pre(const int32_t *in, uint32_t n)
+{
+    uint32_t i, d = (uint32_t)clamp(song.g[G_RPRE], 0, 90) * 441u / 10u;
+    for (i = 0; i < n; i++) {
+        rp_buf[rp_w & (RP_LEN - 1u)] = (int16_t)clamp(in[i] >> 1, -32768, 32767);
+        rp_out[i] = d ? (int32_t)rp_buf[(rp_w - d) & (RP_LEN - 1u)] << 1 : in[i];
+        rp_w++;
+    }
+    return rp_out;
+}
+
+/* PULHRA: the kick's ducking of T1..T3 (COMP page: DUCK, DPTH, LEN). SC: the gain follows the kick's level (its peak of the
+ * last block, eng_dr.c dr_kick_pk); TRIG: each kick hit the gain down by DPTH at once; either back over LEN. A gain at the
+ * block's start and its end (dk_g0, dk_g1), a ramp between: mix_part on every track but T4 (the drums) */
+static int32_t dk_env, dk_g0 = 32767, dk_g1 = 32767;
+static void duck_prep(void)
+{
+    int32_t md = song.g[G_DUCK], dep = clamp(song.g[G_DKDEP], 0, 127);
+    uint32_t kr = dv_kb(TIME_MS_X10[clamp(song.g[G_DKLEN], 0, 127)] * 100u);
+    if (md == 2 && dr_kick_hit)
+        dk_env = 32767;
+    else if (md == 1) {
+        int32_t tg = clamp(dr_kick_pk * 4, 0, 32767);   /* (a full kick (~8000 at velocity 100): the whole depth) */
+        if (tg > dk_env)
+            dk_env = tg;
+    }
+    dr_kick_hit = 0;
+    dr_kick_pk = 0;
+    dk_g0 = dk_g1;
+    dk_g1 = md == 1 || md == 2 ? 32767 - ((dk_env * dep) >> 7) : 32767;
+    dk_env = (int32_t)(((uint32_t)dk_env * (kr > 65536u ? 65536u : kr)) >> 16);
+}
+static inline void duck_apply(int32_t *b, uint32_t n)
+{
+    int32_t g = dk_g0, st = (dk_g1 - dk_g0) / (int32_t)(n ? n : 1u);
+    uint32_t i;
+    for (i = 0; i < n; i++, g += st)
+        b[i] = ((b[i] >> 4) * g) >> 11;
+}
+
+#endif
+
 static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t *rev_in, int32_t *wet,
                      uint32_t n)
 {
@@ -625,6 +674,9 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
         y += mulq15(x << 1, dmix);
         wet[i] = y;
     }
+#if FELUCCA_SWAMP
+    rev_in = rev_pre(rev_in, n);
+#endif
     rt = song.g[G_RTYPE];
     rt = rt == 1 || rt == 2 ? rt : 0;
     hl.side = 0;
@@ -891,6 +943,45 @@ static __attribute__((noinline)) void mix_spread(track_t *t, int32_t *b, uint32_
     t->peak = pk;
 }
 
+#if FELUCCA_SWAMP
+/* PULHRA: the master compressor (COMP, G_COMP; 0 off) on the mix and the buses: a peak follower (attack ~0.7 ms, release
+ * ~190 ms), 4:1 above a threshold that falls with COMP (-2 .. -15 dBFS), the gain made up by up to +4 dB; the limiter and
+ * the soft clip after it as ever. The buses are folded into the mix (wet 0 after) */
+static int32_t cp_env, cp_g = 32767;
+static __attribute__((noinline)) void master_comp(uint32_t n)
+{
+    int32_t c = clamp(song.g[G_COMP], 0, 127), th = 26000 - c * 160, mk = 4096 + c * 20;
+    uint32_t i;
+    if (!c) {
+        cp_g = 32767;
+        cp_env = 0;
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        int32_t l = mix_l[i] + wet[i], r = mix_r[i] + wet[i], a = l < 0 ? -l : l, b = r < 0 ? -r : r;
+        a = a > b ? a : b;
+        if (a > cp_env)
+            cp_env += (a - cp_env) >> 5;
+        else
+            cp_env -= (cp_env >> 13) + 1;
+        if (!(i & 7u)) {
+            int32_t g = 32767;
+            if (cp_env > th) {
+                int32_t num = th + ((cp_env - th) >> 2);
+                g = (int32_t)(((uint32_t)clamp(num, 0, (1 << 19) - 1) << 12) / (uint32_t)((cp_env >> 3) | 1));
+                g = g > 32767 ? 32767 : g;
+            }
+            cp_g += (g - cp_g) >> 1;
+        }
+        l = ((((l >> 3) * cp_g) >> 12) * mk) >> 12;
+        r = ((((r >> 3) * cp_g) >> 12) * mk) >> 12;
+        mix_l[i] = l;
+        mix_r[i] = r;
+        wet[i] = 0;
+    }
+}
+#endif
+
 /* one synth part into the dry mix and the sends; a part with no voice sounding costs
  * the LFO tick and a cleared buffer only (after the DIST tail has run out) */
 static void mix_part(track_t *t, uint32_t n)
@@ -910,6 +1001,10 @@ static void mix_part(track_t *t, uint32_t n)
             mod_end(t);
         return;
     }
+#if FELUCCA_SWAMP
+    if ((dk_g0 | dk_g1) != 32767 && t != &trk[3])
+        duck_apply(b, n);                               /* PULHRA: the kick's ducking, every track but the drums' */
+#endif
     if (spread_on)
         mix_spread(t, b, n);
     else {
@@ -1089,6 +1184,9 @@ static void mix_block(int32_t *out, uint32_t n)
     mf_prep();
 #endif
     events_block(n);
+#if FELUCCA_SWAMP
+    duck_prep();
+#endif
     perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
 #if FELUCCA_MONOFM
     if (perf && perf_trk && perf_trk <= NPART) {        /* the punch-in on one track (FX + D#4): the others to the master */
@@ -1103,6 +1201,9 @@ static void mix_block(int32_t *out, uint32_t n)
     fx_buses(send_c, send_d, send_r, wet, n);
     if (hl.side)
         rev_side_mix(mix_l, mix_r, n);                  /* HALL: stereo */
+#if FELUCCA_SWAMP
+    master_comp(n);
+#endif
     if (scope_mix)
         scope_take_mix(n);
     if (perf) {

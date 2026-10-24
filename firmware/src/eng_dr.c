@@ -61,8 +61,12 @@ static int32_t dr_amp(track_t *t, voice_t *v, int32_t adsr)
 }
 
 /* ===================================================================== KICK === */
+/* the master's ducking (fx.c duck_prep, PULHRA's COMP page): a kick hit since the last block, the kick's peak in it */
+static volatile uint8_t dr_kick_hit;
+static int32_t dr_kick_pk;
 static void dkick_start(track_t *t, voice_t *v, const int16_t *e)
 {
+    dr_kick_hit = 1;
     dr_choke_others(t, v);
     v->ph[0] = 0x40000000u;                               /* (the sine from its peak: the first half-cycle a thump) */
     v->ph[1] = v->ph[2] = 0;
@@ -90,7 +94,7 @@ static void dkick_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
     int32_t vel = v->vel, drv = clamp(e[5], 0, 127), click = clamp(e[6], 0, 127) * 2 * vel, nlev = clamp(e[7], 0, 127) * 200 * vel / 127;
     /* (velocity: the click and the noise with it, the sweep half its depth at 0: a harder hit snaps more, as the circuit) */
     int32_t type = clamp(e[8], 0, DR_KTY_N - 1), g = 4096 + drv * 228, comp = 32767 - drv * 110;
-    int32_t a, d, sw = v->s[1], hold = v->s[2], nl = v->s[3], lp = v->s[4], cn = v->s[5];
+    int32_t a, d, sw = v->s[1], hold = v->s[2], nl = v->s[3], lp = v->s[4], cn = v->s[5], kp = dr_kick_pk;
     uint32_t i;
     if (v->s[6]) {                                        /* choked: out fast, no click or noise any more */
         kb = dv_kb(DR_CHOKE_US);
@@ -143,8 +147,12 @@ static void dkick_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
             x = (softclip(((x >> 1) * g) >> 11) * comp) >> 15;
         else
             x = clamp(soft_knee(x, 28000), -32767, 32767);  /* (the click and the noise on a full body: a knee, no wrap) */
-        out[i] += voice_amp(x, m, i);
+        x = voice_amp(x, m, i);
+        out[i] += x;
+        x = x < 0 ? -x : x;
+        kp = x > kp ? x : kp;
     }
+    dr_kick_pk = kp;
     v->ph[0] = ph;
     v->ph[1] = cph;
     v->ph[2] = wph;

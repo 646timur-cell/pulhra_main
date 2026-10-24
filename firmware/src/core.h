@@ -168,6 +168,14 @@ enum {                          /* global parameters */
                                  * the import of an old project reads them: proj_drums_to_part) */
     G_COUNT
 };
+#if FELUCCA_SWAMP                /* PULHRA: the inert globals as the master dynamics and the reverb's pre-delay (fx.c; the project
+                                    object version 4 stores them, pulhra/sm_bank.c) */
+#define G_RPRE G_DRLVL           /* REV's PRE: 0 .. 90 ms */
+#define G_COMP G_DRREV           /* COMP: the master compressor's amount, 0 off */
+#define G_DUCK G_SLOT            /* DUCK: OFF, SC (the kick's level), TRIG (each kick hit, for LEN) */
+#define G_DKDEP G_NAME           /* its depth */
+#define G_DKLEN G_LOAD           /* its release (F_TIME) */
+#endif
 #define G_MHPF G_DRLVL           /* STRANGE: the inert globals of the old drum part are the master HPF and LPF (stored */
 #define G_MLPF G_DRREV           /* with the project; 0 = off, so a project of another build loads them off: fx.c) */
 #define G_XYLINK G_ENGGO         /* STRANGE: XY LINK (ARP > XY LINK), the unused SET's id: HOME's X / Y turn both parts
