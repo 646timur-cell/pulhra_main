@@ -38,7 +38,12 @@
 #define SM_BANK_BYTES (SM_BPAT * (uint32_t)sizeof(sm_pattern_t))
 #define SM_BMAGIC 0x31425753u                             /* "SWB1" */
 #define SM_PMAGIC 0x31505753u                             /* "SWP1" */
-#define SM_STORE_VER 1u                                   /* the banks' (and version 1 of the project object) */
+#define SM_STORE_VER 1u                                   /* version 1 of the project object (and of the banks) */
+#define SM_BANK_VER 2u                                    /* the banks': 2 = the speed per track (sm_sound_t.speed, the byte of the
+                                                             unused track swing), 183 locks and the KIT's lanes in the space of the
+                                                             last nine (sm_pattern_t.lane); a version 1 bank loads converted
+                                                             (sm_bank_v1) */
+_Static_assert(sizeof(sm_pattern_t) == 2544u, "a pattern's size is the banks' layout (version 2 the same bytes as 1)");
 #define SM_PROJ_VER 3u                                    /* the project object's: version 2 adds the global effects, 3 the MIDI routing */
 #define SM_AUTOSAVE_US 8000000u                           /* 8 s of quiet, stopped: the autosave */
 #define SM_STORE_CHECK_US 200000u                         /* how often the autosave looks (a hash of both halves) */
@@ -86,6 +91,7 @@ _Static_assert(sizeof(sm_prec_t) + SM_FL_DATA <= SM_FL_SEC, "the project fits it
 static uint8_t sm_fs_bank[SM_FL_NSLOT];                   /* the bank in place i (SM_BANK_NONE: none valid) */
 static uint8_t sm_fs_used[SM_FL_NSLOT];
 static uint32_t sm_fs_seq[SM_FL_NSLOT], sm_fs_crc[SM_FL_NSLOT];
+static uint8_t sm_fs_ver[SM_FL_NSLOT];                    /* each place's bank version (1: converted at the load) */
 static uint8_t sm_fs_top[SM_NBANK];                       /* the place of each bank's newest valid copy (SM_BANK_NONE: none) */
 static uint8_t sm_fp_ok[2];                               /* the project's copies valid, their seq */
 static uint32_t sm_fp_seq[2];
@@ -273,7 +279,7 @@ static int sm_bank_save(uint32_t h)
         return 1;
     memset(&hd, 0, sizeof hd);
     hd.magic = SM_BMAGIC;
-    hd.version = SM_STORE_VER;
+    hd.version = SM_BANK_VER;
     hd.bank = (uint8_t)b;
     hd.used = sm_used[b];
     hd.seq = sm_fs_next;
@@ -284,6 +290,7 @@ static int sm_bank_save(uint32_t h)
     sm_fs_used[sl] = hd.used;
     sm_fs_seq[sl] = hd.seq;
     sm_fs_crc[sl] = hd.crc;
+    sm_fs_ver[sl] = SM_BANK_VER;
     sm_fs_top[b] = (uint8_t)sl;
     sm_fs_next++;
     sm_hhash[h % SM_NHALF] = sm_half_hash(h);
@@ -345,6 +352,31 @@ static void sm_bank_clamp(uint32_t s0)
         }
 }
 
+/* a version 1 bank in RAM slots s0..: each pattern's speed onto its four tracks (the byte they had was the unused track swing),
+ * its live locks squeezed into the first 183 places (the space of the last nine is the KIT's lanes now; a pattern of more than
+ * 183 live locks keeps its first 183), the lanes their default */
+static void sm_lanes_default(sm_pattern_t *p);
+static void sm_bank_v1(uint32_t s0)
+{
+    uint32_t i, t, j, k, n;
+    for (i = 0; i < SM_BPAT; i++) {
+        sm_pattern_t *p = &smp.pat[s0 + i];
+        sm_lock_t old[192];
+        memcpy(old, p->lock, sizeof old);                 /* (192 x 4: the locks and the lanes' bytes, the same size) */
+        for (t = 0; t < SM_NTRK; t++)
+            p->kit.snd[t].speed = (int8_t)clamp(p->speed, -3, 3);
+        p->speed = 0;
+        n = p->nlock > 192u ? 192u : p->nlock;
+        for (j = k = 0; j < n; j++)
+            if (old[j].param != SM_LOCK_DEAD && k < SM_NLOCK)
+                p->lock[k++] = old[j];
+        for (j = k; j < SM_NLOCK; j++)
+            p->lock[j].param = SM_LOCK_DEAD;
+        p->nlock = (uint8_t)k;
+        sm_lanes_default(p);
+    }
+}
+
 /* RAM half h <- bank b (the newest valid copy in the flash, else 8 empty patterns with the default kit). The half is free:
  * no pattern of it plays or is asked for (the caller's check); hbank SM_BANK_NONE while it is written, so the audio stream
  * finds no link in it meanwhile */
@@ -359,8 +391,11 @@ static void sm_bank_fill(uint32_t h, uint32_t b)
              st_crc32(&smp.pat[s0], SM_BANK_BYTES) == sm_fs_crc[sl];
         if (!ok)
             sm_msg_show(SM_MSG_FLASH);
-        else
+        else {
+            if (sm_fs_ver[sl] < SM_BANK_VER)
+                sm_bank_v1(s0);
             sm_bank_clamp(s0);
+        }
     }
     if (!ok) {
         sm_kit_t kit;
@@ -386,13 +421,14 @@ static void sm_store_boot(void)
     memset(sm_fs_top, SM_BANK_NONE, sizeof sm_fs_top);
     memset(sm_fp_ok, 0, sizeof sm_fp_ok);
     for (i = 0; flash_ok && i < SM_FL_NSLOT; i++) {
-        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || hd.version != SM_STORE_VER || hd.bank >= SM_NBANK ||
+        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || (hd.version != SM_STORE_VER && hd.version != SM_BANK_VER) || hd.bank >= SM_NBANK ||
             hd.size != SM_BANK_BYTES || sm_flash_crc(sm_slot_addr(i) + SM_FL_DATA, hd.size) != hd.crc)
             continue;
         sm_fs_bank[i] = hd.bank;
         sm_fs_used[i] = hd.used;
         sm_fs_seq[i] = hd.seq;
         sm_fs_crc[i] = hd.crc;
+        sm_fs_ver[i] = (uint8_t)hd.version;
         if (sm_fs_top[hd.bank] >= SM_FL_NSLOT || sm_seq_newer(hd.seq, sm_fs_seq[sm_fs_top[hd.bank]]))
             sm_fs_top[hd.bank] = (uint8_t)i;
         if (!have || sm_seq_newer(hd.seq, top))

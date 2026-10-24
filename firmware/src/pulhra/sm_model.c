@@ -177,10 +177,18 @@ static void sm_kit_default(sm_kit_t *kit)
         sm_sound_from_preset(&kit->snd[t], eng_rank(KIT[t]), 0);
 }
 /* an empty pattern with kit k: no trig, no lock, master length AUTO */
+/* the KIT's four lanes their defaults: KIT's own SND1 .. SND4 defaults (BD SD CHH CP), each its machine's factory sound */
+static void sm_lanes_default(sm_pattern_t *p)
+{
+    uint32_t L;
+    for (L = 0; L < 4u; L++)
+        dr_lane_init(p->lane[L], (uint32_t)ENG_DKIT.edit[L].def);
+}
 static void sm_pat_blank(sm_pattern_t *p, const sm_kit_t *k)
 {
     memset(p, 0, sizeof *p);
     p->kit = *k;
+    sm_lanes_default(p);
 }
 
 /* power-on: 120.0 BPM, swing 50, every step empty, 16 steps; the default kit in every pattern; banks A and B in RAM, the

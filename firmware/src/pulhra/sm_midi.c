@@ -148,14 +148,19 @@ static void sm_ext_pulse(uint32_t ms)
     if (!sm_playing)
         return;
     q = sm_ext_cnt++;                                     /* (the first pulse after Start is the downbeat: pulse 0) */
-    m8 = SM_SPEED8[sm_speed_place(smp.pat[sm_play_pat % SM_NPAT].speed)];
-    if (48u % m8 || !sm_ext_bpm10)
+    (void)m8;                                             /* (the grid's 1x step: six pulses; the tracks' speeds ride its ticks) */
+    if (!sm_ext_bpm10)
         return;
-    per = 48u / m8;
+    per = 6u;
     if (q % per)
         return;
-    step_q8 = sm_step_q8();
+    step_q8 = sm_tick_q8();                               /* (the tick: the grid's 1x step is eight of them) */
     q = step_q8 / 4u;
+    if (sm_tick & 7u) {                                   /* (not on a 1x step's boundary: the pulse is early or late by a tick) */
+        if ((sm_tick & 7u) == 1u && sm_next_q8 >= step_q8 - q && sm_next_q8 < step_q8)
+            sm_next_q8 = step_q8;                         /* (the boundary's tick a little early: the next a whole tick on) */
+        return;
+    }
 
     if (sm_next_q8 <= q)
         sm_next_q8 = 0;                                   /* (late: the step starts now) */

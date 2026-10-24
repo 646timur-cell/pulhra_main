@@ -356,8 +356,9 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
         int32_t v;
         if (k[0]) {                                       /* (/8 .. *8, no round: a byte the audio stream reads every block) */
-            v = clamp((int32_t)sm_speed_place(pt->speed) + k[0], 0, (int32_t)SM_NSPEED - 1) - SM_SPEED_ONE;
-            pt->speed = (int8_t)v;
+            sm_sound_t *sd = &pt->kit.snd[t];             /* (Tim: the selected track's speed, not the pattern's) */
+            v = clamp((int32_t)sm_speed_place(sd->speed) + k[0], 0, (int32_t)SM_NSPEED - 1) - SM_SPEED_ONE;
+            sd->speed = (int8_t)v;
         }
         if (k[1])                                         /* (SEQ, DIR.S, DIR.J, round) */
             smp.mode = (uint8_t)((((int32_t)smp.mode + k[1]) % (int32_t)SM_PM_COUNT + (int32_t)SM_PM_COUNT) % (int32_t)SM_PM_COUNT);

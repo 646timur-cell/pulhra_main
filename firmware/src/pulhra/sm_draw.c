@@ -820,7 +820,7 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             static const char *const M3[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
             char sh[8], tr[8];
             int32_t v = sm_sh_all, a = v < 0 ? -v : v;
-            smd_cell(o, 0, SM_SPEED_N[sm_speed_place(smp.pat[smp.cur % SM_NPAT].speed)], 0);
+            smd_cell(o, 0, SM_SPEED_N[sm_speed_place(smd_snd()->speed)], 0);   /* (the selected track's speed) */
             smd_cell(o, 1, M3[smp.mode % SM_PM_COUNT], 0);
             /* under K3 / K4: the net shift and transpose of every track (A#3 C#4 / D#4 F#4) since the pattern came: SHT+2, TR-1
              * (five characters at most: SH+12 past 9) */

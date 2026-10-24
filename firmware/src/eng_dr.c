@@ -565,6 +565,16 @@ static const char *const N_DR_KSND[DR_NKSND] = {
     "CHNA",
 };
 #define DR_KIT_NOTE 36u                                   /* lane 0's note (C2) */
+/* a lane's nine values from sound k of DR_KSND (its machine's factory sound, the ninth its default) */
+static void dr_lane_init(int8_t *e9, uint32_t k)
+{
+    const dr_ksnd_t *d = &DR_KSND[k % (uint32_t)DR_NKSND];
+    const preset_t *pr = &d->e->presets[d->preset % d->e->npresets];
+    uint32_t i;
+    for (i = 0; i < 8u; i++)
+        e9[i] = pr->e[i];
+    e9[8] = (int8_t)d->e->e8.def;
+}
 static uint32_t dr_lane(uint32_t note) { return (note - DR_KIT_NOTE) & 3u; }   /* (36..39: 0..3; any other: % 4) */
 /* lane L's sound and its nine values (the factory sound's, DCAY on its decay) */
 static const dr_ksnd_t *dr_klane(const int16_t *p, uint32_t L, int16_t *e)

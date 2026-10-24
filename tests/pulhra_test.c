@@ -1766,14 +1766,16 @@ static int test_seq_len(void)
         turn(EN_K4, 3);
         sm_input_poll();
         before.dnote = (uint8_t)(before.dnote + 3u);       /* (K4: the default note moves with the trigs) */
+        before.speed = 3;                                 /* (K1 +5: the track's speed, *8) */
         bad += check("SEQ: K1-K4 are the layer's: no sound parameter moved; K3 SHT+5, K4 TR+3",
                      !memcmp(&before, ksnd(0), sizeof before) && sm_sh_all == 5 && sm_tr_all == 3);
-        bad += check("SEQ: ... K1 +5: the speed *8 (its top)", pt->speed == 3 && sm_step_q8() == sm_tempo_q8() / 8u);
+        bad += check("SEQ: ... K1 +5: T1's speed *8 (its top), its step an eighth", ksnd(0)->speed == 3 && pt->speed == 0 &&
+                     sm_trk_step_q8(pt, 0) == sm_tempo_q8() / 8u && sm_trk_iv(pt, 1) == 8u);
         bad += check("SEQ: ... K2 +1: the next change mode", smp.mode == (m0 + 1u) % SM_PM_COUNT);
         bad += check("SEQ: ... K3, K4: nothing (the master length AUTO)", pt->mlen == 0u);
         turn(EN_K1, -9);
         sm_input_poll();
-        bad += check("SEQ: ... K1 -9: the speed /8 (its bottom)", pt->speed == -3 && sm_step_q8() == sm_tempo_q8() * 8u);
+        bad += check("SEQ: ... K1 -9: T1's speed /8 (its bottom)", ksnd(0)->speed == -3 && sm_trk_step_q8(pt, 0) == sm_tempo_q8() / 8u * 64u);
         turn(EN_K1, 3);
         turn(EN_K2, -1);
         sm_input_poll();
@@ -3012,7 +3014,15 @@ static int test_lock_stress(void)
     }
     push(SMC_STOP, 0, 0, 0, 0);
     run_block();
-    sm_lock_clear_step(0, 0);                             /* stopped: the pool compacted to its live locks */
+    {                                                     /* stopped: a step with a lock cleared, the pool compacted to its live locks */
+        uint32_t i, ts = 0;
+        for (i = 0; i < cpat()->nlock; i++)
+            if (cpat()->lock[i].param != 0xFFu) {
+                ts = cpat()->lock[i].ts;
+                break;
+            }
+        sm_lock_clear_step(ts >> 5, ts & 31u);
+    }
     bad += check("LOCK/STRESS: stopped, a clear compacts: nlock == the live locks", cpat()->nlock == lk_count_live());
     return bad;
 }
@@ -7744,11 +7754,11 @@ static int test_step_select_swing(void)
         turn(EN_SELECT, -8);
         sm_input_poll();
         bad += check("STEPSEL: no step: SELECT is the track's LEVEL (-8), no step touched, the swing kept",
-                     ksnd(0)->p[P_LEVEL] == lv - 8 && ksnd(0)->swing == 0u && sm_step_edit() < 0 && smp.swing == 50u);
+                     ksnd(0)->p[P_LEVEL] == lv - 8 && ksnd(0)->speed == 0 && sm_step_edit() < 0 && smp.swing == 50u);
     }
-    ksnd(0)->swing = 8u;
+    ksnd(0)->speed = 2;
     sm_sound_load(ksnd(0)->machine, 1);
-    bad += check("STEPSEL: a preset load keeps the track's swing (the sequencer's)", ksnd(0)->swing == 8u);
+    bad += check("STEPSEL: a preset load keeps the track's speed (the sequencer's)", ksnd(0)->speed == 2);
     press(B_REC);
     sm_input_poll();
     sm_step_toggle(0, 3);
@@ -7757,17 +7767,17 @@ static int test_step_select_swing(void)
     oct_tap(B_OCTUP);
     oct_tap(B_OCTUP);
     oct_tap(B_OCTUP);
-    bad += check("STEPSEL: a step held: OCT+ x 3 its NUDGE +3, the swing kept, no paste", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
+    bad += check("STEPSEL: a step held: OCT+ x 3 its NUDGE +3, the speed kept, no paste", stp(0, 3)->nudge == 3 && ksnd(0)->speed == 2);
     sm_ux_mk1();
     draw_full();
     bad += check("STEPSEL: ... the header NUDGE+3 (only while OCT moves it), the page line without it", lint_has("NUDGE+3", 0, 0) && lint_has("STEP 04 -", 0, 0));
     key_up(WHITE[3]);
     sm_input_poll();
     oct_tap(B_OCTUP);
-    bad += check("STEPSEL: ... let go, still selected: OCT+ no NUDGE (the pages)", stp(0, 3)->nudge == 3 && ksnd(0)->swing == 8u);
+    bad += check("STEPSEL: ... let go, still selected: OCT+ no NUDGE (the pages)", stp(0, 3)->nudge == 3 && ksnd(0)->speed == 2);
     /* the sequencer: the swing is the pattern's (CLOCK K2), every track the same; a sound's own swing byte plays no part */
     seq_reset();
-    ksnd(0)->swing = 8u;                                  /* (ignored) */
+    ksnd(0)->speed = 0;                                   /* (1x) */
     smp.pat[smp.cur].swing = 10u;                         /* 60 % */
     for (k = 0; k < 4u; k++) {
         sm_step_toggle(0, k);
@@ -8960,6 +8970,53 @@ static int test_step_chord_note(void)
     return bad;
 }
 
+/* a version 1 bank (before the speed per track and the KIT's lanes): loaded converted. Its pattern's speed onto the four tracks
+ * (the byte they had was the unused track swing: zeroed), its 192 locks squeezed to the first 183 live ones, the lanes their
+ * default; saved again: version 2 */
+static int test_bank_v1(void)
+{
+    int bad = 0;
+    uint32_t i, sl, ok = 1;
+    sm_fhdr_t hd;
+    sm_lock_t old[192];
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    smp.pat[2].speed = 1;                                 /* (A03: version 1's pattern speed *2) */
+    for (i = 0; i < SM_NTRK; i++)
+        smp.pat[2].kit.snd[i].speed = 0;
+    for (i = 0; i < 192u; i++) {                          /* 192 locks, every 10th a removed one: 172 live */
+        old[i].ts = (uint8_t)(((i & 3u) << 5) | (i / 4u % 32u));
+        old[i].param = (uint8_t)(i % 10u == 9u ? 0xFFu : P_FCUT);
+        old[i].val = (int16_t)i;
+    }
+    memcpy(smp.pat[2].lock, old, sizeof old);             /* (the lanes' bytes too: version 1's last nine locks) */
+    smp.pat[2].nlock = 192;
+    bad += check("BANKV1: crafted, saved", sm_bank_save(0) == 0);
+    for (sl = 0; sl < SM_FL_NSLOT; sl++) {                /* (the header made version 1's) */
+        memcpy(&hd, nor + sm_slot_addr(sl), sizeof hd);
+        if (hd.magic == SM_BMAGIC && hd.bank == 0u) {
+            hd.version = 1;
+            hd.hcrc = st_crc32(&hd, sizeof hd - 4u);
+            memcpy(nor + sm_slot_addr(sl), &hd, sizeof hd);
+        }
+    }
+    bank_reboot();
+    for (i = 0; i < SM_NTRK; i++)
+        ok &= smp.pat[2].kit.snd[i].speed == 1;
+    bad += check("BANKV1: loaded: the pattern's speed on its four tracks, the pattern's 0", ok && smp.pat[2].speed == 0);
+    ok = smp.pat[2].nlock == 173u;                        /* (192 - 19 removed: 173 live, all kept) */
+    for (i = 0; i < smp.pat[2].nlock; i++)
+        ok &= smp.pat[2].lock[i].param == P_FCUT;
+    bad += check("BANKV1: ... the locks squeezed: the 173 live ones, in order, none removed", ok);
+    {
+        int8_t want[9];
+        dr_lane_init(want, (uint32_t)ENG_DKIT.edit[0].def);
+        bad += check("BANKV1: ... the KIT's lanes their default", !memcmp(smp.pat[2].lane[0], want, 9));
+    }
+    return bad;
+}
+
 static int test_fx_dist_types(void)
 {
     double br[4], rm[4], base_br, base_rm, b2, r2, nul;
@@ -10121,7 +10178,7 @@ static int test_pattern_speed(void)
     int bad = 0;
     in_reset();
     seq_reset();
-    smp.pat[smp.cur].speed = -1;                          /* 1/2x */
+    ksnd(0)->speed = -1;                                  /* 1/2x (T1's speed) */
     sm_step_toggle(0, 0);
     sm_step_toggle(0, 2);
     push(SMC_PLAY, 0, 0, 0, 0);
@@ -10130,7 +10187,7 @@ static int test_pattern_speed(void)
     push(SMC_STOP, 0, 0, 0, 0);
     seq_run(CTL);
     seq_reset();
-    smp.pat[smp.cur].speed = 1;                           /* 2X */
+    ksnd(0)->speed = 1;                                   /* 2X */
     sm_step_toggle(0, 0);
     sm_step_toggle(0, 2);
     push(SMC_PLAY, 0, 0, 0, 0);
@@ -10139,7 +10196,23 @@ static int test_pattern_speed(void)
     bad += check("SPEED: ... the arp's clock is the tempo's (not the pattern's)", sm_tempo_q8() == (uint32_t)FS * 150u * 256u / 1200u);
     push(SMC_STOP, 0, 0, 0, 0);
     seq_run(CTL);
-    smp.pat[smp.cur].speed = 0;
+    seq_reset();                                          /* per track (Tim): T1 at 2x, T2 at 1x, at once */
+    ksnd(0)->speed = 1;
+    sm_step_toggle(0, 0);
+    sm_step_toggle(0, 2);
+    sm_step_toggle(1, 0);
+    sm_step_toggle(1, 2);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    seq_run((uint32_t)(2.5 * S120));
+    bad += check("SPEED: per track: T1 at 2X step 3 at 1 sixteenth, T2 at 1X at 2", on_n[0] >= 2u && near_d(on_at[0][1], 1.0 * S120) &&
+                 on_n[1] == 2u && near_d(on_at[1][1], 2.0 * S120));
+    bad += check("SPEED: ... the master length AUTO in 1x steps: T1 16 at 2X is 8, T2's 16 the longest", sm_mlen_of(cpat()) == 16u);
+    ksnd(1)->speed = -1;
+    bad += check("SPEED: ... T2 at 1/2X: 32", sm_mlen_of(cpat()) == 32u);
+    ksnd(1)->speed = 0;
+    push(SMC_STOP, 0, 0, 0, 0);
+    seq_run(CTL);
+    ksnd(0)->speed = 0;
     return bad;
 }
 
@@ -10782,6 +10855,7 @@ int main(void)
     bad += test_msg_age();
     bad += test_seq_track_copy();
     bad += test_step_chord_note();
+    bad += test_bank_v1();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

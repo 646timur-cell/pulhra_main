@@ -12,7 +12,8 @@
 #define SM_NPAT (SM_NHALF * SM_BPAT)                      /* RAM slots of smp.pat: half * 8 + place */
 #define SM_BANK_NONE 0xFFu
 #define SM_NSTEP 32u
-#define SM_NLOCK 192u                                     /* parameter locks per pattern */
+#define SM_NLOCK 183u                                     /* parameter locks per pattern (192 up to bank version 1: nine of them
+                                                             are the KIT's lanes now, sm_pattern_t.lane) */
 #define SM_NCHAIN 16u
 #define SM_NMACHINE NENG_SHOWN                            /* stage 1: MONOFM's machines, in the order of eng_vis() */
 
@@ -60,10 +61,10 @@ typedef struct {
 
 typedef struct {
     uint8_t machine, preset, len;
-    uint8_t swing;                                        /* (unused: the swing is the pattern's, sm_pattern_t.swing; kept for the bank
-                                                             format) the track's own swing on top of the project's (smp.swing): 0..25
-                                                             percent more, 0 none (the STEP page's SELECT with no step: SWNG
-                                                             50+swing %); the sequencer's, as len (a preset load keeps it) */
+    int8_t speed;                                         /* the track's speed (Tim: per track; the SEQ layer's K1, Elektron's SCALE):
+                                                             SM_SPEED_* places as an offset from 1x, -3 .. +3 = /8 /4 /2 * *2 *4 *8;
+                                                             the sequencer's, as len (a preset load keeps it). (The byte was the unused
+                                                             track swing: a bank of version 1 has it zeroed, sm_bank.c) */
     uint8_t dnote, dvel, dlen, dcond;                     /* the track's trig defaults (SM_INH above); the sequencer's, as len:
                                                              a preset load keeps them, a track copy carries them */
     int8_t p[P_COUNT];                                    /* as mfp_trk_t: -64..127 */
@@ -79,10 +80,11 @@ typedef struct {
     uint8_t swing;                                        /* the pattern's swing (CLOCK K2): 0..25 percent over 50 (50 .. 75 %); every
                                                              track of the pattern swings by it (no swing per track); 0 = none */
     uint8_t mlen;                                         /* master length in 1/16 steps 1..SM_MLEN_MAX, 0 AUTO (the longest track) */
-    int8_t speed;                                         /* the pattern's speed (the SEQ layer's K1, Elektron's SCALE): SM_SPEED_*
-                                                             places as an offset from 1x, -3 .. +3 = /8 /4 /2 * *2 *4 *8; 0 = 1x (the
-                                                             byte was a zeroed reserve: every saved pattern plays at 1x) */
+    int8_t speed;                                         /* (bank version 1: the pattern's speed; moved onto its tracks at the load,
+                                                             sm_sound_t.speed: 0 since) */
     sm_lock_t lock[SM_NLOCK];
+    int8_t lane[4][9];                                    /* the KIT's four lanes (T4): each its machine's nine values (E1 .. E8, the
+                                                             ninth), sm_kit.c; the space of nine locks of version 1 */
 } sm_pattern_t;
 
 /* the pattern change (smp.mode, the project's, as MONOFM's): SEQUENTIAL at the end of the pattern playing (its master length),

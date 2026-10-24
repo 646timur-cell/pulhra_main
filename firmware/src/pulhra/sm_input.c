@@ -268,7 +268,7 @@ static void sm_sound_load(uint32_t machine, uint32_t preset)
     n.dvel = sd->dvel;
     n.dlen = sd->dlen;
     n.dcond = sd->dcond;
-    n.swing = sd->swing;                                  /* (and its swing) */
+    n.speed = sd->speed;                                  /* (and its speed) */
     fm1_irq_off();
     *sd = n;
     fm1_irq_on();
@@ -842,13 +842,14 @@ static void sm_lrec_poll(void)
     uint8_t r = sm_rev_r;
     while (r != *(volatile uint8_t *)&sm_rev_w) {
         sm_rev_t e;
-        uint32_t i, t, sq = sm_step_q8();
+        uint32_t i, t, sq;
         SM_BARRIER();
         e = sm_rev[r % SM_NREV];
         SM_BARRIER();
         r++;
         sm_rev_r = r;
         t = e.trk % SM_NTRK;
+        sq = sm_trk_step_q8(&smp.pat[smp.cur % SM_NPAT], t);   /* (the track's own step: its speed) */
         if (e.kind == SM_REV_ON) {
             uint32_t free = SM_NRO, old = 0;
             if (e.pat != smp.cur % SM_NPAT || e.step >= SM_NSTEP)
