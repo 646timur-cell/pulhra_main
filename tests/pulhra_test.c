@@ -8541,6 +8541,48 @@ static int test_drum_kick(void)
             block_peak(0, 0);
     }
     bad += check("KICK: DECAY: a longer tail", e_long > 20.0 * (e_short + 1.0));
+    {                                                     /* velocity: a square law (vel 40 under a fifth of vel 127's peak) */
+        uint32_t pv[2], k, ty, ok = 1;
+        double br[DR_KTY_N];
+        trk[0].p[P_E3] = 60;                              /* (DECAY as designed; the long tail above out first) */
+        fx_flush();
+        for (k = 0; k < 2u; k++) {
+            pv[k] = 0;
+            trk_note_on(&trk[0], 48, k ? 127u : 40u);
+            for (b = 0; b < 200u; b++) {
+                uint32_t a = block_peak(0, 0);
+                pv[k] = a > pv[k] ? a : pv[k];
+            }
+            for (b = 0; b < 3000u; b++)
+                block_peak(0, 0);
+        }
+        printf("  kick: velocity 40 peak %u, 127 peak %u\n", pv[0], pv[1]);
+        bad += check("KICK: velocity: 40 well under 127 (< 20 %)", pv[1] > 5000u && pv[0] * 5u < pv[1]);
+        for (ty = 0; ty < DR_KTY_N; ty++) {               /* every TYPE sounds, each its own colour */
+            uint32_t pk;
+            double e = 0, d = 0;
+            trk[0].p[P_E8] = (int16_t)ty;
+            nl = 0;
+            trk_note_on(&trk[0], 48, 100);
+            pk = 0;
+            for (b = 0; b < 400u; b++) {
+                uint32_t a = block_peak(L, &nl);
+                pk = a > pk ? a : pk;
+            }
+            for (i = 1; i < nl; i++) {
+                e += (double)L[i] * L[i];
+                d += (double)(L[i] - L[i - 1]) * (L[i] - L[i - 1]);
+            }
+            br[ty] = d / (e + 1.0);
+            ok &= pk > 2000u;
+            for (k = 0; k < ty; k++)
+                ok &= fabs(br[k] - br[ty]) > 0.03 * br[ty];
+            for (b = 0; b < 3000u; b++)
+                block_peak(0, 0);
+        }
+        trk[0].p[P_E8] = 0;
+        bad += check("KICK: every TYPE (SINE TRI ROUND SQR FM FOLD) sounds, each its own brightness", ok);
+    }
     return bad;
 }
 

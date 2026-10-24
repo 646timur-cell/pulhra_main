@@ -2,7 +2,8 @@
 /* PULHRA's drum machines (the EDIT layer's DRUM page; FELUCCA_SWAMP builds only), each a synthesized drum of its own after
  * the analog drum machines (Elektron's Analog Rhythm, the 808 / 909 circuits): a hit is the whole sound (engine_t.oneshot:
  * the ADSR does nothing, velocity does), one voice a track that rings (a new hit chokes the old one in ~2 ms: no pile-up),
- * every value lockable as any machine's. Fixed point, 32-bit products only; the slow envelopes per control block
+ * every value lockable as any machine's. Velocity twice (a square law, dr_amp): 64 is -12 dB; KICK's click, noise and sweep
+ * and SNARE's snap follow it too. Fixed point, 32-bit products only; the slow envelopes per control block
  * (drum_voice.c's helpers: dv_kb, dv_k, dv_slow).
  *
  * KICK: a body oscillator (TYPE: SINE, TRI, ROUND: the sine with its 2nd and 3rd harmonics, phase-locked) swept down
@@ -15,8 +16,8 @@
  * s[1] the sweep (Q15, per sample), s[2] the hold left (samples), s[3] the noise's level (Q15), s[4] the noise's
  * low-pass, s[5] the click's samples left, s[6] choked (1), s[7] the noise's state */
 
-enum { DR_KTY_SINE, DR_KTY_TRI, DR_KTY_ROUND, DR_KTY_N };
-static const char *const N_DR_KTYPE[DR_KTY_N] = {"SINE", "TRI", "ROUND"};
+enum { DR_KTY_SINE, DR_KTY_TRI, DR_KTY_ROUND, DR_KTY_SQR, DR_KTY_FM, DR_KTY_FOLD, DR_KTY_N };
+static const char *const N_DR_KTYPE[DR_KTY_N] = {"SINE", "TRI", "ROUND", "SQR", "FM", "FOLD"};
 
 #define DR_Q30 (1 << 30)
 #define DR_CLICK_N 64u                                    /* the click: 64 samples (1.45 ms) */
@@ -54,7 +55,7 @@ static int32_t dr_amp(track_t *t, voice_t *v, int32_t adsr)
         return 0;
     }
     v->env = 1 << 24;                                     /* (the ADSR's release never ends a hit) */
-    return 32767;
+    return v->vel * 258;                                  /* (velocity twice: the core's and this, a square law: 64 = -12 dB) */
 }
 
 /* ===================================================================== KICK === */
@@ -80,11 +81,12 @@ static void dkick_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
     int32_t base = 23 * 16 + clamp(e[0], 0, 127) * 28 * 16 / 127 + note;   /* TUNE: 26 .. 130 Hz at C3 */
     uint32_t inc0 = pitch_inc((uint32_t)clamp(base, 0, 2047));
     uint32_t top = pitch_inc((uint32_t)clamp(base + clamp(e[1], 0, 127) * 6, 0, 2047));   /* SWEEP: up to 48 st */
-    uint32_t span = (top - inc0) >> 15, ks = dv_k(TIME_MS_X10[clamp(e[2], 0, 127) >> 1] * 100u);   /* STIME: 1 .. 96 ms */
+    uint32_t span = ((top - inc0) >> 15) * (uint32_t)(64 + v->vel / 2) / 127u, ks = dv_k(TIME_MS_X10[clamp(e[2], 0, 127) >> 1] * 100u);   /* STIME: 1 .. 96 ms */
     uint32_t kb = dv_kb(TIME_MS_X10[36 + clamp(e[3], 0, 127) * 60 / 127] * 100u);   /* DECAY: 14 ms .. 1.06 s */
     uint32_t kn = dv_k(4000u), ph = v->ph[0], cph = v->ph[1], wph = v->ph[2];
     uint32_t cinc = pitch_inc(107 * 16), winc = 0xFFFFFFFFu / DR_CLICK_N;   /* (B7 ~ 3.95 kHz; the window's one cycle) */
-    int32_t drv = clamp(e[5], 0, 127), click = clamp(e[6], 0, 127) * 258, nlev = clamp(e[7], 0, 127) * 200;
+    int32_t vel = v->vel, drv = clamp(e[5], 0, 127), click = clamp(e[6], 0, 127) * 2 * vel, nlev = clamp(e[7], 0, 127) * 200 * vel / 127;
+    /* (velocity: the click and the noise with it, the sweep half its depth at 0: a harder hit snaps more, as the circuit) */
     int32_t type = clamp(e[8], 0, DR_KTY_N - 1), g = 4096 + drv * 228, comp = 32767 - drv * 110;
     int32_t a, d, sw = v->s[1], hold = v->s[2], nl = v->s[3], lp = v->s[4], cn = v->s[5];
     uint32_t i;
@@ -105,12 +107,20 @@ static void dkick_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
         int32_t b, x;
         ph += inc0 + span * (uint32_t)sw;
         sw = (sw * (int32_t)ks) >> 15;
-        if (type == DR_KTY_TRI)
-            b = osc_tri(ph);
-        else if (type == DR_KTY_ROUND)
-            b = (sine_i(ph) * 22000 + sine_i(ph << 1) * 8000 + sine_i(ph * 3u) * 4000) >> 15;
-        else
-            b = sine_i(ph);
+        switch (type) {
+        case DR_KTY_TRI: b = osc_tri(ph); break;
+        case DR_KTY_ROUND: b = (sine_i(ph) * 22000 + sine_i(ph << 1) * 8000 + sine_i(ph * 3u) * 4000) >> 15; break;
+        case DR_KTY_SQR: b = softclip(sine_i(ph) * 4); break;   /* (a sine driven square: rounded corners) */
+        case DR_KTY_FM:                                   /* (an octave above modulating it, the index falling with the sweep) */
+            b = sine_i(ph + ((uint32_t)(sine_i(ph << 1) * ((sw >> 4) + 300)) << 4));
+            break;
+        case DR_KTY_FOLD:                                 /* (the sine x3 folded back: odd, metallic partials) */
+            b = sine_i(ph) * 3;
+            while (b > 32767 || b < -32767)
+                b = b > 32767 ? 65534 - b : -65534 - b;
+            break;
+        default: b = sine_i(ph); break;
+        }
         x = (b * (a >> 5)) >> 15;                         /* (a: Q20 -> Q15) */
         a += d;
         if (cn > 0) {                                     /* the click: a windowed burst, mean 0 */
@@ -236,7 +246,7 @@ static void dsnare_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
     uint32_t inc2 = pitch_inc((uint32_t)clamp(b16 + clamp(e[1], 0, 127) * (12 << 4) / 127, 0, 2047));
     uint32_t kb = dv_kb(dr_tau(e[2], 30, 40)), kn = dv_kb(dr_tau(e[4], 32, 45));
     uint32_t ksn = dv_k(2500u), ksw = dv_k(15000u);
-    int32_t nlev = clamp(e[3], 0, 127) * 258, snap = clamp(e[6], 0, 127) * 258, drv = clamp(e[7], 0, 127);
+    int32_t nlev = clamp(e[3], 0, 127) * 258, snap = clamp(e[6], 0, 127) * 2 * v->vel, drv = clamp(e[7], 0, 127);   /* (SNAP with the velocity) */
     int32_t swd = clamp(e[8], 0, 127);                 /* SWEEP: up to an octave above, gliding down */
     int32_t ab, db, an, dn, sn = S->e[0], sw = S->e[1], x1 = S->x1;
     tsvf_t c;
