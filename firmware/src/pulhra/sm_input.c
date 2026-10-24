@@ -711,8 +711,16 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
     sm_step_eff(s, sd, &e);
     f[0] = &s->note[0]; f[1] = &s->vel; f[2] = &s->len; f[3] = &s->cond;
     for (i = 0; i < 4u; i++)
-        if (k[i])
+        if (k[i]) {
+            uint32_t old = i == 0u ? e.note[0] : 0u;
             *f[i] = (uint8_t)sm_field_turn(i, i == 0u ? e.note[0] : i == 1u ? e.vel : i == 2u ? e.len : e.cond, k[i]);
+            if (i == 0u && s->n > 1u && !sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {   /* a chord: NOTE moves every note (Tim) */
+                int32_t dn = (int32_t)s->note[0] - (int32_t)old;
+                uint32_t j;
+                for (j = 1; j < s->n && j < 4u; j++)
+                    s->note[j] = (uint8_t)clamp((int32_t)s->note[j] + dn, 0, 127);
+            }
+        }
     if (sel)                                              /* the selected track's volume */
         sm_turn_base(t, P_LEVEL, sel);
 }

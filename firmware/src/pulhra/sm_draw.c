@@ -367,6 +367,7 @@ typedef struct {
     int filled, dot;                                      /* locked on the held step; locked elsewhere */
     int dim, inv;                                         /* MIXER: the track muted (a dim ring); the selected track (label inverted) */
     int32_t v;                                            /* the value shown: the lock's on the held step */
+    uint8_t chord;                                        /* STEP NOTE: the trig's notes when more than one (a mark: x3) */
 } smd_knob_t;
 /* a note's name: C-1 .. G9 (b: 6 bytes) */
 static void smd_note(char *b, uint32_t n)
@@ -425,7 +426,11 @@ static void smd_step_knob(uint32_t k, smd_knob_t *o)
         e.cond = d->dcond;
     }
     switch (k) {
-    case 0: smd_note(o->val, e.note[0] & 127u); o->pos = (uint32_t)(e.note[0] & 127u) * 256u / 127u; break;
+    case 0:
+        smd_note(o->val, e.note[0] & 127u);
+        o->pos = (uint32_t)(e.note[0] & 127u) * 256u / 127u;
+        o->chord = (uint8_t)(p && p->n > 1u && !sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT]) ? (p->n > 4u ? 4u : p->n) : 0u);
+        break;
     case 1: smd_int(o->val, e.vel, 0); o->pos = (uint32_t)(e.vel > 1u ? e.vel - 1u : 0u) * 256u / 126u; break;
     case 2: i = e.len < SM_NLEN ? e.len : 0u; smd_upper(o->val, SM_LEN_N[i], 5u); o->pos = i * 256u / (SM_NLEN - 1u); break;
     default: sm_cond_name(e.cond, o->val); o->pos = sm_cond_place(e.cond) * 256u / (SM_COND_PLACES - 1u); break;
@@ -545,6 +550,7 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     uint32_t id = sm_page_param(k & 3u), t = sm_ui.trk % SM_NTRK;
     const char *unit;
     o->d = 0;
+    o->chord = 0;
     o->lab[0] = o->val[0] = 0;
     o->pos = 0;
     o->filled = o->dot = 0;
@@ -601,7 +607,7 @@ static uint32_t smd_knob_sig(uint32_t k)
     smd_knob_get(k, &o);
     h = smd_mix(h, sm_ui.page); h = smd_mix(h, smd_snd()->machine); h = smd_mix(h, (uint32_t)o.on);
     h = smd_mix(h, (uint32_t)o.v); h = smd_mix(h, (uint32_t)o.filled); h = smd_mix(h, (uint32_t)o.dot);
-    h = smd_mix(h, (uint32_t)(o.dim * 2 + o.inv));
+    h = smd_mix(h, (uint32_t)(o.dim * 2 + o.inv) + o.chord * 16u);
     for (i = 0; o.val[i]; i++)                            /* (the STEP page: the text is the value) */
         h = smd_mix(h, (uint8_t)o.val[i]);
     return h;
@@ -636,6 +642,10 @@ static void smd_knob(uint32_t k)
     if (o.on) {
         sm_px_text((60 - 12 * smd_len(o.lab)) / 2, 4, 2u, o.lab, T_TEXT, o.inv);
         sm_px_ring(SMD_RING_CX, SMD_RING_CY, SMD_RING_R, o.pos, o.filled, o.dot, o.dim);
+        if (o.chord) {                                    /* a chord or an interval on the trig: x3 in the corner over the ring */
+            char cm[3] = {'x', (char)('0' + o.chord), 0};
+            sm_px_text(60 - 13, 26, 1u, cm, T_TEXT, 1);
+        }
         sm_px_text((60 - 12 * smd_len(o.val)) / 2, 98, 2u, o.val, T_TEXT, 0);
     }
     smd_end();

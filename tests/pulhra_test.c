@@ -8930,6 +8930,36 @@ static int test_seq_track_copy(void)
     return bad;
 }
 
+/* a chord on a trig (Tim): STEP's NOTE moves every note, and x3 marks the NOTE ring */
+static int test_step_chord_note(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    draw_setup();
+    sm_step_toggle(0, 2);
+    stp(0, 2)->note[0] = 60;
+    stp(0, 2)->note[1] = 64;
+    stp(0, 2)->note[2] = 67;
+    stp(0, 2)->n = 3;
+    sm_ui.page = (uint8_t)page_by_name("STEP");
+    press(B_REC);
+    sm_input_poll();
+    key_dn(WHITE[2]);
+    sm_input_poll();
+    turn(EN_K1, 2);
+    sm_input_poll();
+    draw_full();
+    bad += check("CHORD: NOTE +2 on a three-note trig: every note up 2", stp(0, 2)->note[0] == 62u && stp(0, 2)->note[1] == 66u &&
+                 stp(0, 2)->note[2] == 69u);
+    bad += check("CHORD: ... x3 over the NOTE ring", lint_has("x3", 0, 0));
+    key_up(WHITE[2]);
+    sm_input_poll();
+    press(B_REC);
+    sm_input_poll();
+    return bad;
+}
+
 static int test_fx_dist_types(void)
 {
     double br[4], rm[4], base_br, base_rm, b2, r2, nul;
@@ -10751,6 +10781,7 @@ int main(void)
     bad += test_setup_nostrip();
     bad += test_msg_age();
     bad += test_seq_track_copy();
+    bad += test_step_chord_note();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }
