@@ -55,7 +55,9 @@ static int32_t dr_amp(track_t *t, voice_t *v, int32_t adsr)
         return 0;
     }
     v->env = 1 << 24;                                     /* (the ADSR's release never ends a hit) */
-    return v->vel * 258;                                  /* (velocity twice: the core's and this, a square law: 64 = -12 dB) */
+    return v->vel * 516;                                  /* (velocity twice: the core's and this, a square law: 64 = -12 dB; x2
+                                                             (+6 dB): a hit is short, it must stand up to the held machines.
+                                                             Never past 65532: voice_amp's s x amp stays below 2^31) */
 }
 
 /* ===================================================================== KICK === */
