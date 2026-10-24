@@ -732,7 +732,7 @@ static const preset_t DKIT_PRESETS[] = {
 };
 #define DR_CAT_KIT "DDDD"
 static const engine_t ENG_DKIT = {
-    .name = "KIT", .page_title = {"LANES", "SOUNDS"}, .presets = DKIT_PRESETS, .npresets = NELEM(DKIT_PRESETS),
+    .name = "DRUM", .page_title = {"LANES", "SOUNDS"}, .presets = DKIT_PRESETS, .npresets = NELEM(DKIT_PRESETS),
     .note_on = dkit_note_on, .render = dkit_render, .keys = dkit_keys,
     .mem = sizeof(dr_slot_t) * NVOICE, .amp = dr_amp, .oneshot = 1, .poly = 6,
     .knob = {P_E0, P_E1, P_E2, P_E3},

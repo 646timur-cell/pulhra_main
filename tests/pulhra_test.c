@@ -1526,7 +1526,7 @@ static int test_edit_layer_every_machine(void)
     for (play = 0; play < 2u; play++)
         for (t = 0; t < SM_NTRK; t++)
             for (m = 0; m < SM_NMACHINE; m++) {
-                if (m == SM_KIT_MACH)                     /* (the KIT: not on the DRUM page, its lane machines are) */
+                if (m >= MF_PAGE_4 && m != SM_KIT_MACH)   /* (the DRUM page: DRUM (the KIT) alone, its lanes the drum machines) */
                     continue;
                 in_reset();
                 voices_power_on();
@@ -1543,9 +1543,9 @@ static int test_edit_layer_every_machine(void)
                     press(B_OCTUP);
                     sm_input_poll();
                 }
-                key_dn(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
+                key_dn(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
                 sm_input_poll();
-                key_up(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
+                key_up(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
                 sm_draw();
                 layer_let_go(B_EDIT);
                 trk_note_on(&trk[t], 64, 100);            /* (during the fade: xp_note) */
@@ -1558,8 +1558,8 @@ static int test_edit_layer_every_machine(void)
                 }
                 if (!sm_mach_ok(m, t))                    /* (the DRUM page: T4's alone; elsewhere its keys load nothing) */
                     ok &= ksnd(t)->machine != m;
-                else if (m >= MF_PAGE_4)                  /* (KICK .. CYM, PERC on T4: the KIT, its lane in edit that machine) */
-                    ok &= ksnd(t)->machine == SM_KIT_MACH && trk[t].engine == ENGI_DKIT && ksnd(t)->p[P_E0 + sm_kit_lane % 4u] == (int8_t)sm_place_kmach(m);
+                else if (m >= MF_PAGE_4)                  /* (DRUM on T4: the KIT) */
+                    ok &= ksnd(t)->machine == SM_KIT_MACH && trk[t].engine == ENGI_DKIT;
                 else if (!(ksnd(t)->machine == m && trk[t].engine == sm_engine_of(m) && !trk[t].xf_on)) {
                     printf("  every machine: T%u machine %u (%s) play %u: model %u core %u xf %u\n", t + 1u, m,
                            ENGINES[sm_engine_of(m)]->name, play, ksnd(t)->machine, trk[t].engine, trk[t].xf_on);
@@ -1585,7 +1585,7 @@ static int test_edit_layer_every_machine(void)
     for (t = 0; t < SM_NTRK; t++)                             /* every machine to every machine, notes on through the switch */
         for (pg = 0; pg < SM_NMACHINE; pg++)
             for (m = 0; m < SM_NMACHINE; m++) {
-                if (m == SM_KIT_MACH)                     /* (the KIT: not on the DRUM page, its lane machines are) */
+                if (m >= MF_PAGE_4 && m != SM_KIT_MACH)   /* (the DRUM page: DRUM (the KIT) alone, its lanes the drum machines) */
                     continue;
                 in_reset();
                 voices_power_on();
@@ -1604,9 +1604,9 @@ static int test_edit_layer_every_machine(void)
                     press(B_OCTUP);
                     sm_input_poll();
                 }
-                key_dn(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
+                key_dn(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
                 sm_input_poll();
-                key_up(WHITE[m >= MF_PAGE_4 ? sm_place_kmach(m) : m - sm_epage_first(sm_lay_epage)]);
+                key_up(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
                 layer_let_go(B_EDIT);
                 trk_note_on(&trk[t], 64, 100);
                 for (b = 0; b < 60u; b++)
@@ -9095,6 +9095,24 @@ static int test_kit_lane_pages(void)
                 printf("pulhra: KITPAGES: L%u %s wrong\n", L + 1u, e->name);
         }
     bad += check("KITPAGES: L1..L4, every machine: EDIT 1 / 2 its eight values (no BPM, no MIDI)", ok);
+    sm_kit_lane = 0;
+    ksnd(3)->p[P_E0] = DR_KM_KICK;
+    sm_lane_machine(0);
+    sm_ui.page = (uint8_t)page_by_name("EDIT 1");
+    turn(EN_SELECT, 10);                                  /* (SELECT past the end: the last, PERC) */
+    sm_input_poll();
+    draw_full();
+    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to PERC (its values the PERC's)", ksnd(3)->p[P_E0] == DR_KM_PERC &&
+                 cpat()->lane[0][0] == DPERC_PRESETS[0].e[0] && lint_has("PERC", 0, 0));
+    layer_hold(B_EDIT);
+    while (sm_lay_epage != 3u) {
+        press(B_OCTUP);
+        sm_input_poll();
+    }
+    layer_draw(SML_EDIT);
+    bad += check("KITPAGES: the DRUM page: one machine, DRUM, lit (T4 a KIT)", lint_has("DRUM", 0, 0) && !lint_has("KICK", 0, 0) &&
+                 !lint_has("SNAR", 0, 0) && lint_machines() == 1u);
+    layer_let_go(B_EDIT);
     return bad;
 }
 
@@ -9117,13 +9135,16 @@ static int test_kit_lanes(void)
         press(B_OCTUP);
         sm_input_poll();
     }
-    key_dn(WHITE[1]);                                     /* G3: SNARE */
+    key_dn(WHITE[0]);                                     /* F3: DRUM, the page's one machine (the KIT) */
     sm_input_poll();
-    key_up(WHITE[1]);
+    key_up(WHITE[0]);
     layer_let_go(B_EDIT);
+    sm_ui.page = (uint8_t)page_by_name("EDIT 1");
+    turn(EN_SELECT, 1);                                   /* L1: KICK -> SNARE */
+    sm_input_poll();
     play_blocks(10);
     pt = cpat();
-    bad += check("KITL: T4 + the DRUM page's SNARE: a KIT, its L1 a SNARE (its first sound), on the core too",
+    bad += check("KITL: T4 + DRUM, SELECT +1 on EDIT 1: a KIT, its L1 a SNARE (its first sound), on the core too",
                  ksnd(3)->machine == SM_KIT_MACH && trk[3].engine == ENGI_DKIT && ksnd(3)->p[P_E0] == DR_KM_SNARE &&
                  pt->lane[0][0] == DSNARE_PRESETS[0].e[0] && dr_lp[3][0][0] == DSNARE_PRESETS[0].e[0]);
     sm_ui.page = (uint8_t)page_by_name("EDIT 1");

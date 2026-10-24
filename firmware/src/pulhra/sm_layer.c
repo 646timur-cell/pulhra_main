@@ -92,13 +92,17 @@ static uint32_t sm_layer_button(uint32_t l)
 /* the page of machines (0..2) a machine is on, its first machine, how many it has */
 static uint32_t sm_epage_of(uint32_t machine) { return machine >= MF_PAGE[3] ? 3u : machine >= MF_PAGE[2] ? 2u : machine >= MF_PAGE[1] ? 1u : 0u; }
 static uint32_t sm_epage_first(uint32_t pg) { return MF_PAGE[pg % SM_NEPAGE]; }
-static uint32_t sm_epage_n(uint32_t pg)                  /* (the DRUM page: its lane machines, the KIT's own place not on it) */
+static uint32_t sm_epage_n(uint32_t pg)                  /* (the DRUM page (Tim): one machine, DRUM (the KIT): its lanes pick KICK .. PERC) */
 {
-    return (uint32_t)MF_PAGE[pg % SM_NEPAGE + 1u] - MF_PAGE[pg % SM_NEPAGE] - (pg % SM_NEPAGE == 3u ? 1u : 0u);
+    return pg % SM_NEPAGE == 3u ? 1u : (uint32_t)MF_PAGE[pg % SM_NEPAGE + 1u] - MF_PAGE[pg % SM_NEPAGE];
 }
 static uint32_t sm_epage_mach(uint32_t pg, uint32_t w)  /* the machine on white key w of page pg */
 {
-    return pg % SM_NEPAGE == 3u ? sm_kmach_place(w) : sm_epage_first(pg) + w;
+    return pg % SM_NEPAGE == 3u ? SM_KIT_MACH : sm_epage_first(pg) + w;
+}
+static int sm_epage_on(uint32_t pg, uint32_t w, uint32_t cur)   /* is key w of page pg the machine in use (cur: sm_mach_shown) */
+{
+    return pg % SM_NEPAGE == 3u ? sm_snd_kit(sm_ui_sound()) : sm_epage_mach(pg, w) == cur;
 }
 
 static void sm_layer_open(uint32_t l)
@@ -432,7 +436,7 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
                     sd->p[P_E0 + sm_kit_lane % 4u] = (int8_t)sm_place_kmach(m);
                     sm_param_push(SM_KIT_TRK, P_E0 + sm_kit_lane % 4u);
                     sm_lane_machine(sm_kit_lane % 4u);
-                } else {
+                } else if (m != SM_KIT_MACH || !sm_snd_kit(sm_ui_sound())) {   /* (DRUM on a KIT already: kept, its lanes too) */
                     sm_sound_load(m, 0);
                     if (m == SM_KIT_MACH)
                         sm_kit_lane = 0;
