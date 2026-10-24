@@ -85,10 +85,10 @@ static int test_engines(void)
         ok &= ENGINES[e]->npresets <= 16u && str_eq(N_ENGNAME[e], ENGINES[e]->name);
     }
     bad += check("MONOFM: the machines' names, favourites (row 0), categories", ok);
-    /* the pool (app.ld POOL, 0x5A000): what the stock build keeps besides the engine memory (276,248 B, CI's log), four
-     * parts of ENG_MEM_PART, the global delay 32 KiB shorter; at least 8 KiB spare (tools/build.py) */
+    /* the pool (app.ld POOL, 0x55800 since PULHRA's 64 steps took 18 KiB of it for the RAM): the PULHRA build's (332,352 B,
+     * CI's log 24.10: four parts of ENG_MEM_PART, the global delay of MONOFM) and at least 8 KiB spare (tools/build.py) */
     bad += check("MONOFM: four parts fit the pool with 8 KiB spare",
-                 276248u - 2u * 65536u + sizeof dly_buf + NPART * ENG_MEM_PART + 8192u <= 0x5A000u);
+                 332352u - 98304u - 4u * 28672u + sizeof dly_buf + NPART * ENG_MEM_PART + 8192u <= 0x55800u);
     return bad;
 }
 
