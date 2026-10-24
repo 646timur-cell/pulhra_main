@@ -150,7 +150,7 @@ static int midi_enqueue(uint32_t pkt, uint32_t source)
         return 0;
     }
     midi_in_q[at] = pkt;
-    midi_in_ms[at] = 0;
+    midi_in_ms[at] = fm1_ms;
     midi_in_source[at] = (uint8_t)source;
     RING_PUBLISH();
     mi_w++;
@@ -4599,7 +4599,8 @@ static void midi_reset(void)
     for (uint32_t t = 0; t < SM_NTRK; t++)               /* (the MIDI page's routing as at boot: an earlier test may turn it) */
         sm_midi_ch[t] = (uint8_t)(t + 1u);
     sm_midi_src = 1;
-    sm_midi_trn = SM_TRN_AUTO;
+    sm_midi_clk = SM_CLK_AUTO;
+    sm_midi_trnoff = 0;
     seq_reset();
     host_ticks = 1000u;
 }
@@ -9020,18 +9021,29 @@ static int test_midi_pages(void)
     bad += check("SETUP knob: ... K1 up: back to 1", sm_midi_ch[0] == 1u);
     shift_press(B_HOME);                                  /* SETUP (the next page of the MENU family) */
     bad += check("SETUP knob: SHIFT+HOME again: the SETUP page", !strcmp(sm_cur_page()->name, "SETUP"));
-    turn(EN_K1, 1);                                       /* MODE: 0 -> 1 */
+    turn(EN_K2, 1);                                       /* K2 MODE: 0 -> 1 */
     sm_input_poll();
-    bad += check("SETUP knob: K1 (MODE) turns the pattern change mode", smp.mode == 1u);
-    turn(EN_K1, -2);                                      /* 1 - 2 -> 2, not 255 */
+    bad += check("SETUP knob: K2 (MODE) turns the pattern change mode", smp.mode == 1u);
+    turn(EN_K2, -2);                                      /* 1 - 2 -> 2, not 255 */
     sm_input_poll();
-    bad += check("SETUP knob: ... K1 down two: wraps to DIR.J (2)", smp.mode == 2u);
-    turn(EN_K2, -1);                                      /* SRC: 1 -> 0 (USB) */
+    bad += check("SETUP knob: ... K2 down two: wraps to JMP (2)", smp.mode == 2u);
+    turn(EN_K4, -1);                                      /* K4 SRC: 1 -> 0 (USB) */
     sm_input_poll();
-    bad += check("SETUP knob: K2 (SRC) down: USB", sm_midi_src == 0u);
-    turn(EN_K2, -1);                                      /* 0 -> JACK (2), not 255 */
+    bad += check("SETUP knob: K4 (SRC) down: USB", sm_midi_src == 0u);
+    turn(EN_K4, -1);                                      /* 0 -> JACK (2), not 255 */
     sm_input_poll();
     bad += check("SETUP knob: ... and wraps up JACK (2), never 255", sm_midi_src == 2u);
+    turn(EN_K1, -1);                                      /* K1 CLK: AUTO -> JACK (round) */
+    sm_input_poll();
+    bad += check("SETUP knob: K1 (CLK) down: wraps to JACK", sm_midi_clk == SM_CLK_JACK);
+    turn(EN_K3, 1);                                       /* K3 TRNS: ON -> OFF */
+    sm_input_poll();
+    sm_ux_mk1();
+    draw_full();
+    bad += check("SETUP knob: K3 (TRNS) OFF; the page: CLK MODE TRNS SRC, JACK JMP OFF JACK", sm_midi_trnoff && lint_has("CLK", 0, 0) &&
+                 lint_has("TRNS", 0, 0) && lint_has("JMP", 0, 0) && lint_has("OFF", 0, 0) && lint_frame("setup") == 0);
+    sm_midi_clk = SM_CLK_AUTO;
+    sm_midi_trnoff = 0;
     for (k = 0; k < SM_NTRK; k++) {                       /* (leave nothing held: the books clear, the tracks released) */
         sm_mn[k][0] = sm_mn[k][1] = sm_mn[k][2] = sm_mn[k][3] = 0;
         sm_kn[k][0] = sm_kn[k][1] = sm_kn[k][2] = sm_kn[k][3] = 0;
@@ -9941,49 +9953,105 @@ static int test_midi_transport(void)
 {
     int bad = 0;
     midi_reset();
-    sm_midi_src = 2u;                                     /* JACK */
+    sm_midi_src = 2u;                                     /* SRC JACK, CLK AUTO: the jack's clock and transport */
     midi_enqueue(0xFu | 0xFAu << 8, 2u);                  /* Start from the jack */
     mix_blocks(1);
-    bad += check("TRNSIN: JACK, AUTO: MIDI Start from the jack plays", sm_playing);
+    bad += check("TRNSIN: SRC JACK, CLK AUTO, TRNS ON: MIDI Start from the jack plays", sm_playing);
     midi_enqueue(0xFu | 0xFCu << 8, 2u);
     mix_blocks(1);
     bad += check("TRNSIN: ... Stop stops", !sm_playing);
-    midi_enqueue(0xFu | 0xFAu << 8, 1u);                  /* (USB: the source filter drops it) */
+    midi_enqueue(0xFu | 0xFAu << 8, 1u);
     mix_blocks(1);
-    bad += check("TRNSIN: ... a Start from USB: nothing (the source is the jack)", !sm_playing);
+    bad += check("TRNSIN: ... a Start from USB: nothing (the clock's port is the jack)", !sm_playing);
     midi_enqueue(0xFu | 0xFBu << 8, 2u);                  /* Continue */
     mix_blocks(1);
     bad += check("TRNSIN: ... Continue plays", sm_playing);
     midi_enqueue(0xFu | 0xFCu << 8, 2u);
     mix_blocks(1);
-    midi_reset();                                         /* (INT, AUTO) */
+    midi_reset();                                         /* (SRC INT, CLK AUTO: the panel's clock) */
     midi_enqueue(0xFu | 0xFAu << 8, 2u);
-    mix_blocks(1);
-    bad += check("TRNSIN: INT, AUTO: a Start is no transport", !sm_playing);
-    sm_midi_trn = SM_TRN_ON;
     midi_enqueue(0xFu | 0xFAu << 8, 1u);
     mix_blocks(1);
-    bad += check("TRNSIN: INT, ON: a Start from USB plays", sm_playing);
+    bad += check("TRNSIN: SRC INT, CLK AUTO (INT): no transport from any port", !sm_playing);
+    sm_midi_clk = SM_CLK_USB;
+    midi_enqueue(0xFu | 0xFAu << 8, 1u);
+    mix_blocks(1);
+    bad += check("TRNSIN: CLK USB: a Start from USB plays", sm_playing);
     midi_enqueue(0xFu | 0xFCu << 8, 1u);
     mix_blocks(1);
-    sm_midi_src = 2u;
-    sm_midi_trn = SM_TRN_OFF;
+    sm_midi_src = 0u;                                     /* (the notes from USB alone: the clock's port is its own) */
+    sm_midi_clk = SM_CLK_JACK;
     midi_enqueue(0xFu | 0xFAu << 8, 2u);
     mix_blocks(1);
-    bad += check("TRNSIN: JACK, OFF: no transport", !sm_playing);
+    bad += check("TRNSIN: SRC USB, CLK JACK: the jack's Start plays (the clock's port whatever SRC)", sm_playing);
+    midi_enqueue(0xFu | 0xFCu << 8, 2u);
+    mix_blocks(1);
+    sm_midi_trnoff = 1;
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);
+    mix_blocks(1);
+    bad += check("TRNSIN: TRNS OFF: no transport", !sm_playing);
     nor_wipe();
     in_reset();
     host_ticks = 1000u;
-    sm_midi_trn = SM_TRN_OFF;
+    sm_midi_clk = SM_CLK_USB;
+    sm_midi_trnoff = 1;
     sm_midi_src = 2u;
     sm_phash ^= 1u;                                       /* (the flash wiped: whatever the RAM says is not saved yet) */
     bad += check("TRNSIN: saved ...", sm_store_all() == 0);
-    sm_midi_trn = SM_TRN_ON;
+    sm_midi_clk = SM_CLK_AUTO;
+    sm_midi_trnoff = 0;
     bank_reboot();
-    bad += check("TRNSIN: ... power off, on: OFF, JACK back", sm_midi_trn == SM_TRN_OFF && sm_midi_src == 2u);
+    bad += check("TRNSIN: ... power off, on: CLK USB, TRNS OFF, SRC JACK back", sm_midi_clk == SM_CLK_USB && sm_midi_trnoff && sm_midi_src == 2u);
     nor_wipe();
     midi_reset();
     in_reset();
+    return bad;
+}
+
+
+/* the external clock (SYNC AUTO with JACK): 24 pulses a beat set the tempo (here 125.0: a pulse every 20 ms) and the steps lock to
+ * every 6th pulse, the panel's tempo (120.0) not used while the pulses come; they stop: the panel's tempo again */
+static int test_midi_clock_in(void)
+{
+    int bad = 0;
+    uint32_t ms, k, steps = 0, last = 0, maxdev = 0, n0, base_ms, c0;
+    midi_reset();
+    sm_midi_src = 2u;                                     /* JACK, SYNC AUTO: the clock and the transport */
+    for (k = 0; k < 16u; k++)
+        sm_step_toggle(0, k);
+    base_ms = fm1_ms;
+    c0 = seq_clock;
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);                  /* Start */
+    for (ms = 0; ms < 4000u; ms++) {
+        fm1_ms = base_ms + ms;
+        if (ms % 20u == 0u)
+            midi_enqueue(0xFu | 0xF8u << 8, 2u);          /* a pulse every 20 ms: 125.0 BPM */
+        while (seq_clock < c0 + (uint32_t)(((uint64_t)(ms + 1u) * FS) / 1000u)) {   /* (the audio up to this millisecond's end) */
+            events_block(CTL);
+            seq_clock += CTL;
+        }
+    }
+    bad += check("CLKIN: 24 pulses a beat of 480 ms: the tempo 125.0 (the panel's 120.0 not used)", sm_bpm_eff() == 1250u && smp.bpm10 == 1200u);
+    n0 = on_n[0];
+    (void)n0;
+    for (k = 0; k < seq_nev && k < 1024u; k++) {          /* the step starts after the first second: every 120 ms (6 pulses) */
+        const seq_ev_t *e = &seq_ev[k];
+        if (!e->on || e->t != 0u || e->at < c0 + FS)
+            continue;
+        if (last) {
+            uint32_t d = e->at - last, want = FS * 120u / 1000u, dev = d > want ? d - want : want - d;
+            maxdev = dev > maxdev ? dev : maxdev;
+            steps++;
+        }
+        last = e->at;
+    }
+    printf("pulhra: CLKIN: %u steps, the largest deviation from 120 ms %u samples\n", steps, maxdev);
+    bad += check("CLKIN: the steps every 6 pulses (120 ms), within 2 blocks", steps >= 20u && maxdev <= 2u * CTL);
+    fm1_ms = base_ms + 4000u + SM_EXT_TIMEOUT_MS + 10u;
+    bad += check("CLKIN: no pulse for a while: the panel's tempo again", sm_bpm_eff() == 1200u);
+    midi_enqueue(0xFu | 0xFCu << 8, 2u);
+    mix_blocks(1);
+    midi_reset();
     return bad;
 }
 
@@ -10175,6 +10243,7 @@ int main(void)
     bad += test_splash();
     bad += test_quick_save_msg();
     bad += test_midi_transport();
+    bad += test_midi_clock_in();
     bad += test_shift_keys();
     bad += test_shift_accel();
     bad += test_kbd_readout();

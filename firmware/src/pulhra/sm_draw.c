@@ -129,7 +129,7 @@ static uint32_t smd_hdr_sig(void)
     const sm_sound_t *s = smd_snd();
     uint32_t h = 2166136261u;
     h = smd_mix(h, smd_muted()); h = smd_mix(h, sm_ui.trk); h = smd_mix(h, s->machine); h = smd_mix(h, s->preset); h = smd_mix(h, sm_gid_of(smp.cur));
-    h = smd_mix(h, smp.bpm10); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg); h = smd_mix(h, (uint32_t)(uint16_t)sm_msg_val);
+    h = smd_mix(h, sm_bpm_eff()); h = smd_mix(h, smd_play); h = smd_mix(h, sm_msg); h = smd_mix(h, (uint32_t)(uint16_t)sm_msg_val);
     if (sm_msg_blinks(sm_msg))
         h = smd_mix(h, 0xB1u + smd_blink());
     h = smd_mix(h, (uint32_t)(uint8_t)sm_ui.oct);
@@ -217,7 +217,7 @@ static void smd_header(void)
     /* right, from the right edge: A01 120.0 >   (while recording: 120.0 > REC, the pattern gives way). The keyboard's LATCH on the
      * selected track (ARP held + F3): LAT, inverted, in the pattern's place (the pattern gives way to it as to REC); with REC on
      * too, in the tempo's place (the tempo gives way): the left side (T1 KEYS +2, at most x 110) is never covered */
-    fmt_fix(t, smp.bpm10, 1);
+    fmt_fix(t, (int32_t)sm_bpm_eff(), 1);                 /* (the external clock's while it runs) */
     smd_gname(a, sm_gid_of(smp.cur), 0);
     x = 240 - (rec ? 12 * 3 + 6 : 0) - 12;
     sm_px_text(x, 2, 2u, smd_play ? "\x10" : "\x11", T_BG, 0);
@@ -459,30 +459,23 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         o->dim = 0; o->inv = 0;
         return;
     }
-    if (sm_page_home() == SMH_SETUP) {
+    if (sm_page_home() == SMH_SETUP) {                    /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC (the notes' MIDI source) */
+        static const char *const CLK_N[SM_CLK_COUNT] = {"AUTO", "INT", "USB", "JACK"};
+        static const char *const PM_N[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
+        static const char *const SRC_N[3] = {"USB", "INT", "JACK"};
+        static const char *const LB[4] = {"CLK", "MODE", "TRNS", "SRC"};
+        uint32_t i, kk = k & 3u, n = kk == 0u ? SM_CLK_COUNT : kk == 1u ? SM_PM_COUNT : kk == 2u ? 2u : 3u;
+        uint32_t v = kk == 0u ? sm_midi_clk : kk == 1u ? smp.mode % SM_PM_COUNT : kk == 2u ? sm_midi_trnoff : sm_midi_src % 3u;
+        const char *val = kk == 0u ? CLK_N[v % SM_CLK_COUNT] : kk == 1u ? PM_N[v] : kk == 2u ? (v ? "OFF" : "ON") : SRC_N[v];
         o->on = 1;
-        if ((k & 3u) == 0u) {
-            o->lab[0] = 'M'; o->lab[1] = 'O'; o->lab[2] = 'D'; o->lab[3] = 'E'; o->lab[4] = 0;
-            static const char *const PM_N[] = {"SEQ", "DIR.S", "DIR.J"};
-            smd_upper(o->val, PM_N[smp.mode % SM_PM_COUNT], 5u);
-            o->v = (int32_t)smp.mode;
-            o->pos = smp.mode * 256u / (SM_PM_COUNT - 1u);
-            o->dim = 0; o->inv = 0;
-        } else if ((k & 3u) == 1u) {
-            o->lab[0] = 'S'; o->lab[1] = 'R'; o->lab[2] = 'C'; o->lab[3] = 0;
-            static const char *const SRC_N[] = {"USB", "INT", "JACK"};
-            smd_upper(o->val, SRC_N[sm_midi_src % 3], 5u);
-            o->v = (int32_t)sm_midi_src;
-            o->pos = sm_midi_src * 256u / 2u;
-            o->dim = 0; o->inv = 0;
-        } else if ((k & 3u) == 2u) {                      /* TRNS: the transport in, AUTO (on with JACK) / ON / OFF */
-            static const char *const TR_N[SM_TRN_COUNT] = {"AUTO", "ON", "OFF"};
-            o->lab[0] = 'T'; o->lab[1] = 'R'; o->lab[2] = 'N'; o->lab[3] = 'S'; o->lab[4] = 0;
-            smd_upper(o->val, TR_N[sm_midi_trn % SM_TRN_COUNT], 5u);
-            o->v = (int32_t)sm_midi_trn;
-            o->pos = sm_midi_trn * 256u / (SM_TRN_COUNT - 1u);
-            o->dim = !sm_midi_trn_on(); o->inv = 0;
-        } else { o->on = 0; }
+        for (i = 0; LB[kk][i]; i++)
+            o->lab[i] = LB[kk][i];
+        o->lab[i] = 0;
+        smd_upper(o->val, val, 5u);
+        o->v = (int32_t)v;
+        o->pos = v * 256u / (n - 1u);
+        o->dim = (uint8_t)(kk == 2u && !sm_midi_clk_port());   /* (TRNS dim with no external clock: INT) */
+        o->inv = 0;
         return;
     }
     if (sm_page_home() == SMH_MIXER) {
@@ -502,9 +495,9 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         o->val[5] = 0;
     } else if (k == 0u) {
         o->lab[0] = 'B'; o->lab[1] = 'P'; o->lab[2] = 'M'; o->lab[3] = 0;
-        fmt_fix(o->val, smp.bpm10, 1);
-        o->v = smp.bpm10;
-        o->pos = ((uint32_t)clamp(smp.bpm10, 300, 3000) - 300u) * 256u / 2700u;
+        fmt_fix(o->val, (int32_t)sm_bpm_eff(), 1);        /* (the external clock's while it runs: K1 waits under it) */
+        o->v = (int32_t)sm_bpm_eff();
+        o->pos = (sm_bpm_eff() - 300u) * 256u / 2700u;
     } else if (k == 1u) {
         const char *w = "SWING";
         for (i = 0; w[i]; i++)

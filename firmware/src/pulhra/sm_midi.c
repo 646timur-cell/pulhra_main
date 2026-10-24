@@ -28,14 +28,17 @@ static uint32_t sm_kn[SM_NTRK][4];                        /* the notes the keybo
  * inputs (a TRS-only rig works out of the box). */
 static uint8_t sm_midi_ch[SM_NTRK] = {1, 2, 3, 4};
 static uint8_t sm_midi_src = 1;
-/* the SETUP page's K3, TRNS: the transport in (MIDI Start / Continue / Stop play and stop the sequencer): 0 AUTO (on while
- * the source is JACK, the TRS jack alone: a hardware rig's clock master; off for USB and INT), 1 ON (from the source),
- * 2 OFF. The project saves it (sm_bank.c, version 3's byte after the source) */
-enum { SM_TRN_AUTO, SM_TRN_ON, SM_TRN_OFF, SM_TRN_COUNT };
-static uint8_t sm_midi_trn = SM_TRN_AUTO;
-static uint32_t sm_midi_trn_on(void)
+/* the SETUP page (SHIFT + HOME): K1 CLK, the clock's source: AUTO (the default: the jack when SRC is JACK, else the panel), INT
+ * (the panel's tempo), USB, JACK: from that port MIDI clock is the tempo and the steps' phase (sm_ext_pulse); K3 TRNS, the
+ * transport in: ON (the default) Start / Continue / Stop from the clock's port play and stop the sequencer, OFF not. The clock
+ * and the transport come from their port whatever SRC (the notes' source) lets in. The project saves both (sm_bank.c, version
+ * 3's byte after the source: CLK in bits 0..1, TRNS OFF bit 2; 0 = AUTO, ON) */
+enum { SM_CLK_AUTO, SM_CLK_INT, SM_CLK_USB, SM_CLK_JACK, SM_CLK_COUNT };
+static uint8_t sm_midi_clk = SM_CLK_AUTO, sm_midi_trnoff;
+static uint32_t sm_midi_clk_port(void)                   /* the port of the external clock: 1 USB, 2 the jack, 0 none (INT) */
 {
-    return sm_midi_trn == SM_TRN_ON || (sm_midi_trn == SM_TRN_AUTO && sm_midi_src == 2u);
+    uint32_t c = sm_midi_clk == SM_CLK_AUTO ? (sm_midi_src == 2u ? SM_CLK_JACK : SM_CLK_INT) : sm_midi_clk;
+    return c == SM_CLK_USB ? 1u : c == SM_CLK_JACK ? 2u : 0u;
 }
 static volatile uint8_t sm_midi_ch_release[SM_NTRK];     /* a track's channel changed (sm_input.c sets its byte, the drain
                                                              clears it: a byte each side, no read-modify-write between the
@@ -113,6 +116,45 @@ static void sm_kbd_note(uint32_t t, uint32_t note, uint32_t vel)
     }
 }
 
+/* the external clock (24 pulses a beat, 6 a 1/16): the tempo from the time of a whole beat of pulses (the stamps are the
+ * USB poll's / the UART's milliseconds: a beat averages their jitter, then a quarter of each new estimate), published for
+ * sm_bpm_eff; and the phase: on the pulse that starts a step of the pattern's grid (6 x 8 / m pulses: *, /2 .. /8 and *2;
+ * *4 and *8 fall between pulses: tempo only), the step due within a quarter step is started now, one started up to a quarter
+ * step early has its next start moved to a whole step from now. A gap of SM_EXT_TIMEOUT_MS starts the measuring over */
+static uint32_t sm_ext_ts[25], sm_ext_n, sm_ext_cnt;
+static void sm_ext_pulse(uint32_t ms)
+{
+    uint32_t m8, per, step_q8, q;
+    if (sm_ext_n && (uint32_t)(ms - sm_ext_ts[(sm_ext_n - 1u) % 25u]) >= SM_EXT_TIMEOUT_MS)
+        sm_ext_n = 0;                                     /* (a gap: measure anew) */
+    sm_ext_ts[sm_ext_n % 25u] = ms;
+    sm_ext_n++;
+    if (sm_ext_n > 24u) {
+        uint32_t dt = ms - sm_ext_ts[(sm_ext_n - 25u) % 25u];   /* (a beat: 24 pulses ago) */
+        if (dt >= 200u && dt <= 2000u) {                  /* (30 .. 300 BPM) */
+            uint32_t b = (6000000u / dt + 5u) / 10u, e = sm_ext_bpm10;
+            sm_ext_bpm10 = (uint16_t)(e ? (e * 3u + b + 2u) / 4u : b);
+        }
+    }
+    sm_ext_last_ms = ms;
+    if (!sm_playing)
+        return;
+    q = sm_ext_cnt++;                                     /* (the first pulse after Start is the downbeat: pulse 0) */
+    m8 = SM_SPEED8[sm_speed_place(smp.pat[sm_play_pat % SM_NPAT].speed)];
+    if (48u % m8 || !sm_ext_bpm10)
+        return;
+    per = 48u / m8;
+    if (q % per)
+        return;
+    step_q8 = sm_step_q8();
+    q = step_q8 / 4u;
+
+    if (sm_next_q8 <= q)
+        sm_next_q8 = 0;                                   /* (late: the step starts now) */
+    else if (sm_next_q8 >= step_q8 - q && sm_next_q8 < step_q8)
+        sm_next_q8 = step_q8;                             /* (early: its next a whole step from this pulse) */
+}
+
 static void sm_midi_drain(void)
 {
     uint32_t t, mute = sm_mute_eff();
@@ -140,21 +182,27 @@ static void sm_midi_drain(void)
         uint32_t note = (pkt >> 16) & 0x7Fu, vel = (pkt >> 24) & 0x7Fu, ch;
         RING_PUBLISH();
         mi_r++;
-        /* the SETUP page's MIDI source: USB (0) the USB port alone, INT (1) both merged, JACK (2) the TRS jack alone */
-        if ((sm_midi_src == 0u && src != 1u) || (sm_midi_src == 2u && src != 2u))
+        if ((pkt & 0x0Fu) == 0x0Fu && status == 0xF8u) {  /* MIDI clock from the clock's port: the tempo, the steps' phase */
+            if (src == sm_midi_clk_port())
+                sm_ext_pulse(midi_in_ms[at]);
             continue;
-        if ((pkt & 0x0Fu) == 0x0Fu && status >= 0xFAu && status <= 0xFCu) {   /* realtime: the transport in (TRNS) */
-            if (sm_midi_trn_on()) {
+        }
+        if ((pkt & 0x0Fu) == 0x0Fu && status >= 0xFAu && status <= 0xFCu) {   /* realtime from the clock's port: the transport in */
+            if (src == sm_midi_clk_port() && !sm_midi_trnoff) {
                 if (status == 0xFCu) {
                     sm_seq_stop();
                 } else {
                     if (status == 0xFAu && sm_playing)
                         sm_seq_stop();                    /* (Start: from the top, playing or not; Continue: on if stopped) */
                     sm_seq_play();
+                    sm_ext_cnt = 0;                       /* (the pulses count the grid from here) */
                 }
             }
             continue;
         }
+        /* the SETUP page's MIDI source (the notes): USB (0) the USB port alone, INT (1) both merged, JACK (2) the TRS jack alone */
+        if ((sm_midi_src == 0u && src != 1u) || (sm_midi_src == 2u && src != 2u))
+            continue;
         if ((hi != 0x80u && hi != 0x90u) || (pkt & 0x0Fu) != hi >> 4)
             continue;                                     /* (a SysEx byte, realtime, CC ..) */
         for (ch = 0; ch < SM_NTRK; ch++) {                /* the MIDI page: every track on the channel plays it (a layer) */

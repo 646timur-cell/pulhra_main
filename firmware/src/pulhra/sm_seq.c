@@ -90,11 +90,23 @@ static volatile uint8_t sm_rec_mtrk = 0xFFu;
 /* the step playing on track t (the screen's playhead) */
 static uint32_t sm_seq_pos(uint32_t t) { return sm_pos[t % SM_NTRK]; }
 
+/* the external clock (sm_midi.c, the SETUP page's SYNC): its tempo measured over a beat of MIDI clock (24 pulses; 0: none yet)
+ * and the time of the last pulse. While pulses come (none for SM_EXT_TIMEOUT_MS: the tempo is the panel's again) it is the
+ * tempo of everything: the steps, the arp, the delay's divisions, the header */
+#define SM_EXT_TIMEOUT_MS 300u
+static volatile uint16_t sm_ext_bpm10;
+static volatile uint32_t sm_ext_last_ms;
+static uint32_t sm_bpm_eff(void)
+{
+    uint32_t e = *(volatile uint16_t *)&sm_ext_bpm10;
+    if (e && (uint32_t)(fm1_ms - *(volatile uint32_t *)&sm_ext_last_ms) < SM_EXT_TIMEOUT_MS)
+        return (uint32_t)clamp((int32_t)e, 300, 3000);
+    return (uint32_t)clamp(smp.bpm10, 300, 3000);         /* 30.0 .. 300.0 BPM */
+}
 /* a 1/16 at the tempo, in q8 samples (the arpeggiator's clock: the tempo's alone) */
 static uint32_t sm_tempo_q8(void)
 {
-    uint32_t b = (uint32_t)clamp(smp.bpm10, 300, 3000);   /* 30.0 .. 300.0 BPM */
-    return (uint32_t)FS * 150u * 256u / b;
+    return (uint32_t)FS * 150u * 256u / sm_bpm_eff();
 }
 /* the sequencer's step: the tempo's 1/16 at the speed of the pattern playing (sm_pattern_t.speed, a byte the main loop
  * writes): *8 makes it 8 x shorter (300 BPM: 275 samples, still more than a block), /8 8 x longer, at most 5644800 x 8 = 45 M q8 (30 BPM), so two steps of pending time fit 32 bits and

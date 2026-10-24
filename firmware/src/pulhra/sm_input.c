@@ -1012,7 +1012,7 @@ static void sm_input_poll(void)
         k[i] = panel_enc(EN_K1 + (uint32_t)i);
     sm_pat_poll();
     sm_bank_poll(now);                                    /* (a bank brought in, a request served, SAVE at STOP, the autosave) */
-    fx_bpm10 = smp.bpm10;                                 /* (the delay's divisions, LFO SYNC, ESYNC: fx.c beat_samples) */
+    fx_bpm10 = (uint16_t)sm_bpm_eff();                    /* (the delay's divisions, LFO SYNC, ESYNC: fx.c beat_samples; the external clock's) */
     /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is
      * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
     sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);
@@ -1089,20 +1089,24 @@ static void sm_input_poll(void)
                     sm_midi_release_req(i);               /* (a new channel or OFF: the drain lets the old channel's notes go) */
                 }
             }
-    } else if (sm_page_home() == SMH_SETUP) {
-        uint8_t w = (uint8_t)((((int32_t)smp.mode + k[0]) % SM_PM_COUNT + SM_PM_COUNT) % SM_PM_COUNT);
-        if (k[0] && w != smp.mode) {
+    } else if (sm_page_home() == SMH_SETUP) {             /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC, each round */
+        uint8_t w;
+        if (k[0]) {
+            sm_midi_clk = (uint8_t)((((int32_t)sm_midi_clk + k[0]) % (int32_t)SM_CLK_COUNT + (int32_t)SM_CLK_COUNT) % (int32_t)SM_CLK_COUNT);
+            sm_dirty = 1;
+        }
+        w = (uint8_t)((((int32_t)smp.mode + k[1]) % SM_PM_COUNT + SM_PM_COUNT) % SM_PM_COUNT);
+        if (k[1] && w != smp.mode) {
             smp.mode = w;
             sm_dirty = 1;
         }
-        w = (uint8_t)((((int32_t)sm_midi_src + k[1]) % 3 + 3) % 3);
-        if (k[1] && w != sm_midi_src) {
-            sm_midi_src = w;
+        if (k[2] && (k[2] & 1)) {                         /* (an odd turn flips it) */
+            sm_midi_trnoff = (uint8_t)!sm_midi_trnoff;
             sm_dirty = 1;
         }
-        w = (uint8_t)((((int32_t)sm_midi_trn + k[2]) % (int32_t)SM_TRN_COUNT + (int32_t)SM_TRN_COUNT) % (int32_t)SM_TRN_COUNT);
-        if (k[2] && w != sm_midi_trn) {                   /* K3 TRNS: AUTO / ON / OFF (round) */
-            sm_midi_trn = w;
+        w = (uint8_t)((((int32_t)sm_midi_src + k[3]) % 3 + 3) % 3);
+        if (k[3] && w != sm_midi_src) {
+            sm_midi_src = w;
             sm_dirty = 1;
         }
     } else if (sm_page_home()) {
