@@ -8970,39 +8970,49 @@ static int test_seq_track_copy(void)
     return bad;
 }
 
-/* OCT- (SHIFT) + a chord trig held (Tim): K1..K4 its notes 1..4, no REST, the trig stays at the release; a single trig: REST as ever */
-static int test_chord_notes(void)
+/* the chord entry (Tim): ARM, a trig held + D#5: every key up, then a chord played on the keys (they sound): its notes the trig's;
+ * let go, the entry ends (the keys trigs again). An empty step: a new trig */
+static int test_chord_entry(void)
 {
     int bad = 0;
     in_reset();
     host_ticks = 1000u;
     draw_setup();
-    sm_step_toggle(0, 2);
-    stp(0, 2)->note[0] = 60;
-    stp(0, 2)->note[1] = 64;
-    stp(0, 2)->note[2] = 67;
-    stp(0, 2)->n = 3;
-    btn_down(B_OCTDN);                                    /* SHIFT held (REC off) */
+    sm_ui.oct = 0;
+    press(B_REC);                                         /* ARM (grid record) */
     sm_input_poll();
-    ms(150);
+    key_dn(WHITE[2]);                                     /* step 3 (empty) held */
     sm_input_poll();
-    key_dn(WHITE[2]);
+    key_dn(SM_CHE_KEY);                                   /* + D#5 */
     sm_input_poll();
-    btn_up(B_OCTDN);                                      /* (OCT- may go: the trig held keeps the chord in edit) */
+    bad += check("CHORDE: ARM, a trig held + D#5: the chord entry, PLAY CHORD", sm_che == 1u && sm_msg == SM_MSG_CHORDIN);
+    host_notes = 0;
+    fm1_in.notes = 0;
     sm_input_poll();
-    turn(EN_K2, 2);
-    turn(EN_K3, -3);
-    turn(EN_K4, 5);                                       /* (a fourth note there is not: nothing) */
+    bad += check("CHORDE: ... every key up: the keys a keyboard, no trig toggled", sm_che == 2u && sm_ui.kbd && !stp(0, 2)->n);
+    key_dn(0);                                            /* F3 A3 C4 */
+    key_dn(4);
+    key_dn(7);
     sm_input_poll();
-    draw_full();
-    bad += check("CHORDN: OCT- + a chord trig: K2 note 2 +2, K3 note 3 -3, note 1 kept, no REST",
-                 stp(0, 2)->note[0] == 60u && stp(0, 2)->note[1] == 66u && stp(0, 2)->note[2] == 64u && stp(0, 2)->n == 3u &&
-                 !(stp(0, 2)->flags & SMF_REST));
-    bad += check("CHORDN: ... the knobs N1 N2 N3 (no fourth note: no N4), note 2 F#4", lint_has("N1", 0, 0) && lint_has("N3", 0, 0) &&
-                 !lint_has("N4", 0, 0) && lint_has("F#4", 0, 0));
-    key_up(WHITE[2]);
+    play_blocks(2);
+    host_notes = 0;
+    fm1_in.notes = 0;
     sm_input_poll();
-    bad += check("CHORDN: ... let go: the trig stays (three notes)", stp(0, 2)->n == 3u);
+    bad += check("CHORDE: ... F3 A3 C4 played and let go: step 3 a trig of those three notes, CHORD SET, the entry over",
+                 stp(0, 2)->n == 3u && stp(0, 2)->note[0] == 53u && stp(0, 2)->note[1] == 57u && stp(0, 2)->note[2] == 60u &&
+                 sm_che == 0u && !sm_ui.kbd && sm_msg == SM_MSG_CHORDSET);
+    lk_tap(5);
+    bad += check("CHORDE: ... the keys trigs again", stp(0, 5)->n == 1u);
+    press(B_REC);
+    sm_input_poll();
+    key_dn(WHITE[3]);
+    sm_input_poll();
+    key_dn(SM_CHE_KEY);
+    sm_input_poll();
+    bad += check("CHORDE: REC off: D#5 with a trig held, no entry", sm_che == 0u);
+    host_notes = 0;
+    fm1_in.notes = 0;
+    sm_input_poll();
     return bad;
 }
 
@@ -11045,7 +11055,7 @@ int main(void)
     bad += test_step_chord_note();
     bad += test_bank_old();
     bad += test_kit_lane_pages();
-    bad += test_chord_notes();
+    bad += test_chord_entry();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;

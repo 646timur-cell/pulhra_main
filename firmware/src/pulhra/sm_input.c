@@ -47,7 +47,11 @@ static uint32_t sm_key_t0[SM_NKEYS], sm_key_arm;          /* press time of the w
 static uint8_t sm_key_step[SM_NKEYS];                     /* the step each of them was pressed on (a bank key may move on) */
 static uint8_t sm_key_trk[SM_NKEYS];                      /* ... and the track */
 static uint32_t sm_key_used;                              /* bit per key: a knob turned while it was down (a lock, no toggle) */
-static uint8_t sm_chord_k = 0xFFu;                        /* SHIFT (OCT-) + a chord trig (Tim): its key, while held K1..K4 its notes 1..4 */
+/* the chord entry (Tim): ARM (REC on), a trig held + D#5 (POLY on the panel): the keys a keyboard until a chord is played (up to
+ * four keys down together; it sounds); when every key is up again its notes are the trig's (an empty step: a new trig), the
+ * keyboard mode back as it was. sm_che 0 off, 1 waiting for every key up (the trig, D#5), 2 the chord being played */
+#define SM_CHE_KEY 22u                                    /* D#5 */
+static uint8_t sm_che, sm_che_step, sm_che_trk, sm_che_kbd, sm_che_n, sm_che_note[4];
 static uint8_t sm_oct_pend;                               /* an OCT press waiting for the other one: 0 none, 1 OCT-, 2 OCT+ */
 static uint32_t sm_oct_t0;                                /* ... when it went down */
 static uint8_t sm_kb_note[SM_NKEYS], sm_kb_trk[SM_NKEYS]; /* keyboard mode: the note each key sounds (0xFF none) and its track */
@@ -348,22 +352,6 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
             continue;
         if (sm_shift && k == SM_SHK_FILL && !sm_rec)      /* (SHIFT + G5, REC off: FILL, sm_fill_poll; REC on: the copy as ever) */
             continue;
-        if (sm_shift) {
-            uint32_t st = (uint32_t)sm_ui.bank * 16u + (uint32_t)w;
-            const sm_pattern_t *cp = &smp.pat[smp.cur % SM_NPAT];
-            const sm_step_t *cs = &cp->step[sm_ui.trk % SM_NTRK][st % SM_NSTEP];
-            if (cs->n > 1u && !(cs->flags & SMF_REST) && !sm_trk_kit(sm_ui.trk % SM_NTRK, cp)) {
-                sm_key_step[k] = (uint8_t)st;             /* a chord: held, its notes on the knobs (no REST, no toggle at the release) */
-                sm_key_trk[k] = sm_ui.trk;
-                sm_key_t0[k] = now;
-                sm_key_arm |= 1u << k;
-                sm_key_used |= 1u << k;
-                sm_chord_k = (uint8_t)k;
-                sm_ui.held_step = sm_ui.sel_step = (uint8_t)st;
-                sm_dirty = 1;
-                continue;
-            }
-        }
         if (sm_shift) {                                   /* SHIFT + a trig key (Tim): a lock trig there (no note, the locks only), or
                                                              back: an empty step a new one, a trig made one, a lock trig made a trig */
             sm_step_rest(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);   /* (the page in view) */
@@ -388,8 +376,6 @@ static void sm_keys_release(uint32_t now)
             continue;
         if (!((held >> k) & 1u)) {
             sm_key_arm &= ~(1u << k);
-            if (k == sm_chord_k)
-                sm_chord_k = 0xFFu;
             if (!((sm_key_used >> k) & 1u) && (uint32_t)(now - sm_key_t0[k]) <= SM_HOLD_US * FM1_TICKS_PER_US)
                 sm_step_toggle(sm_key_trk[k], sm_key_step[k]);   /* (off: its locks go too) */
             sm_key_used &= ~(1u << k);
@@ -715,6 +701,62 @@ static int32_t sm_trig_held(void)
     return last < SM_NKEYS ? (int32_t)sm_key_step[last] : -1;
 }
 
+/* the chord entry (sm_che, above): returns the keys pressed this poll the rest of the poll may see (D#5 taken by it) */
+static uint32_t sm_che_poll(uint32_t notes)
+{
+    uint32_t k, t;
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    if (sm_che && (!sm_rec || sm_layer || sm_che_trk != sm_ui.trk)) {   /* (REC off, a layer, another track: given up) */
+        sm_ui.kbd = sm_che_kbd;
+        sm_che = 0;
+    }
+    if (!sm_che) {
+        int32_t hs;
+        if (!sm_rec || sm_layer || !((notes >> SM_CHE_KEY) & 1u) || (hs = sm_trig_held()) < 0 ||
+            sm_trk_kit(sm_ui.trk % SM_NTRK, p))
+            return notes;
+        sm_che = 1;                                       /* a trig held + D#5: wait for every key up */
+        sm_che_step = (uint8_t)hs;
+        sm_che_trk = sm_ui.trk;
+        sm_che_kbd = sm_ui.kbd;
+        sm_che_n = 0;
+        sm_key_used |= sm_key_arm;                        /* (the trig's release toggles nothing) */
+        sm_msg_show(SM_MSG_CHORDIN);
+        return notes & ~(1u << SM_CHE_KEY);
+    }
+    t = sm_che_trk % SM_NTRK;
+    if (sm_che == 1) {
+        if (!fm1_in.notes) {
+            sm_che = 2;                                   /* every key up: the keys a keyboard now */
+            sm_ui.kbd = 1;
+            sm_key_arm = 0;
+        }
+        return 0;
+    }
+    for (k = 0; k < SM_NKEYS; k++)                        /* the chord: each key down, its note (up to four) */
+        if (((notes >> k) & 1u) && sm_che_n < 4u) {
+            uint32_t pitch = sm_key_pitch(p->kit.snd[t].p, k, sm_ui.oct);
+            if (pitch != SM_KEY_SILENT)
+                sm_che_note[sm_che_n++] = (uint8_t)pitch;
+        }
+    if (sm_che_n && !fm1_in.notes) {                      /* played and let go: the trig's notes */
+        sm_step_t *s = &p->step[t][sm_che_step % SM_NSTEP];
+        uint32_t i;
+        if (!s->n)
+            sm_step_fresh(t, sm_che_step % SM_NSTEP, 0);
+        for (i = 0; i < sm_che_n; i++)
+            s->note[i] = sm_che_note[i];
+        s->flags &= (uint8_t)~SMF_REST;
+        SM_BARRIER();
+        s->n = sm_che_n;
+        sm_ui.kbd = sm_che_kbd;
+        sm_che = 0;
+        sm_msg_show(SM_MSG_CHORDSET);
+        sm_dirty = 1;
+    }
+    return notes;
+}
+
 /* a STEP field f (0 NOTE 0..127, 1 VEL 1..127, 2 LEN the list's index, 3 COND its walk) from v turned by d */
 static uint32_t sm_field_turn(uint32_t f, uint32_t v, int32_t d)
 {
@@ -725,32 +767,6 @@ static uint32_t sm_field_turn(uint32_t f, uint32_t v, int32_t d)
     if (f == 2u)
         return (uint32_t)clamp((int32_t)v + d, 0, (int32_t)SM_NLEN - 1);
     return sm_cond_of_place((uint32_t)clamp((int32_t)sm_cond_place(v) + d, 0, (int32_t)SM_COND_PLACES - 1));
-}
-
-/* the chord in edit (SHIFT + a chord trig, its key still down): its step, else -1 */
-static int32_t sm_chord_step(void)
-{
-    uint32_t k = sm_chord_k;
-    if (k >= SM_NKEYS || !((sm_key_arm >> k) & 1u) || sm_key_trk[k] != sm_ui.trk ||
-        smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][sm_key_step[k] % SM_NSTEP].n < 2u)
-        return -1;
-    return (int32_t)sm_key_step[k];
-}
-/* ... K1..K4 its notes 1..4, a semitone a detent (a knob past the trig's notes: nothing) */
-static void sm_chord_turn(const int32_t *k)
-{
-    int32_t st = sm_chord_step();
-    sm_step_t *s, e;
-    uint32_t i;
-    if (st < 0)
-        return;
-    s = &smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][st];
-    sm_step_eff(s, &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK], &e);
-    for (i = 0; i < 4u && i < s->n; i++)
-        if (k[i]) {
-            s->note[i] = (uint8_t)clamp((int32_t)e.note[i] + k[i], 0, 127);   /* (a byte store: the audio stream reads it whole) */
-            sm_dirty = 1;
-        }
 }
 
 /* the STEP page's knobs: K1 NOTE, K2 VEL, K3 LEN, K4 COND (sm_field_turn), SELECT the track's LEVEL, PRESETS the FLAG list round
@@ -1191,6 +1207,7 @@ static void sm_input_poll(void)
     }
     sm_oct_poll(pressed, now, (pressed & ~((1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]))) || notes || sel || alg ||
                                pre || k[0] || k[1] || k[2] || k[3]);
+    notes = sm_che_poll(notes);                           /* (the chord entry: ARM, a trig + D#5) */
     if (!sm_layer && sm_shift_held())
         sm_shift_keys(notes);
     else
@@ -1210,10 +1227,6 @@ static void sm_input_poll(void)
     }
     if (sel || k[0] || k[1] || k[2] || k[3] || (pre && sm_page_is_step()))   /* (any of them, a knob without a parameter */
         sm_key_used |= sm_key_arm;                                           /* too: no toggle) */
-    if (sm_chord_step() >= 0) {                           /* a chord in edit: the knobs its notes, nothing else */
-        sm_chord_turn(k);
-        k[0] = k[1] = k[2] = k[3] = 0;
-    }
     for (i = 0; i < 4; i++)                               /* SHIFT: the turn accelerated (after the keys saw the detents) */
         k[i] = sm_accel((uint32_t)i, k[i]);
     sel = sm_accel(4u, sel);
