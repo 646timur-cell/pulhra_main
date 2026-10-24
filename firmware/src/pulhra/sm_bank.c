@@ -336,6 +336,7 @@ static void sm_bank_clamp(uint32_t s0)
         for (t = 0; t < SM_NTRK; t++) {
             sm_sound_t *sd = &smp.pat[s0 + i].kit.snd[t];
             sd->machine %= SM_NMACHINE;
+            sm_ens_semi(sd);                              /* (ENS: a just ratio of an older bank its semitone) */
             for (p = 0; p < P_COUNT; p++) {
                 const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), p);
                 if (d)

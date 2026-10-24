@@ -76,6 +76,18 @@ static int32_t sm_val_turn(const param_desc_t *d, uint32_t id, int32_t v, int32_
 /* a machine's preset as the sound ui.c apply_preset_to + set_engine_of leave on a track (the sound only, nothing of the
  * track's own, no undo, no UI): the parameter defaults, the engine's eight values and its ninth, the ADSR, F.ENV, the
  * voice mode, the sends */
+/* ENS on PULHRA: semitones only (Tim). Its factory sounds' just ratios (25 .. 28: 6/5 5/4 4/3 3/2) become the nearest
+ * semitones (+3 +4 +5 +7), a stored one too (sm_bank.c) */
+static void sm_ens_semi(sm_sound_t *s)
+{
+    static const int8_t JI_SEMI[4] = {15, 16, 17, 19};
+    uint32_t i;
+    if (sm_engine_of(s->machine) != ENGI_MENS)
+        return;
+    for (i = 0; i < 3u; i++)
+        if (s->p[P_E0 + i] > 24)
+            s->p[P_E0 + i] = JI_SEMI[(s->p[P_E0 + i] - 25) & 3];
+}
 static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t preset)
 {
     static const uint8_t FX_DEF[4] = {0, 24, 28, 36};
@@ -115,6 +127,7 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
     s->p[P_VOICE] = (int8_t)(pr->mono ? V_LEGATO : V_POLY);
     for (i = 0; i < 4u; i++)
         s->p[P_DIST + i] = (int8_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
+    sm_ens_semi(s);
 }
 
 /* step s as it plays on a track with sound d: its inherited fields (SM_INH) the track's defaults. The audio stream's at a

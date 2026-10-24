@@ -199,6 +199,7 @@ static void mpulse_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
 static const char *const N_MENS_PCH[] = {"OFF", "-12", "-11", "-10", "-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2", "-1",
                                          "+1", "+2", "+3", "+4", "+5", "+6", "+7", "+8", "+9", "+10", "+11", "+12",
                                          "6/5", "5/4", "4/3", "3/2"};
+#define MENS_PCH_MAX (FELUCCA_SWAMP ? 24 : 28)          /* (PULHRA: semitones only, Tim: no just ratios) */
 static int32_t mens_cents(int32_t k)
 {
     static const int16_t JI[4] = {316, 386, 498, 702};
@@ -936,8 +937,8 @@ static const engine_t ENG_MPULSE = {
 static const engine_t ENG_MENS = {
     .name = "ENS", .page_title = {"CHORD", "WAVE"}, .presets = MENS_PRESETS, .npresets = NELEM(MENS_PRESETS),
     .note_on = mens_note_on, .render = mens_render, .knob = {P_E0, P_E3, P_E4, P_E5},
-    .edit = {{"PCH2", F_ENUM, 0, 28, 0, N_MENS_PCH, 0}, {"PCH3", F_ENUM, 0, 28, 0, N_MENS_PCH, 0},
-             {"PCH4", F_ENUM, 0, 28, 0, N_MENS_PCH, 0}, {"WAVE", F_PCT, 0, 127, 0, 0, 0},
+    .edit = {{"PCH2", F_ENUM, 0, MENS_PCH_MAX, 0, N_MENS_PCH, 0}, {"PCH3", F_ENUM, 0, MENS_PCH_MAX, 0, N_MENS_PCH, 0},
+             {"PCH4", F_ENUM, 0, MENS_PCH_MAX, 0, N_MENS_PCH, 0}, {"WAVE", F_PCT, 0, 127, 0, 0, 0},
              {"PW", F_PCT, 0, 127, 64, 0, 0}, {"CHRL", F_PCT, 0, 127, 0, 0, 0}, {"CHRW", F_PCT, 0, 127, 40, 0, 0},
              MF_TUNE},
     .e8 = {"STRM", F_PCT, 0, 127, 0, 0, 0},              /* (STRUM) */

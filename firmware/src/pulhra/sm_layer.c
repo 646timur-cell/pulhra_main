@@ -316,8 +316,6 @@ static void sm_seq_tool(uint32_t w, uint32_t t)
     case SM_W_COPY_TRK: sm_copy_trk(t); break;
     case SM_W_PASTE_TRK: sm_paste_trk(t); break;
     case SM_W_PASTE_PAT: sm_paste_pat(); break;
-    case SM_W_SHL: sm_shift_trk(t, -1); break;
-    case SM_W_SHR: sm_shift_trk(t, 1); break;
     case SM_W_TRN_DN: sm_trn(t, -1); break;
     case SM_W_TRN_UP: sm_trn(t, 1); break;
     default: return;
@@ -347,7 +345,14 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_dirty = 1;
         }
     }
-    if (sm_layer == SML_SEQ && (k[0] || k[1])) {          /* K1 the pattern's speed (/8 .. *8), K2 the change mode; K3, K4 nothing */
+    if (sm_layer == SML_SEQ && (k[2] || k[3])) {          /* K3 every track's shift, K4 their transpose (as A#3 / C#4, D#4 / F#4) */
+        int32_t j;
+        for (j = 0; j < (k[2] < 0 ? -k[2] : k[2]); j++)
+            sm_shift_all(k[2] < 0 ? -1 : 1);
+        for (j = 0; j < (k[3] < 0 ? -k[3] : k[3]); j++)
+            sm_trn_all(k[3] < 0 ? -1 : 1);
+    }
+    if (sm_layer == SML_SEQ && (k[0] || k[1])) {          /* K1 the pattern's speed (/8 .. *8), K2 the change mode */
         sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
         int32_t v;
         if (k[0]) {                                       /* (/8 .. *8, no round: a byte the audio stream reads every block) */

@@ -441,8 +441,9 @@ static int test_sound_from_preset(void)
             const preset_t *pr = &e->presets[pi];
             sm_sound_from_preset(&s, m, pi);
             ok &= s.machine == m && s.preset == pi;
-            for (i = 0; i < 8u; i++)
-                ok &= s.p[P_E0 + i] == (int8_t)pr->e[i];
+            for (i = 0; i < 8u; i++)                      /* (ENS: a just ratio its semitone, sm_ens_semi) */
+                ok &= s.p[P_E0 + i] == (int8_t)pr->e[i] || (sm_engine_of(m) == ENGI_MENS && i < 3u && pr->e[i] > 24 &&
+                                                             s.p[P_E0 + i] <= 24 && s.p[P_E0 + i] >= 15);
             ok &= s.p[P_ATK] == (int8_t)pr->env[0] && s.p[P_DEC] == (int8_t)pr->env[1] &&
                   s.p[P_SUS] == (int8_t)pr->env[2] && s.p[P_REL] == (int8_t)pr->env[3];
             ok &= s.p[P_ED_FLT] == pr->fenv;
@@ -1761,10 +1762,12 @@ static int test_seq_len(void)
         before.len = 32u;
         turn(EN_K1, 5);                                   /* K1: the pattern's speed, * .. *8 (no round) */
         turn(EN_K2, 1);                                   /* K2: the change mode, the next */
-        turn(EN_K3, 5);                                   /* K3, K4: nothing */
-        turn(EN_K4, 24);
+        turn(EN_K3, 5);                                   /* K3: every track's shift, K4: their transpose (Tim) */
+        turn(EN_K4, 3);
         sm_input_poll();
-        bad += check("SEQ: K1-K4 are the layer's too: no parameter moved", !memcmp(&before, ksnd(0), sizeof before));
+        before.dnote = (uint8_t)(before.dnote + 3u);       /* (K4: the default note moves with the trigs) */
+        bad += check("SEQ: K1-K4 are the layer's: no sound parameter moved; K3 SHT+5, K4 TR+3",
+                     !memcmp(&before, ksnd(0), sizeof before) && sm_sh_all == 5 && sm_tr_all == 3);
         bad += check("SEQ: ... K1 +5: the speed *8 (its top)", pt->speed == 3 && sm_step_q8() == sm_tempo_q8() / 8u);
         bad += check("SEQ: ... K2 +1: the next change mode", smp.mode == (m0 + 1u) % SM_PM_COUNT);
         bad += check("SEQ: ... K3, K4: nothing (the master length AUTO)", pt->mlen == 0u);
@@ -3384,6 +3387,11 @@ static int test_rec_live_gestures(void)
             }
             snprintf(what, sizeof what, "LIVE %s, %s: the base moved, the core at once", GN[lrg_gest], PN[lrg_pagei]);
             bad += check(what, ksnd(0)->p[id] == v0 + 16 && moved);
+            if (!sm_live) {                               /* ARM (Tim): the knob records nothing while playing; only a held trig locks */
+                snprintf(what, sizeof what, "LIVE %s, %s: ARM: no lock recorded by the knob", GN[lrg_gest], PN[lrg_pagei]);
+                bad += check(what, nl == 0u && !nempty);
+                continue;
+            }
             snprintf(what, sizeof what, "LIVE %s, %s: a lock on every trig (8), none on an empty step", GN[lrg_gest], PN[lrg_pagei]);
             if (check(what, nl == 8u && !nempty))
                 bad++, printf("  locks on trigs %u, on empty steps %u\n", nl, nempty);
@@ -6140,14 +6148,14 @@ static int test_shift_trn(void)
     stp(0, 3)->note[1] = 127;
     sm_lock_set(0, 3, P_FCUT, 11);
     sm_step_toggle(1, 5);
+    sm_shift_trk(0, -1);                                  /* (SEQ's E4 / F4 gone, Tim: the track's shift is SHIFT + D#4 / F#4) */
     layer_hold(B_SEQ);
-    lay_key(WHITE[6]);                                    /* E4: SHIFT < */
-    bad += check("EDIT/SHIFT: E4: T1's trigs one step left, wrapping (0 -> 15, 3 -> 2), the lock with its trig",
+    bad += check("EDIT/SHIFT: back one: T1's trigs one step left, wrapping (0 -> 15, 3 -> 2), the lock with its trig",
                  stp(0, 15)->n && stp(0, 15)->note[0] == 48 && stp(0, 2)->n == 2u && !stp(0, 0)->n && !stp(0, 3)->n &&
                  ed_lock(cpat(), 0, 2, P_FCUT) == 11 && ed_live(cpat(), 0) == 1u && stp(1, 5)->n);
-    lay_key(WHITE[7]);                                    /* F4: SHIFT > twice */
-    lay_key(WHITE[7]);
-    bad += check("EDIT/SHIFT: F4 x2: one step right of where they were (1, 4)", stp(0, 1)->n && stp(0, 4)->n == 2u &&
+    sm_shift_trk(0, 1);
+    sm_shift_trk(0, 1);
+    bad += check("EDIT/SHIFT: forward x2: one step right of where they were (1, 4)", stp(0, 1)->n && stp(0, 4)->n == 2u &&
                  ed_lock(cpat(), 0, 4, P_FCUT) == 11 && !stp(0, 15)->n);
     lay_key(WHITE[10]);                                   /* B4: TRN - */
     bad += check("EDIT/TRN: B4: the notes a semitone down (47; 49, the chord's 126)", stp(0, 1)->note[0] == 47 &&
@@ -6162,9 +6170,7 @@ static int test_shift_trn(void)
                  stp(0, 4)->note[1] == 127);
     ksnd(0)->len = 8;                                     /* a track of 8: the steps past it stay */
     sm_step_toggle(0, 12);
-    layer_hold(B_SEQ);
-    lay_key(WHITE[6]);
-    layer_let_go(B_SEQ);
+    sm_shift_trk(0, -1);
     bad += check("EDIT/SHIFT: length 8: wraps at 8 (1 -> 0, 4 -> 3), step 13 stays", stp(0, 0)->n && stp(0, 3)->n == 2u &&
                  stp(0, 12)->n && ed_lock(cpat(), 0, 3, P_FCUT) == 11);
     return bad;

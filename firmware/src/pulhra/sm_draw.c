@@ -695,7 +695,7 @@ static void smd_select(void)
 /* -------------------------------------------------------- layer map --- */
 /* an open layer's map: five rows of 34 px over the knobs and SELECT (y 48 .. 217), each row either one text across (w) or four
  * cells of 60 px (c), a cell inverted for what is on (the machine of the track, a mute, a solo). The labels are scale 2 */
-typedef struct { char w[22]; char c[5][6]; uint8_t inv, cells, winv, dim, und, box, cols; } smd_mrow_t;   /* (bits per cell;
+typedef struct { char w[22]; char c[5][6]; uint8_t inv, cells, winv, dim, und, box, cols, seqx; } smd_mrow_t;   /* (bits per cell;
                                                                                          cols: 4, or 5 cells of 48 px) */
 static void smd_cell(smd_mrow_t *o, uint32_t i, const char *s, uint32_t inv)
 {
@@ -829,7 +829,9 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             smd_int(tr + 3, a > 99 ? 99 : a, 0);
             smd_cell(o, 2, sh, 0);
             smd_cell(o, 3, tr, 0);
-            smd_upper(o->c[2], sh, 5u);                   /* (five here: SHT+2 fills its 60 px cell, K4's is the screen's edge) */
+            smd_upper(o->c[2], sh, 5u);                   /* (five each: SH+12, TR-12; the row's own places, seqx) */
+            smd_upper(o->c[3], tr, 5u);
+            o->seqx = 1;
             o->dim |= (uint8_t)((sm_sh_all ? 0u : 4u) | (sm_tr_all ? 0u : 8u));   /* (0: dim) */
         } else if (sm_msg == SM_MSG_CLEARED || sm_msg == SM_MSG_PTNCLR) {   /* SEQ + F3: CLEAR T1, F5 held: PTN CLEAR, on the map
                                                                             too (blinks with the header) */
@@ -883,7 +885,9 @@ static void smd_map_row(uint32_t r)
     if (o.w[0])
         sm_px_text(4, 10, 2u, o.w, T_TEXT, o.winv);
     for (c = 0; c < o.cells; c++) {
-        int32_t x = (int32_t)(c * cw) + ((int32_t)cw - 12 * smd_len(o.c[c])) / 2, cx = (int32_t)(c * cw);
+        /* (the SEQ map's knob row: the speed, the mode, SHT, TR packed left to right, two digits fitting: 8 44 94 166) */
+        static const int16_t SEQX[4] = {8, 44, 94, 166};
+        int32_t x = o.seqx && c < 4u ? SEQX[c] : (int32_t)(c * cw) + ((int32_t)cw - 12 * smd_len(o.c[c])) / 2, cx = (int32_t)(c * cw);
         uint32_t inv = (o.inv >> c) & 1u;
         if (!o.c[c][0])
             continue;
