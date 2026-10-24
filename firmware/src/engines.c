@@ -148,6 +148,10 @@ static const engine_t *const ENGINES[NENGINES] = {
 #endif
 #if FELUCCA_SWAMP
     &ENG_DKICK,                  /* 42 (ENGI_DKICK) */
+    &ENG_DSNARE,                 /* 43 */
+    &ENG_DCLAP,                  /* 44 */
+    &ENG_DHAT,                   /* 45 */
+    &ENG_DCYM,                   /* 46 (ENGI_DCYM) */
 #endif
 };
 
@@ -220,7 +224,7 @@ static const uint8_t ENGINE_ORDER[] = {                 /* MONOFM: the EDIT laye
     ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT, ENGI_PLANT,  /* springs, drones, the organic */
     ENGI_GLITCH, ENGI_ERROR, ENGI_RITUAL, ENGI_MECH, ENGI_BIO, /* 3 SLICE: the slice machines */
 #if FELUCCA_SWAMP
-    ENGI_DKICK,                                                /* 4 DRUM (PULHRA): the drum machines */
+    ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM,  /* 4 DRUM (PULHRA): the drum machines */
 #endif
 };
 #define MF_PAGE_2 13u                                    /* the pages' first places in ENGINE_ORDER, then its end */

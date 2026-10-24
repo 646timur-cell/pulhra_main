@@ -8538,6 +8538,109 @@ static int test_drum_kick(void)
     return bad;
 }
 
+/* the DRUM page's other machines: each a hit at once, rings out by itself (no voice left, silence), never past full scale;
+ * their colours (the share of energy in the first difference): KICK darkest, HAT brightest; HAT CL shorter than OP; CLAP's
+ * bursts (the envelope dips and rises again in its first 25 ms) */
+static void dr_load(uint32_t engine)
+{
+    uint32_t b;
+    draw_setup();
+    kit_dry();
+    sm_ui.trk = 0;
+    sm_sound_load(eng_rank(engine), 0);
+    sm_input_poll();
+    for (b = 0; b < 40u; b++)
+        run_block();
+    trk[1].p[P_LEVEL] = trk[2].p[P_LEVEL] = trk[3].p[P_LEVEL] = 0;
+    kit_dry();
+    fx_flush();
+}
+/* a hit rendered for blocks into L: its peak, its brightness, the samples until it falls below 1 % of its peak (len) */
+static void dr_hit(int32_t *L, uint32_t blocks, uint32_t *pk, double *bright, uint32_t *len)
+{
+    uint32_t b, nl = 0, i;
+    double e = 0, d = 0;
+    *pk = 0;
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < blocks; b++) {
+        uint32_t a = block_peak(L, &nl);
+        *pk = a > *pk ? a : *pk;
+    }
+    for (i = 1; i < nl; i++) {
+        e += (double)L[i] * L[i];
+        d += (double)(L[i] - L[i - 1]) * (L[i] - L[i - 1]);
+    }
+    *bright = e > 0 ? d / e : 0;
+    *len = 0;
+    for (i = 0; i < nl; i++)
+        if ((uint32_t)(L[i] < 0 ? -L[i] : L[i]) * 100u > *pk)
+            *len = i;
+}
+static int test_drum_machines(void)
+{
+    static int32_t L[CTL * 6000];
+    static const uint32_t E[5] = {ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM};
+    static const char *const N[5] = {"KICK", "SNARE", "CLAP", "HAT", "CYM"};
+    double br[5];
+    uint32_t len[5], pk, k, ok = 1, quiet, act;
+    int bad = 0;
+    char w[160];
+    for (k = 0; k < 5u; k++) {
+        uint32_t b;
+        dr_load(E[k]);
+        ok &= trk[0].engine == E[k] && eng_rank(E[k]) >= MF_PAGE[3];
+        dr_hit(L, 6000, &pk, &br[k], &len[k]);
+        act = dr_active(0);
+        quiet = 0;
+        for (b = 0; b < 50u; b++) {
+            uint32_t a = block_peak(0, 0);
+            quiet = a > quiet ? a : quiet;
+        }
+        printf("  %s: peak %u, brightness %.4f, rings %.0f ms, voices after 4.4 s %u\n", N[k], pk, br[k], len[k] * 1000.0 / FS, act);
+        snprintf(w, sizeof w, "DRUM: %s: a hit, rings out by itself (no voice, silence), never past full scale", N[k]);
+        bad += check(w, pk > 2500u && pk < 65534u && act == 0u && quiet <= 2u);
+    }
+    bad += check("DRUM: every machine on the DRUM page, loaded", ok);
+    bad += check("DRUM: KICK the darkest, HAT brighter than SNARE and KICK, CYM brighter than SNARE",
+                 br[0] < br[1] && br[0] < br[2] && br[3] > br[1] && br[4] > br[1]);
+    {
+        uint32_t lc, lo, pkc;
+        double bb;
+        dr_load(ENGI_DHAT);
+        trk[0].p[P_E0] = 0;
+        dr_hit(L, 2000, &pkc, &bb, &lc);
+        trk[0].p[P_E0] = 1;
+        dr_hit(L, 2000, &pkc, &bb, &lo);
+        printf("  HAT: CL %.0f ms, OP %.0f ms\n", lc * 1000.0 / FS, lo * 1000.0 / FS);
+        bad += check("DRUM: HAT: OP rings longer than CL (x3)", lo > 3u * lc);
+    }
+    {
+        uint32_t i, dips = 0, pkc, lc, prev = 0, w0 = 0;
+        double bb;
+        dr_load(ENGI_DCLAP);
+        dr_hit(L, 200, &pkc, &bb, &lc);
+        for (i = 0; i + 64u < (uint32_t)(FS / 40u); i += 64u) {   /* 64-sample windows over 25 ms: rises after a fall */
+            uint32_t j, m = 0;
+            for (j = 0; j < 64u; j++) {
+                uint32_t a = (uint32_t)(L[i + j] < 0 ? -L[i + j] : L[i + j]);
+                m = a > m ? a : m;
+            }
+            if (!i) {
+                prev = w0 = m;                            /* (prev: the lowest since the last rise, w0 the highest) */
+            } else if (m > 2u * prev && 2u * prev < w0) {
+                dips++;
+                prev = w0 = m;
+            } else {
+                prev = m < prev ? m : prev;
+                w0 = m > w0 ? m : w0;
+            }
+        }
+        printf("  CLAP: %u rises in 25 ms\n", dips);
+        bad += check("DRUM: CLAP: its bursts (the level rises again at least twice in 25 ms)", dips >= 2u);
+    }
+    return bad;
+}
+
 static int test_fx_dist_types(void)
 {
     double br[4], rm[4], base_br, base_rm, b2, r2, nul;
@@ -10346,6 +10449,7 @@ int main(void)
     bad += test_rec_arm();
     bad += test_draw_shots();
     bad += test_drum_kick();                              /* (last: it leaves a KICK on T1) */
+    bad += test_drum_machines();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

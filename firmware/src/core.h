@@ -84,7 +84,11 @@
 #define ENGI_MNOISE 41u          /* GND NOISE */
 /* PULHRA's drum machines (eng_dr.c, FELUCCA_SWAMP), the EDIT layer's DRUM page. Append-only */
 #define ENGI_DKICK 42u           /* KICK: after the Analog Rhythm's BD */
-#define SWAMP_NDRUM 1            /* (how many: ENGINES, the DRUM page) */
+#define ENGI_DSNARE 43u          /* SNARE: two shells, band-passed noise, a snap */
+#define ENGI_DCLAP 44u           /* CLAP: bursts of band-passed noise, a tail */
+#define ENGI_DHAT 45u            /* HAT: six squares (the 808's), CL / OP */
+#define ENGI_DCYM 46u            /* CYM: crash, ride, china */
+#define SWAMP_NDRUM 5            /* (how many: ENGINES, the DRUM page) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (FELUCCA_MONOFM ? 27 + SWAMP_NDRUM * FELUCCA_SWAMP : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
