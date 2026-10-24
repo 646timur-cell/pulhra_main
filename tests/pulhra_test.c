@@ -9869,7 +9869,7 @@ static int test_fx_punch(void)
     lint_nz = sizeof LZONES / sizeof LZONES[0];
     draw_full();
     bad += check("PUNCH: ... C4 FREEZE too; the map: 1/8 and FRZ, FX . MASTER", (perf_held & PF_BIT(PF_FRZ)) != 0u &&
-                 lint_has("1/8", 0, 0) && lint_has("FRZ", 0, 0) && lint_has("FX \x12 MASTER \x12 D#4", 0, 0) && lint_frame("punch") == 0);
+                 lint_has("1/8", 0, 0) && lint_has("FRZ", 0, 0) && lint_has("FX \x12 MASTER", 0, 0) && !lint_has("FX \x12 MASTER \x12 D#4", 0, 0) && lint_frame("punch") == 0);
     key_up(WHITE[0]);
     sm_input_poll();
     bad += check("PUNCH: F3 let go: REPEAT off, FREEZE on", !(perf_held & PF_BIT(PF_R8)) && (perf_held & PF_BIT(PF_FRZ)));
@@ -9888,7 +9888,7 @@ static int test_fx_punch(void)
     key_up(10);
     sm_input_poll();
     draw_full();
-    bad += check("PUNCH: D#4: the target T1", perf_trk == 1u && !(perf_held & PF_BIT(PF_M1)) && lint_has("FX \x12 T1 \x12 D#4", 0, 0));
+    bad += check("PUNCH: D#4: the target T1", perf_trk == 1u && !(perf_held & PF_BIT(PF_M1)) && lint_has("FX \x12 T1", 0, 0));
     layer_let_go(B_FX);
     bad += check("PUNCH: FX let go, C4 still down: FREEZE on, the macros back to 0", sm_layer == SML_NONE &&
                  (perf_held & PF_BIT(PF_FRZ)) && !perf_k[0] && !perf_k[1]);

@@ -294,7 +294,6 @@ static void smd_page(void)
             static const char *const TG[SM_NTRK + 1u] = {"MASTER", "T1", "T2", "T3", "T4"};
             smd_cat(b, &n, "FX \x12 ");
             smd_cat(b, &n, TG[perf_trk % (SM_NTRK + 1u)]);
-            smd_cat(b, &n, " \x12 D#4");
         } else if (sm_layer == SML_GLO) {                 /* BANK A MUTE SOLO (the bank in view) */
             char bn[2] = {(char)('A' + sm_glo_bank % SM_NBANK), 0};
             smd_cat(b, &n, "BANK ");
