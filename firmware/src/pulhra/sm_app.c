@@ -46,6 +46,7 @@ static void sm_core_init(void)
     }
     sm_project_init();
     sm_kit_boot(&smp.pat[smp.cur].kit);
+    sm_lanes_core(&smp.pat[smp.cur]);
     sm_seq_init();
     sm_input_init();
     sm_layer_init();

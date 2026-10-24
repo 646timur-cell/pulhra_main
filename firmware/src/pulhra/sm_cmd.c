@@ -136,7 +136,7 @@ static void sm_rec_off(uint32_t t, uint32_t note);
 
 /* the sequencer's (the audio stream's) own: bit per parameter, the parameters the last trig fired on each track locked
  * (sm_seq.c sm_seq_locks). While a bit is set, trk[t].p holds the lock's value, not the model's base */
-#define SM_LKB ((P_COUNT + 7u) / 8u)
+#define SM_LKB ((SM_NPID + 7u) / 8u)                     /* (the sound's ids and the KIT's lanes) */
 static uint8_t sm_lk_on[SM_NTRK][SM_LKB];
 static uint8_t sm_lk_step[SM_NTRK];                       /* the step whose trig set sm_lk_on (0xFF: none) */
 static uint8_t sm_gen[SM_NTRK];                           /* the track's trig fires (sm_seq_fire bumps it; the main loop reads) */
@@ -146,7 +146,15 @@ static volatile uint8_t sm_play_pat;                      /* the pattern playing
 static void sm_seq_unlock(uint32_t t);                    /* sm_seq.c: the locked values of track t back to the base */
 static void sm_ps_stop(uint32_t t);                       /* sm_seq.c: the PSLIDE of track t ends where it is */
 static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock);
-static int sm_lk_is(uint32_t t, uint32_t p) { return p < P_COUNT && ((sm_lk_on[t % SM_NTRK][p >> 3] >> (p & 7u)) & 1u); }
+static int sm_lk_is(uint32_t t, uint32_t p) { return p < SM_NPID && ((sm_lk_on[t % SM_NTRK][p >> 3] >> (p & 7u)) & 1u); }
+/* the core's value of id on track t (a lane's: dr_lp) */
+static void sm_core_set(uint32_t t, uint32_t id, int32_t v)
+{
+    if (sm_is_lp(id))
+        dr_lp[t % SM_NTRK][(id - SM_LP0) / 9u][(id - SM_LP0) % 9u] = (int16_t)v;
+    else if (id < P_COUNT)
+        trk[t % SM_NTRK].p[id] = (int16_t)v;
+}
 
 /* one command onto the core (the audio stream's side; the model is the main loop's and was written before the push).
  * A value is clamped to its parameter's range (P_E0..P_E8: the range of the engine the track is on its way to) */
@@ -165,9 +173,9 @@ static void sm_cmd_apply(const sm_cmd_t *c)
         break;
     case SMC_PARAM:
         if (t < SM_NTRK) {
-            const param_desc_t *d = sm_desc_safe(eng_idx(trk[t].eng_req), c->param);
+            const param_desc_t *d = sm_desc_core(t, c->param);
             if (d && !sm_lk_is(t, c->param))              /* (none: P_E8 of a machine without one, an id out of range; */
-                trk[t].p[c->param] = (int16_t)clamp(c->val, d->min, d->max);   /* locked now: the next trig takes the base) */
+                sm_core_set(t, c->param, clamp(c->val, d->min, d->max));   /* locked now: the next trig takes the base) */
         }
         break;
     case SMC_UNLOCK:
@@ -175,7 +183,7 @@ static void sm_cmd_apply(const sm_cmd_t *c)
             sm_seq_unlock(t);
         break;
     case SMC_PREVIEW:
-        if (t < SM_NTRK && c->param < P_COUNT && sm_playing) {
+        if (t < SM_NTRK && c->param < SM_NPID && sm_playing) {
             sm_seq_pset(t, c->param, c->val, 0, 0);
             sm_lk_on[t][c->param >> 3] |= (uint8_t)(1u << (c->param & 7u));
         }
@@ -192,6 +200,8 @@ static void sm_cmd_apply(const sm_cmd_t *c)
     case SMC_LOAD:
         if (t < SM_NTRK) {
             sm_track_load(t, &pt->kit.snd[t]);
+            if (t == SM_KIT_TRK)
+                sm_lanes_core(pt);                        /* (the KIT's lanes with T4's sound) */
             memset(sm_lk_on[t], 0, SM_LKB);               /* (every value the sound's base now) */
             sm_ps_stop(t);                                /* (no glide over the sound just loaded) */
             sm_lk_step[t] = 0xFFu;

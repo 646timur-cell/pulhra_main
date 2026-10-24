@@ -51,7 +51,7 @@ static void sm_led_clear(uint8_t *nl, uint32_t id)
 /* the keys of the open layer: the white keys by their number (F3 = 0), the black keys 1..4 for the mutes */
 static void sm_leds_layer(uint8_t *nl, uint8_t *ng, uint8_t *ni, uint8_t *nbr)
 {
-    uint32_t k, w = 0, nb = 0, t = sm_ui.trk % SM_NTRK, cur = smp.pat[smp.cur % SM_NPAT].kit.snd[t].machine;
+    uint32_t k, w = 0, nb = 0, t = sm_ui.trk % SM_NTRK, cur = sm_mach_shown(&smp.pat[smp.cur % SM_NPAT], t);
     uint32_t gcur = sm_gid_of(smp.cur);
     for (k = 0; k < SM_NKEYS; k++) {
         if ((SM_BLACK_KEYS >> k) & 1u) {

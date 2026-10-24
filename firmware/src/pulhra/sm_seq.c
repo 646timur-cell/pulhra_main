@@ -150,12 +150,12 @@ static void sm_seq_release(uint32_t t)
 /* a value onto track t's core, clamped to the parameter's range on the engine the track is on its way to (as SMC_PARAM) */
 static void sm_seq_pset(uint32_t t, uint32_t p, int32_t v, uint32_t st, int lock)
 {
-    const param_desc_t *d = sm_desc_safe(eng_idx(trk[t].eng_req), p);
+    const param_desc_t *d = sm_desc_core(t, p);
     (void)st;
     if (!d)
         return;
     v = clamp(v, d->min, d->max);
-    trk[t].p[p] = (int16_t)v;
+    sm_core_set(t, p, v);
     if (lock)
         SM_LOCK_APPLIED(t, st, p, v);
 }
@@ -176,7 +176,7 @@ static void sm_seq_locks(uint32_t t, uint32_t st)
     for (i = 0; i < n; i++) {
         const sm_lock_t *l = &pt->lock[i];
         uint32_t p = l->param;
-        if (l->ts != ts || p >= P_COUNT)                  /* (0xFF >= P_COUNT: a removed entry) */
+        if (l->ts != ts || p >= SM_NPID)                  /* (0xFF >= SM_NPID: a removed entry) */
             continue;
         now[p >> 3] |= (uint8_t)(1u << (p & 7u));
         sm_seq_pset(t, p, l->val, st, 1);
@@ -185,7 +185,7 @@ static void sm_seq_locks(uint32_t t, uint32_t st)
         uint32_t back = sm_lk_on[t][b] & ~now[b], k;
         for (k = 0; back; k++, back >>= 1)
             if (back & 1u)
-                sm_seq_pset(t, b * 8u + k, pt->kit.snd[t].p[b * 8u + k], st, 0);
+                sm_seq_pset(t, b * 8u + k, sm_pget(pt, t, b * 8u + k), st, 0);
         sm_lk_on[t][b] = now[b];
     }
     sm_lk_step[t] = (uint8_t)st;
@@ -197,9 +197,9 @@ static void sm_seq_unlock(uint32_t t)
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint32_t p;
     t %= SM_NTRK;
-    for (p = 0; p < P_COUNT; p++)
+    for (p = 0; p < SM_NPID; p++)
         if (sm_lk_is(t, p))
-            sm_seq_pset(t, p, pt->kit.snd[t].p[p], 0, 0);
+            sm_seq_pset(t, p, sm_pget(pt, t, p), 0, 0);
     memset(sm_lk_on[t], 0, SM_LKB);
     sm_lk_step[t] = 0xFFu;
     sm_ps[t].n = 0;                                       /* (a glide must not write over the base again) */
@@ -625,6 +625,8 @@ static void sm_pat_switch(uint32_t n, uint32_t how)
         memset(sm_lk_on[t], 0, SM_LKB);
         sm_lk_step[t] = 0xFFu;
         sm_track_load(t, &smp.pat[n].kit.snd[t]);
+        if (t == SM_KIT_TRK)
+            sm_lanes_core(&smp.pat[n]);
         sm_rskip[t] = 0;                                  /* (the steps of the pattern before) */
         if (how != SM_PM_JUMP) {
             sm_next[t] = 0;

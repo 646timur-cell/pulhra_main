@@ -1555,6 +1555,8 @@ static int test_edit_layer_every_machine(void)
                 }
                 if (!sm_mach_ok(m, t))                    /* (the DRUM page: T4's alone; elsewhere its keys load nothing) */
                     ok &= ksnd(t)->machine != m;
+                else if (m >= MF_PAGE_4 && m < SM_KIT_MACH)   /* (KICK .. CYM on T4: the KIT, its lane in edit that machine) */
+                    ok &= ksnd(t)->machine == SM_KIT_MACH && trk[t].engine == ENGI_DKIT && ksnd(t)->p[P_E0 + sm_kit_lane % 4u] == (int8_t)(m - MF_PAGE_4);
                 else if (!(ksnd(t)->machine == m && trk[t].engine == sm_engine_of(m) && !trk[t].xf_on)) {
                     printf("  every machine: T%u machine %u (%s) play %u: model %u core %u xf %u\n", t + 1u, m,
                            ENGINES[sm_engine_of(m)]->name, play, ksnd(t)->machine, trk[t].engine, trk[t].xf_on);
@@ -1604,7 +1606,8 @@ static int test_edit_layer_every_machine(void)
                 trk_note_on(&trk[t], 64, 100);
                 for (b = 0; b < 60u; b++)
                     run_block();
-                ok &= trk[t].engine == sm_engine_of(sm_mach_ok(m, t) ? m : pg);   /* (the DRUM page off T4: no switch) */
+                ok &= trk[t].engine == (sm_mach_ok(m, t) && m >= MF_PAGE_4 ? ENGI_DKIT : sm_engine_of(sm_mach_ok(m, t) ? m : pg));   /* (the DRUM
+                                                                     page off T4: no switch; on T4 its machines the KIT's lanes) */
                 trk_all_off(&trk[t]);
             }
     printf("pulhra: every machine through the EDIT layer: peak %u\n", peak);
@@ -9011,8 +9014,94 @@ static int test_bank_v1(void)
     bad += check("BANKV1: ... the locks squeezed: the 173 live ones, in order, none removed", ok);
     {
         int8_t want[9];
-        dr_lane_init(want, (uint32_t)ENG_DKIT.edit[0].def);
+        dr_lane_init(want, (uint32_t)ENG_DKIT.edit[0].def, 0);
         bad += check("BANKV1: ... the KIT's lanes their default", !memcmp(smp.pat[2].lane[0], want, 9));
+    }
+    return bad;
+}
+
+/* the KIT (Tim): a whole machine a lane. EDIT 1 / 2 are the lane in edit's machine (its eight values, SELECT on EDIT 1 its
+ * machine, on EDIT 2 its ninth); the DRUM page's KICK .. CYM on T4 set the lane's machine; a value turned is the core's at once;
+ * a held trig locks a lane's value, the step plays it; PRESETS the lane's factory sounds */
+static int test_kit_lanes(void)
+{
+    int bad = 0;
+    uint32_t i;
+    sm_pattern_t *pt;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_kit_lane = 0;
+    layer_hold(B_EDIT);
+    for (i = 0; i < 4u && sm_lay_epage != 3u; i++) {
+        press(B_OCTUP);
+        sm_input_poll();
+    }
+    key_dn(WHITE[1]);                                     /* G3: SNARE */
+    sm_input_poll();
+    key_up(WHITE[1]);
+    layer_let_go(B_EDIT);
+    play_blocks(10);
+    pt = cpat();
+    bad += check("KITL: T4 + the DRUM page's SNARE: a KIT, its L1 a SNARE (its first sound), on the core too",
+                 ksnd(3)->machine == SM_KIT_MACH && trk[3].engine == ENGI_DKIT && ksnd(3)->p[P_E0] == DR_KM_SNARE &&
+                 pt->lane[0][0] == DSNARE_PRESETS[0].e[0] && dr_lp[3][0][0] == DSNARE_PRESETS[0].e[0]);
+    sm_ui.page = (uint8_t)page_by_name("EDIT 1");
+    bad += check("KITL: EDIT 1: K1 .. K4 L1's values 1..4, SELECT its machine; EDIT 2 5..8 and the ninth",
+                 sm_page_param(0) == SM_LP(0, 0) && sm_page_param(3) == SM_LP(0, 3) && sm_page_param(4) == P_E0);
+    turn(EN_K1, 5);
+    sm_input_poll();
+    play_blocks(2);
+    bad += check("KITL: K1 +5: L1's TUNE in the pattern and the core", pt->lane[0][0] == DSNARE_PRESETS[0].e[0] + 5 &&
+                 dr_lp[3][0][0] == pt->lane[0][0]);
+    draw_full();
+    bad += check("KITL: the header T4 SNAR L1, EDIT 1's page line the lane's sound", lint_has("SNAR", 0, 0) && lint_has("L1", 0, 0) &&
+                 lint_has("EDIT 1 \x12 SD ANALOG", 0, 0));
+    key_dn(1);                                            /* F#3 .. : L2 */
+    sm_input_poll();
+    key_up(1);
+    key_dn(3);
+    sm_input_poll();
+    key_up(3);
+    sm_input_poll();
+    bad += check("KITL: G#3: L2 in edit, EDIT 1 its values", sm_kit_lane == 1u && sm_page_param(0) == SM_LP(1, 0) && sm_page_param(4) == P_E1);
+    turn(EN_SELECT, -1);                                  /* L2's machine: SNARE -> KICK */
+    sm_input_poll();
+    play_blocks(2);
+    bad += check("KITL: SELECT -1: L2 a KICK, its values the KICK's first sound", ksnd(3)->p[P_E1] == DR_KM_KICK &&
+                 pt->lane[1][1] == DKICK_PRESETS[0].e[1] && dr_lp[3][1][1] == DKICK_PRESETS[0].e[1]);
+    turn(EN_PRESET, 1);
+    sm_input_poll();
+    play_blocks(2);
+    bad += check("KITL: PRESETS +1: L2 the KICK's second sound", ksnd(3)->p[P_E5] == 1 && pt->lane[1][0] == DKICK_PRESETS[1].e[0] &&
+                 dr_lp[3][1][0] == DKICK_PRESETS[1].e[0]);
+    press(B_REC);
+    sm_input_poll();
+    lk_tap(4);                                            /* (L2: a hit on step 5) */
+    key_dn(WHITE[4]);
+    sm_input_poll();
+    turn(EN_K1, 10);                                      /* step 5 held: L2's TUNE locked +10 */
+    sm_input_poll();
+    key_up(WHITE[4]);
+    sm_input_poll();
+    press(B_REC);
+    sm_input_poll();
+    bad += check("KITL: a held trig + K1: a lock of L2's TUNE on step 5, the base kept", lk_val(3, 4, SM_LP(1, 0)) == DKICK_PRESETS[1].e[0] + 10 &&
+                 pt->lane[1][0] == DKICK_PRESETS[1].e[0]);
+    {
+        uint32_t seen = 0, b;
+        press(B_PLAY);
+        sm_input_poll();
+        for (b = 0; b < 1400u; b++) {
+            run_block();
+            seen |= dr_lp[3][1][0] == DKICK_PRESETS[1].e[0] + 10;
+        }
+        press(B_PLAY);
+        sm_input_poll();
+        run_block();
+        bad += check("KITL: playing: step 5 sets L2's TUNE to its lock on the core", seen);
     }
     return bad;
 }
@@ -10856,6 +10945,7 @@ int main(void)
     bad += test_seq_track_copy();
     bad += test_step_chord_note();
     bad += test_bank_v1();
+    bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

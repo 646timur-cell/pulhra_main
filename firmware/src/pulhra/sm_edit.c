@@ -173,6 +173,7 @@ static void sm_copy_trk(uint32_t t)
             sm_clip.lock[k++].ts = (uint8_t)(p->lock[i].ts & 31u);
         }
     sm_clip.nlock = (uint16_t)k;
+    memcpy(sm_clip.lane, p->lane, sizeof sm_clip.lane);  /* (a KIT's lanes go with T4's sound) */
     sm_clip_kind = SM_CLIP_TRK;
 }
 
@@ -185,6 +186,8 @@ static void sm_paste_trk(uint32_t t)
     sm_undo_snap();
     sm_put_begin(1u << t);
     sm_put_track(t, &sm_clip, sm_clip_kind == SM_CLIP_TRK ? 0u : t, 0, 1);
+    if (t == SM_KIT_TRK && sm_snd_kit(&smp.pat[smp.cur % SM_NPAT].kit.snd[t]))   /* (a KIT pasted on T4: its lanes too; the LOAD */
+        memcpy(smp.pat[smp.cur % SM_NPAT].lane, sm_clip.lane, sizeof sm_clip.lane);   /* brings them) */
     sm_acc_reset(1u << t);
 }
 

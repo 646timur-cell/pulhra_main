@@ -547,82 +547,67 @@ static const engine_t ENG_DCYM = {
 };
 
 /* ====================================================================== KIT === */
-/* four lanes on one track (T4 only: pulhra/sm_layer.c), each one of the drums above as one of its factory sounds (SND1 ..
- * SND4: BD1 .. CHNA), TUNE1 .. TUNE4 (+-12 semitones) moving it, DCAY (SELECT: every lane's decay, -64 .. +63 on the
- * sound's own). A lane is a note: 36 + lane (C2 .. D#2; any other note its lane by note % 4): the sequencer's lanes
- * (sm_seq.c), the keyboard's F3 G3 A3 B3 (keys). A hit chokes only its own lane's last one. Velocity scales it */
-typedef struct { const engine_t *e; uint8_t preset, decay; const char *name; } dr_ksnd_t;   /* decay: its DECAY's E index */
-static const dr_ksnd_t DR_KSND[] = {
-    {&ENG_DKICK, 0, 3, "BD1"}, {&ENG_DKICK, 1, 3, "BD2"}, {&ENG_DKICK, 2, 3, "BD3"}, {&ENG_DKICK, 3, 3, "BD4"},
-    {&ENG_DSNARE, 0, 2, "SD1"}, {&ENG_DSNARE, 1, 2, "SD2"}, {&ENG_DSNARE, 2, 2, "SD3"}, {&ENG_DSNARE, 3, 2, "SD4"},
-    {&ENG_DCLAP, 0, 4, "CP1"}, {&ENG_DCLAP, 1, 4, "CP2"}, {&ENG_DCLAP, 2, 4, "CP3"},
-    {&ENG_DHAT, 0, 2, "CHH"}, {&ENG_DHAT, 1, 3, "OHH"}, {&ENG_DHAT, 2, 2, "HHN"}, {&ENG_DHAT, 3, 2, "HHM"},
-    {&ENG_DCYM, 0, 1, "CRSH"}, {&ENG_DCYM, 1, 1, "RIDE"}, {&ENG_DCYM, 2, 1, "CHNA"},
-};
-#define DR_NKSND ((int32_t)NELEM(DR_KSND))
-static const char *const N_DR_KSND[DR_NKSND] = {
-    "BD1", "BD2", "BD3", "BD4", "SD1", "SD2", "SD3", "SD4", "CP1", "CP2", "CP3", "CHH", "OHH", "HHN", "HHM", "CRSH", "RIDE",
-    "CHNA",
-};
+/* four lanes on one track (T4 only: pulhra/sm_layer.c), each a whole drum machine of the above (Tim): L1 .. L4 its machine
+ * (KICK SNARE CLAP HAT CYM), its own nine values (the pattern's sm_pattern_t.lane; in the core dr_lp, set by the sequencer's
+ * loads and its parameter commands, pulhra/sm_kit.c), lockable each. A lane is a note: 36 + lane (C2 .. D#2; any other note its
+ * lane by note % 4): the sequencer's lanes (sm_seq.c), the keyboard's F3 G3 A3 B3 (keys). A hit chokes only its own lane's last
+ * one. Velocity scales it */
+enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_N };
+static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM"};
+static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM};
+static int16_t dr_lp[NPART][4][9];                        /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's */
 #define DR_KIT_NOTE 36u                                   /* lane 0's note (C2) */
-/* a lane's nine values from sound k of DR_KSND (its machine's factory sound, the ninth its default) */
-static void dr_lane_init(int8_t *e9, uint32_t k)
+static uint32_t dr_kmach(int32_t v) { return (uint32_t)clamp(v, 0, DR_KM_N - 1); }
+/* a lane's nine values: machine m's factory sound pi (the ninth its default) */
+static void dr_lane_init(int8_t *e9, uint32_t m, uint32_t pi)
 {
-    const dr_ksnd_t *d = &DR_KSND[k % (uint32_t)DR_NKSND];
-    const preset_t *pr = &d->e->presets[d->preset % d->e->npresets];
+    const engine_t *e = DR_KENG[m % DR_KM_N];
+    const preset_t *pr = &e->presets[pi % e->npresets];
     uint32_t i;
     for (i = 0; i < 8u; i++)
         e9[i] = pr->e[i];
-    e9[8] = (int8_t)d->e->e8.def;
+    e9[8] = (int8_t)e->e8.def;
+}
+/* the descriptor of value k (0..8) of a lane of machine m */
+static const param_desc_t *dr_lane_desc(uint32_t m, uint32_t k)
+{
+    const engine_t *e = DR_KENG[m % DR_KM_N];
+    return k < 8u ? &e->edit[k] : &e->e8;
 }
 static uint32_t dr_lane(uint32_t note) { return (note - DR_KIT_NOTE) & 3u; }   /* (36..39: 0..3; any other: % 4) */
-/* lane L's sound and its nine values (the factory sound's, DCAY on its decay) */
-static const dr_ksnd_t *dr_klane(const int16_t *p, uint32_t L, int16_t *e)
-{
-    const dr_ksnd_t *k = &DR_KSND[clamp(p[P_E0 + (L & 3u)], 0, DR_NKSND - 1)];
-    const preset_t *pr = &k->e->presets[k->preset % k->e->npresets];
-    uint32_t i;
-    for (i = 0; i < 8u; i++)
-        e[i] = pr->e[i];
-    e[8] = k->e->e8.def;
-    e[k->decay] = (int16_t)clamp(e[k->decay] + p[P_E8], 0, 127);
-    return k;
-}
-/* the lane's pitch: C3 (as designed) + its TUNE */
-static vmod_t dr_kmod(const int16_t *p, uint32_t L, const vmod_t *m)
-{
-    vmod_t k = *m;
-    k.pitch16 = 48 * 16 + clamp(p[P_E4 + (L & 3u)], -64, 63) * (12 << 4) / 64;
-    return k;
-}
 static void dkit_note_on(track_t *t, voice_t *v)
 {
-    int16_t e[9];
-    const dr_ksnd_t *k = dr_klane(t->p, dr_lane(v->note), e);
+    uint32_t L = dr_lane(v->note), m = dr_kmach(t->p[P_E0 + L]);
+    const int16_t *e = dr_lp[(uint32_t)(t - trk) % NPART][L];
     dr_lane_choke = 1;
-    if (k->e == &ENG_DKICK) {
+    if (m == DR_KM_KICK) {
         dr_slot_t *S = dr_slot(t, v);                     /* (KICK keeps its state in the voice: the slot clean anyway) */
         memset(S, 0, sizeof *S);
         dkick_start(t, v, e);
+    } else if (m == DR_KM_SNARE) {
+        dsnare_start(t, v, e);
+    } else if (m == DR_KM_CLAP) {
+        dclap_start(t, v, e);
+    } else if (m == DR_KM_HAT) {
+        dhat_start(t, v, e);
     } else {
-        k->e->note_on == dsnare_note_on ? dsnare_start(t, v, e) : k->e->note_on == dclap_note_on ? dclap_start(t, v, e)
-            : k->e->note_on == dhat_note_on ? dhat_start(t, v, e) : dcym_start(t, v, e);
+        dcym_start(t, v, e);
     }
     dr_lane_choke = 0;
 }
 static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
-    int16_t e[9];
-    uint32_t L = dr_lane(v->note);
-    const dr_ksnd_t *k = dr_klane(t->p, L, e);
-    vmod_t km = dr_kmod(t->p, L, m);
-    if (k->e == &ENG_DKICK)
+    uint32_t L = dr_lane(v->note), mc = dr_kmach(t->p[P_E0 + L]);
+    const int16_t *e = dr_lp[(uint32_t)(t - trk) % NPART][L];
+    vmod_t km = *m;
+    km.pitch16 = 48 * 16;                                 /* (each lane at its machine's own TUNE: C3) */
+    if (mc == DR_KM_KICK)
         dkick_run(t, v, out, n, &km, e);
-    else if (k->e == &ENG_DSNARE)
+    else if (mc == DR_KM_SNARE)
         dsnare_run(t, v, out, n, &km, e);
-    else if (k->e == &ENG_DCLAP)
+    else if (mc == DR_KM_CLAP)
         dclap_run(t, v, out, n, &km, e);
-    else if (k->e == &ENG_DHAT)
+    else if (mc == DR_KM_HAT)
         dhat_run(t, v, out, n, &km, e);
     else
         dcym_run(t, v, out, n, &km, e);
@@ -634,23 +619,21 @@ static int32_t dkit_keys(const track_t *t, uint32_t k)
     return k < 7u && !(k & 1u) ? (int32_t)(DR_KIT_NOTE + k / 2u) : -1;
 }
 static const preset_t DKIT_PRESETS[] = {
-    /* SND1..SND4, TUNE1..TUNE4 */
-    {"KIT 808", {0, 4, 11, 8, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 10)},
-    {"KIT PUNCH", {1, 5, 12, 9, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(10, 0, 0, 10)},
-    {"KIT DEEP", {2, 6, 13, 10, -10, -10, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 30)},
-    {"KIT HARD", {3, 7, 14, 15, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(20, 0, 0, 0)},
+    /* L1..L4 machine, then the factory sound of each lane's machine */
+    {"KIT 808", {DR_KM_KICK, DR_KM_SNARE, DR_KM_HAT, DR_KM_CLAP, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 10)},
+    {"KIT PUNCH", {DR_KM_KICK, DR_KM_SNARE, DR_KM_HAT, DR_KM_CLAP, 1, 1, 0, 1}, {0, 64, 127, 30}, 0, 0, FX(10, 0, 0, 10)},
+    {"KIT DEEP", {DR_KM_KICK, DR_KM_SNARE, DR_KM_HAT, DR_KM_CYM, 2, 2, 1, 1}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 30)},
+    {"KIT HARD", {DR_KM_KICK, DR_KM_SNARE, DR_KM_HAT, DR_KM_CLAP, 3, 3, 3, 2}, {0, 64, 127, 30}, 0, 0, FX(20, 0, 0, 0)},
 };
 #define DR_CAT_KIT "DDDD"
-#define DR_KTUNE(lb) {lb, F_INT, -64, 63, 0, 0, 0}
 static const engine_t ENG_DKIT = {
-    .name = "KIT", .page_title = {"LANES", "TUNE"}, .presets = DKIT_PRESETS, .npresets = NELEM(DKIT_PRESETS),
+    .name = "KIT", .page_title = {"LANES", "SOUNDS"}, .presets = DKIT_PRESETS, .npresets = NELEM(DKIT_PRESETS),
     .note_on = dkit_note_on, .render = dkit_render, .keys = dkit_keys,
     .mem = sizeof(dr_slot_t) * NVOICE, .amp = dr_amp, .oneshot = 1, .poly = 6,
     .knob = {P_E0, P_E1, P_E2, P_E3},
-    .edit = {{"SND1", F_ENUM, 0, DR_NKSND - 1, 0, N_DR_KSND, 0}, {"SND2", F_ENUM, 0, DR_NKSND - 1, 4, N_DR_KSND, 0},
-             {"SND3", F_ENUM, 0, DR_NKSND - 1, 11, N_DR_KSND, 0}, {"SND4", F_ENUM, 0, DR_NKSND - 1, 8, N_DR_KSND, 0},
-             DR_KTUNE("TUN1"), DR_KTUNE("TUN2"), DR_KTUNE("TUN3"), DR_KTUNE("TUN4")},
-    .e8 = {"DCAY", F_INT, -64, 63, 0, 0, 0},
+    .edit = {{"L1", F_ENUM, 0, DR_KM_N - 1, DR_KM_KICK, N_DR_KMACH, 0}, {"L2", F_ENUM, 0, DR_KM_N - 1, DR_KM_SNARE, N_DR_KMACH, 0},
+             {"L3", F_ENUM, 0, DR_KM_N - 1, DR_KM_HAT, N_DR_KMACH, 0}, {"L4", F_ENUM, 0, DR_KM_N - 1, DR_KM_CLAP, N_DR_KMACH, 0},
+             {"S1", F_INT, 0, 3, 0, 0, 0}, {"S2", F_INT, 0, 3, 0, 0, 0}, {"S3", F_INT, 0, 3, 0, 0, 0}, {"S4", F_INT, 0, 3, 0, 0, 0}},
     .xyd = {{XY_E(4), XY_E(5), 0}, {XY_E(6), XY_E(7), 0}},
     .xya = {{40, 40, 0}, {40, 40, 0}},
 };

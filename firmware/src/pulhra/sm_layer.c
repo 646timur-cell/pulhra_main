@@ -417,8 +417,19 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         if (sm_layer == SML_EDIT) {
             if (w >= 0 && (uint32_t)w < sm_epage_n(sm_lay_epage) &&
                 sm_mach_ok(sm_epage_first(sm_lay_epage) + (uint32_t)w, t)) {   /* (the DRUM page: T4's alone) */
-                sm_sound_load(sm_epage_first(sm_lay_epage) + (uint32_t)w, 0);
-                sm_kit_lane = 0;
+                uint32_t m = sm_epage_first(sm_lay_epage) + (uint32_t)w;
+                if (m >= MF_PAGE_4 && m < SM_KIT_MACH) {  /* KICK .. CYM on T4 (Tim): the KIT's lane in edit that machine; */
+                    sm_sound_t *sd = sm_ui_sound();        /* T4 not a KIT yet: a KIT first */
+                    if (!sm_snd_kit(sd))
+                        sm_sound_load(SM_KIT_MACH, 0);
+                    sd->p[P_E0 + sm_kit_lane % 4u] = (int8_t)(m - MF_PAGE_4);
+                    sm_param_push(SM_KIT_TRK, P_E0 + sm_kit_lane % 4u);
+                    sm_lane_machine(sm_kit_lane % 4u);
+                } else {
+                    sm_sound_load(m, 0);
+                    if (m == SM_KIT_MACH)
+                        sm_kit_lane = 0;
+                }
             }
         } else if (sm_layer == SML_GLO) {
             uint32_t b, n = 0;                            /* the black key's place among the black keys, 0 .. 3: T1 .. T4 (the

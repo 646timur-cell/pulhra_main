@@ -38,7 +38,7 @@
 #define SM_KEY_NOTE0 53u                                  /* F3, the first key's MIDI note (C4 = 60) */
 #define SM_KEY_VEL 100u
 
-static uint32_t sm_pdirty[SM_NTRK][4];                    /* bit per parameter (P_COUNT <= 127): pushed again */
+static uint32_t sm_pdirty[SM_NTRK][5];                    /* bit per parameter id (< SM_NPID <= 160: the KIT's lanes too): pushed again */
 static uint8_t sm_ld_pend;                                /* bit per track: a LOAD still to push */
 static uint8_t sm_tr_pend;                                /* 0 none, 1 PLAY, 2 STOP still to push */
 static uint8_t sm_save_st;                                /* SAVE: 0 up, 1 down (since sm_save_t0), 2 held: UNDO done */
@@ -130,6 +130,7 @@ static void sm_trn(uint32_t t, int32_t d);
 
 static sm_sound_t *sm_ui_sound(void) { return &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK]; }
 
+static void sm_lane_machine(uint32_t L);
 static void sm_param_push(uint32_t t, uint32_t id)
 {
     sm_cmd_t c;
@@ -137,7 +138,7 @@ static void sm_param_push(uint32_t t, uint32_t id)
     c.trk = (uint8_t)t;
     c.step = smp.cur;                                     /* (the pattern: sm_cmd.c) */
     c.param = (uint8_t)id;
-    c.val = smp.pat[smp.cur % SM_NPAT].kit.snd[t].p[id];
+    c.val = (int16_t)sm_pget(&smp.pat[smp.cur % SM_NPAT], t, id);
     if (sm_cmd_push(c))
         sm_pdirty[t][id >> 5] &= ~(1u << (id & 31u));
     else
@@ -166,12 +167,15 @@ static void sm_turn_held(uint32_t id, int32_t s)
  * then the command */
 static void sm_turn_base(uint32_t t, uint32_t id, int32_t s)
 {
-    sm_sound_t *sd = &smp.pat[smp.cur % SM_NPAT].kit.snd[t % SM_NTRK];
+    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    sm_sound_t *sd = &pt->kit.snd[t % SM_NTRK];
     const param_desc_t *d = sm_desc_trk(sd, id);
     if (!s || !d)
         return;
-    sd->p[id] = (int8_t)sm_val_turn(d, id, sd->p[id], s);   /* (a byte write: the audio stream sees the old or the new) */
+    sm_pset(pt, t, id, sm_val_turn(d, id, sm_pget(pt, t, id), s));   /* (a byte write: the audio stream sees the old or the new) */
     sm_param_push(t % SM_NTRK, id);
+    if (sm_snd_kit(sd) && t % SM_NTRK == SM_KIT_TRK && id >= P_E0 && id < P_E0 + 4u)
+        sm_lane_machine(id - P_E0);                       /* (a lane's machine turned: its values that machine's first sound) */
     sm_dirty = 1;
 }
 
@@ -213,7 +217,7 @@ static void sm_turn(uint32_t id, int32_t s)
     if (sm_rec && sm_live && sm_playing) {               /* REC (live), playing: the knob records onto the trig playing (ARM: never; a held trig locks) */
         uint32_t st = *(volatile uint8_t *)&sm_pos[t];
         sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};
-        c.val = sm_ui_sound()->p[id];
+        c.val = (int16_t)sm_pget(&smp.pat[smp.cur % SM_NPAT], t, id);
         if (smp.pat[smp.cur % SM_NPAT].step[t][st % SM_NSTEP].n)
             (void)sm_lock_set(t, st % SM_NSTEP, id, c.val);   /* (the pool full: LOCKS FULL, the base moved all the same) */
         (void)sm_cmd_push(c);                             /* (refused: the base's SMC_PARAM, or the next trig, brings it) */
@@ -272,9 +276,28 @@ static void sm_sound_load(uint32_t machine, uint32_t preset)
     fm1_irq_off();
     *sd = n;
     fm1_irq_on();
+    if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT]))
+        sm_lanes_default(&smp.pat[smp.cur % SM_NPAT]);    /* (the KIT: its lanes from its sound; the LOAD brings them) */
     sm_ld_pend |= (uint8_t)(1u << sm_ui.trk);
     sm_dirty = 1;
 }
+
+/* the KIT on T4: lane L's nine values its machine's factory sound pi (S1 .. S4 = pi), each pushed */
+static void sm_lane_sound(uint32_t L, uint32_t pi)
+{
+    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    sm_sound_t *sd = &pt->kit.snd[SM_KIT_TRK];
+    uint32_t k;
+    L &= 3u;
+    sd->p[P_E4 + L] = (int8_t)pi;
+    sm_param_push(SM_KIT_TRK, P_E4 + L);
+    dr_lane_init(pt->lane[L], dr_kmach(sd->p[P_E0 + L]), pi);
+    for (k = 0; k < 9u; k++)
+        sm_param_push(SM_KIT_TRK, SM_LP(L, k));
+    sm_dirty = 1;
+}
+/* lane L's machine turned (SELECT on EDIT 1, the DRUM page's keys): its first factory sound */
+static void sm_lane_machine(uint32_t L) { sm_lane_sound(L, 0); }
 
 /* PRESETS: the next / previous preset of the track's machine (wraps), the whole sound from it, then the LOAD */
 static void sm_preset_turn(int32_t s)
@@ -282,6 +305,12 @@ static void sm_preset_turn(int32_t s)
     sm_sound_t *sd = sm_ui_sound();
     uint32_t np = ENGINES[sm_engine_of(sd->machine)]->npresets;
     int32_t p;
+    if (s && sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {   /* the KIT: the lane in edit's factory sounds */
+        uint32_t L = sm_kit_lane % 4u, n = DR_KENG[dr_kmach(sd->p[P_E0 + L])]->npresets;
+        p = ((int32_t)clamp(sd->p[P_E4 + L], 0, 15) + s) % (int32_t)n;
+        sm_lane_sound(L, (uint32_t)(p < 0 ? p + (int32_t)n : p));
+        return;
+    }
     if (!s || !np)
         return;
     p = ((int32_t)sd->preset + s) % (int32_t)np;
@@ -1047,12 +1076,12 @@ static void sm_flush(void)
             sm_cmd_t c = {SMC_LOAD, (uint8_t)t, smp.cur, 0, 0};
             if (sm_cmd_push(c)) {
                 sm_ld_pend &= (uint8_t)~(1u << t);
-                for (w = 0; w < 4u; w++)
+                for (w = 0; w < 5u; w++)
                     sm_pdirty[t][w] = 0;                  /* (the sound carries every value of the model) */
             }
             continue;                                     /* (the values wait for the sound: a LOAD changes the engine) */
         }
-        for (w = 0; w < 4u; w++)
+        for (w = 0; w < 5u; w++)
             for (b = 0; sm_pdirty[t][w] && b < 32u; b++)
                 if ((sm_pdirty[t][w] >> b) & 1u)
                     sm_param_push(t, w * 32u + b);

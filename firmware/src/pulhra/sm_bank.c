@@ -344,6 +344,14 @@ static void sm_bank_clamp(uint32_t s0)
             sm_sound_t *sd = &smp.pat[s0 + i].kit.snd[t];
             sd->machine %= SM_NMACHINE;
             sm_ens_semi(sd);                              /* (ENS: a just ratio of an older bank its semitone) */
+            if (t == SM_KIT_TRK && sm_snd_kit(sd)) {      /* (the KIT's lanes: each inside its machine's ranges) */
+                uint32_t L, k;
+                for (L = 0; L < 4u; L++)
+                    for (k = 0; k < 9u; k++) {
+                        const param_desc_t *d = dr_lane_desc(dr_kmach(sd->p[P_E0 + L]), k);
+                        smp.pat[s0 + i].lane[L][k] = (int8_t)clamp(smp.pat[s0 + i].lane[L][k], d->min, d->max);
+                    }
+            }
             for (p = 0; p < P_COUNT; p++) {
                 const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), p);
                 if (d)
@@ -485,6 +493,7 @@ static void sm_store_boot(void)
     smp.next = SM_PAT_NONE;
     sm_phash = sm_proj_hash();
     sm_kit_boot(&smp.pat[smp.cur].kit);
+    sm_lanes_core(&smp.pat[smp.cur]);
     sm_seq_init();
     sm_as_sig = 0;
     sm_as_t0 = sm_as_look = fm1_ticks();

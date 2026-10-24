@@ -105,6 +105,10 @@ static void smd_upper(char *d, const char *s, uint32_t n)
 static const char *smd_preset_name(const sm_sound_t *s)
 {
     const engine_t *e = ENGINES[sm_engine_of(s->machine)];
+    if (sm_snd_kit(s) && s == &smp.pat[smp.cur % SM_NPAT].kit.snd[SM_KIT_TRK]) {   /* the KIT: the lane in edit's sound (BD PUNCH) */
+        const engine_t *le = DR_KENG[dr_kmach(s->p[P_E0 + sm_kit_lane % 4u])];
+        return le->presets[(uint32_t)clamp(s->p[P_E4 + sm_kit_lane % 4u], 0, 15) % le->npresets].name;
+    }
     return e->npresets ? e->presets[s->preset % e->npresets].name : "";
 }
 
@@ -209,7 +213,7 @@ static void smd_header(void)
         smd_int(o, sm_ui.oct, 1);
         sm_px_text(x, 2, 2u, o, T_BG, 0);
     } else if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {   /* KIT: T4 BD1 L1 - the lane in edit, its sound */
-        smd_upper(nm, N_DR_KSND[clamp(s->p[P_E0 + sm_kit_lane % 4u], 0, DR_NKSND - 1)], 4u);
+        smd_upper(nm, N_DR_KMACH[dr_kmach(s->p[P_E0 + sm_kit_lane % 4u])], 4u);   /* (the lane's machine) */
         x += sm_px_text(x, 2, 2u, nm, T_BG, 0) + 6;
         l[0] = 'L'; l[1] = (char)('1' + sm_kit_lane % 4u); l[2] = 0;
         sm_px_text(x, 2, 2u, l, T_BG, 1);
@@ -269,6 +273,9 @@ static uint32_t smd_page_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t h = smd_mix(smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine), s->preset);
+    if (sm_snd_kit(s))                                    /* (the KIT: the lane in edit, its machine and sound) */
+        h = smd_mix(smd_mix(smd_mix(h, sm_kit_lane), (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u]),
+                    (uint32_t)(uint8_t)s->p[P_E4 + sm_kit_lane % 4u]);
     if (sm_page_is_step()) {
         int32_t st;
         const sm_step_t *p = smd_step(&st);
@@ -581,7 +588,7 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     if (!o->d)
         return;
     o->on = 1;
-    o->v = s->p[id];
+    o->v = sm_pget(pt, t, id);
     if (sm_ui.held_step < SM_NSTEP) {
         int32_t li = sm_lock_find(pt, t, sm_ui.held_step, id);
         if (li >= 0) {
@@ -610,6 +617,8 @@ static uint32_t smd_knob_sig(uint32_t k)
     h = smd_mix(h, (uint32_t)(o.dim * 2 + o.inv) + o.chord * 16u);
     for (i = 0; o.val[i]; i++)                            /* (the STEP page: the text is the value) */
         h = smd_mix(h, (uint8_t)o.val[i]);
+    for (i = 0; o.lab[i]; i++)                            /* (the KIT: a lane of another machine, other labels) */
+        h = smd_mix(h, (uint8_t)o.lab[i] + 0x100u);
     return h;
 }
 /* a knob's label in at most 4 characters (48 of the column's 60 px: a gap of 12 to the next label, never a run-on such as
@@ -658,13 +667,15 @@ static int32_t smd_sel_val(uint32_t id)                  /* SELECT's value: the 
     int32_t li = sm_ui.held_step < SM_NSTEP ? sm_lock_find(pt, sm_ui.trk % SM_NTRK, sm_ui.held_step, id) : -1;
     if (id & SM_GLB)
         return song.g[(id & ~SM_GLB) % G_COUNT];
-    return li >= 0 ? pt->lock[li].val : smd_snd()->p[id];
+    return li >= 0 ? pt->lock[li].val : sm_pget(pt, sm_ui.trk % SM_NTRK, id);
 }
 static uint32_t smd_sel_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t id = sm_page_param(4);
     uint32_t h = smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine);
+    if (sm_snd_kit(s))                                    /* (the KIT: the lane's machine names its ninth value) */
+        h = smd_mix(h, (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u] * 4u + sm_kit_lane);
     if (sm_page_is_step())
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
     if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP)   /* (the selected track's volume) */
@@ -741,7 +752,7 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
         for (c = 0; c < 4u; c++) {
             i = r * 4u + c;
             if (i < cnt) {
-                smd_cell(o, c, ENGINES[sm_engine_of(sm_epage_first(pg) + i)]->name, sm_epage_first(pg) + i == s->machine);
+                smd_cell(o, c, ENGINES[sm_engine_of(sm_epage_first(pg) + i)]->name, sm_epage_first(pg) + i == sm_mach_shown(&smp.pat[smp.cur % SM_NPAT], sm_ui.trk));
                 if (!sm_mach_ok(sm_epage_first(pg) + i, sm_ui.trk))
                     o->dim |= (uint8_t)(1u << c);         /* (the DRUM page off T4: dim, its keys load nothing) */
             }

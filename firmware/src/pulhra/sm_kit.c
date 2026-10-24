@@ -27,6 +27,15 @@ static void sm_track_load(uint32_t t, const sm_sound_t *s)
         k->p[i] = (int16_t)s->p[i];                       /* (int8_t -> int16_t: sign-extended) */
 }
 
+/* the KIT's lanes of pattern pt onto the core (eng_dr.c dr_lp, T4's): ISR only, as sm_track_load (or before the audio starts) */
+static void sm_lanes_core(const sm_pattern_t *pt)
+{
+    uint32_t L, k;
+    for (L = 0; L < 4u; L++)
+        for (k = 0; k < 9u; k++)
+            dr_lp[SM_KIT_TRK][L][k] = pt->lane[L][k];
+}
+
 /* power-on, before the audio starts (nothing runs concurrently): the four sounds onto the tracks, the engines
  * switched at once and their state regions claimed */
 static void sm_kit_boot(const sm_kit_t *k)

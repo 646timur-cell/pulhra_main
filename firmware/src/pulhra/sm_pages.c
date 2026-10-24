@@ -132,6 +132,14 @@ static uint32_t sm_page_param(uint32_t k)
 {
     const sm_page_t *pg = sm_cur_page();
     uint32_t id = k < 4u ? pg->id[k] : pg->sel;
+    if (pg->fam == SMFAM_EDIT && sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {
+        /* the KIT (Tim): EDIT 1 / EDIT 2 the lane in edit's machine, its eight values; SELECT on EDIT 1 that machine, on EDIT 2
+         * its ninth value */
+        uint32_t L = sm_kit_lane % 4u, two = pg->id[0] == P_E4;
+        if (k < 4u)
+            return SM_LP(L, (two ? 4u : 0u) + k);
+        return two ? SM_LP(L, 8u) : P_E0 + L;
+    }
     if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5 && pg->fam == SMFAM_ENV) {
         if (id == P_FCUT)
             return P_HBASE;

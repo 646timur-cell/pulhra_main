@@ -15,6 +15,9 @@ static uint32_t sm_engine_of(uint32_t machine) { return eng_vis(machine); }
 static uint8_t sm_kit_lane;                               /* the KIT lane in edit (the trig keys, the strip): ALGORITHM picks it */
 /* machine m may go on track t: the DRUM page's (MF_PAGE_4 on: KICK .. KIT) on T4 alone (Tim: the drums are T4's) */
 static int sm_mach_ok(uint32_t m, uint32_t t) { return m < MF_PAGE_4 || t % SM_NTRK == SM_KIT_TRK; }
+static int sm_snd_kit(const sm_sound_t *d);
+/* the machine the EDIT layer shows as track t's (inverted, lit): the KIT's lane in edit's machine (KICK .. CYM), else its own */
+static uint32_t sm_mach_shown(const sm_pattern_t *pt, uint32_t t);
 static int sm_snd_kit(const sm_sound_t *d) { return d->machine == SM_KIT_MACH; }
 /* track t of pattern pt plays the KIT */
 static int sm_trk_kit(uint32_t t, const sm_pattern_t *pt) { return t == SM_KIT_TRK && sm_snd_kit(&pt->kit.snd[t]); }
@@ -28,6 +31,11 @@ static const sm_step_t *sm_step_view(const sm_pattern_t *pt, uint32_t t, uint32_
     *tmp = *st;
     tmp->n = (uint8_t)(st->n && st->note[sm_kit_lane % 4u] != 0);
     return tmp;
+}
+static uint32_t sm_mach_shown(const sm_pattern_t *pt, uint32_t t)
+{
+    const sm_sound_t *s = &pt->kit.snd[t % SM_NTRK];
+    return sm_trk_kit(t % SM_NTRK, pt) ? MF_PAGE_4 + dr_kmach(s->p[P_E0 + sm_kit_lane % 4u]) : s->machine;
 }
 /* a KIT step's lanes that hit (bit per lane) */
 static uint32_t sm_kit_mask(const sm_step_t *s)
@@ -49,11 +57,43 @@ static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
 
 /* the descriptor of parameter id on the sound s: sm_desc_safe, and the INSERT's three values A B C as its TYPE names them
  * (params.c ins_desc: DRIVE .. for the swept ones, BITS RATE LPF for CRUSH; the ranges are 0..127 in every type) */
+/* the KIT's lanes as parameters (Tim: a whole machine a lane, every value lockable): ids past P_COUNT, lane L's value k
+ * (0..8: E1 .. E8, the ninth) SM_LP(L, k); their value the pattern's (sm_pattern_t.lane), the core's dr_lp (eng_dr.c) */
+#define SM_LP0 ((uint32_t)P_COUNT)
+#define SM_NPID (SM_LP0 + 36u)                            /* every id a lock, a command, a push may carry */
+#define SM_LP(L, k) (SM_LP0 + (uint32_t)(L) * 9u + (uint32_t)(k))
+_Static_assert(SM_NPID < 0xFFu, "a parameter id is a byte (0xFF: a removed lock)");
+static int sm_is_lp(uint32_t id) { return id >= SM_LP0 && id < SM_NPID; }
+/* the value of id on track t of pattern pt: a lane's, else the sound's */
+static int32_t sm_pget(const sm_pattern_t *pt, uint32_t t, uint32_t id)
+{
+    if (sm_is_lp(id))
+        return pt->lane[(id - SM_LP0) / 9u][(id - SM_LP0) % 9u];
+    return id < P_COUNT ? pt->kit.snd[t % SM_NTRK].p[id] : 0;
+}
+static void sm_pset(sm_pattern_t *pt, uint32_t t, uint32_t id, int32_t v)
+{
+    if (sm_is_lp(id))
+        pt->lane[(id - SM_LP0) / 9u][(id - SM_LP0) % 9u] = (int8_t)v;
+    else if (id < P_COUNT)
+        pt->kit.snd[t % SM_NTRK].p[id] = (int8_t)v;
+}
+/* the descriptor of a lane's value on a KIT whose lane machines are p[P_E0 .. P_E3] (the model's or the core's) */
+static const param_desc_t *sm_desc_lp16(int32_t mach, uint32_t id) { return dr_lane_desc(dr_kmach(mach), (id - SM_LP0) % 9u); }
 static const param_desc_t *sm_desc_trk(const sm_sound_t *s, uint32_t id)
 {
+    if (sm_is_lp(id))
+        return sm_snd_kit(s) ? sm_desc_lp16(s->p[P_E0 + (id - SM_LP0) / 9u], id) : 0;
     if (id >= P_IA && id <= P_IC)
         return ins_desc(s->p[P_ITYPE], id - P_IA);
     return sm_desc_safe(sm_engine_of(s->machine), id);
+}
+/* the core's: track t (trk[], the engine on its way) */
+static const param_desc_t *sm_desc_core(uint32_t t, uint32_t id)
+{
+    if (sm_is_lp(id))
+        return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? sm_desc_lp16(trk[t % SM_NTRK].p[P_E0 + (id - SM_LP0) / 9u], id) : 0;
+    return sm_desc_safe(eng_idx(trk[t % SM_NTRK].eng_req), id);
 }
 
 /* the INSERT TYPEs a track offers, in the order of the knob: OFF CRUSH PHASR FLANG CHOR (fx.c IT_*, the values stored). The
@@ -177,12 +217,17 @@ static void sm_kit_default(sm_kit_t *kit)
         sm_sound_from_preset(&kit->snd[t], eng_rank(KIT[t]), 0);
 }
 /* an empty pattern with kit k: no trig, no lock, master length AUTO */
-/* the KIT's four lanes their defaults: KIT's own SND1 .. SND4 defaults (BD SD CHH CP), each its machine's factory sound */
+/* the KIT's four lanes from T4's sound: each its machine (L1 .. L4) at its factory sound (S1 .. S4); a T4 of another machine:
+ * KIT's own defaults (KICK SNARE HAT CLAP, their first sounds) */
 static void sm_lanes_default(sm_pattern_t *p)
 {
+    const sm_sound_t *s = &p->kit.snd[SM_KIT_TRK];
     uint32_t L;
     for (L = 0; L < 4u; L++)
-        dr_lane_init(p->lane[L], (uint32_t)ENG_DKIT.edit[L].def);
+        if (sm_snd_kit(s))
+            dr_lane_init(p->lane[L], dr_kmach(s->p[P_E0 + L]), (uint32_t)clamp(s->p[P_E4 + L], 0, 15));
+        else
+            dr_lane_init(p->lane[L], (uint32_t)ENG_DKIT.edit[L].def, 0);
 }
 static void sm_pat_blank(sm_pattern_t *p, const sm_kit_t *k)
 {

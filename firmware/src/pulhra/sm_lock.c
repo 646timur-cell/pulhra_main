@@ -117,7 +117,7 @@ static int sm_lock_set(uint32_t t, uint32_t s, uint32_t param, int32_t v)
     sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
     int32_t i;
     uint32_t k, n;
-    if (t >= SM_NTRK || s >= SM_NSTEP || param >= P_COUNT)
+    if (t >= SM_NTRK || s >= SM_NSTEP || param >= SM_NPID)
         return 0;
     i = sm_lock_find(p, t, s, param);
     if (i >= 0) {
@@ -181,7 +181,7 @@ static int sm_lock_turn(uint32_t t, uint32_t s, uint32_t id, int32_t d, int mk)
     if (make && !mk)
         return 0;
     i = sm_lock_find(p, t, s, id);
-    v = i >= 0 ? p->lock[i].val : sd->p[id];
+    v = i >= 0 ? p->lock[i].val : sm_pget(p, t, id);
     v = sm_val_turn(dc, id, v, d);
     if (!sm_lock_set(t, s, id, v))
         return 0;
