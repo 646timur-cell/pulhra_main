@@ -2085,13 +2085,13 @@ typedef struct { int32_t x0, y0, x1, y1; const char *name; } zone_t;
 static const zone_t ZONES[] = {
     {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "page"},
     {0, 48, 60, 160, "knob0"}, {60, 48, 120, 160, "knob1"}, {120, 48, 180, 160, "knob2"}, {180, 48, 240, 160, "knob3"},
-    {0, 168, 240, 188, "select"}, {208, 220, 240, 240, "len"},
+    {0, 168, 240, 188, "select"}, {208, 220, 240, 240, "len"}, {0, 220, 208, 240, "strip"},
 };
 /* an open layer: the header, the page line (its title), the five rows of the map (240 x 34 from y 48) */
 static const zone_t LZONES[] = {
     {0, 0, 240, 20, "header"}, {0, 20, 240, 48, "title"},
     {0, 48, 240, 82, "row0"}, {0, 82, 240, 116, "row1"}, {0, 116, 240, 150, "row2"}, {0, 150, 240, 184, "row3"}, {0, 184, 240, 218, "row4"},
-    {208, 220, 240, 240, "len"},
+    {208, 220, 240, 240, "len"}, {0, 220, 208, 240, "strip"},
 };
 static const zone_t *lint_zones = ZONES;
 static uint32_t lint_nz = sizeof ZONES / sizeof ZONES[0];
@@ -2230,10 +2230,10 @@ static int test_draw_playhead_snapshot(void)
     begin_hook = hook_move_pos;                               /* the first cv_begin of the frame: after the signatures */
     px = frame_px();
     bad += check("playhead: the strip shows the step the frame read (3), not the one the audio stream moved to (9)",
-                 SCR(3 * SMD_STEP_W + 5, 239) == SINK && SCR(9 * SMD_STEP_W + 5, 239) == SGND && begin_hook == 0);
+                 SCR(3 * SMD_STEP_W, 223) == SINK && SCR(9 * SMD_STEP_W, 223) == SGND && begin_hook == 0);
     px = frame_px();
     bad += check("playhead: the next frame sees the move and draws step 9",
-                 px > 0 && px <= 240u * 20u && SCR(9 * SMD_STEP_W + 5, 239) == SINK && SCR(3 * SMD_STEP_W + 5, 239) == SGND);
+                 px > 0 && px <= 240u * 20u && SCR(9 * SMD_STEP_W, 223) == SINK && SCR(3 * SMD_STEP_W, 223) == SGND);
     return bad;
 }
 /* the 4 x 4 box at x, y: all ink / all ground */
@@ -2269,36 +2269,38 @@ static uint32_t scr_sink(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 #define BO (SW / 2u - 4u)
 #define RO (SW / 2u - 2u)
 #define MO (SW / 2u)
+static int lint_has(const char *t, int32_t *y0, int32_t *y1);
+/* the strip's ASCII: the character drawn in cell i (lint's boxes: a text of one character at x i * 13 + 1 in the strip), 0 none */
+static char strip_ch(uint32_t i)
+{
+    uint32_t k;
+    for (k = 0; k < lint_n && k < 256u; k++)
+        if (lint_box[k].y0 >= 220 && lint_box[k].x0 == (int32_t)(i * SMD_STEP_W + 1u) && lint_box[k].s[0] && !lint_box[k].s[1])
+            return lint_box[k].s[0];
+    return 0;
+}
 static int test_strip_dots(void)
 {
     int bad = 0;
-    uint32_t px, i;
+    uint32_t i;
     sm_step_t *st;
     draw_setup();
     st = smp.pat[smp.cur].step[0];
     st[1].n = 1;                                              /* a trig */
-    st[2].n = 1; st[2].flags = (uint8_t)(2u << 4);            /* x3 */
-    st[3].n = 1; st[3].flags = (uint8_t)(3u << 4);            /* x4 */
+    st[2].n = 1; st[2].flags = SMF_ACCENT;                    /* an accent */
+    st[3].n = 1; st[3].flags = (uint8_t)(2u << 4);            /* x3: a ratchet */
     st[4].flags = SMF_REST;                                   /* a REST: locks only */
-    st[5].n = 1; st[5].flags = (uint8_t)(1u << 4);            /* x2 */
+    st[5].n = 1; st[5].flags = SMF_SLIDE;                     /* a slide */
+    st[6].n = 1; st[6].flags = SMF_ACCENT | (1u << 4);        /* an accented ratchet: the ratchet wins */
     draw_full();
     bad += check("strip: the strip is 20 px high, at the bottom of the screen", SMD_STRIP_H <= 20u && SMD_STRIP_Y + SMD_STRIP_H == 240u);
-    bad += check("strip: a trig is one filled 3 x 3 dot (the lowest place, rows 15..17)", box_is(SW + DO, 235, 3, 3, SINK) && scr_sink(SW, 220, SW, 20) == 9u);
-    bad += check("strip: x3 is three 3 x 3 dots stacked at a pitch of 4 (a 1 px gap between)",
-                 box_is(2 * SW + DO, 235, 3, 3, SINK) && box_is(2 * SW + DO, 231, 3, 3, SINK) && box_is(2 * SW + DO, 227, 3, 3, SINK) &&
-                 scr_sink(2 * SW, 220, SW, 20) == 27u && SCR(2 * SW + MO, 234) == SGND && SCR(2 * SW + MO, 230) == SGND);
-    bad += check("strip: x4 is four dots (rows 3..17)",
-                 box_is(3 * SW + DO, 235, 3, 3, SINK) && box_is(3 * SW + DO, 223, 3, 3, SINK) && scr_sink(3 * SW, 220, SW, 20) == 36u);
-    bad += check("strip: x2 is two dots", box_is(5 * SW + DO, 235, 3, 3, SINK) && box_is(5 * SW + DO, 231, 3, 3, SINK) && scr_sink(5 * SW, 220, SW, 20) == 18u);
-    bad += check("strip: a REST is a hollow dot (the outline 4 x 4)",
-                 SCR(4 * SW + RO, 234) == SINK && SCR(4 * SW + RO + 3, 237) == SINK && SCR(4 * SW + RO, 236) == SINK && SCR(4 * SW + RO + 3, 235) == SINK &&
-                 box_is(4 * SW + RO + 1, 235, 2, 2, SGND) && scr_sink(4 * SW, 220, SW, 20) == 12u);
-    bad += check("strip: an empty step is nothing, the beats 1 5 9 13 a dim 1 x 1",
-                 scr_sink(6 * SW, 220, SW, 20) == 0 && SCR(MO, 236) == DIMC && scr_sink(0, 220, SW, 20) == 1u &&
-                 scr_sink(8 * SW, 220, SW, 20) == 1u && SCR(8 * SW + MO, 236) == DIMC && SCR(6 * SW + MO, 236) == SGND);
-    for (i = 0; i < 240u * 20u; i++) {                        /* nothing but the three inks */
+    bad += check("strip: ASCII: . empty, bullet a trig, ^ accent, x ratchet, degree REST, * slide (the ratchet over the accent)",
+                 strip_ch(0) == '\x13' && strip_ch(1) == '\x14' && strip_ch(2) == '\x15' && strip_ch(3) == '\x17' &&
+                 strip_ch(4) == '\x16' && strip_ch(5) == '\x18' && strip_ch(6) == '\x17' && strip_ch(7) == '\x13');
+    bad += check("strip: ... an empty step dim, a trig in the ink", SCR(0 * SW + 1 + 4, 220 + 4 + 12) == DIMC && SCR(1 * SW + 1 + 4, 220 + 4 + 6) == SINK);
+    for (i = 0; i < 240u * 20u; i++) {                        /* nothing but the inks */
         uint16_t c = SCR(i % 240u, 220u + i / 240u);
-        if (c != SINK && c != DIMC && c != SGND)
+        if (c != INK && c != DIMC && c != BGC && c != SGND)
             bad++;
     }
     sm_playing = 1;
@@ -2307,37 +2309,17 @@ static int test_strip_dots(void)
     sm_dirty = 1;
     lcd_px = 0;
     sm_draw();
-    bad += check("strip: the step playing has a bar 8 x 1 under its place", box_is(SW + BO, 239, 8, 1, SINK) && SCR(SW + BO - 1, 239) == SGND &&
-                                                                          SCR(SW + BO + 8, 239) == SGND && SCR(SW + BO, 238) == SGND);
-    bad += check("strip: the step held has a bar 8 x 2 over its place", box_is(2 * SW + BO, 220, 8, 2, SINK) && SCR(2 * SW + BO - 1, 220) == SGND &&
-                                                                       SCR(2 * SW + BO + 8, 221) == SGND && box_is(2 * SW + DO, 227, 3, 3, SINK));
-    {   /* a x4 stack keeps a 1 px gap to the bar under it (playing) and to the one over it (held) */
-        uint32_t x, gap = 1, bars;
-        sm_pos[0] = 3;
-        sm_ui.held_step = 3;
-        sm_dirty = 1;
-        sm_draw();
-        for (x = 3 * SW + DO; x < 3 * SW + DO + 3u; x++)
-            gap &= SCR(x, 222) == SGND && SCR(x, 238) == SGND;
-        bars = box_is(3 * SW + BO, 220, 8, 2, SINK) && box_is(3 * SW + BO, 239, 8, 1, SINK);
-        bad += check("strip: x4 playing and held at once: both bars, a 1 px gap to the stack on each side (rows 2 and 18)",
-                     bars && gap && box_is(3 * SW + DO, 223, 3, 3, SINK) && box_is(3 * SW + DO, 235, 3, 3, SINK));
-        sm_pos[0] = 1;
-        sm_ui.held_step = 2;
-        sm_dirty = 1;
-        sm_draw();
-    }
+    bad += check("strip: the step playing inverted (a box of ink, its character the ground)",
+                 SCR(1 * SW + 0, 220 + 3) == SINK && SCR(1 * SW + 1 + 4, 220 + 4 + 6) == SGND && SCR(2 * SW + 0, 220 + 3) != SINK);
+    bad += check("strip: the step held: a bar over it (rows 0..1)", box_is(2 * SW + 2, 220, 8, 2, SINK) && SCR(1 * SW + 2, 220) != SINK);
+    sm_playing = 0;
     sm_ui.held_step = 0xFFu;
-    sm_pos[0] = 4;
-    sm_dirty = 1;
-    px = frame_px();
-    bad += check("strip: a step change is at most 240 x 20 px", px > 0 && px <= 240u * 20u);
-    bad += check("strip: a REST with the playing bar under it", SCR(4 * SW + RO, 234) == SINK && box_is(4 * SW + BO, 239, 8, 1, SINK));
-    sm_ui.bank = 1;
     ksnd(0)->len = 32;
-    sm_dirty = 1;
-    sm_draw();
-    bad += check("strip: the second bank shows steps 16..31 (empty here: the four beat marks)", scr_sink(0, 220, 16 * SW, 20) == 4u);
+    sm_ui.bank = 1;
+    draw_full();
+    bad += check("strip: the second bank shows steps 16..31 (empty here: all dots), P2", strip_ch(0) == '\x13' && strip_ch(15) == '\x13' &&
+                 lint_has("P2", 0, 0));
+    sm_ui.bank = 0;
     ksnd(0)->len = 16;
     return bad;
 }
@@ -6510,7 +6492,7 @@ static int test_strip_len8(void)
         smp.pat[smp.cur].step[0][s].n = 1;
     ksnd(0)->len = 8;
     draw_full();
-    bad += check("STRIP8: length 8: a dot on each of the 8 places", scr_count(0, 220, 8 * SMD_STEP_W, 20, SINK) == 8u * 9u);
+    bad += check("STRIP8: length 8: a trig character on each of the 8 places", strip_ch(0) == '\x14' && strip_ch(7) == '\x14' && !strip_ch(8));
     bad += check("STRIP8: ... nothing past them (places 9 .. 16)", scr_sink(8 * SMD_STEP_W, 220, 8 * SMD_STEP_W, 20) == 0u);
     ksnd(0)->len = 16;
     return bad;

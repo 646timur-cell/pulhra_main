@@ -12,7 +12,7 @@ static uint32_t sm_px_glyph(uint8_t c)
         c = (uint8_t)(c - 32u);
     if (c >= 32u && c <= 95u)
         return c - 32u;
-    if (c >= 0x10u && c <= 0x12u)
+    if (c >= 0x10u && c <= 0x18u)
         return 64u + (c - 0x10u);
     return 0;
 }

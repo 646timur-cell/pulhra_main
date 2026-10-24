@@ -959,46 +959,61 @@ static void smd_strip4(void)
     }
     smd_end();
 }
+static char smd_step_ch(const sm_step_t *st);
 static uint32_t smd_strip1_sig(void)                     /* the selected track's strip */
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
     uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, h = 2166136261u;
     int32_t ph = smd_playhead();
     for (i = 0; i < 16u; i++)
-        h = smd_mix(h, b + i < smd_strip_len() ? smd_dots(&pt->step[t][b + i]) : 9u);
+        h = smd_mix(h, b + i < smd_strip_len() ? (uint32_t)(uint8_t)smd_step_ch(&pt->step[t][b + i]) : 9u);
     h = smd_mix(h, smd_strip_len());
     h = smd_mix(h, ph >= (int32_t)b && ph < (int32_t)b + 16 ? (uint32_t)ph : 0xFFu);
     h = smd_mix(h, smd_mark() >= b && smd_mark() < b + 16u ? smd_mark() : 0xFFu);
     return smd_mix(h, t * 2u + (b != 0));
 }
 static uint32_t smd_strip_sig(void) { return sm_page_home() == SMH_MIXER ? smd_strip4_sig() : smd_strip1_sig(); }
+/* the selected track's strip in ASCII (Tim's): a character per step in its 13 px cell, the ink on the strip's ground:
+ *   . an empty step (dim)   bullet a trig   ^ an accent   degree a REST (a lock trig)   x a ratchet   * a slide (or PSLIDE)
+ * (one character a step: REST, then the ratchet, then the accent, then the slide win); the step playing inverted (a box of ink,
+ * its character the ground); the step held or edited a bar over it (rows 0..1); nothing past the track's length; the length
+ * (or P1 / P2 on a track of two pages) right of the steps */
+static char smd_step_ch(const sm_step_t *st)
+{
+    if (st->flags & SMF_REST)
+        return '\x16';
+    if (!st->n)
+        return '\x13';
+    if (SMF_RAT(st->flags))
+        return '\x17';
+    if (st->flags & SMF_ACCENT)
+        return '\x15';
+    if (st->flags & (SMF_SLIDE | SMF_PSLIDE))
+        return '\x18';
+    return '\x14';
+}
 static void smd_strip1(void)
 {
     const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i, j;
+    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank ? 16u : 0u, i;
     int32_t ph = smd_playhead();
     uint32_t len = smd_strip_len();
-    char l[4];
+    char l[4], c[2] = {0, 0};
     smd_begin(0, SMD_STRIP_Y, 240u, SMD_STRIP_H, SM_WHITE_DIM);
     for (i = 0; i < 16u; i++) {
-        int32_t x = (int32_t)(i * SMD_STEP_W) + (int32_t)(SMD_STEP_W / 2u);   /* (x: the centre of the place) */
-        uint32_t s = b + i, d = smd_dots(&pt->step[t][s]);
+        int32_t x = (int32_t)(i * SMD_STEP_W);            /* (the cell: x .. x + 12; the glyph 10 px at x + 1) */
+        uint32_t s = b + i;
         if (s >= len)                                     /* past the track's length: nothing */
             continue;
-        if (d == 0) {
-            if (i % 4u == 0)
-                cv_rect(x, 16, 1, 1, (uint16_t)SM_DIM_INK);
-        } else if (d == 5u) {                             /* REST: a hollow dot */
-            cv_rect(x - 2, 14, 4, 4, T_BG);
-            cv_rect(x - 1, 15, 2, 2, SM_WHITE_DIM);       /* (hollow: the strip's ground inside) */
+        c[0] = smd_step_ch(&pt->step[t][s]);
+        if (ph == (int32_t)s) {                           /* the step playing: inverted */
+            cv_rect(x, 3, (int32_t)SMD_STEP_W - 1, 16, T_BG);
+            sm_px_text(x + 1, 4, 2u, c, SM_WHITE_DIM, 0);
         } else {
-            for (j = 0; j < d; j++)                       /* (the lowest dot: rows 15..17) */
-                cv_rect(x - 1, 15 - (int32_t)j * 4, 3, 3, T_BG);
+            sm_px_text(x + 1, 4, 2u, c, (uint16_t)(c[0] == '\x13' ? SM_DIM_INK : T_BG), 0);
         }
-        if (ph == (int32_t)s)
-            cv_rect(x - 4, 19, 8, 1, T_BG);
         if (smd_mark() == s)
-            cv_rect(x - 4, 0, 8, 2, T_BG);
+            cv_rect(x + 2, 0, 8, 2, T_BG);
     }
     if (len > 16u) {                                      /* two pages of steps: the page number, large (P2 inverted) */
         l[0] = 'P';
