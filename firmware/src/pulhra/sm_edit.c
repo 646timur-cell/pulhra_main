@@ -17,7 +17,7 @@
  * edit itself is removing. A block that comes in the middle plays the track with no trig (a trig due in those few hundred
  * microseconds is skipped: the edit is happening then). TRN writes the note bytes in place (a fire in between plays a chord
  * half moved: no harm). */
-#define SM_CLEAR_ALL_US 800000u                           /* SEQ + F3 held this long: every track */
+#define SM_CLEAR_ALL_US 800000u                           /* SEQ + F5 held this long: the pattern (every track) */
 enum { SM_CLIP_NONE, SM_CLIP_TRK, SM_CLIP_PAT };
 
 /* the two buffers in .noinit (app.ld NOINIT: RAM the .bss does not pay for; sm_main.c checks they fit with the rest of it):

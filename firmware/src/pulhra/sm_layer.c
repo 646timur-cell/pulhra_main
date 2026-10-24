@@ -45,7 +45,7 @@ static uint8_t sm_lay_cleared;                            /* SEQ: the track was 
 static uint8_t sm_lay_void;                               /* a button with no layer (HOME) was held: its release is no tap */
 static uint8_t sm_lay_pick = SM_PAT_NONE;                 /* SEQ: the pattern ALGORITHM picked (SM_PAT_NONE: none yet) */
 static uint8_t sm_lay_chain[SM_NCHAIN], sm_lay_nch;       /* SEQ: the chain being built (OCT+), its links */
-static uint8_t sm_lay_clr;                                /* SEQ: F3 down since sm_lay_clr_t0 (1), its hold cleared all (2) */
+static uint8_t sm_lay_clr;                                /* SEQ: F5 down since sm_lay_clr_t0 (1), its hold cleared the pattern (2) */
 static uint32_t sm_lay_clr_t0;
 
 #define SM_NLBTN 8u
@@ -59,7 +59,8 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
 #define SM_LAY_SHR_KEY 8u                                 /* SEQ: C#4 (key 8), ... a step forward */
 #define SM_LAY_TDN_KEY 10u                                /* SEQ: D#4 (key 10), every track's trigs a semitone down */
 #define SM_LAY_TUP_KEY 13u                                /* SEQ: F#4 (key 13), ... up */
-#define SM_LAY_F3_KEY 0u                                  /* SEQ: F3 (key 0), CLEAR (held: all) */
+#define SM_LAY_F3_KEY 0u                                  /* SEQ: F3 (key 0), CLEAR the track */
+#define SM_LAY_PCLR_KEY 24u                               /* SEQ: F5 (key 24) held SM_CLEAR_ALL_US: PTN CLEAR (every track) */
 #define SM_LAY_FILL_KEY 26u                               /* GLO: G5 (key 26), FILL while held */
 enum { SM_W_CLEAR = 0, SM_W_COPY_PAT = 1, SM_W_COPY_TRK = 4, SM_W_PASTE_TRK = 5, SM_W_PASTE_PAT = 2, SM_W_SHL = 6, SM_W_SHR = 7,
        SM_W_TRN_DN = 10, SM_W_TRN_UP = 11 };             /* SEQ: the white keys of the tools (F3 = 0); C4=4 copy, D4=5 paste */
@@ -310,8 +311,6 @@ static void sm_seq_tool(uint32_t w, uint32_t t)
     case SM_W_CLEAR:
         sm_edit_clear(1u << t, 1);
         sm_lay_cleared = 1;
-        sm_lay_clr = 1;                                   /* (held on: all four tracks) */
-        sm_lay_clr_t0 = fm1_ticks();
         break;
     case SM_W_COPY_PAT: sm_copy_pat(); break;
     case SM_W_COPY_TRK: sm_copy_trk(t); break;
@@ -393,11 +392,14 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_dirty = 1;
         }
     }
-    if (sm_layer == SML_SEQ && sm_lay_clr == 1u) {       /* F3 held on: all four tracks at 0.8 s (the tap's UNDO snapshot) */
-        if (!((fm1_in.notes >> SM_LAY_F3_KEY) & 1u))
+    if (sm_layer == SML_SEQ && sm_lay_clr == 1u) {       /* F5 held 0.8 s: the pattern cleared, every track (a tap: nothing; the UNDO
+                                                             snapshot its own, unless an F3 of this hold took one: UNDO is before both) */
+        if (!((fm1_in.notes >> SM_LAY_PCLR_KEY) & 1u))
             sm_lay_clr = 0;
         else if ((uint32_t)(fm1_ticks() - sm_lay_clr_t0) >= SM_CLEAR_ALL_US * FM1_TICKS_PER_US) {
-            sm_edit_clear((1u << SM_NTRK) - 1u, 0);
+            sm_edit_clear((1u << SM_NTRK) - 1u, !sm_lay_cleared);
+            sm_msg_show(SM_MSG_PTNCLR);
+            sm_lay_cleared = 1;
             sm_lay_clr = 2;
         }
     }
@@ -428,6 +430,9 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_chain_npend = 0;
             sm_lay_nch = 0;
             sm_dirty = 1;
+        } else if (sm_layer == SML_SEQ && key == SM_LAY_PCLR_KEY) {   /* (held: the pattern cleared, above) */
+            sm_lay_clr = 1;
+            sm_lay_clr_t0 = fm1_ticks();
         } else if (sm_layer == SML_SEQ && (key == SM_LAY_SHL_KEY || key == SM_LAY_SHR_KEY)) {
             sm_shift_all(key == SM_LAY_SHR_KEY ? 1 : -1);
         } else if (sm_layer == SML_SEQ && (key == SM_LAY_TDN_KEY || key == SM_LAY_TUP_KEY)) {

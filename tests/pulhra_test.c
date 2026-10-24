@@ -2603,6 +2603,7 @@ static int test_layer_maps(void)
     sm_msg_show(SM_MSG_CLEARED);
     layer_draw(SML_SEQ);
     bad += check("MAP: SEQ: CLEAR (inverted) in the header after a clear", lint_has("CLEAR", 0, 0) && !lint_has("CLEARED", 0, 0));
+    bad += check("MAP: SEQ: ... and CLEAR T1 on the map's last row", lint_has("CLEAR T1", 0, 0));
     host_ticks += SM_MSG_BLINK_US * FM1_TICKS_PER_US;
     bad += check("MAP: ... it blinks: 125 ms on, the header's signature changes", smd_blink() == 1u);
     host_ticks += SM_MSG_US * FM1_TICKS_PER_US;
@@ -5892,15 +5893,24 @@ static int test_clear_all_hold(void)
     key_dn(WHITE[0]);
     sm_input_poll();
     bad += check("EDIT/CLEAR ALL: F3 down: the selected track (T3) cleared at once", !ed_trigs(cpat(), 2) && ed_trigs(cpat(), 0) == 4u);
+    ms(900);
+    sm_input_poll();
+    bad += check("EDIT/CLEAR ALL: ... F3 held 0.9 s: only T3 (no clear of all on F3)", ed_trigs(cpat(), 0) == 4u && ed_live(cpat(), 4) == 6u);
+    key_up(WHITE[0]);
+    sm_input_poll();
+    key_dn(WHITE[14]);                                    /* F5 */
+    sm_input_poll();
     ms(700);
     sm_input_poll();
-    bad += check("EDIT/CLEAR ALL: ... held 0.7 s: the others still there", ed_trigs(cpat(), 0) == 4u && ed_live(cpat(), 4) == 6u);
+    bad += check("EDIT/CLEAR ALL: F5 held 0.7 s: the others still there", ed_trigs(cpat(), 0) == 4u && ed_live(cpat(), 4) == 6u);
     ms(150);
     sm_input_poll();
-    bad += check("EDIT/CLEAR ALL: ... held 0.85 s: all 4 tracks, trigs and locks", !ed_trigs(cpat(), 0) && !ed_trigs(cpat(), 1) &&
+    bad += check("EDIT/CLEAR ALL: ... held 0.85 s: the pattern: all 4 tracks, trigs and locks", !ed_trigs(cpat(), 0) && !ed_trigs(cpat(), 1) &&
                  !ed_trigs(cpat(), 3) && !ed_live(cpat(), 4) && cpat()->nlock == 0u);
-    bad += check("EDIT/CLEAR ALL: ... the kit kept, CLEARED", !memcmp(&kit, &cpat()->kit, sizeof kit) && sm_msg == SM_MSG_CLEARED);
-    key_up(WHITE[0]);
+    bad += check("EDIT/CLEAR ALL: ... the kit kept, PTN CLEAR", !memcmp(&kit, &cpat()->kit, sizeof kit) && sm_msg == SM_MSG_PTNCLR);
+    layer_draw(SML_SEQ);
+    bad += check("EDIT/CLEAR ALL: ... PTN CLEAR in the header and on the map", lint_has("PTN CLEAR", 0, 0));
+    key_up(WHITE[14]);
     sm_input_poll();
     layer_let_go(B_SEQ);
     save_hold();
@@ -5964,13 +5974,18 @@ static int test_undo_after_clear_while_playing(void)
     sm_input_poll();
     bad += check("EDIT/UNDO: playing: F3 tapped: T1 empty, T2 not yet", !ed_trigs(cpat(), 0) && !ed_live(cpat(), 0) &&
                  ed_trigs(cpat(), 1) == 16u && !lk_bad_dead && !lk_bad_val);
-    for (t = 0; t < SM_NTRK; t++)                         /* (... then all: held 0.8 s) */
+    for (t = 0; t < SM_NTRK; t++)                         /* (... then the pattern: F5 held 0.8 s) */
         for (s = 0; s < SM_NSTEP; s++)
             for (p = 0; p < P_COUNT; p++)
                 lk_shadow[t][s][p] = LK_NONE;
+    key_up(WHITE[0]);
+    sm_input_poll();
+    key_dn(WHITE[14]);
+    sm_input_poll();
     ms(900);
     sm_input_poll();
-    key_up(WHITE[0]);
+    bad += check("EDIT/UNDO: playing: F5 held: PTN CLEAR in the header", sm_msg == SM_MSG_PTNCLR);
+    key_up(WHITE[14]);
     sm_input_poll();
     layer_let_go(B_SEQ);
     bad += check("EDIT/UNDO: playing: CLEAR all (held): no trig, no live lock", !ed_trigs(cpat(), 0) && !ed_trigs(cpat(), 3) &&

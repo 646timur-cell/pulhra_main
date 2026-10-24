@@ -120,7 +120,7 @@ static uint32_t smd_muted(void)                           /* the selected track 
 {
     return (sm_mute_eff() >> (sm_ui.trk % SM_NTRK)) & 1u;
 }
-static uint32_t smd_blink(void)                           /* CLEAN's blink: 0 inverted, 1 plain */
+static uint32_t smd_blink(void)                           /* CLEAR's blink: 0 inverted, 1 plain */
 {
     return (uint32_t)(fm1_ticks() - sm_msg_t0) / (SM_MSG_BLINK_US * FM1_TICKS_PER_US) & 1u;
 }
@@ -822,6 +822,13 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             smd_cell(o, 3, tr, 0);
             smd_upper(o->c[2], sh, 5u);                   /* (five here: SHT+2 fills its 60 px cell, K4's is the screen's edge) */
             o->dim |= (uint8_t)((sm_sh_all ? 0u : 4u) | (sm_tr_all ? 0u : 8u));   /* (0: dim) */
+        } else if (sm_msg == SM_MSG_CLEARED || sm_msg == SM_MSG_PTNCLR) {   /* SEQ + F3: CLEAR T1, F5 held: PTN CLEAR, on the map
+                                                                            too (blinks with the header) */
+            char tn[3] = {'T', (char)('1' + sm_ui.trk % SM_NTRK), 0};
+            smd_cat(o->w, &n, sm_msg == SM_MSG_PTNCLR ? "PTN CLEAR" : "CLEAR ");
+            if (sm_msg == SM_MSG_CLEARED)
+                smd_cat(o->w, &n, tn);
+            o->winv = (uint8_t)(smd_blink() ? 0u : 1u);
         } else if (sm_lay_nch) {                          /* the chain being built: + A01 A01 B02 (its last four links) */
             char l[4];
             smd_cat(o->w, &n, "+");
