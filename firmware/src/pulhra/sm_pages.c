@@ -8,7 +8,7 @@
  * SHIFT + HOME (sm_layer.c sm_shift_combo), in turn: MIDI (K1..K4 the channel of T1..T4, OFF + 1..16) and SETUP (K1 the
  * pattern change mode, K2 the MIDI source); the project saves both (sm_bank.c, version 3). */
 #define SM_NOPARAM 0xFFu
-#define SM_GLB 0x80u                                      /* a page's parameter id with this bit is a GLOBAL (song.g[id & 0x7F]): the
+#define SM_GLB 0x100u                                     /* a page's parameter id with this bit is a GLOBAL (song.g[id & 0xFF]): the
                                                              FX page's SELECT and the deep FX pages; no locks, the project's */
 
 /* the families of the buttons (a tap of the button: the family's next page) and, after FX, the families of the SHIFT combos (no
@@ -21,8 +21,9 @@ enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU, SMH_MIDI, SMH_SETUP
 typedef struct {
     const char *name;
     uint8_t fam;
-    uint8_t id[4];                                        /* the parameters on K1..K4, SM_NOPARAM: none */
-    uint8_t sel;                                          /* the parameter on SELECT, SM_NOPARAM: none */
+    uint16_t id[4];                                       /* the parameters on K1..K4, SM_NOPARAM: none (16 bits: SM_GLB above the
+                                                             KIT's lane ids, P_COUNT + 36 > 0x80) */
+    uint16_t sel;                                         /* the parameter on SELECT, SM_NOPARAM: none */
     uint8_t home;                                         /* SMH_*: the HOME pages, whose knobs are not the selected track's sound */
 } sm_page_t;
 

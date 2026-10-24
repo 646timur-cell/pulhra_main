@@ -8329,7 +8329,7 @@ static void shift_press(uint32_t b)
 /* a turn of one control, a poll; the parameter ids of the knobs K1..K4 and SELECT, and what changed in the selected track's model */
 static int test_fx_pages(void)
 {
-    static const struct { const char *pg; uint8_t id[5]; } T[3] = {
+    static const struct { const char *pg; uint16_t id[5]; } T[3] = {
         {"FX", {P_DIST, P_CHOR, P_DLY, P_REV, SM_GLB | G_DMIX}},
         {"DIST", {P_DTYPE, P_DIST, P_DTONE, P_DOUT, P_DLCUT}},
         {"INSERT", {P_ITYPE, P_IA, P_IB, P_IC, P_IMIX}},
@@ -9001,6 +9001,39 @@ static int test_bank_old(void)
     }
     bank_reboot();
     bad += check("BANKOLD: a version 2 bank is not loaded: A01 empty", found && smp.pat[0].step[1][63].n == 0);
+    return bad;
+}
+
+/* every lane L1..L4, every machine: EDIT 1 / EDIT 2 show that machine's values (Tim: L2..L4 showed BPM, SWING, MIDI: their
+ * ids, P_COUNT + 9 .. + 35, reached the bit 0x80 that marked a page's global) */
+static int test_kit_lane_pages(void)
+{
+    int bad = 0;
+    uint32_t L, m, k, ok = 1;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    for (L = 0; L < 4u && ok; L++)
+        for (m = 0; m < DR_KM_N && ok; m++) {
+            const engine_t *e = DR_KENG[m];
+            sm_kit_lane = L;
+            ksnd(3)->p[P_E0 + L] = (int8_t)m;
+            sm_lane_machine(L);
+            for (k = 0; k < 8u; k++) {
+                char lab[6] = {0};
+                smd_upper(lab, e->edit[k].label, 5u);
+                sm_ui.page = (uint8_t)page_by_name(k < 4u ? "EDIT 1" : "EDIT 2");
+                draw_full();
+                ok &= lint_has(lab, 0, 0) && !lint_has("BPM", 0, 0) && !lint_has("ROUT", 0, 0) && !lint_has("LOAD", 0, 0);
+            }
+            if (!ok)
+                printf("pulhra: KITPAGES: L%u %s wrong\n", L + 1u, e->name);
+        }
+    bad += check("KITPAGES: L1..L4, every machine: EDIT 1 / 2 its eight values (no BPM, no MIDI)", ok);
     return bad;
 }
 
@@ -10929,6 +10962,7 @@ int main(void)
     bad += test_seq_track_copy();
     bad += test_step_chord_note();
     bad += test_bank_old();
+    bad += test_kit_lane_pages();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
