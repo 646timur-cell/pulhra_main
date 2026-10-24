@@ -55,7 +55,8 @@ static const char *const N_NOTE[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", 
 static const char *const N_DASH[] = {"--"};
 static const char *const N_RTYPE[] = {"ROOM", "SPRING", "HALL"};
 #if FELUCCA_SWAMP
-static const char *const N_DUCK[] = {"OFF", "SC", "TRIG"};   /* G_DUCK (PULHRA, fx.c duck_prep) */
+static const char *const N_CRATIO[] = {"1.5:1", "2:1", "3:1", "4:1", "6:1", "10:1", "20:1"};   /* G_CRAT (PULHRA, fx.c CMP_R8) */
+static const char *const N_CSC[] = {"OFF", "KICK", "1/4"};   /* G_CSC (PULHRA, fx.c comp_prep) */
 #endif   /* G_RTYPE: the reverb bus's model (fx.c) */
 static const char *const N_GO[] = {"--", "GO"};
 #if FELUCCA_STRANGE
@@ -359,24 +360,31 @@ static const param_desc_t GP[G_COUNT] = {
      * stored with the project as before. (was "--": stored 0 = CH1-4, as MIDI IN always was) */
     [G_ROUTE] = PE("ROUT", N_ROUTE, 0),
     [G_INFO] = PD("CPU", F_INT, 0, 0, 0),
-#if FELUCCA_SWAMP
-    [G_DUCK] = PE("DUCK", N_DUCK, 0),            /* PULHRA: the kick's ducking of T1..T3 (fx.c duck_prep) */
-    [G_DKDEP] = PD("DPTH", F_PCT, 0, 127, 80),
-    [G_DKLEN] = PD("LEN", F_TIME, 50, 95, 72),   /* 30 ms .. 1 s (TIME_MS_X10) */
+#if FELUCCA_SWAMP                                    /* PULHRA (fx.c): the reverb's PRE and TONE, the master compressor */
+    [G_RPRE] = PD("PRE", F_INT, 0, 90, 0),
+    [G_RTONE] = PD("TONE", F_INT, -64, 63, 0),
+    [G_CTHR] = PD("THR", F_INT, -40, 0, 0),
+    [G_CRAT] = PE("RAT", N_CRATIO, 3),
+    [G_CATK] = PD("ATK", F_TIME, 10, 60, 30),   /* 1.4 .. 77 ms */
+    [G_CSC] = PE("SC", N_CSC, 0),
 #else
     [G_SLOT] = PD("SLOT", F_INT, 1, 4, 1),
     [G_NAME] = PE("NAME", N_DASH, 0),
     [G_LOAD] = PE("LOAD", N_GO, 0),
-#endif
     [G_SAVE] = PE("SAVE", N_GO, 0),
     [G_ENGSEL] = PE("ENG", N_ENGNAME, 0),
+#endif
 #if FELUCCA_STRANGE
     [G_ENGGO] = PE("LINK", N_XYLINK, 0),               /* (G_XYLINK) */
 #else
     [G_ENGGO] = PE("SET", N_GO, 0),
 #endif
+#if FELUCCA_SWAMP
+    [G_CREL] = PD("REL", F_TIME, 50, 95, 72),   /* 30 ms .. 1 s */
+#else
     [G_CLRSEQ] = PE("CLRSQ", N_GO, 0),
     [G_INITSND] = PE("INIT", N_GO, 0),
+#endif
     /* the reverb's model on the REVERB page: the id of the old GM drum channel (G_DRCH, inert since 1.0) */
     [G_RTYPE] = PE("TYPE", N_RTYPE, 2),         /* HALL at power-on since 1.2 (ROOM before; projects keep theirs) */
     /* inert: they set the GM drum part (level, reverb send), which is gone (drums are the DRUM engine
@@ -385,9 +393,6 @@ static const param_desc_t GP[G_COUNT] = {
 #if FELUCCA_DARK
     [G_MHPF] = PD("HPF", F_HPF, 0, 127, 0),     /* STRANGE: the master filters (fx.c master_filter) */
     [G_MLPF] = PD("LPF", F_LPF, 0, 127, 0),
-#elif FELUCCA_SWAMP
-    [G_RPRE] = PD("PRE", F_INT, 0, 90, 0),       /* PULHRA: the reverb's pre-delay in ms (fx.c rev_pre) */
-    [G_COMP] = PD("COMP", F_PCT, 0, 127, 0),     /* PULHRA: the master compressor (fx.c master_comp), 0 off */
 #else
     [G_DRLVL] = PD("-", F_INT, 0, 0, 0),
     [G_DRREV] = PD("-", F_INT, 0, 0, 0),

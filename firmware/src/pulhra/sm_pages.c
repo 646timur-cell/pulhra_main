@@ -52,10 +52,12 @@ static const sm_page_t SM_PAGES[] = {
      * K2 HITS, K3 ROT, OCT+ generates the trigs into the selected track (sm_input.c sm_eu_gen); MENU: a stub until the menu */
     {"VOICE", SMFAM_VOICE, {P_VOICE, P_GLIDE, P_DETUNE, P_PRIO}, SM_NOPARAM},
     {"DLY", SMFAM_DEEP, {SM_GLB | G_DTIME, SM_GLB | G_DFDBK, SM_GLB | G_DCOLOR, SM_GLB | G_DMIX}, SM_NOPARAM},
-    {"REV", SMFAM_DEEP, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RDAMP, SM_GLB | G_RPRE}, SM_NOPARAM},   /* K4 PRE-DELAY */
+    {"REV", SMFAM_DEEP, {SM_GLB | G_RTYPE, SM_GLB | G_RSIZE, SM_GLB | G_RTONE, SM_GLB | G_RPRE}, SM_NOPARAM},   /* K3 TONE (the damping
+                                                                                                   and a high shelf, Tim), K4 PRE-DELAY */
     {"CHORUS", SMFAM_DEEP, {SM_GLB | G_CRATE, SM_GLB | G_CDEPTH, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM},
-    /* COMP (Tim): the master compressor's amount; DUCK: T1..T3 ducked by the kick: SC its level, TRIG each hit; DPTH, LEN */
-    {"COMP", SMFAM_DEEP, {SM_GLB | G_COMP, SM_GLB | G_DUCK, SM_GLB | G_DKDEP, SM_GLB | G_DKLEN}, SM_NOPARAM},
+    /* COMP (Tim): SELECT the threshold, K1 RATIO, K2 ATTACK, K3 RELEASE, K4 SC: OFF the master's own level, KICK the kick's (the
+     * gain on T1..T3), 1/4 each beat (the same: a pump) */
+    {"COMP", SMFAM_DEEP, {SM_GLB | G_CRAT, SM_GLB | G_CATK, SM_GLB | G_CREL, SM_GLB | G_CSC}, SM_GLB | G_CTHR},
     {"EUCLID", SMFAM_EUCL, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_EUCLID},
     {"SCL", SMFAM_SCL, {P_ROOT, P_SCALE, P_QUANT, P_TRANS}, SM_NOPARAM},
     {"MICRO", SMFAM_SCL, {P_FM4_LEVEL, P_MAMT, P_ROOT, SM_NOPARAM}, SM_NOPARAM},

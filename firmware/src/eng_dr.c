@@ -63,6 +63,7 @@ static int32_t dr_amp(track_t *t, voice_t *v, int32_t adsr)
 /* ===================================================================== KICK === */
 /* the master's ducking (fx.c duck_prep, PULHRA's COMP page): a kick hit since the last block, the kick's peak in it */
 static volatile uint8_t dr_kick_hit;
+static volatile uint8_t dr_beat_hit;                       /* a beat (a quarter) of the sequencer since the last block (COMP SC 1/4) */
 static int32_t dr_kick_pk;
 static void dkick_start(track_t *t, voice_t *v, const int16_t *e)
 {

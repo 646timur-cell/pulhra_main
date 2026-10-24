@@ -843,6 +843,8 @@ static void events_block(uint32_t n)
             if (kind == 1u) {                             /* a tick: the 1x clock every eighth, each track on its own count */
                 if (!(sm_tick & 7u))
                     sm_mstep++;
+                if (!(sm_tick & 31u))
+                    dr_beat_hit = 1;                      /* (a beat: four 1x steps; COMP's SC 1/4, fx.c) */
                 for (t = 0; t < SM_NTRK; t++)
                     if (!(sm_tick % (tsq[t] / (tq ? tq : 1u))))
                         sm_seq_step(t, best, tsq[t], (mute >> t) & 1u);

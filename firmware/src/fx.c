@@ -610,26 +610,60 @@ static __attribute__((noinline)) const int32_t *rev_pre(const int32_t *in, uint3
     return rp_out;
 }
 
-/* PULHRA: the kick's ducking of T1..T3 (COMP page: DUCK, DPTH, LEN). SC: the gain follows the kick's level (its peak of the
- * last block, eng_dr.c dr_kick_pk); TRIG: each kick hit the gain down by DPTH at once; either back over LEN. A gain at the
- * block's start and its end (dk_g0, dk_g1), a ramp between: mix_part on every track but T4 (the drums) */
+/* PULHRA: the compressor (COMP page: THR, RATIO, ATK, REL, SC). The gain law on a level e: e above the threshold T comes out at
+ * T + (e - T) / R. SC OFF: the master's own level (the mix and the buses), master_comp, made up by half the reduction at full
+ * scale. SC KICK: the kick's level (eng_dr.c dr_kick_pk, each block), SC 1/4: a pulse on each beat (the sequencer's,
+ * dr_beat_hit); then the gain is the tracks' T1..T3 (not the drums': a pump), a ramp a block (dk_g0 -> dk_g1, duck_apply) */
+static const uint16_t CMP_R8[7] = {384, 512, 768, 1024, 1536, 2560, 5120};   /* N_CRATIO in 1/256 */
 static int32_t dk_env, dk_g0 = 32767, dk_g1 = 32767;
-static void duck_prep(void)
+static int32_t cmp_thr(void)                              /* THR (dB) as a level: 32767 x 10^(dB / 20) */
 {
-    int32_t md = song.g[G_DUCK], dep = clamp(song.g[G_DKDEP], 0, 127);
-    uint32_t kr = dv_kb(TIME_MS_X10[clamp(song.g[G_DKLEN], 0, 127)] * 100u);
-    if (md == 2 && dr_kick_hit)
-        dk_env = 32767;
-    else if (md == 1) {
-        int32_t tg = clamp(dr_kick_pk * 4, 0, 32767);   /* (a full kick (~8000 at velocity 100): the whole depth) */
-        if (tg > dk_env)
-            dk_env = tg;
+    int32_t db = clamp(song.g[G_CTHR], -40, 0), v = 32767;
+    while (db <= -6) {
+        v >>= 1;                                          /* (-6.02 dB a halving) */
+        db += 6;
     }
+    return (int32_t)(((uint32_t)v * (uint32_t)(65536 - (-db) * 7130)) >> 16);   /* (the rest, -1 dB ~ x 0.891) */
+}
+static uint32_t lg2_q16(uint32_t x)                       /* log2 x, Q16 (x >= 1); the mantissa's log by a parabola (~0.01) */
+{
+    uint32_t i = 0, f;
+    while ((x >> i) > 1u)
+        i++;
+    f = i >= 16u ? (x >> (i - 16u)) & 0xFFFFu : (x << (16u - i)) & 0xFFFFu;
+    return (i << 16) + f + ((f * (65536u - f)) >> 16) * 22675u / 65536u;
+}
+static int32_t cmp_gain(int32_t e, int32_t th, uint32_t r8)   /* Q15: (th / e)^(1 - 1/R) above the threshold (dB in, dB / R out) */
+{
+    uint32_t over, k;
+    if (e <= th || e <= 0)
+        return 32767;
+    over = lg2_q16((uint32_t)e) - lg2_q16((uint32_t)(th > 0 ? th : 1));
+    k = ((r8 - 256u) << 8) / r8;                          /* (1 - 1/R, Q8) */
+    k = exp2_neg((over >> 8) * k);
+    return (int32_t)(k > 32767u ? 32767u : k);
+}
+static void comp_prep(void)
+{
+    int32_t sc = song.g[G_CSC], det = 0, th = cmp_thr();
+    uint32_t r8 = CMP_R8[clamp(song.g[G_CRAT], 0, 6)];
+    uint32_t ka = dv_kb(TIME_MS_X10[clamp(song.g[G_CATK], 0, 127)] * 100u);   /* (per block, Q16) */
+    uint32_t kr = dv_kb(TIME_MS_X10[clamp(song.g[G_CREL], 0, 127)] * 100u);
+    if (sc == 1)
+        det = clamp(dr_kick_pk * 4, 0, 32767);          /* (a kick at velocity 100: ~ full scale) */
+    else if (sc == 2 && dr_beat_hit)
+        det = 32767;
     dr_kick_hit = 0;
     dr_kick_pk = 0;
+    dr_beat_hit = 0;
+    ka = ka > 65536u ? 65536u : ka;
+    kr = kr > 65536u ? 65536u : kr;
+    if (det > dk_env)                                     /* (attack: towards the level, ATK's time constant) */
+        dk_env = det - (int32_t)(((uint32_t)(det - dk_env) * ka) >> 16);
+    else
+        dk_env = (int32_t)(((uint32_t)dk_env * kr) >> 16);
     dk_g0 = dk_g1;
-    dk_g1 = md == 1 || md == 2 ? 32767 - ((dk_env * dep) >> 7) : 32767;
-    dk_env = (int32_t)(((uint32_t)dk_env * (kr > 65536u ? 65536u : kr)) >> 16);
+    dk_g1 = sc == 1 || sc == 2 ? cmp_gain(dk_env, th, r8) : 32767;
 }
 static inline void duck_apply(int32_t *b, uint32_t n)
 {
@@ -639,6 +673,22 @@ static inline void duck_apply(int32_t *b, uint32_t n)
         b[i] = ((b[i] >> 4) * g) >> 11;
 }
 
+/* PULHRA: REV's TONE (-64 .. 63): the reverb's damping (G_RDAMP, the model's, from it) and a high shelf on what the reverb adds
+ * (a one-pole at ~2.4 kHz: its highs x 0.25 .. x 1.75) */
+static int32_t rt_pre[CTL] __attribute__((section(".pool")));
+static int32_t rt_lp;
+static void rev_tone(int32_t *wet, uint32_t n)
+{
+    int32_t s = clamp(song.g[G_RTONE], -64, 63) * 48;     /* (Q12) */
+    uint32_t i;
+    if (!s)
+        return;
+    for (i = 0; i < n; i++) {
+        int32_t r = wet[i] - rt_pre[i];
+        rt_lp += ((r - rt_lp) * 10000) >> 15;
+        wet[i] = rt_pre[i] + r + (((r - rt_lp) >> 2) * s >> 10);
+    }
+}
 #endif
 
 static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t *rev_in, int32_t *wet,
@@ -676,6 +726,9 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
     }
 #if FELUCCA_SWAMP
     rev_in = rev_pre(rev_in, n);
+    song.g[G_RDAMP] = (int16_t)clamp(60 - song.g[G_RTONE], 0, 127);   /* (TONE: the damping with it; 0 is the old default) */
+    for (rt = 0; rt < (int32_t)n; rt++)
+        rt_pre[rt] = wet[rt];
 #endif
     rt = song.g[G_RTYPE];
     rt = rt == 1 || rt == 2 ? rt : 0;
@@ -688,6 +741,9 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
         rev_spring(rev_in, wet, n);
     else
         rev_room(rev_in, wet, n);
+#if FELUCCA_SWAMP
+    rev_tone(wet, n);
+#endif
 }
 
 /* after the buses: HALL's stereo difference to the left and from the right of the dry mix (the wet bus adds the
@@ -944,35 +1000,31 @@ static __attribute__((noinline)) void mix_spread(track_t *t, int32_t *b, uint32_
 }
 
 #if FELUCCA_SWAMP
-/* PULHRA: the master compressor (COMP, G_COMP; 0 off) on the mix and the buses: a peak follower (attack ~0.7 ms, release
- * ~190 ms), 4:1 above a threshold that falls with COMP (-2 .. -15 dBFS), the gain made up by up to +4 dB; the limiter and
- * the soft clip after it as ever. The buses are folded into the mix (wet 0 after) */
+/* PULHRA: the compressor on the master (SC OFF): the peak of the mix and the buses followed (ATK, REL a sample's time
+ * constants), the gain law every 8 samples, made up by half its reduction at full scale; the limiter and the soft clip after
+ * it as ever. The buses folded into the mix (wet 0 after) */
 static int32_t cp_env, cp_g = 32767;
 static __attribute__((noinline)) void master_comp(uint32_t n)
 {
-    int32_t c = clamp(song.g[G_COMP], 0, 127), th = 26000 - c * 160, mk = 4096 + c * 20;
-    uint32_t i;
-    if (!c) {
+    int32_t th = cmp_thr(), mk;
+    uint32_t r8 = CMP_R8[clamp(song.g[G_CRAT], 0, 6)], i;
+    uint32_t ka = dv_k(TIME_MS_X10[clamp(song.g[G_CATK], 0, 127)] * 100u), kr = dv_k(TIME_MS_X10[clamp(song.g[G_CREL], 0, 127)] * 100u);
+    if (song.g[G_CSC] || th >= 32767) {
         cp_g = 32767;
         cp_env = 0;
         return;
     }
+    mk = 4096 + ((4096 * 32767 / (cmp_gain(32767, th, r8) | 1) - 4096) >> 1);   /* (Q12: half the reduction at full scale) */
+    mk = clamp(mk, 4096, 16384);
     for (i = 0; i < n; i++) {
         int32_t l = mix_l[i] + wet[i], r = mix_r[i] + wet[i], a = l < 0 ? -l : l, b = r < 0 ? -r : r;
         a = a > b ? a : b;
         if (a > cp_env)
-            cp_env += (a - cp_env) >> 5;
+            cp_env = a - (int32_t)(((uint32_t)(a - cp_env) >> 4) * ka >> 11);
         else
-            cp_env -= (cp_env >> 13) + 1;
-        if (!(i & 7u)) {
-            int32_t g = 32767;
-            if (cp_env > th) {
-                int32_t num = th + ((cp_env - th) >> 2);
-                g = (int32_t)(((uint32_t)clamp(num, 0, (1 << 19) - 1) << 12) / (uint32_t)((cp_env >> 3) | 1));
-                g = g > 32767 ? 32767 : g;
-            }
-            cp_g += (g - cp_g) >> 1;
-        }
+            cp_env = (int32_t)(((uint32_t)cp_env >> 4) * kr >> 11);
+        if (!(i & 7u))
+            cp_g = cmp_gain(cp_env, th, r8);
         l = ((((l >> 3) * cp_g) >> 12) * mk) >> 12;
         r = ((((r >> 3) * cp_g) >> 12) * mk) >> 12;
         mix_l[i] = l;
@@ -1002,7 +1054,7 @@ static void mix_part(track_t *t, uint32_t n)
         return;
     }
 #if FELUCCA_SWAMP
-    if ((dk_g0 | dk_g1) != 32767 && t != &trk[3])
+    if ((dk_g0 != 32767 || dk_g1 != 32767) && t != &trk[3])
         duck_apply(b, n);                               /* PULHRA: the kick's ducking, every track but the drums' */
 #endif
     if (spread_on)
@@ -1200,7 +1252,7 @@ static void mix_block(int32_t *out, uint32_t n)
 #endif
     events_block(n);
 #if FELUCCA_SWAMP
-    duck_prep();
+    comp_prep();
 #endif
     perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
 #if FELUCCA_MONOFM

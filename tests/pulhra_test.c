@@ -9104,37 +9104,72 @@ static int test_master_dyn(void)
     o = rev_pre(imp, CTL);
     bad += check("DYN: PRE 0: the send as it is", o[3] == 7000);
 
-    song.g[G_DUCK] = 2;                                   /* TRIG */
-    song.g[G_DKDEP] = 127;
-    song.g[G_DKLEN] = 60;
+    song.g[G_RTONE] = 0;
+    for (i = 0; i < CTL; i++)
+        wet[i] = rt_pre[i] = 1000;
+    rev_tone(wet, CTL);
+    bad += check("DYN: TONE 0: the reverb as it is", wet[5] == 1000);
+    {                                                     /* TONE: a high shelf on the reverb's own part (wet - rt_pre) */
+        int32_t hi[2];
+        uint32_t k;
+        for (k = 0; k < 2u; k++) {
+            int32_t pk = 0;
+            song.g[G_RTONE] = k ? 63 : -64;
+            rt_lp = 0;
+            for (b = 0; b < 20u; b++)
+                for (i = 0; i < CTL; i++) {
+                    rt_pre[i] = 0;
+                    wet[i] = (i & 1u) ? 8000 : -8000;   /* (the top of the band: all highs) */
+                    rev_tone(wet + i, 1);
+                    pk = wet[i] > pk ? wet[i] : pk;
+                }
+            hi[k] = pk;
+        }
+        printf("pulhra: TONE -64: %d, +63: %d (of 8000)\n", hi[0], hi[1]);
+        bad += check("DYN: TONE -64 darkens the reverb's highs (under half), +63 brightens them (over x1.4)", hi[0] < 4000 && hi[1] > 11200);
+        song.g[G_RTONE] = 0;
+    }
+
+    song.g[G_CSC] = 1;                                    /* SC KICK: the kick's level, the gain on T1..T3 */
+    song.g[G_CTHR] = -24;
+    song.g[G_CRAT] = 6;                                   /* 20:1 */
+    song.g[G_CATK] = 10;
+    song.g[G_CREL] = 60;
     dk_env = 0;
     dk_g1 = 32767;
-    dr_kick_hit = 1;
-    duck_prep();
-    bad += check("DYN: TRIG: a kick hit, the gain down at once (deep)", dk_g1 < 2000);
-    for (b = 0; b < 2000u && dk_g1 < 30000; b++, back1++)
-        duck_prep();
-    song.g[G_DKLEN] = 90;
-    dr_kick_hit = 1;
-    duck_prep();
-    for (b = 0; b < 4000u && dk_g1 < 30000; b++, back2++)
-        duck_prep();
-    bad += check("DYN: ... back over LEN: a longer LEN, slower", back1 > 20u && back2 > 4u * back1);
-    song.g[G_DUCK] = 1;                                   /* SC */
-    dk_env = 0;
     dr_kick_pk = 8000;
-    duck_prep();
-    bad += check("DYN: SC: the kick's level dips the gain, no hit needed", dk_g1 < 4000);
-    song.g[G_DUCK] = 0;
-    dr_kick_hit = 1;
-    duck_prep();
-    duck_prep();
-    bad += check("DYN: DUCK OFF: no dip", dk_g0 == 32767 && dk_g1 == 32767);
+    for (b = 0; b < 4u; b++)
+        comp_prep(), dr_kick_pk = 8000;
+    bad += check("DYN: SC KICK: a kick's level over THR -24 at 20:1: T1..T3's gain far down", dk_g1 < 6000);
+    for (b = 0; b < 2000u && dk_g1 < 30000; b++, back1++)
+        comp_prep();
+    song.g[G_CREL] = 90;
+    dr_kick_pk = 8000;
+    for (b = 0; b < 4u; b++)
+        comp_prep(), dr_kick_pk = 8000;
+    for (b = 0; b < 4000u && dk_g1 < 30000; b++, back2++)
+        comp_prep();
+    bad += check("DYN: ... back over REL: a longer REL, slower", back1 > 20u && back2 > 4u * back1);
+    song.g[G_CSC] = 2;                                    /* SC 1/4: a beat pulses it */
+    song.g[G_CREL] = 60;
+    dk_env = 0;
+    dr_beat_hit = 1;
+    comp_prep();
+    comp_prep();
+    bad += check("DYN: SC 1/4: a beat pulls the gain down, no kick needed", dk_g1 < 20000);
+    song.g[G_CSC] = 0;
+    dr_kick_pk = 8000;
+    comp_prep();
+    comp_prep();
+    bad += check("DYN: SC OFF: T1..T3 left alone", dk_g0 == 32767 && dk_g1 == 32767);
 
-    song.g[G_COMP] = 100;
+    song.g[G_CTHR] = -18;
+    song.g[G_CRAT] = 3;                                   /* 4:1 */
+    song.g[G_CATK] = 20;
+    song.g[G_CREL] = 70;
     cp_env = 0;
     cp_g = 32767;
-    for (b = 0; b < 200u; b++) {
+    for (b = 0; b < 400u; b++) {
         for (i = 0; i < CTL; i++) {
             mix_l[i] = mix_r[i] = (i & 1u) ? 30000 : -30000;
             wet[i] = 0;
@@ -9145,38 +9180,39 @@ static int test_master_dyn(void)
         int32_t loud = mix_l[1], quiet;
         cp_env = 0;
         cp_g = 32767;
-        for (b = 0; b < 200u; b++) {
+        for (b = 0; b < 400u; b++) {
             for (i = 0; i < CTL; i++) {
-                mix_l[i] = mix_r[i] = (i & 1u) ? 3000 : -3000;
+                mix_l[i] = mix_r[i] = (i & 1u) ? 1500 : -1500;
                 wet[i] = 0;
             }
             master_comp(CTL);
         }
         quiet = mix_l[1];
-        printf("pulhra: COMP 100: 30000 -> %d, 3000 -> %d\n", loud, quiet);
-        bad += check("DYN: COMP: 20 dB in, at most 14 dB out (the loud squeezed 4:1 over the threshold), the quiet made up a little",
-                     loud * 2 < quiet * 11 && loud < 30000 && quiet >= 3000 && quiet <= 4600);
+        printf("pulhra: COMP -18 dB 4:1: 30000 -> %d, 1500 -> %d\n", loud, quiet);
+        bad += check("DYN: COMP THR -18 4:1: 26 dB in, about 13 dB out (the loud squeezed, the quiet made up)",
+                     loud * 2 < quiet * 11 && loud < 30000 && quiet > 1500);
     }
-    song.g[G_COMP] = 0;
+    song.g[G_CTHR] = 0;
     mix_l[0] = 12345;
     wet[0] = 5;
     master_comp(1);
-    bad += check("DYN: COMP 0: off, nothing touched", mix_l[0] == 12345 && wet[0] == 5);
+    bad += check("DYN: THR 0 dB: off, nothing touched", mix_l[0] == 12345 && wet[0] == 5);
 
     nor_wipe();
     in_reset();
     host_ticks = 1000u;
     song.g[G_RPRE] = 33;
-    song.g[G_COMP] = 70;
-    song.g[G_DUCK] = 2;
-    song.g[G_DKDEP] = 90;
-    song.g[G_DKLEN] = 80;
+    song.g[G_RTONE] = -20;
+    song.g[G_CTHR] = -12;
+    song.g[G_CRAT] = 5;
+    song.g[G_CSC] = 2;
     bad += check("DYN: saved", sm_proj_save() == 0);
-    song.g[G_RPRE] = song.g[G_COMP] = song.g[G_DUCK] = 0;
+    song.g[G_RPRE] = song.g[G_RTONE] = song.g[G_CTHR] = song.g[G_CSC] = 0;
     bank_reboot();
-    bad += check("DYN: ... after a reboot: PRE 33, COMP 70, DUCK TRIG, DPTH 90, LEN 80", song.g[G_RPRE] == 33 && song.g[G_COMP] == 70 &&
-                 song.g[G_DUCK] == 2 && song.g[G_DKDEP] == 90 && song.g[G_DKLEN] == 80);
-    song.g[G_RPRE] = song.g[G_COMP] = song.g[G_DUCK] = 0;
+    bad += check("DYN: ... after a reboot: PRE 33, TONE -20, THR -12, RATIO 10:1, SC 1/4", song.g[G_RPRE] == 33 && song.g[G_RTONE] == -20 &&
+                 song.g[G_CTHR] == -12 && song.g[G_CRAT] == 5 && song.g[G_CSC] == 2 && song.g[G_DRLVL] == 0 && song.g[G_DRREV] == 0);
+    song.g[G_RPRE] = song.g[G_RTONE] = song.g[G_CTHR] = song.g[G_CSC] = 0;
+    song.g[G_CRAT] = 3;
     return bad;
 }
 
@@ -9613,8 +9649,8 @@ static int test_fx_deep_pages(void)
     bad += check("FX: ... K1 K2 K3 edit song.g (TIME, FDBK, COLR), the sound of the track is untouched",
                  song.g[G_DTIME] == param_turn(&GP[G_DTIME], t0, 2) && song.g[G_DTIME] != t0 && song.g[G_DFDBK] == f0 - 5 && song.g[G_DCOLOR] == d0 + 4 && !memcmp(&before, ksnd(0), sizeof before));
     shift_press(B_FX);
-    bad += check("FX: SHIFT + FX again: REV (TYPE, SIZE, DAMP, PRE)", sm_layer == SML_NONE && !strcmp(sm_cur_page()->name, "REV") &&
-                 sm_page_param(0) == (SM_GLB | G_RTYPE) && sm_page_param(1) == (SM_GLB | G_RSIZE) && sm_page_param(2) == (SM_GLB | G_RDAMP) &&
+    bad += check("FX: SHIFT + FX again: REV (TYPE, SIZE, TONE, PRE)", sm_layer == SML_NONE && !strcmp(sm_cur_page()->name, "REV") &&
+                 sm_page_param(0) == (SM_GLB | G_RTYPE) && sm_page_param(1) == (SM_GLB | G_RSIZE) && sm_page_param(2) == (SM_GLB | G_RTONE) &&
                  sm_page_param(3) == (SM_GLB | G_RPRE));
     {
         int16_t r0 = song.g[G_RTYPE], z0 = song.g[G_RSIZE];
@@ -9635,9 +9671,9 @@ static int test_fx_deep_pages(void)
         bad += check("FX: ... K1 / K2 edit CRT, CDP; the core reads song.g", song.g[G_CRATE] == c0 + 7 && song.g[G_CDEPTH] == e0 + 3);
     }
     shift_press(B_FX);
-    bad += check("FX: SHIFT + FX once more: COMP (COMP, DUCK, DPTH, LEN)", !strcmp(sm_cur_page()->name, "COMP") &&
-                 sm_page_param(0) == (SM_GLB | G_COMP) && sm_page_param(1) == (SM_GLB | G_DUCK) && sm_page_param(2) == (SM_GLB | G_DKDEP) &&
-                 sm_page_param(3) == (SM_GLB | G_DKLEN));
+    bad += check("FX: SHIFT + FX once more: COMP (SELECT THR; RATIO, ATK, REL, SC)", !strcmp(sm_cur_page()->name, "COMP") &&
+                 sm_page_param(4) == (SM_GLB | G_CTHR) && sm_page_param(0) == (SM_GLB | G_CRAT) && sm_page_param(1) == (SM_GLB | G_CATK) &&
+                 sm_page_param(2) == (SM_GLB | G_CREL) && sm_page_param(3) == (SM_GLB | G_CSC));
     shift_press(B_FX);
     bad += check("FX: SHIFT + FX once more: round to DLY", !strcmp(sm_cur_page()->name, "DLY"));
     fx_tap();
@@ -9810,7 +9846,7 @@ static int test_fx_project_migration(void)
     {
         uint32_t newest = sm_seq_newer(sm_fp_seq[0], sm_fp_seq[1]) ? 0u : 1u;
         st_read(SM_FL_PROJ + newest * SM_FL_SEC, &hd, sizeof hd);
-        bad += check("MIGRATE: ... the newer copy's header: version 4, 58 bytes", hd.version == SM_PROJ_VER && SM_PROJ_VER == 4u && hd.size == sizeof(sm_prec_t) && sizeof(sm_prec_t) == 58u);
+        bad += check("MIGRATE: ... the newer copy's header: version 5, 62 bytes", hd.version == SM_PROJ_VER && SM_PROJ_VER == 5u && hd.size == sizeof(sm_prec_t) && sizeof(sm_prec_t) == 62u);
     }
     bank_reboot();
     bad += check("MIGRATE: ... reboot: DMIX 12, BPM 150.0 kept", song.g[G_DMIX] == 12 && smp.bpm10 == 1500u);
@@ -9848,7 +9884,7 @@ static int test_fx_draw(void)
                  lint_frame("dly") == 0);
     sm_ui.page = (uint8_t)page_by_name("REV");
     draw_full();
-    bad += check("FX draw: ... REV page: TYPE SIZE DAMP", lint_has("TYPE", 0, 0) && lint_has("SIZE", 0, 0) && lint_has("DAMP", 0, 0) &&
+    bad += check("FX draw: ... REV page: TYPE SIZE TONE PRE", lint_has("TYPE", 0, 0) && lint_has("SIZE", 0, 0) && lint_has("TONE", 0, 0) && lint_has("PRE", 0, 0) && !lint_has("HPF", 0, 0) &&
                  lint_has("HALL", 0, 0) && lint_frame("rev") == 0);
     sm_ui.page = (uint8_t)page_by_name("CHORUS");
     draw_full();

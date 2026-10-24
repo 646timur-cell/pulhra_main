@@ -168,13 +168,16 @@ enum {                          /* global parameters */
                                  * the import of an old project reads them: proj_drums_to_part) */
     G_COUNT
 };
-#if FELUCCA_SWAMP                /* PULHRA: the inert globals as the master dynamics and the reverb's pre-delay (fx.c; the project
-                                    object version 4 stores them, pulhra/sm_bank.c) */
-#define G_RPRE G_DRLVL           /* REV's PRE: 0 .. 90 ms */
-#define G_COMP G_DRREV           /* COMP: the master compressor's amount, 0 off */
-#define G_DUCK G_SLOT            /* DUCK: OFF, SC (the kick's level), TRIG (each kick hit, for LEN) */
-#define G_DKDEP G_NAME           /* its depth */
-#define G_DKLEN G_LOAD           /* its release (F_TIME) */
+#if FELUCCA_SWAMP                /* PULHRA: the Felucca menu's globals (no menu here) as the reverb's PRE and TONE and the master
+                                    compressor (fx.c; the project object version 5 stores them, pulhra/sm_bank.c). Not G_DRLVL /
+                                    G_DRREV: with FELUCCA_DARK (MONOFM's SOMA) they are the master HPF / LPF (Tim: PRE was a HPF) */
+#define G_RPRE G_SLOT            /* REV's PRE: 0 .. 90 ms */
+#define G_RTONE G_NAME           /* REV's TONE: its damping and a high shelf on the reverb, 64 flat */
+#define G_CTHR G_LOAD            /* COMP: the threshold, -40 .. 0 dB (0: off) */
+#define G_CRAT G_SAVE            /* its ratio (N_CRATIO) */
+#define G_CATK G_CLRSEQ          /* its attack (F_TIME) */
+#define G_CREL G_INITSND         /* its release (F_TIME) */
+#define G_CSC G_ENGSEL           /* its key: OFF (the master's own level), KICK (the kick, on T1..T3), 1/4 (each beat, on T1..T3) */
 #endif
 #define G_MHPF G_DRLVL           /* STRANGE: the inert globals of the old drum part are the master HPF and LPF (stored */
 #define G_MLPF G_DRREV           /* with the project; 0 = off, so a project of another build loads them off: fx.c) */

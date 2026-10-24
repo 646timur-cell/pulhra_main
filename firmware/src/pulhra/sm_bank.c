@@ -49,7 +49,8 @@
                                                              places) are not loaded */
 _Static_assert(sizeof(sm_pattern_t) == SM_PAT3_BYTES + 16u && __builtin_offsetof(sm_pattern_t, lmix) == SM_PAT3_BYTES,
                "a pattern's size is the banks' layout (version 4: version 3's and the lanes' mix)");
-#define SM_PROJ_VER 4u                                    /* the project object's: version 2 adds the global effects, 3 the MIDI routing,
+#define SM_PROJ_VER 5u                                    /* 5: the reverb's PRE and TONE, the compressor (sm_prec_t.g4) */
+#define SM_PROJ_VER_OLD 4u                                    /* the project object's: version 2 adds the global effects, 3 the MIDI routing,
                                                              4 the master dynamics and the reverb's pre-delay */
 #define SM_AUTOSAVE_US 8000000u                           /* 8 s of quiet, stopped: the autosave */
 #define SM_STORE_CHECK_US 200000u                         /* how often the autosave looks (a hash of both halves) */
@@ -79,8 +80,9 @@ _Static_assert(SM_FL_LO >= 0xB4000u && SM_FL_HI <= 0xE0000u && (SM_FL_SLOT0 & 0x
  * writes version 2 (the other copy keeps the old one until then: the newest valid copy of either version wins) */
 #define SM_NGFX 9u
 static const uint8_t SM_GFX[SM_NGFX] = {G_DTIME, G_DFDBK, G_DCOLOR, G_DMIX, G_RTYPE, G_RSIZE, G_RDAMP, G_CRATE, G_CDEPTH};
-#define SM_NGFX4 5u
-static const uint8_t SM_GFX4[SM_NGFX4] = {G_RPRE, G_COMP, G_DUCK, G_DKDEP, G_DKLEN};
+#define SM_NGFX4 7u                                       /* version 5: the reverb's PRE TONE, the compressor (version 4 had five of
+                                                             another meaning: not loaded) */
+static const uint8_t SM_GFX4[SM_NGFX4] = {G_RPRE, G_RTONE, G_CTHR, G_CRAT, G_CATK, G_CREL, G_CSC};
 typedef struct {
     uint16_t bpm10;
     uint8_t swing, mute, mode, nchain, cur, rsv;          /* cur: the pattern id (0..39) */
@@ -89,11 +91,12 @@ typedef struct {
     uint8_t mch[SM_NTRK];                                 /* version 3: the MIDI page's channel of each track (0 OFF, 1..16) */
     uint8_t msrc, mtrn;                                   /* version 3: the SETUP page's MIDI source (0 USB, 1 INT, 2 JACK); its
                                                              CLK (bits 0..1: AUTO INT USB JACK) and TRNS OFF (bit 2): 0 AUTO, ON */
-    int16_t g4[SM_NGFX4];                                 /* version 4: SM_GFX4 (PRE, COMP, DUCK, DPTH, LEN) */
+    int16_t g4[SM_NGFX4];                                 /* version 5: SM_GFX4 */
 } sm_prec_t;
 #define SM_PREC1_BYTES 24u                                /* version 1's size: everything up to g */
 #define SM_PREC2_BYTES (SM_PREC1_BYTES + 2u * SM_NGFX)    /* version 2's: up to mch */
 #define SM_PREC3_BYTES (SM_PREC2_BYTES + SM_NTRK + 2u)   /* version 3's: up to g4 */
+#define SM_PREC4_BYTES (SM_PREC3_BYTES + 2u * 5u)        /* version 4's: five g4 of another meaning */
 _Static_assert(sizeof(sm_prec_t) == SM_PREC3_BYTES + 2u * SM_NGFX4, "the project object: version 1, g, the MIDI routing, g4, no padding");
 _Static_assert(sizeof(sm_prec_t) + SM_FL_DATA <= SM_FL_SEC, "the project fits its sector");
 
@@ -199,6 +202,7 @@ static int sm_phdr_ok(const sm_fhdr_t *h)
     return sm_hdr_ok(h, SM_PMAGIC) && ((h->version == SM_STORE_VER && h->size == SM_PREC1_BYTES) ||
                                        (h->version == 2u && h->size == SM_PREC2_BYTES) ||
                                        (h->version == 3u && h->size == SM_PREC3_BYTES) ||
+                                       (h->version == SM_PROJ_VER_OLD && h->size == SM_PREC4_BYTES) ||
                                        (h->version == SM_PROJ_VER && h->size == sizeof(sm_prec_t)));
 }
 /* the CRC of n bytes of the flash at off (read in 256-byte pieces) */
@@ -466,6 +470,9 @@ static void sm_store_boot(void)
     r.msrc = 1u;
     if (pc < 2u && !st_read(SM_FL_PROJ + pc * SM_FL_SEC, &hd, sizeof hd) &&
         !st_read(SM_FL_PROJ + pc * SM_FL_SEC + SM_FL_DATA, &r, hd.size)) {
+        if (hd.version < SM_PROJ_VER)                     /* (version 4's g4 meant another thing: the defaults) */
+            for (i = 0; i < SM_NGFX4; i++)
+                r.g4[i] = GP[SM_GFX4[i]].def;
         for (i = 0; i < SM_NGFX; i++) {                   /* (the global effects into the core's song.g, in their ranges) */
             const param_desc_t *d = &GP[SM_GFX[i]];
             song.g[SM_GFX[i]] = (int16_t)clamp(r.g[i], d->min, d->max);
