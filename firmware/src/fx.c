@@ -1009,8 +1009,8 @@ static void mix_part(track_t *t, uint32_t n)
         mix_spread(t, b, n);
     else {
         track_dist(t, b, n);
-        if (t->p[P_ITYPE] | t->ins_run)
-            track_insert(t, b, n);                      /* the INSERT (1.5): off, nothing */
+        if ((t->p[P_ITYPE] | t->ins_run) && !(FELUCCA_SWAMP && t->engine == ENGI_DKIT))
+            track_insert(t, b, n);                      /* the INSERT (1.5): off, nothing (PULHRA: none on the KIT, Tim) */
         slicer_track(t, b, n);                          /* slicer.c: before the level, pan and sends */
         if ((pf.mute >> (t - trk)) & 1u)
             perf_mute((uint32_t)(t - trk), b, n);       /* perform.c: a black key in the FX layer */
@@ -1020,6 +1020,10 @@ static void mix_part(track_t *t, uint32_t n)
         int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127], pan = t->p[P_PAN];
         int32_t gl = 4096 - (pan > 0 ? pan * 64 : 0), gr = 4096 + (pan < 0 ? pan * 64 : 0);
         int32_t c = t->p[P_CHOR] * 258, d = t->p[P_DLY] * 258, r = t->p[P_REV] * 258, pk = t->peak;
+#if FELUCCA_SWAMP
+        if (t->engine == ENGI_DKIT)
+            c = d = r = 0;                              /* (the KIT: its lanes' own sends, below) */
+#endif
         int32_t xmax = c > d ? c : d;
         xmax = 0x7FFFFFFF / ((xmax > r ? xmax : r) | 1);   /* sends: loud chords at a high LEVEL */
         for (i = 0; i < n; i++) {
@@ -1042,6 +1046,17 @@ static void mix_part(track_t *t, uint32_t n)
         }
         t->peak = pk;
     }
+#if FELUCCA_SWAMP
+    if (t->engine == ENGI_DKIT) {                       /* the KIT's lanes' sends (eng_dr.c dkit_render) at the track's LEVEL */
+        int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127];
+        for (i = 0; i < n; i++) {
+            send_c[i] += ((dr_ls[0][i] >> 2) * lvl) >> 10;
+            send_d[i] += ((dr_ls[1][i] >> 2) * lvl) >> 10;
+            send_r[i] += ((dr_ls[2][i] >> 2) * lvl) >> 10;
+            dr_ls[0][i] = dr_ls[1][i] = dr_ls[2][i] = 0;
+        }
+    }
+#endif
     if (pf.thr)
         perf_throw(t, b, send_d, send_r, n);            /* perform.c: REV / ECHO THROW (1.5.1), the sends towards full */
     if (mod.on)

@@ -155,18 +155,17 @@ static void fm1_main(void)
     fm1_guard_lock_top();
     fm1_irq_enable_all();
     fm1_delay_ms(30);
-    /* the animated splash: "pulhra" typed in, the large characters drifting softly along the margins; the pot followed.
-     * 1.5 s by the clock, not by a frame count (a frame's LCD transfer is not free), the watchdog fed every frame, and at
-     * most 300 frames should the clock not run */
+    /* the animated splash (sm_splash.c): SM_SPLASH_MS by the clock, not by a frame count (a frame's LCD transfer is not
+     * free), the pot followed, the watchdog fed every frame, and at most 500 frames should the clock not run */
     {
         uint32_t t0 = fm1_ms, el;
-        for (ms = 0; ms < 300u; ms++) {
+        for (ms = 0; ms < 500u; ms++) {
             fm1_wdt_feed();
             master_poll();
             el = (uint32_t)(fm1_ms - t0);
-            if (el >= 1500u)
+            if (el >= SM_SPLASH_MS)
                 break;
-            sm_splash_paint(100u * el / 1500u);
+            sm_splash_paint(1000u * el / SM_SPLASH_MS);
             fm1_delay_ms(10);
         }
         fm1_wdt_feed();

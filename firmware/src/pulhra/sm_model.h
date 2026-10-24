@@ -89,6 +89,8 @@ typedef struct {
     sm_lock_t lock[SM_NLOCK];
     int8_t lane[4][9];                                    /* the KIT's four lanes (T4): each its machine's nine values (E1 .. E8, the
                                                              ninth), sm_kit.c; the space of nine locks of version 1 */
+    int8_t lmix[4][4];                                    /* the KIT's lanes' mix (Tim): each lane's LVL, CHO, DLY, REV (bank version 4;
+                                                             a version 3 bank loads with the defaults, sm_bank.c) */
 } sm_pattern_t;
 
 /* the pattern change (smp.mode, the project's, as MONOFM's): SEQUENTIAL at the end of the pattern playing (its master length),

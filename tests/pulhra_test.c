@@ -1770,13 +1770,13 @@ static int test_seq_len(void)
         before.len = 32u;
         turn(EN_K1, 5);                                   /* K1: the pattern's speed, * .. *8 (no round) */
         turn(EN_K2, 1);                                   /* K2: the change mode, the next */
-        turn(EN_K3, 5);                                   /* K3: every track's shift, K4: their transpose (Tim) */
+        turn(EN_K3, 5);                                   /* K3: the selected track's shift, K4: its transpose (Tim) */
         turn(EN_K4, 3);
         sm_input_poll();
         before.dnote = (uint8_t)(before.dnote + 3u);       /* (K4: the default note moves with the trigs) */
         before.speed = 3;                                 /* (K1 +5: the track's speed, *8) */
         bad += check("SEQ: K1-K4 are the layer's: no sound parameter moved; K3 SHT+5, K4 TR+3",
-                     !memcmp(&before, ksnd(0), sizeof before) && sm_sh_all == 5 && sm_tr_all == 3);
+                     !memcmp(&before, ksnd(0), sizeof before) && sm_sh_acc[0] == 5 && sm_trn_acc[0] == 3);
         bad += check("SEQ: ... K1 +5: T1's speed *8 (its top), its step an eighth", ksnd(0)->speed == 3 && pt->speed == 0 &&
                      sm_trk_step_q8(pt, 0) == sm_tempo_q8() / 8u && sm_trk_iv(pt, 1) == 8u);
         bad += check("SEQ: ... K2 +1: the next change mode", smp.mode == (m0 + 1u) % SM_PM_COUNT);
@@ -9180,6 +9180,197 @@ static int test_master_dyn(void)
     return bad;
 }
 
+/* the KIT's lanes' mix (Tim): AMP's K1..K4 the lane in edit's LVL CHO DLY REV, FX's sends its own; LVL 0 silences that lane
+ * alone; a lane's REV send feeds the reverb (the track's own sends off); a version 3 bank loads widened, the mix at its defaults */
+static int test_kit_lane_mix(void)
+{
+    int bad = 0;
+    uint32_t i, b, sl;
+    sm_fhdr_t hd;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    sm_kit_lane = 1;
+    sm_ui.page = (uint8_t)page_by_name("AMP");
+    bad += check("LMIX: KIT, AMP: K1..K4 the lane's LVL CHO DLY REV, SELECT the track's LEVEL",
+                 sm_page_param(0) == SM_LM(1, 0) && sm_page_param(3) == SM_LM(1, 3) && sm_page_param(4) == P_LEVEL);
+    turn(EN_K4, 20);
+    sm_input_poll();
+    play_blocks(2);
+    bad += check("LMIX: ... K4 +20: L2's REV 20, in the pattern and the core", cpat()->lmix[1][3] == 20 && dr_lm[3][1][3] == 20 &&
+                 cpat()->lmix[0][3] == 0);
+    sm_ui.page = (uint8_t)page_by_name("FX");
+    bad += check("LMIX: ... FX: CHO DLY REV the lane's", sm_page_param(1) == SM_LM(1, 1) && sm_page_param(3) == SM_LM(1, 3) &&
+                 sm_page_param(0) == P_DIST);
+    draw_full();
+    bad += check("LMIX: ... drawn, REV 20 (no fault)", lint_has("REV", 0, 0));
+    {                                                     /* L2 alone hit: its REV send reaches the reverb's bus */
+        uint32_t pk = 0;
+        trk_note_on(&trk[3], DR_KIT_NOTE + 1u, 120);
+        for (b = 0; b < 40u; b++) {
+            run_block();
+            for (i = 0; i < CTL; i++) {
+                uint32_t a = (uint32_t)(send_r[i] < 0 ? -send_r[i] : send_r[i]);
+                pk = a > pk ? a : pk;
+            }
+        }
+        bad += check("LMIX: L2 hit, its REV 20: the reverb's send gets it", pk > 50u);
+        trk_all_off(&trk[3]);
+        play_blocks(200);
+        cpat()->lmix[1][3] = 0;
+        dr_lm[3][1][3] = 0;
+        pk = 0;
+        trk_note_on(&trk[3], DR_KIT_NOTE + 1u, 120);
+        for (b = 0; b < 40u; b++) {
+            run_block();
+            for (i = 0; i < CTL; i++) {
+                uint32_t a = (uint32_t)(send_r[i] < 0 ? -send_r[i] : send_r[i]);
+                pk = a > pk ? a : pk;
+            }
+        }
+        bad += check("LMIX: ... REV 0: nothing (the track's own REV is not the lanes')", pk == 0u);
+        trk_all_off(&trk[3]);
+        play_blocks(200);
+    }
+    {
+        uint32_t p1 = 0, p0 = 0;
+        trk_note_on(&trk[3], DR_KIT_NOTE, 120);
+        for (b = 0; b < 20u; b++) {
+            uint32_t a = block_peak(0, 0);
+            p1 = a > p1 ? a : p1;
+        }
+        trk_all_off(&trk[3]);
+        play_blocks(300);
+        dr_lm[3][0][0] = 0;
+        trk_note_on(&trk[3], DR_KIT_NOTE, 120);
+        for (b = 0; b < 20u; b++) {
+            uint32_t a = block_peak(0, 0);
+            p0 = a > p0 ? a : p0;
+        }
+        trk_all_off(&trk[3]);
+        play_blocks(300);
+        dr_lm[3][0][0] = 112;
+        bad += check("LMIX: L1's LVL 0: its hit gone (112: heard; the reverb's tail of before only)", p1 > 1000u && p0 * 20u < p1);
+    }
+    /* a version 3 bank: the patterns 3824 bytes each, no lanes' mix */
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(2, 40);
+    smp.pat[1].step[0][63].n = 1;
+    smp.pat[1].lane[2][0] = 33;
+    bad += check("LMIX: saved (version 4)", sm_bank_save(0) == 0);
+    for (sl = 0; sl < SM_FL_NSLOT; sl++) {
+        memcpy(&hd, nor + sm_slot_addr(sl), sizeof hd);
+        if (hd.magic == SM_BMAGIC && hd.bank == 0u) {
+            uint8_t *d = nor + sm_slot_addr(sl) + SM_FL_DATA;
+            for (i = 0; i < SM_BPAT; i++)                 /* (squeezed: each pattern's first 3824 bytes, in a row) */
+                memmove(d + i * SM_PAT3_BYTES, d + i * sizeof(sm_pattern_t), SM_PAT3_BYTES);
+            hd.version = SM_BANK_VER3;
+            hd.size = SM_BPAT * SM_PAT3_BYTES;
+            hd.crc = st_crc32(d, hd.size);
+            hd.hcrc = st_crc32(&hd, sizeof hd - 4u);
+            memcpy(nor + sm_slot_addr(sl), &hd, sizeof hd);
+        }
+    }
+    bank_reboot();
+    bad += check("LMIX: a version 3 bank loads: its trigs and lanes where they were, the lanes' mix the defaults",
+                 smp.pat[0].step[2][40].n && smp.pat[1].step[0][63].n && smp.pat[1].lane[2][0] == 33 &&
+                 smp.pat[1].lmix[2][0] == 112 && smp.pat[7].lmix[3][3] == 0);
+    return bad;
+}
+
+/* the screen drawn frame by frame (sm_draw: only the zones whose signature moved) is the screen drawn whole, after any input
+ * (Tim: the rows of HOME's panel went black after a track's CLEAR; a held step, a knob's ring left stale). MIXER, the SEQ layer
+ * opened and let go; then a random walk of presses, holds, keys, knobs, time and audio blocks (a fixed seed), compared after
+ * every poll */
+static uint32_t rd_rs;
+static uint32_t rd_rnd(uint32_t n) { rd_rs = rd_rs * 1103515245u + 12345u; return (rd_rs >> 16) % n; }
+static int rd_same(uint32_t *first)
+{
+    static uint16_t inc[240 * 240];
+    uint32_t i, d = 0;
+    sm_draw();
+    memcpy(inc, host_screen, sizeof inc);
+    sm_redraw_all();
+    sm_dirty = 1;
+    sm_draw();
+    for (i = 0; i < 240u * 240u; i++)
+        if (inc[i] != host_screen[i]) {
+            if (!d && first)
+                *first = i;
+            d++;
+        }
+    return d == 0u;
+}
+static int test_redraw(void)
+{
+    static const uint32_t BTN[] = {B_FX, B_ENV, B_LFO, B_EDIT, B_GLO, B_HOME, B_ARP, B_SEQ, B_PLAY, B_REC, B_OCTDN, B_OCTUP, B_SCL, B_SAVE};
+    int bad = 0;
+    uint32_t t, s, step, held = 0xFFu, ok = 1, at = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = t; s < 16u; s += 3u)
+            sm_step_toggle(t, s);
+    sm_ui.page = (uint8_t)page_by_name("MIXER");
+    sm_draw();
+    layer_hold(B_SEQ);
+    sm_draw();
+    layer_let_go(B_SEQ);
+    ms(1500);
+    sm_input_poll();
+    bad += check("REDRAW: MIXER, the SEQ layer opened and let go: the panel's rows drawn (frame by frame = whole)", rd_same(0));
+    rd_rs = 4242u;
+    for (step = 0; step < 1500u && ok; step++) {
+        uint32_t a = rd_rnd(16);
+        if (a < 3)
+            press(BTN[rd_rnd(14)]);
+        else if (a == 3 && held == 0xFFu)
+            btn_down(held = BTN[rd_rnd(14)]);
+        else if (a == 4 && held != 0xFFu) {
+            btn_up(held);
+            held = 0xFFu;
+        } else if (a < 8) {
+            uint32_t k = rd_rnd(SM_NKEYS);
+            if ((fm1_in.notes >> k) & 1u)
+                key_up(k);
+            else
+                key_dn(k);
+        } else if (a < 11)
+            turn(rd_rnd(NE), (int32_t)rd_rnd(7) - 3);
+        else if (a < 13)
+            ms(rd_rnd(900));
+        else if (a == 13)
+            fm1_in.notes = host_notes = 0;
+        else {
+            uint32_t n = rd_rnd(30) + 1u;
+            while (n--)
+                run_block();
+        }
+        sm_input_poll();
+        ok = rd_same(&at);
+    }
+    if (!ok)
+        printf("pulhra: REDRAW: step %u, first pixel %u,%u, page %s layer %u\n", step, at % 240u, at / 240u, sm_cur_page()->name, sm_layer);
+    bad += check("REDRAW: 1500 random inputs: every frame as the whole screen", ok);
+    if (held != 0xFFu)
+        btn_up(held);
+    fm1_in.notes = host_notes = 0;
+    if (sm_playing) {
+        press(B_PLAY);
+        sm_input_poll();
+    }
+    return bad;
+}
+
 /* every lane L1..L4, every machine: EDIT 1 / EDIT 2 show that machine's values (Tim: L2..L4 showed BPM, SWING, MIDI: their
  * ids, P_COUNT + 9 .. + 35, reached the bit 0x80 that marked a page's global) */
 static int test_kit_lane_pages(void)
@@ -10617,13 +10808,13 @@ static int test_seq_all_tracks(void)
     {
         int ok = 1;
         for (t = 0; t < SM_NTRK; t++)
-            ok &= stp(t, 6)->n == 1u && !stp(t, 4)->n;
-        bad += check("SEQALL: SEQ + C#4 twice: every track's trig two steps forward", ok);
+            ok &= t == 0u ? stp(t, 6)->n == 1u && !stp(t, 4)->n : stp(t, 4)->n == 1u && !stp(t, 6)->n;
+        bad += check("SEQALL: SEQ + C#4 twice: the selected track's (T1) trig two steps forward, the others stay (Tim)", ok);
     }
-    bad += check("SEQALL: ... the net SHT+2 (no header message)", sm_sh_all == 2 && sm_msg == SM_MSG_NONE);
+    bad += check("SEQALL: ... the net SHT+2 (no header message)", sm_sh_acc[0] == 2 && sm_msg == SM_MSG_NONE);
     seq_key(5);                                           /* A#3: back */
     seq_key(5);
-    bad += check("SEQALL: SEQ + A#3 twice: back where they were, SHT+0", stp(0, 4)->n == 1u && stp(3, 4)->n == 1u && sm_sh_all == 0);
+    bad += check("SEQALL: SEQ + A#3 twice: back where they were, SHT+0", stp(0, 4)->n == 1u && stp(3, 4)->n == 1u && sm_sh_acc[0] == 0);
     sm_ux_mk1();
     draw_full();
     bad += check("SEQALL: ... the map's row under K3 / K4: SHT+0 TR+0", smd_has_cells("SHT+0", "TR+0"));
@@ -10631,13 +10822,13 @@ static int test_seq_all_tracks(void)
     {
         int ok = 1;
         for (t = 0; t < SM_NTRK; t++)
-            ok &= stp(t, 4)->note[0] == 61u + t;
-        bad += check("SEQALL: SEQ + F#4: every track's notes a semitone up, TR+1", ok && sm_tr_all == 1);
+            ok &= stp(t, 4)->note[0] == (t == 0u ? 61u : 60u + t);
+        bad += check("SEQALL: SEQ + F#4: the selected track's notes a semitone up (the others not), TR+1", ok && sm_trn_acc[0] == 1);
     }
     seq_key(10);                                          /* D#4: down */
     seq_key(10);
     draw_full();
-    bad += check("SEQALL: SEQ + D#4 twice: a semitone below the start, TR-1 drawn under K4", stp(2, 4)->note[0] == 61u && smd_has_cells("SHT+0", "TR-1"));
+    bad += check("SEQALL: SEQ + D#4 twice: a semitone below the start, TR-1 drawn under K4", stp(0, 4)->note[0] == 59u && stp(2, 4)->note[0] == 62u && smd_has_cells("SHT+0", "TR-1"));
     layer_let_go(B_SEQ);
     ms(1200);
     sm_input_poll();
@@ -10784,19 +10975,24 @@ static int test_splash(void)
 {
     int bad = 0;
     uint32_t t, i, badpx = 0, topink = 0, termink = 0;
-    for (t = 0; t <= 100u; t += 5u) {
+    for (t = 0; t <= 1000u; t += 25u) {
         draw_setup();
         sm_splash_paint(t);
         for (i = 0; i < 240u * 240u; i++) {
             uint16_t c = host_screen[i];
-            badpx += c != INK && c != DIMC && c != BGC && c != SGND;
+            badpx += c != INK && c != DIMC && c != BGC && c != SGND && c != swap16(0x8410u);
         }
     }
     for (i = 0; i < 240u * 140u; i++)
         topink += host_screen[i] != BGC;
-    for (i = 240u * 154u; i < 240u * 240u; i++)
+    for (i = 240u * 150u; i < 240u * 240u; i++)
         termink += host_screen[i] != BGC;
-    bad += check("SPLASH: every frame in the four inks; the rain and the terminal drawn at the end", !badpx && topink > 2000u && termink > 1000u);
+    bad += check("SPLASH: every frame in the five inks; the rain and the terminal drawn at the end", !badpx && topink > 2000u && termink > 1000u);
+    draw_setup();
+    sm_splash_paint(20);
+    for (i = 0, topink = 0; i < 240u * 240u; i++)
+        topink += host_screen[i] != BGC;
+    bad += check("SPLASH: it starts minimal: the first frames a cursor alone (under 300 px lit)", topink > 0u && topink < 300u);
     return bad;
 }
 
@@ -11166,6 +11362,8 @@ int main(void)
     bad += test_kit_lane_pages();
     bad += test_chord_entry();
     bad += test_master_dyn();
+    bad += test_kit_lane_mix();
+    bad += test_redraw();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;

@@ -665,6 +665,10 @@ enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR
 static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "PERC"};
 static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC};
 static int16_t dr_lp[NPART][4][9];                        /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's */
+static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
+static int32_t dr_ls[3][CTL];                             /* the KIT's lanes' sends this block (CHO DLY REV, at the lanes' LVL; fx.c
+                                                             mix_part takes them at the track's LEVEL, the track's own sends off) */
+static int32_t dr_kbuf[CTL];
 #define DR_KIT_NOTE 36u                                   /* lane 0's note (C2) */
 static uint32_t dr_kmach(int32_t v) { return (uint32_t)clamp(v, 0, DR_KM_N - 1); }
 /* a lane's nine values: machine m's factory sound pi (the ninth its default) */
@@ -710,20 +714,36 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
 {
     uint32_t L = dr_lane(v->note), mc = dr_kmach(t->p[P_E0 + L]);
     const int16_t *e = dr_lp[(uint32_t)(t - trk) % NPART][L];
+    const int16_t *lm = dr_lm[(uint32_t)(t - trk) % NPART][L];
+    int32_t *b = dr_kbuf, lv = LEVEL_Q12[clamp(lm[0], 0, 127)], sc = clamp(lm[1], 0, 127) * 258, sd = clamp(lm[2], 0, 127) * 258;
+    int32_t sr = clamp(lm[3], 0, 127) * 258;
     vmod_t km = *m;
+    uint32_t i;
     km.pitch16 = 48 * 16;                                 /* (each lane at its machine's own TUNE: C3) */
+    for (i = 0; i < n; i++)
+        b[i] = 0;
     if (mc == DR_KM_KICK)
-        dkick_run(t, v, out, n, &km, e);
+        dkick_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_SNARE)
-        dsnare_run(t, v, out, n, &km, e);
+        dsnare_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_CLAP)
-        dclap_run(t, v, out, n, &km, e);
+        dclap_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_HAT)
-        dhat_run(t, v, out, n, &km, e);
+        dhat_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_PERC)
-        dperc_run(t, v, out, n, &km, e);
+        dperc_run(t, v, b, n, &km, e);
     else
-        dcym_run(t, v, out, n, &km, e);
+        dcym_run(t, v, b, n, &km, e);
+    for (i = 0; i < n; i++) {                             /* the lane's LVL (as a track's LEVEL, 112: 0 dB) and its sends */
+        int32_t x = (clamp(b[i], -131071, 131071) * lv) >> 12;
+        out[i] += x;
+        if (sc)
+            dr_ls[0][i] += (x * (sc >> 3)) >> 12;
+        if (sd)
+            dr_ls[1][i] += (x * (sd >> 3)) >> 12;
+        if (sr)
+            dr_ls[2][i] += (x * (sr >> 3)) >> 12;
+    }
 }
 /* the keyboard: the white F3 G3 A3 B3 (keys 0 2 4 6) the four lanes, the other keys nothing */
 static int32_t dkit_keys(const track_t *t, uint32_t k)

@@ -278,7 +278,7 @@ static void web_power_on(void)
     sm_store_boot();
     master_boot();
     audio_init();
-    web_boot_ms = fm1_ms + 30u + 1500u;   /* splash duration */
+    web_boot_ms = fm1_ms + 30u + SM_SPLASH_MS;   /* splash duration */
     web_booted = 1;
 }
 
@@ -321,7 +321,7 @@ static void web_ms(void)
     if (!web_booted)
         return;
     if ((int32_t)(fm1_ms - web_boot_ms) < 0) {          /* the animated splash while it runs (web_power_on set the end) */
-        sm_splash_paint(100u * (fm1_ms - (web_boot_ms - 1530u)) / 1500u);
+        sm_splash_paint(1000u * (fm1_ms - (web_boot_ms - 30u - SM_SPLASH_MS)) / SM_SPLASH_MS);
         return;
     }
     if (web_boot_ms) {

@@ -35,16 +35,12 @@ static void sm_edit_init(void)
 }
 
 /* sm_input.c sm_pat_poll: another pattern plays now (the snapshot is of the one before) */
-static int8_t sm_sh_all, sm_tr_all;                       /* SEQ held + A#3 / C#4, D#4 / F#4: the net shift / transpose of all the tracks
-                                                             since the pattern came (the header's SHT+N, TR+N) */
 static void sm_acc_reset(uint32_t mask)                   /* the net SHIFT / TRN shown of the tracks of mask: rewritten, back to 0 */
 {
     uint32_t t;
     for (t = 0; t < SM_NTRK; t++)
         if ((mask >> t) & 1u)
             sm_sh_acc[t] = sm_trn_acc[t] = 0;
-    if (mask)                                             /* (a track rewritten: the net of all of them is no longer what it says) */
-        sm_sh_all = sm_tr_all = 0;
 }
 static void sm_edit_pat_changed(void)
 {
@@ -174,6 +170,7 @@ static void sm_copy_trk(uint32_t t)
         }
     sm_clip.nlock = (uint16_t)k;
     memcpy(sm_clip.lane, p->lane, sizeof sm_clip.lane);  /* (a KIT's lanes go with T4's sound) */
+    memcpy(sm_clip.lmix, p->lmix, sizeof sm_clip.lmix);
     sm_clip_kind = SM_CLIP_TRK;
 }
 
@@ -187,7 +184,10 @@ static void sm_paste_trk(uint32_t t)
     sm_put_begin(1u << t);
     sm_put_track(t, &sm_clip, sm_clip_kind == SM_CLIP_TRK ? 0u : t, 0, 1);
     if (t == SM_KIT_TRK && sm_snd_kit(&smp.pat[smp.cur % SM_NPAT].kit.snd[t]))   /* (a KIT pasted on T4: its lanes too; the LOAD */
+    {
         memcpy(smp.pat[smp.cur % SM_NPAT].lane, sm_clip.lane, sizeof sm_clip.lane);   /* brings them) */
+        memcpy(smp.pat[smp.cur % SM_NPAT].lmix, sm_clip.lmix, sizeof sm_clip.lmix);
+    }
     sm_acc_reset(1u << t);
 }
 
@@ -215,38 +215,32 @@ static void sm_shift_trk(uint32_t t, int32_t dir)
     sm_put_track(t, &sm_undo_buf, t, dir < 0 ? -1 : 1, 0);   /* (the snapshot is the track as it was) */
 }
 
-/* SEQ held + A#3 / C#4: every track's steps (and locks) one step left (-1) or right (+1), each wrapping at its own length; one
- * UNDO for all of them. The SEQ map shows the net count under K3: SHT+N */
+/* SEQ held + K3 / A#3 / C#4 (Tim: the selected track alone): its steps (and locks) one step left (-1) or right (+1), wrapping at its
+ * length; the net under K3 (SHT+N, the track's: sm_sh_acc, as SHIFT + D#4 / F#4) */
 static void sm_shift_all(int32_t dir)
 {
-    uint32_t t;
-    sm_undo_snap();
-    sm_put_begin((1u << SM_NTRK) - 1u);
-    for (t = 0; t < SM_NTRK; t++)
-        sm_put_track(t, &sm_undo_buf, t, dir < 0 ? -1 : 1, 0);
-    sm_sh_all = (int8_t)clamp((int32_t)sm_sh_all + (dir < 0 ? -1 : 1), -99, 99);
+    uint32_t t = sm_ui.trk % SM_NTRK, len = (uint32_t)clamp(smp.pat[smp.cur % SM_NPAT].kit.snd[t].len, 1, (int32_t)SM_NSTEP);
+    int32_t v;
+    dir = dir < 0 ? -1 : 1;
+    sm_shift_trk(t, dir);
+    v = ((int32_t)sm_sh_acc[t] + dir) % (int32_t)len;
+    if (v > (int32_t)len / 2)
+        v -= (int32_t)len;
+    else if (v < -(int32_t)len / 2)
+        v += (int32_t)len;
+    sm_sh_acc[t] = (int8_t)clamp(v, -99, 99);
     sm_dirty = 1;
 }
 static void sm_trn(uint32_t t, int32_t d);
-/* SEQ held + D#4 / F#4: every track's trigs a semitone down / up (sm_trn, one UNDO for all). The SEQ map: TR+N under K4 */
+/* SEQ held + K4 / D#4 / F#4: the selected track's trigs a semitone down / up (sm_trn; a KIT: nothing); TR+N under K4 */
 static void sm_trn_all(int32_t d)
 {
-    uint32_t t;
-    sm_trn(0, d);                                         /* (its snapshot, before any track moved, is the UNDO) */
-    for (t = 1; t < SM_NTRK; t++) {
-        sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
-        uint32_t s, k;
-        if (sm_trk_kit(t, p))                             /* (KIT: its note bytes are the lanes' hits, no pitch) */
-            continue;
-        p->kit.snd[t].dnote = (uint8_t)clamp((int32_t)p->kit.snd[t].dnote + d, 0, 127);
-        for (s = 0; s < SM_NSTEP; s++) {
-            sm_step_t *x = &p->step[t][s];
-            for (k = 0; k < x->n && k < 4u; k++)
-                if (x->note[k] != SM_INH)
-                    x->note[k] = (uint8_t)clamp((int32_t)x->note[k] + d, 0, 127);
-        }
-    }
-    sm_tr_all = (int8_t)clamp((int32_t)sm_tr_all + (d < 0 ? -1 : 1), -99, 99);
+    uint32_t t = sm_ui.trk % SM_NTRK;
+    d = d < 0 ? -1 : 1;
+    if (sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT]))
+        return;
+    sm_trn(t, d);
+    sm_trn_acc[t] = (int8_t)clamp((int32_t)sm_trn_acc[t] + d, -99, 99);
     sm_dirty = 1;
 }
 

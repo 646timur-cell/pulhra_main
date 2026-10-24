@@ -166,7 +166,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
             int32_t r = mulq15(gurdy_bp(&bf[0], o, &S->b[0], &S->b[1]), gb[0]) +
                         mulq15(gurdy_bp(&bf[1], o, &S->b[2], &S->b[3]), gb[1]) +
                         mulq15(gurdy_bp(&bf[2], o, &S->b[4], &S->b[5]), gb[2]);
-            o += mulq15(r - o, bmix);
+            o += mulq15(clamp(r - o, -65535, 65535), bmix);   /* (clamped: a loud body overflowed the product, a click) */
         }
         o = clamp(soft_knee(o, 24000), -32767, 32767);
 #if FELUCCA_MONOFM

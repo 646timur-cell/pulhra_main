@@ -57,6 +57,7 @@ static uint8_t smd_lat;                                   /* the selected track'
 static uint8_t smd_pos, smd_play, smd_rec, smd_live;      /* (and REC / live: the REC key sets them from the main loop) */
 static uint8_t smd_pos4[SM_NTRK];                         /* HOME > MIXER: every track's playing step, read once per frame too */
 static uint32_t sm_last_pos4 = 0xFFFFFFFFu;
+static uint32_t sm_last_ui;                                /* the hash of the UI's state the last frame saw (sm_draw) */
 
 /* the colours of the look (gfx.c's ux, what the splash and the canvas read): ink, dim, ground; nothing else is ever drawn */
 static void sm_ux_mk1(void)
@@ -614,7 +615,7 @@ static uint32_t smd_knob_sig(uint32_t k)
     smd_knob_get(k, &o);
     h = smd_mix(h, sm_ui.page); h = smd_mix(h, smd_snd()->machine); h = smd_mix(h, (uint32_t)o.on);
     h = smd_mix(h, (uint32_t)o.v); h = smd_mix(h, (uint32_t)o.filled); h = smd_mix(h, (uint32_t)o.dot);
-    h = smd_mix(h, (uint32_t)(o.dim * 2 + o.inv) + o.chord * 16u);
+    h = smd_mix(h, (uint32_t)(o.dim * 2 + o.inv) + o.chord * 16u); h = smd_mix(h, o.pos);   /* (pos: EUCLID's HITS ring is of STEPS' range) */
     for (i = 0; o.val[i]; i++)                            /* (the STEP page: the text is the value) */
         h = smd_mix(h, (uint8_t)o.val[i]);
     for (i = 0; o.lab[i]; i++)                            /* (the KIT: a lane of another machine, other labels) */
@@ -830,7 +831,7 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
                                                              change mode (SEQ, STR: direct start, JMP: direct jump); K3, K4 none */
             static const char *const M3[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
             char sh[8], tr[8];
-            int32_t v = sm_sh_all, a = v < 0 ? -v : v;
+            int32_t v = sm_sh_acc[sm_ui.trk % SM_NTRK], a = v < 0 ? -v : v;
             smd_cell(o, 0, SM_SPEED_N[sm_speed_place(smd_snd()->speed)], 0);   /* (the selected track's speed) */
             smd_cell(o, 1, M3[smp.mode % SM_PM_COUNT], 0);
             /* under K3 / K4: the net shift and transpose of every track (A#3 C#4 / D#4 F#4) since the pattern came: SHT+2, TR-1
@@ -844,7 +845,7 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
                 sh[2] = v < 0 ? '-' : '+';
                 smd_int(sh + 3, a > 99 ? 99 : a, 0);
             }
-            v = sm_tr_all;
+            v = sm_trn_acc[sm_ui.trk % SM_NTRK];
             a = v < 0 ? -v : v;
             tr[0] = 'T'; tr[1] = 'R'; tr[2] = v < 0 ? '-' : '+';
             smd_int(tr + 3, a > 99 ? 99 : a, 0);
@@ -853,7 +854,7 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             smd_upper(o->c[2], sh, 5u);                   /* (five each: SH+12, TR-12; the row's own places, seqx) */
             smd_upper(o->c[3], tr, 5u);
             o->seqx = 1;
-            o->dim |= (uint8_t)((sm_sh_all ? 0u : 4u) | (sm_tr_all ? 0u : 8u));   /* (0: dim) */
+            o->dim |= (uint8_t)((sm_sh_acc[sm_ui.trk % SM_NTRK] ? 0u : 4u) | (sm_trn_acc[sm_ui.trk % SM_NTRK] ? 0u : 8u));   /* (0: dim) */
         } else if (sm_msg == SM_MSG_CLEARED || sm_msg == SM_MSG_PTNCLR) {   /* SEQ + F3: CLEAR T1, F5 held: PTN CLEAR, on the map
                                                                             too (blinks with the header) */
             char tn[3] = {'T', (char)('1' + sm_ui.trk % SM_NTRK), 0};
@@ -1128,6 +1129,23 @@ static void sm_draw(void)
         pk = pk << 8 | smd_pos4[z];
     if (!smd_panel() || smd_kitp())
         pk = sm_last_pos4;                                /* (the other tracks' steps are drawn on MIXER only) */
+    {                                                     /* (the UI's state hashed: a handler that forgot sm_dirty is still drawn;
+                                                             the fuzzing of 24.10 found a held step, a layer's pick, GLO's bank) */
+        const uint8_t *u = (const uint8_t *)&sm_ui;
+        uint32_t i, h = 2166136261u;
+        for (i = 0; i < sizeof sm_ui; i++)
+            h = smd_mix(h, u[i]);
+        h = smd_mix(h, sm_layer | (uint32_t)sm_lay_epage << 8 | (uint32_t)sm_glo_bank << 16 | (uint32_t)sm_lay_pick << 24);
+        h = smd_mix(h, sm_kit_lane | (uint32_t)sm_msg << 8 | (uint32_t)smd_rec << 16 | (uint32_t)smd_live << 17);
+        h = smd_mix(h, smp.cur | (uint32_t)smp.next << 8 | (uint32_t)smp.mute << 16 | (uint32_t)smp.nchain << 24);
+        h = smd_mix(h, sm_key_arm);
+        h = smd_mix(h, fm1_in.notes);
+        h = smd_mix(h, fm1_in.buttons);
+        if (h != sm_last_ui) {
+            sm_last_ui = h;
+            sm_dirty = 1;
+        }
+    }
     if (!sm_dirty && smd_pos == sm_last_pos && smd_play == sm_last_play && pk == sm_last_pos4)
         return;
     sm_dirty = 0;
@@ -1138,6 +1156,12 @@ static void sm_draw(void)
         smd_begin(0, SMD_MIX_Y, 240u, SMD_STRIP_Y - SMD_MIX_Y, T_BG);
         smd_end();
         smd_mix_drawn = 0;
+        sm_zvalid &= (uint8_t)~((1u << SMD_Z_SEL) | (1u << SMD_Z_STRIP));
+    }
+    if (!sm_map_open() && smd_mapped) {                   /* the layer's map gone: its gaps cleared first, then SELECT and the strip
+                                                             drawn again over them (MIXER's panel is under them: cleared after its
+                                                             rows were drawn, T2 / T3 went black, Tim) */
+        smd_unmap();
         sm_zvalid &= (uint8_t)~((1u << SMD_Z_SEL) | (1u << SMD_Z_STRIP));
     }
     sig[0] = smd_hdr_sig();
@@ -1164,6 +1188,4 @@ static void sm_draw(void)
         sm_zsig[z] = sig[z];
         sm_zvalid |= (uint8_t)(1u << z);
     }
-    if (!sm_map_open() && smd_mapped)
-        smd_unmap();
 }

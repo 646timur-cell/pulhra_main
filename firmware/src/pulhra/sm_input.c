@@ -38,7 +38,8 @@
 #define SM_KEY_NOTE0 53u                                  /* F3, the first key's MIDI note (C4 = 60) */
 #define SM_KEY_VEL 100u
 
-static uint32_t sm_pdirty[SM_NTRK][5];                    /* bit per parameter id (< SM_NPID <= 160: the KIT's lanes too): pushed again */
+#define SM_PDW ((SM_NPID + 31u) / 32u)
+static uint32_t sm_pdirty[SM_NTRK][SM_PDW];               /* bit per parameter id (< SM_NPID: the KIT's lanes too): pushed again */
 static uint8_t sm_ld_pend;                                /* bit per track: a LOAD still to push */
 static uint8_t sm_tr_pend;                                /* 0 none, 1 PLAY, 2 STOP still to push */
 static uint8_t sm_save_st;                                /* SAVE: 0 up, 1 down (since sm_save_t0), 2 held: UNDO done */
@@ -1137,12 +1138,12 @@ static void sm_flush(void)
             sm_cmd_t c = {SMC_LOAD, (uint8_t)t, smp.cur, 0, 0};
             if (sm_cmd_push(c)) {
                 sm_ld_pend &= (uint8_t)~(1u << t);
-                for (w = 0; w < 5u; w++)
+                for (w = 0; w < SM_PDW; w++)
                     sm_pdirty[t][w] = 0;                  /* (the sound carries every value of the model) */
             }
             continue;                                     /* (the values wait for the sound: a LOAD changes the engine) */
         }
-        for (w = 0; w < 5u; w++)
+        for (w = 0; w < SM_PDW; w++)
             for (b = 0; sm_pdirty[t][w] && b < 32u; b++)
                 if ((sm_pdirty[t][w] >> b) & 1u)
                     sm_param_push(t, w * 32u + b);
