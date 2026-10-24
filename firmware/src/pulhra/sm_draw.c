@@ -550,6 +550,25 @@ static uint32_t smd_itype_place(int32_t v)                /* the place of an INS
     for (i = 0; i < 4u && (int32_t)SM_ITYPES[i] < v; i++) {}
     return i;
 }
+/* a chord in edit (SHIFT + a chord trig held): knob k its note k+1 (N1 .. N4), past the trig's notes "-" */
+static void smd_chord_knob(uint32_t k, smd_knob_t *o, int32_t st)
+{
+    const sm_step_t *p = &smp.pat[smp.cur % SM_NPAT].step[sm_ui.trk % SM_NTRK][st % (int32_t)SM_NSTEP];
+    sm_step_t e;
+    o->lab[0] = 'N';
+    o->lab[1] = (char)('1' + k);
+    o->lab[2] = 0;
+    o->val[0] = '-';
+    o->val[1] = 0;
+    if (k >= p->n)
+        return;
+    sm_step_eff(p, smd_snd(), &e);
+    o->on = 1;
+    o->filled = 1;
+    smd_note(o->val, e.note[k] & 127u);
+    o->pos = (uint32_t)(e.note[k] & 127u) * 256u / 127u;
+    o->v = (int32_t)o->pos;
+}
 static void smd_knob_get(uint32_t k, smd_knob_t *o)
 {
     const sm_sound_t *s = smd_snd();
@@ -564,6 +583,10 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     o->dim = o->inv = 0;
     o->v = 0;
     o->on = 0;
+    if (sm_chord_step() >= 0) {
+        smd_chord_knob(k & 3u, o, sm_chord_step());
+        return;
+    }
     if (sm_page_is_step()) {
         smd_step_knob(k & 3u, o);
         return;

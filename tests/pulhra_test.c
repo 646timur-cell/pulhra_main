@@ -8945,6 +8945,42 @@ static int test_seq_track_copy(void)
     return bad;
 }
 
+/* OCT- (SHIFT) + a chord trig held (Tim): K1..K4 its notes 1..4, no REST, the trig stays at the release; a single trig: REST as ever */
+static int test_chord_notes(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    draw_setup();
+    sm_step_toggle(0, 2);
+    stp(0, 2)->note[0] = 60;
+    stp(0, 2)->note[1] = 64;
+    stp(0, 2)->note[2] = 67;
+    stp(0, 2)->n = 3;
+    btn_down(B_OCTDN);                                    /* SHIFT held (REC off) */
+    sm_input_poll();
+    ms(150);
+    sm_input_poll();
+    key_dn(WHITE[2]);
+    sm_input_poll();
+    btn_up(B_OCTDN);                                      /* (OCT- may go: the trig held keeps the chord in edit) */
+    sm_input_poll();
+    turn(EN_K2, 2);
+    turn(EN_K3, -3);
+    turn(EN_K4, 5);                                       /* (a fourth note there is not: nothing) */
+    sm_input_poll();
+    draw_full();
+    bad += check("CHORDN: OCT- + a chord trig: K2 note 2 +2, K3 note 3 -3, note 1 kept, no REST",
+                 stp(0, 2)->note[0] == 60u && stp(0, 2)->note[1] == 66u && stp(0, 2)->note[2] == 64u && stp(0, 2)->n == 3u &&
+                 !(stp(0, 2)->flags & SMF_REST));
+    bad += check("CHORDN: ... the knobs N1 N2 N3 (no fourth note: no N4), note 2 F#4", lint_has("N1", 0, 0) && lint_has("N3", 0, 0) &&
+                 !lint_has("N4", 0, 0) && lint_has("F#4", 0, 0));
+    key_up(WHITE[2]);
+    sm_input_poll();
+    bad += check("CHORDN: ... let go: the trig stays (three notes)", stp(0, 2)->n == 3u);
+    return bad;
+}
+
 /* a chord on a trig (Tim): STEP's NOTE moves every note, and x3 marks the NOTE ring */
 static int test_step_chord_note(void)
 {
@@ -10963,6 +10999,7 @@ int main(void)
     bad += test_step_chord_note();
     bad += test_bank_old();
     bad += test_kit_lane_pages();
+    bad += test_chord_notes();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
