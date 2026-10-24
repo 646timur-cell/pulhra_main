@@ -390,7 +390,11 @@ static void sm_bank_fill(uint32_t h, uint32_t b)
         ok = !st_read(sm_slot_addr(sl) + SM_FL_DATA, &smp.pat[s0], nb) && st_crc32(&smp.pat[s0], nb) == sm_fs_crc[sl];
         if (ok && sm_fs_ver[sl] == SM_BANK_VER3)
             for (i = SM_BPAT; i-- > 0;) {                 /* (version 3: widened in place, the last pattern first) */
-                memmove(&smp.pat[s0 + i], (uint8_t *)&smp.pat[s0] + i * SM_PAT3_BYTES, SM_PAT3_BYTES);
+                volatile uint8_t *d = (uint8_t *)&smp.pat[s0 + i];   /* (volatile: the loop stays a loop, not a memmove call) */
+                const uint8_t *src = (uint8_t *)&smp.pat[s0] + i * SM_PAT3_BYTES;
+                uint32_t j = SM_PAT3_BYTES;
+                while (j--)                               /* (backwards: d >= src, overlapping; no memmove in libc.c) */
+                    d[j] = src[j];
                 sm_lmix_default(&smp.pat[s0 + i]);
             }
         if (!ok)
