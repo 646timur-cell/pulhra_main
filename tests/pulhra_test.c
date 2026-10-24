@@ -10415,17 +10415,24 @@ static int test_midi_transport(void)
     midi_enqueue(0xFu | 0xFAu << 8, 1u);
     mix_blocks(1);
     bad += check("TRNSIN: SRC INT, CLK AUTO (INT): no transport from any port", !sm_playing);
-    sm_midi_clk = SM_CLK_USB;
+    sm_midi_clk = SM_CLK_USB;                             /* (SRC INT: USB's clock not offered, Tim: none of a port not in use) */
     midi_enqueue(0xFu | 0xFAu << 8, 1u);
     mix_blocks(1);
-    bad += check("TRNSIN: CLK USB: a Start from USB plays", sm_playing);
+    bad += check("TRNSIN: SRC INT, CLK USB set: no USB clock (not a port in use)", !sm_playing);
+    sm_midi_src = 0u;
+    midi_enqueue(0xFu | 0xFAu << 8, 1u);
+    mix_blocks(1);
+    bad += check("TRNSIN: SRC USB, CLK USB: a Start from USB plays", sm_playing);
     midi_enqueue(0xFu | 0xFCu << 8, 1u);
     mix_blocks(1);
-    sm_midi_src = 0u;                                     /* (the notes from USB alone: the clock's port is its own) */
     sm_midi_clk = SM_CLK_JACK;
     midi_enqueue(0xFu | 0xFAu << 8, 2u);
     mix_blocks(1);
-    bad += check("TRNSIN: SRC USB, CLK JACK: the jack's Start plays (the clock's port whatever SRC)", sm_playing);
+    bad += check("TRNSIN: SRC USB, CLK JACK set: the jack's Start ignored (the jack not in use)", !sm_playing);
+    sm_midi_src = 2u;
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);
+    mix_blocks(1);
+    bad += check("TRNSIN: SRC JACK, CLK JACK: the jack's Start plays", sm_playing);
     midi_enqueue(0xFu | 0xFCu << 8, 2u);
     mix_blocks(1);
     sm_midi_trnoff = 1;

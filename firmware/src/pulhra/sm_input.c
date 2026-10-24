@@ -1134,8 +1134,16 @@ static void sm_input_poll(void)
             }
     } else if (sm_page_home() == SMH_SETUP) {             /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC, each round */
         uint8_t w;
-        if (k[0]) {
-            sm_midi_clk = (uint8_t)((((int32_t)sm_midi_clk + k[0]) % (int32_t)SM_CLK_COUNT + (int32_t)SM_CLK_COUNT) % (int32_t)SM_CLK_COUNT);
+        if (k[0]) {                                       /* (round over the choices SRC allows: sm_midi_clk_ok) */
+            int32_t c = sm_midi_clk, j, d = k[0] < 0 ? -1 : 1, n = k[0] < 0 ? -k[0] : k[0];
+            while (n--) {
+                for (j = 0; j < (int32_t)SM_CLK_COUNT; j++) {
+                    c = ((c + d) % (int32_t)SM_CLK_COUNT + (int32_t)SM_CLK_COUNT) % (int32_t)SM_CLK_COUNT;
+                    if (sm_midi_clk_ok((uint32_t)c))
+                        break;
+                }
+            }
+            sm_midi_clk = (uint8_t)c;
             sm_dirty = 1;
         }
         w = (uint8_t)((((int32_t)smp.mode + k[1]) % SM_PM_COUNT + SM_PM_COUNT) % SM_PM_COUNT);
@@ -1150,6 +1158,8 @@ static void sm_input_poll(void)
         w = (uint8_t)((((int32_t)sm_midi_src + k[3]) % 3 + 3) % 3);
         if (k[3] && w != sm_midi_src) {
             sm_midi_src = w;
+            if (!sm_midi_clk_ok(sm_midi_clk))             /* (a port no longer in use: its clock gone, AUTO) */
+                sm_midi_clk = SM_CLK_AUTO;
             sm_dirty = 1;
         }
     } else if (sm_page_home()) {

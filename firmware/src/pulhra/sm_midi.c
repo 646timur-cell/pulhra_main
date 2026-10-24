@@ -35,9 +35,17 @@ static uint8_t sm_midi_src = 1;
  * 3's byte after the source: CLK in bits 0..1, TRNS OFF bit 2; 0 = AUTO, ON) */
 enum { SM_CLK_AUTO, SM_CLK_INT, SM_CLK_USB, SM_CLK_JACK, SM_CLK_COUNT };
 static uint8_t sm_midi_clk = SM_CLK_AUTO, sm_midi_trnoff;
+/* the CLK choices SETUP offers (Tim: no external clock of a port not in use): AUTO, INT, and the port MIDI SRC is (USB, the
+ * jack); SRC INT: AUTO and INT only */
+static int sm_midi_clk_ok(uint32_t c)
+{
+    return c == SM_CLK_AUTO || c == SM_CLK_INT || (c == SM_CLK_USB && sm_midi_src == 0u) || (c == SM_CLK_JACK && sm_midi_src == 2u);
+}
 static uint32_t sm_midi_clk_port(void)                   /* the port of the external clock: 1 USB, 2 the jack, 0 none (INT) */
 {
     uint32_t c = sm_midi_clk == SM_CLK_AUTO ? (sm_midi_src == 2u ? SM_CLK_JACK : SM_CLK_INT) : sm_midi_clk;
+    if (!sm_midi_clk_ok(c))
+        c = SM_CLK_INT;
     return c == SM_CLK_USB ? 1u : c == SM_CLK_JACK ? 2u : 0u;
 }
 static volatile uint8_t sm_midi_ch_release[SM_NTRK];     /* a track's channel changed (sm_input.c sets its byte, the drain
