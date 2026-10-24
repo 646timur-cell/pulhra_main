@@ -7,7 +7,7 @@
  *              nothing, and the page does not change when the button is let go
  *   hold       the button down for HOLD_MS, or a key pressed / a knob turned while it is down (even at 50 ms): the layer is
  *              open until the button is let go; the page under it stays as it was
- *   EDIT       white keys from F3: the machines of the page (MONO 13, SOMA 9, SLICE 5: engines.c MF_PAGE, in the order of
+ *   EDIT       white keys from F3: the machines of the page (MONO 13, SOMA 9, SLICE 5, DRUM: engines.c MF_PAGE, in the order of
  *              eng_vis), OCT+ the next page, OCT- the previous (no INIT key). Loads as the PRESETS knob does
  *   GLO        black keys 1..4 (F#3 G#3 A#3 C#4) toggle the mute of T1..T4 (smp.mute); the white keys F3 .. B3 solo T1..T4
  *              while they are held (sm_solo); the banks and patterns (sm_bank.c sm_glo_poll): the black G#4 A#4 C#5 D#5 F#5 put
@@ -64,7 +64,7 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
 #define SM_LAY_FILL_KEY 26u                               /* GLO: G5 (key 26), FILL while held */
 enum { SM_W_CLEAR = 0, SM_W_COPY_PAT = 1, SM_W_COPY_TRK = 4, SM_W_PASTE_TRK = 5, SM_W_PASTE_PAT = 2, SM_W_SHL = 6, SM_W_SHR = 7,
        SM_W_TRN_DN = 10, SM_W_TRN_UP = 11 };             /* SEQ: the white keys of the tools (F3 = 0); C4=4 copy, D4=5 paste */
-#define SM_NEPAGE 3u
+#define SM_NEPAGE 4u                                      /* MONO SOMA SLICE DRUM (engines.c MF_PAGE) */
 
 static void sm_layer_init(void)
 {
@@ -90,7 +90,7 @@ static uint32_t sm_layer_button(uint32_t l)
 }
 
 /* the page of machines (0..2) a machine is on, its first machine, how many it has */
-static uint32_t sm_epage_of(uint32_t machine) { return machine >= MF_PAGE[2] ? 2u : machine >= MF_PAGE[1] ? 1u : 0u; }
+static uint32_t sm_epage_of(uint32_t machine) { return machine >= MF_PAGE[3] ? 3u : machine >= MF_PAGE[2] ? 2u : machine >= MF_PAGE[1] ? 1u : 0u; }
 static uint32_t sm_epage_first(uint32_t pg) { return MF_PAGE[pg % SM_NEPAGE]; }
 static uint32_t sm_epage_n(uint32_t pg) { return (uint32_t)MF_PAGE[pg % SM_NEPAGE + 1u] - MF_PAGE[pg % SM_NEPAGE]; }
 

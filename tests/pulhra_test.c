@@ -1383,11 +1383,11 @@ static int test_edit_layer_loads_machine(void)
     sm_input_poll();
     key_up(WHITE[0]);
     bad += check("EDIT: SOMA's first white key: machine 13", ksnd(0)->machine == 13u);
-    press(B_OCTUP);
-    sm_input_poll();
-    press(B_OCTUP);
-    sm_input_poll();
-    bad += check("EDIT: OCT+ twice more: back on MONO (wraps)", sm_lay_epage == 0u);
+    for (k = 1; k < SM_NEPAGE; k++) {
+        press(B_OCTUP);
+        sm_input_poll();
+    }
+    bad += check("EDIT: OCT+ round the pages (SLICE, DRUM): back on MONO (wraps)", sm_lay_epage == 0u);
     press(B_OCTDN);
     sm_input_poll();
     bad += check("EDIT: OCT-: the previous page (from MONO: the last, wraps)", sm_lay_epage == SM_NEPAGE - 1u);
@@ -1401,7 +1401,7 @@ static int test_edit_layer_loads_machine(void)
     press(B_OCTUP);
     sm_input_poll();
     press(B_OCTUP);
-    sm_input_poll();                                      /* SLICE: 5 machines */
+    sm_input_poll();                                      /* (four pages: round to SLICE again) SLICE: 5 machines */
     for (k = 0; k < 16u; k++) {
         key_dn(WHITE[k]);
         sm_input_poll();
@@ -8382,6 +8382,7 @@ static void fx_t1(void)                                   /* T1 SAW alone, dry, 
     trk[0].p[P_ITYPE] = 0;
     trk[0].p[P_DTYPE] = 0;
     trk[1].p[P_LEVEL] = trk[2].p[P_LEVEL] = trk[3].p[P_LEVEL] = 0;
+    fx.cho_ph = 0;                                        /* (the chorus's LFO from 0: the same run whatever the tests before played) */
 }
 /* each send is heard on its own bus: only its bus gets the signal and the wet mix has it; the same note with the send at 0
  * leaves the bus silent */
@@ -8460,8 +8461,80 @@ static int test_fx_sends_audible(void)
         k = s - 1u;
         snprintf(w, sizeof w, "FX: send %s: its bus peaks %u, the others 0, the wet mix %u (without it %u), the output gains energy x%.2f",
                  NAME[s], pk[k], fx_pk_w, w0, e1 / e0);
-        bad += check(w, pk[k] > 500u && pk[(k + 1u) % 3u] == 0 && pk[(k + 2u) % 3u] == 0 && fx_pk_w > w0 + 300u && e1 > 1.05 * e0);
+        bad += check(w, pk[k] > 500u && pk[(k + 1u) % 3u] == 0 && pk[(k + 2u) % 3u] == 0 && fx_pk_w > w0 + 300u && e1 > (s == 1u ? 0.8 : 1.05) * e0);   /* (CHO: a comb on the dry, its gain
+                                                                     * depends on the phases the tests before left: ~1, not more) */
     }
+    return bad;
+}
+
+/* DRUM page: KICK (eng_dr.c) on T1: a hit sounds at once, sits low (its body near TUNE's ~50 Hz once the sweep is down),
+ * rings out to silence by itself (the voice ends: no ADSR), a second hit chokes the first (one voice rings), DECAY is
+ * the length, nothing past full scale */
+static uint32_t dr_active(uint32_t t)
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < NVOICE; i++)
+        n += trk[t].v[i].active != 0;
+    return n;
+}
+static int test_drum_kick(void)
+{
+    static int32_t L[CTL * 2000];
+    int bad = 0;
+    uint32_t b, nl = 0, pk0 = 0, pk_late = 0, zc = 0, i, act_after = 0, mx = 0;
+    double e_short = 0, e_long = 0;
+    uint32_t kick = eng_rank(ENGI_DKICK);
+    draw_setup();
+    kit_dry();
+    sm_ui.trk = 0;
+    sm_sound_load(kick, 0);
+    sm_input_poll();
+    for (b = 0; b < 40u; b++)
+        run_block();
+    trk[1].p[P_LEVEL] = trk[2].p[P_LEVEL] = trk[3].p[P_LEVEL] = 0;
+    kit_dry();
+    bad += check("KICK: on the DRUM page (MF_PAGE[3]), loaded on T1", kick >= MF_PAGE[3] && trk[0].engine == ENGI_DKICK);
+    fx_flush();                                           /* (the tests before: their delay and reverb tails out) */
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < 2000u; b++) {
+        uint32_t a = block_peak(L, &nl);
+        mx = a > mx ? a : mx;
+        if (b < 30u)
+            pk0 = a > pk0 ? a : pk0;
+        if (b >= 1700u)
+            pk_late = a > pk_late ? a : pk_late;
+        if (b == 1650u)
+            act_after = dr_active(0);
+    }
+    for (i = (uint32_t)(FS / 10u); i < (uint32_t)(FS / 4u); i++)   /* 100 .. 250 ms: the body's zero crossings */
+        zc += (L[i - 1u] < 0) != (L[i] < 0);
+    printf("  kick: peak %u (first 20 ms %u), body %.1f Hz, after 1.2 s %u voices, last %u\n", mx, pk0, zc / 2.0 / 0.15, act_after, pk_late);
+    bad += check("KICK: the hit at once, loud", pk0 > 4000u);
+    bad += check("KICK: ... its body low (35 .. 80 Hz)", zc / 2.0 / 0.15 > 35.0 && zc / 2.0 / 0.15 < 80.0);
+    bad += check("KICK: ... rings out by itself: no voice after 1.2 s, silence", act_after == 0u && pk_late <= 2u);
+    bad += check("KICK: ... never past full scale", mx < 32767u * 2u);
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < 140u; b++)
+        block_peak(0, 0);
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < 30u; b++)
+        block_peak(0, 0);
+    bad += check("KICK: a second hit chokes the first: one voice rings", dr_active(0) == 1u);
+    for (b = 0; b < 2000u; b++)
+        block_peak(0, 0);
+    for (b = 0; b < 2u; b++) {                            /* DECAY 20, then 110: the energy after 300 ms */
+        uint32_t k;
+        trk[0].p[P_E3] = b ? 110 : 20;
+        nl = 0;
+        trk_note_on(&trk[0], 48, 100);
+        for (k = 0; k < 1000u; k++)
+            block_peak(L, &nl);
+        for (i = (uint32_t)(FS * 3u / 10u); i < nl; i++)
+            *(b ? &e_long : &e_short) += (double)L[i] * L[i];
+        for (k = 0; k < 4000u; k++)
+            block_peak(0, 0);
+    }
+    bad += check("KICK: DECAY: a longer tail", e_long > 20.0 * (e_short + 1.0));
     return bad;
 }
 
@@ -10272,6 +10345,7 @@ int main(void)
     bad += test_oct_strip();
     bad += test_rec_arm();
     bad += test_draw_shots();
+    bad += test_drum_kick();                              /* (last: it leaves a KICK on T1) */
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

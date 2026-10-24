@@ -58,6 +58,9 @@ static const char *const PRESET_CAT[NENGINES > 16 ? NENGINES : 16] = {
     MONO_CAT_MSAW, MONO_CAT_MPULSE, MONO_CAT_MENS, MONO_CAT_MSID, MONO_CAT_MWAVE, MONO_CAT_MDDRAW, MONO_CAT_MBBOX,   /* 29.. */
     MONO_CAT_MFMST, MONO_CAT_MFMPAR, MONO_CAT_MFMDYN, MONO_CAT_MVO, MONO_CAT_MSINE, MONO_CAT_MNOISE,                 /* ..41 */
 #endif
+#if FELUCCA_SWAMP
+    DR_CAT_KICK,                                                                                                       /* 42.. */
+#endif
 };
 static uint32_t preset_cat(uint32_t e, uint32_t k)    /* factory preset k of engine e */
 {

@@ -69,6 +69,9 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
 #endif
 #if FELUCCA_MONOFM
 #include "eng_mono.c"           /* MONOFM: the Monomachine-style machines */
+#if FELUCCA_SWAMP
+#include "eng_dr.c"             /* PULHRA: the drum machines (KICK ..) */
+#endif
 #endif
 
 /* the editor protocol, user presets and projects store these indices: append, never reorder. MONOFM: Felucca's own
@@ -143,6 +146,9 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_MSINE,                  /* 40 */
     &ENG_MNOISE,                 /* 41 (ENGI_MNOISE) */
 #endif
+#if FELUCCA_SWAMP
+    &ENG_DKICK,                  /* 42 (ENGI_DKICK) */
+#endif
 };
 
 /* a track's engine number as an index (the audio paths: a compare, cheaper than % NENGINES; a bad number: 0) */
@@ -213,13 +219,24 @@ static const uint8_t ENGINE_ORDER[] = {                 /* MONOFM: the EDIT laye
     ENGI_STRING, ENGI_MODAL, ENGI_BLOW, ENGI_RESO,             /* 2 SOMA: physical models, */
     ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT, ENGI_PLANT,  /* springs, drones, the organic */
     ENGI_GLITCH, ENGI_ERROR, ENGI_RITUAL, ENGI_MECH, ENGI_BIO, /* 3 SLICE: the slice machines */
+#if FELUCCA_SWAMP
+    ENGI_DKICK,                                                /* 4 DRUM (PULHRA): the drum machines */
+#endif
 };
 #define MF_PAGE_2 13u                                    /* the pages' first places in ENGINE_ORDER, then its end */
 #define MF_PAGE_3 22u
+#if FELUCCA_SWAMP
+#define MF_PAGE_4 27u                                    /* PULHRA: the DRUM page after SLICE */
+static const uint8_t MF_PAGE[5] = {0, MF_PAGE_2, MF_PAGE_3, MF_PAGE_4, NENG_SHOWN};
+_Static_assert(sizeof ENGINE_ORDER == NENG_SHOWN && MF_PAGE_2 <= 15u && MF_PAGE_3 - MF_PAGE_2 <= 15u &&
+               MF_PAGE_4 - MF_PAGE_3 <= 15u && NENG_SHOWN - MF_PAGE_4 <= 15u, "PULHRA: four pages of at most 15 machines");
+static const char *const MF_PAGE_NAME[4] = {"MONO", "SOMA", "SLICE", "DRUM"};
+#else
 static const uint8_t MF_PAGE[4] = {0, MF_PAGE_2, MF_PAGE_3, NENG_SHOWN};
 _Static_assert(sizeof ENGINE_ORDER == NENG_SHOWN && MF_PAGE_2 <= 15u && MF_PAGE_3 - MF_PAGE_2 <= 15u &&
                NENG_SHOWN - MF_PAGE_3 <= 15u, "MONOFM: three pages of at most 15 machines (the white keys)");
 static const char *const MF_PAGE_NAME[3] = {"MONO", "SOMA", "SLICE"};
+#endif
 /* MONOFM v4: the SELECT knob on EDIT, each machine's most used value (its E index; the machine's own desc names it):
  * SAW's unison level, PULSE's width, ENS's wave, SID's width, WAVE's morph, DDRAW's mix, the FM machines' first depth,
  * VO-6's vowel morph, SINE's fold, NOISE's colour, the physical models' brightness or breath, the slice machines'
