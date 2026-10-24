@@ -666,9 +666,9 @@ static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", 
 static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC};
 static int16_t dr_lp[NPART][4][9];                        /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
-static int32_t dr_ls[3][CTL];                             /* the KIT's lanes' sends this block (CHO DLY REV, at the lanes' LVL; fx.c
+static int32_t dr_ls[3][CTL] __attribute__((section(".pool")));                             /* the KIT's lanes' sends this block (CHO DLY REV, at the lanes' LVL; fx.c
                                                              mix_part takes them at the track's LEVEL, the track's own sends off) */
-static int32_t dr_kbuf[CTL];
+static int32_t dr_kbuf[CTL] __attribute__((section(".pool")));   /* (the pool: RAM keeps its 4 KiB headroom) */
 #define DR_KIT_NOTE 36u                                   /* lane 0's note (C2) */
 static uint32_t dr_kmach(int32_t v) { return (uint32_t)clamp(v, 0, DR_KM_N - 1); }
 /* a lane's nine values: machine m's factory sound pi (the ninth its default) */
