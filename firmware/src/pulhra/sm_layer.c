@@ -331,8 +331,12 @@ static void sm_seq_tool(uint32_t w, uint32_t t)
 static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg, int32_t sel)
 {
     uint32_t key, t = sm_ui.trk % SM_NTRK;
-    if (sm_layer == SML_EDIT && ((pressed >> panel.btn[B_OCTUP]) & 1u)) {
+    if (sm_layer == SML_EDIT && ((pressed >> panel.btn[B_OCTUP]) & 1u)) {   /* the machines' pages: OCT+ the next, OCT- the previous */
         sm_lay_epage = (uint8_t)((sm_lay_epage + 1u) % SM_NEPAGE);
+        sm_dirty = 1;
+    }
+    if (sm_layer == SML_EDIT && ((pressed >> panel.btn[B_OCTDN]) & 1u)) {
+        sm_lay_epage = (uint8_t)((sm_lay_epage + SM_NEPAGE - 1u) % SM_NEPAGE);
         sm_dirty = 1;
     }
     if (sm_layer == SML_SEQ && sel) {                     /* SELECT: the track's length */

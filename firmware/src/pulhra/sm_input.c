@@ -425,7 +425,7 @@ static void sm_oct_poll(uint32_t pressed, uint32_t now, uint32_t act)
     if (act && sm_oct_pend == 1u && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u))
         sm_oct_pend = 0;                                  /* (OCT- used as SHIFT: no pair, no single press of its own) */
     sm_shift = (uint8_t)(!sm_ui.kbd && !sm_layer_busy() && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u));
-    if (sm_layer_busy()) {                         /* (the layers use OCT: EDIT's next page; a layer button down may open one) */
+    if (sm_layer_busy()) {                         /* (the layers use OCT: EDIT's next / previous page; a layer button down may open one) */
         sm_oct_pend = 0;
         return;
     }

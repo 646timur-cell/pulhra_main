@@ -1388,6 +1388,16 @@ static int test_edit_layer_loads_machine(void)
     press(B_OCTUP);
     sm_input_poll();
     bad += check("EDIT: OCT+ twice more: back on MONO (wraps)", sm_lay_epage == 0u);
+    press(B_OCTDN);
+    sm_input_poll();
+    bad += check("EDIT: OCT-: the previous page (from MONO: the last, wraps)", sm_lay_epage == SM_NEPAGE - 1u);
+    press(B_OCTDN);
+    sm_input_poll();
+    bad += check("EDIT: ... OCT- again: the one before", sm_lay_epage == SM_NEPAGE - 2u && sm_ui.kbd == 0u && !sm_shift);
+    press(B_OCTUP);
+    sm_input_poll();
+    press(B_OCTUP);
+    sm_input_poll();
     press(B_OCTUP);
     sm_input_poll();
     press(B_OCTUP);
