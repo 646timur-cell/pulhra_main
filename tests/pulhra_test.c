@@ -4130,20 +4130,23 @@ static int test_trig_copy_paste(void)
     stp(0, 2)->nudge = 3;
     sm_lock_set(0, 2, P_FCUT, 30);
     sm_lock_set(0, 2, P_FRES, 99);
-    btn_down(B_OCTDN);                                    /* SHIFT held */
+    press(B_REC);                                         /* (grid record: the trig keys hold) */
     sm_input_poll();
-    ms(150);
+    key_dn(WHITE[2]);                                     /* trig 3 held + REC (Tim): copied */
     sm_input_poll();
-    lk_tap(2);
-    bad += check("TCOPY: SHIFT + trig key 3: copied (VEL, flags, two locks), the trig not toggled",
-                 sm_shift && stp(0, 2)->n == 1u && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip.flags == SMF_ACCENT && sm_tclip_nl == 2u);
-    lk_tap(6);
-    bad += check("TCOPY: ... an empty step: nothing copied, nothing placed", !stp(0, 6)->n && sm_tclip.vel == 90u);
-    btn_up(B_OCTDN);
-    ms(150);
+    press(B_REC);
     sm_input_poll();
-    press(B_REC);                                         /* (grid record: a trig held + OCT+ pastes) */
+    key_up(WHITE[2]);
     sm_input_poll();
+    bad += check("TCOPY: trig key 3 held + REC: copied (VEL, flags, two locks), the trig not toggled, REC still on",
+                 sm_rec && stp(0, 2)->n == 1u && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip.flags == SMF_ACCENT && sm_tclip_nl == 2u);
+    key_dn(WHITE[6]);
+    sm_input_poll();
+    press(B_REC);
+    sm_input_poll();
+    key_up(WHITE[6]);
+    sm_input_poll();
+    bad += check("TCOPY: ... an empty step: nothing copied, nothing placed", !stp(0, 6)->n && sm_tclip.vel == 90u && sm_rec);
     key_dn(WHITE[9]);                                     /* an empty step held + OCT+ */
     sm_input_poll();
     oct_tap(B_OCTUP);
@@ -4166,13 +4169,17 @@ static int test_trig_copy_paste(void)
     sm_undo();
     bad += check("TCOPY: UNDO: the trig before the paste (VEL 20, LEVEL locked)", stp(0, 11)->vel == 20u &&
                  lk_val(0, 11, P_LEVEL) == 10 && lk_val(0, 11, P_FCUT) == LK_NONE);
-    btn_down(B_REC);                                      /* REC is no modifier any more: a press toggles recording, a key */
-    sm_input_poll();                                      /* with it down toggles the trig (REC was on: now off, nothing) */
-    lk_tap(11);
-    btn_up(B_REC);
+    key_dn(WHITE[13]);                                    /* an empty step held + PLAY (Tim): pasted, no transport */
     sm_input_poll();
-    bad += check("TCOPY: REC pressed (on -> off) + a trig key: no copy (VEL still 90), REC stays off, the trig kept",
-                 sm_tclip.vel == 90u && !sm_rec && stp(0, 11)->n == 1u);
+    press(B_PLAY);
+    sm_input_poll();
+    key_up(WHITE[13]);
+    sm_input_poll();
+    bad += check("TCOPY: step 14 held + PLAY: pasted (VEL 90), no transport, no toggle at release",
+                 stp(0, 13)->n == 1u && stp(0, 13)->vel == 90u && !sm_playing && lk_val(0, 13, P_FCUT) == 30);
+    press(B_REC);                                         /* REC alone: recording off as ever */
+    sm_input_poll();
+    bad += check("TCOPY: REC alone (no trig held): recording off", !sm_rec);
     /* pasted while playing at 300 BPM, the audio stream preempting every store: every lock it applies is the model's, none
      * of a trig replaced (lk_shadow: the locks each step has; a paste replaces the target's with the source's) */
     {
@@ -6845,16 +6852,11 @@ static void bank_play(uint32_t n)
         }
     }
 }
-static void seq_f5_save(void)                             /* SEQ + F#5 held 0.9 s */
+static void shift_press(uint32_t b);
+static void seq_f5_save(void)                             /* (SEQ + F#5 is the track's paste now, Tim: the save is SHIFT + SAVE) */
 {
-    layer_hold(B_SEQ);
-    key_dn(25);
+    shift_press(B_SAVE);
     sm_input_poll();
-    ms(900);
-    sm_input_poll();
-    key_up(25);
-    sm_input_poll();
-    layer_let_go(B_SEQ);
 }
 
 /* the GLO grid: a tap on an empty place saves the current pattern into it (no switch), a tap on a used one asks for it, a hold
@@ -7148,7 +7150,7 @@ static int test_bank_roundtrip(void)
     smp.next = SM_PAT_NONE;
     memcpy(a, &smp.pat[0], sizeof a);
     seq_f5_save();
-    bad += check("ROUND: SEQ + F#5 held: SAVED", sm_msg == SM_MSG_SAVED && !sm_half_dirty(0) && !sm_half_dirty(1));
+    bad += check("ROUND: SHIFT + SAVE: SAVED", sm_msg == SM_MSG_SAVED && !sm_half_dirty(0) && !sm_half_dirty(1));
     /* bank C (not in RAM at the reboot): brought in (B, clean now, gives way), C04 edited, saved */
     bad += check("ROUND: C brought into half 1 (B saved, clean)", sm_bank_bring(2) == SM_BR_OK && smp.hbank[1] == 2u);
     pat_trig(8 + 3, 3, 0, 90);
@@ -7435,58 +7437,44 @@ static int test_rec_grid(void)
     sm_input_poll();
     bad += check("RECGRID: REC on: trig held + a knob: the step's lock, the base kept, the trig kept",
                  lk_val(0, 3, P_FCUT) != LK_NONE && ksnd(0)->p[P_FCUT] == base && stp(0, 3)->n == 1u);
-    key_dn(WHITE[5]);                                     /* REC turned off with a key down: its release toggles nothing */
+    key_dn(WHITE[5]);                                     /* a key down + REC (Tim): the trig's copy, REC stays; no toggle */
     sm_input_poll();
     press(B_REC);
     sm_input_poll();
     key_up(WHITE[5]);
     sm_input_poll();
-    bad += check("RECGRID: REC off while a key is down: its release toggles nothing", !sm_rec && !stp(0, 5)->n);
+    bad += check("RECGRID: a key down + REC: a copy (REC stays on), its release toggles nothing", sm_rec && !stp(0, 5)->n);
     return bad;
 }
 
+/* SHIFT (OCT- held) + a trig key (Tim): a lock trig (REST: the locks only, no note) there, or back; REC on or off; SHIFT + G5
+ * with REC off is FILL, not a REST on step 16 */
 static int test_shift_trig_copy(void)
 {
     int bad = 0;
     in_reset();
     host_ticks = 1000u;
     sm_step_toggle(0, 2);
-    stp(0, 2)->vel = 90;
-    sm_lock_set(0, 2, P_FCUT, 30);
     btn_down(B_OCTDN);                                    /* SHIFT held (REC off) */
     sm_input_poll();
     ms(150);
     sm_input_poll();
     lk_tap(2);
-    bad += check("SHCOPY: SHIFT + trig key 3 (REC off): copied (VEL 90, its lock), the trig not toggled",
-                 sm_shift && sm_tclip_ok && sm_tclip.vel == 90u && sm_tclip_nl == 1u && stp(0, 2)->n == 1u);
+    bad += check("SHREST: SHIFT + trig key 3: the trig a lock trig (REST), kept", sm_shift && stp(0, 2)->n == 1u &&
+                 (stp(0, 2)->flags & SMF_REST));
     lk_tap(6);
-    bad += check("SHCOPY: ... SHIFT + an empty step: nothing copied, nothing toggled", !stp(0, 6)->n && sm_tclip.vel == 90u);
-    btn_up(B_OCTDN);
-    ms(150);
-    sm_input_poll();
-    press(B_REC);
-    sm_input_poll();
-    stp(0, 2)->vel = 70;
-    btn_down(B_OCTDN);                                    /* SHIFT with REC on: a copy, no toggle either */
-    sm_input_poll();
-    ms(150);
-    sm_input_poll();
+    bad += check("SHREST: ... SHIFT + an empty step: a new lock trig", stp(0, 6)->n == 1u && (stp(0, 6)->flags & SMF_REST));
     lk_tap(2);
+    bad += check("SHREST: ... SHIFT + the lock trig again: a trig with its note again", stp(0, 2)->n == 1u &&
+                 !(stp(0, 2)->flags & SMF_REST));
+    key_dn(26);
+    sm_input_poll();
+    key_up(26);
+    sm_input_poll();
+    bad += check("SHREST: SHIFT + G5 (REC off): FILL, step 16 untouched", !stp(0, 15)->n);
     btn_up(B_OCTDN);
     ms(150);
     sm_input_poll();
-    bad += check("SHCOPY: SHIFT + trig with REC on: copied (VEL 70), not toggled", sm_tclip.vel == 70u && stp(0, 2)->n == 1u &&
-                 !sm_ui.kbd);
-    lk_tap(4);
-    bad += check("SHCOPY: REC on + a trig key alone: a toggle now, not a copy", stp(0, 4)->n == 1u && sm_tclip.vel == 70u);
-    key_dn(WHITE[9]);
-    sm_input_poll();
-    oct_tap(B_OCTUP);
-    key_up(WHITE[9]);
-    sm_input_poll();
-    bad += check("SHCOPY: trig held + OCT+: pasted (VEL 70, FCUT 30), no toggle at release",
-                 stp(0, 9)->n == 1u && stp(0, 9)->vel == 70u && lk_val(0, 9, P_FCUT) == 30);
     return bad;
 }
 
@@ -8899,6 +8887,46 @@ static int test_msg_age(void)
     bad += check("MSG: SAVED still at 1.5 s", sm_msg == SM_MSG_SAVED);
     sm_msg_poll(fm1_ticks() + 2100000u * FM1_TICKS_PER_US);
     bad += check("MSG: ... gone at 2.1 s", sm_msg == SM_MSG_NONE);
+    return bad;
+}
+
+/* SEQ held + D#5 held 0.8 s: the track copied; F#5 held: pasted (Tim). A tap: the hint, nothing done */
+static int test_seq_track_copy(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 3);
+    stp(0, 3)->vel = 77;
+    layer_hold(B_SEQ);
+    key_dn(22);
+    sm_input_poll();
+    bad += check("TRKCOPY: D#5 down: HOLD: COPY TRACK", sm_msg == SM_MSG_TCOPYP);
+    ms(900);
+    sm_input_poll();
+    key_up(22);
+    sm_input_poll();
+    bad += check("TRKCOPY: ... held 0.9 s: TRACK COPIED", sm_msg == SM_MSG_TCOPY);
+    layer_let_go(B_SEQ);
+    turn(EN_ALGO, 1);
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    key_dn(25);
+    sm_input_poll();
+    ms(200);
+    sm_input_poll();
+    key_up(25);
+    sm_input_poll();
+    bad += check("TRKCOPY: F#5 tapped on T2: nothing pasted", !stp(1, 3)->n);
+    key_dn(25);
+    sm_input_poll();
+    ms(900);
+    sm_input_poll();
+    key_up(25);
+    sm_input_poll();
+    layer_let_go(B_SEQ);
+    bad += check("TRKCOPY: F#5 held on T2: T1's track pasted (step 4, VEL 77), TRACK PASTED",
+                 stp(1, 3)->n && stp(1, 3)->vel == 77u && sm_msg == SM_MSG_TPASTE);
     return bad;
 }
 
@@ -10722,6 +10750,7 @@ int main(void)
     bad += test_shift_fill();
     bad += test_setup_nostrip();
     bad += test_msg_age();
+    bad += test_seq_track_copy();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

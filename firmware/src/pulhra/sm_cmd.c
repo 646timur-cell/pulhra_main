@@ -364,3 +364,24 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     SM_BARRIER();
     s->n = 1;
 }
+
+/* the main loop, SHIFT + a trig key (Tim): step st of track t a lock trig (REST: no note, its locks only) or back. An empty
+ * step: a fresh lock trig (its fields, a barrier, n); a trig: its REST flag flipped (one byte: the audio stream sees the old
+ * flags or the new) */
+static void sm_step_rest(uint32_t t, uint32_t st)
+{
+    sm_step_t *s;
+    if (t >= SM_NTRK || st >= SM_NSTEP)
+        return;
+    s = &smp.pat[smp.cur % SM_NPAT].step[t][st];
+    if (s->n) {
+        s->flags ^= (uint8_t)SMF_REST;
+        return;
+    }
+    sm_lock_clear_step(t, st);
+    sm_step_fresh(t, st, SMF_REST);
+    if (sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT]))
+        s->note[0] = 0;                                   /* (KIT: no lane hits, the locks only) */
+    SM_BARRIER();
+    s->n = 1;
+}

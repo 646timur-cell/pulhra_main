@@ -741,19 +741,37 @@ static void sm_glo_poll(uint32_t notes, uint32_t now)
 }
 
 /* SEQ, every poll: F#5 held 0.8 s: SAVE (once a hold) */
+/* SEQ held + D#5 / F#5 held 0.8 s (Tim): the selected track copied / pasted (a tap: "HOLD: .." in the header, nothing done).
+ * sm_fsave_dn: the key down (22 or 25), 0 none. (SEQ + F#5 is no SAVE any more: SHIFT + SAVE is) */
+#define SM_TCOPY_KEY 22u                                  /* D#5 */
+#define SM_TPASTE_KEY 25u                                 /* F#5 */
+static void sm_copy_trk(uint32_t t);
+static void sm_paste_trk(uint32_t t);
 static void sm_fsave_poll(uint32_t notes, uint32_t now)
 {
-    if ((notes >> 25) & 1u) {
-        sm_fsave_dn = 1;
-        sm_fsave_done = 0;
-        sm_fsave_t0 = now;
-    }
+    uint32_t k;
+    for (k = SM_TCOPY_KEY; k <= SM_TPASTE_KEY; k += SM_TPASTE_KEY - SM_TCOPY_KEY)
+        if ((notes >> k) & 1u) {
+            sm_fsave_dn = (uint8_t)k;
+            sm_fsave_done = 0;
+            sm_fsave_t0 = now;
+            sm_msg_show(k == SM_TCOPY_KEY ? SM_MSG_TCOPYP : SM_MSG_TPASTEP);
+        }
     if (!sm_fsave_dn)
         return;
-    if (!((fm1_in.notes >> 25) & 1u)) {
+    if (!((fm1_in.notes >> sm_fsave_dn) & 1u)) {
+        if (!sm_fsave_done && (sm_msg == SM_MSG_TCOPYP || sm_msg == SM_MSG_TPASTEP))
+            sm_msg = SM_MSG_NONE;                         /* (let go early: nothing done) */
         sm_fsave_dn = 0;
-    } else if (!sm_fsave_done && (uint32_t)(now - sm_fsave_t0) >= SM_SAVE_HOLD_US * FM1_TICKS_PER_US) {
+        sm_dirty = 1;
+    } else if (!sm_fsave_done && (int32_t)(now - sm_fsave_t0) >= (int32_t)(SM_SAVE_HOLD_US * FM1_TICKS_PER_US)) {
         sm_fsave_done = 1;
-        sm_save_ask();
+        if (sm_fsave_dn == SM_TCOPY_KEY) {
+            sm_copy_trk(sm_ui.trk % SM_NTRK);
+            sm_msg_show(SM_MSG_TCOPY);
+        } else {
+            sm_paste_trk(sm_ui.trk % SM_NTRK);
+            sm_msg_show(SM_MSG_TPASTE);
+        }
     }
 }

@@ -318,8 +318,10 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
             continue;
         if (sm_shift && k == SM_SHK_FILL && !sm_rec)      /* (SHIFT + G5, REC off: FILL, sm_fill_poll; REC on: the copy as ever) */
             continue;
-        if (sm_shift) {                                   /* SHIFT + a trig key: the trig copied, no toggle */
-            (void)sm_trig_copy(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);
+        if (sm_shift) {                                   /* SHIFT + a trig key (Tim): a lock trig there (no note, the locks only), or
+                                                             back: an empty step a new one, a trig made one, a lock trig made a trig */
+            sm_step_rest(sm_ui.trk, (uint32_t)sm_ui.bank * 16u + (uint32_t)w);
+            sm_dirty = 1;
             continue;
         }
         if (!sm_rec)                                      /* (REC off: the keys leave the steps alone) */
@@ -780,6 +782,17 @@ static void sm_eu_gen(void)
  * while off, arms. */
 static void sm_rec_poll(uint32_t pressed)
 {
+    if (((pressed >> panel.btn[B_REC]) & 1u) && sm_key_arm) {   /* a trig held + REC (Tim): that trig copied; REC stays as it is */
+        uint32_t k;
+        for (k = 0; k < SM_NKEYS; k++)
+            if ((sm_key_arm >> k) & 1u) {
+                (void)sm_trig_copy(sm_key_trk[k], sm_key_step[k]);
+                break;
+            }
+        sm_key_used |= sm_key_arm;                        /* (no toggle at the release) */
+        sm_dirty = 1;
+        return;
+    }
     if ((pressed >> panel.btn[B_REC]) & 1u) {
         if (sm_rec && sm_live) {                            /* RECORD MODE: exit to ARM, the transport keeps running */
             sm_live = 0;
@@ -1074,7 +1087,10 @@ static void sm_input_poll(void)
     sm_save_poll(pressed, now);
     sm_rec_poll(pressed);
     sm_lrec_poll();                                       /* (live record: the notes the audio stream placed) */
-    if (((pressed >> panel.btn[B_PLAY]) & 1u) && ((fm1_in.buttons >> panel.btn[B_REC]) & 1u)) {
+    if (((pressed >> panel.btn[B_PLAY]) & 1u) && sm_key_arm) {   /* a trig held + PLAY (Tim): the trig copied pasted there, no transport */
+        sm_paste_held();
+        sm_dirty = 1;
+    } else if (((pressed >> panel.btn[B_PLAY]) & 1u) && ((fm1_in.buttons >> panel.btn[B_REC]) & 1u)) {
         /* REC held + PLAY (Elektron's live record): recording on whatever REC's own press made of it (on from grid record,
          * that press turned it off), and playing (started; already playing: it plays on, a STOP not pushed yet dropped) */
         sm_rec = 1;
