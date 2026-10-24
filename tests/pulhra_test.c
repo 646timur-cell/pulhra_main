@@ -2308,7 +2308,7 @@ static int test_strip_dots(void)
     bad += check("strip: ASCII: . empty, bullet a trig, ^ accent, x ratchet, degree REST, * slide (the ratchet over the accent)",
                  strip_ch(0) == '\x13' && strip_ch(1) == '\x14' && strip_ch(2) == '\x15' && strip_ch(3) == '\x17' &&
                  strip_ch(4) == '\x16' && strip_ch(5) == '\x18' && strip_ch(6) == '\x17' && strip_ch(7) == '\x13');
-    bad += check("strip: ... an empty step dim, a trig in the ink", SCR(0 * SW + 1 + 4, 220 + 4 + 12) == DIMC && SCR(1 * SW + 1 + 4, 220 + 4 + 6) == SINK);
+    bad += check("strip: ... an empty step dim, a trig in the ink", SCR(0 * SW + 1 + 4, 220 + 4 + 6) == DIMC && SCR(1 * SW + 1 + 4, 220 + 4 + 6) == SINK);
     for (i = 0; i < 240u * 20u; i++) {                        /* nothing but the inks */
         uint16_t c = SCR(i % 240u, 220u + i / 240u);
         if (c != INK && c != DIMC && c != BGC && c != SGND)
@@ -6246,7 +6246,7 @@ static int test_len_visible(void)
     bad += check("LEN: the strip: the length (12) at its right, inside the screen",
                  lint_has("12", &y0, &y1) && y0 >= 220 && y1 <= 240 && lint_frame("strip len") == 0);
     bad += check("LEN: ... nothing drawn past the length (steps 13 .. 16: no beat mark, no trig)",
-                 scr_sink(12 * SMD_STEP_W, 220, 4 * SMD_STEP_W, 20) == 0 && SCR(8 * SMD_STEP_W + SMD_STEP_W / 2, 236) == DIMC);
+                 scr_sink(12 * SMD_STEP_W, 220, 4 * SMD_STEP_W, 20) == 0 && SCR(8 * SMD_STEP_W + 1 + 4, 220 + 4 + 6) == DIMC);
     ksnd(0)->len = 16;
     smp.pat[0].step[0][13].n = 0;
     return bad;
