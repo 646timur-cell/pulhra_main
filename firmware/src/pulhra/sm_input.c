@@ -54,6 +54,7 @@ static uint32_t sm_key_used;                              /* bit per key: a knob
 #define SM_CHE_KEY 22u                                    /* D#5 */
 static uint8_t sm_che, sm_che_step, sm_che_trk, sm_che_kbd, sm_che_n, sm_che_note[4];
 static uint8_t sm_oct_pend;                               /* an OCT press waiting for the other one: 0 none, 1 OCT-, 2 OCT+ */
+static uint8_t sm_oct_late, sm_oct_used;                  /* OCT+ held past the window: its page turn at the release; REC / PLAY came */
 static uint32_t sm_oct_t0;                                /* ... when it went down */
 static uint8_t sm_kb_note[SM_NKEYS], sm_kb_trk[SM_NKEYS]; /* keyboard mode: the note each key sounds (0xFF none) and its track */
 static uint32_t sm_kb_pend;                               /* bit per key: pressed, its note-on not pushed yet */
@@ -125,6 +126,8 @@ static uint32_t sm_layer_busy(void);                      /* a layer open, or it
 static void sm_undo(void);                                /* sm_edit.c (after this file) */
 static int sm_trig_copy(uint32_t t, uint32_t st);
 static void sm_paste_held(void);
+static void sm_page_copy(void);                          /* sm_edit.c: OCT+ + REC / PLAY */
+static void sm_page_paste(void);
 static uint8_t sm_tclip_ok;                               /* (sm_edit.c: a trig copied) */
 static void sm_edit_pat_changed(void);
 static void sm_eu_gen(void);
@@ -476,9 +479,19 @@ static void sm_oct_poll(uint32_t pressed, uint32_t now, uint32_t act)
         return;
     }
     if (sm_oct_pend && (uint32_t)(now - sm_oct_t0) > SM_OCT_PAIR_US * FM1_TICKS_PER_US) {
-        sm_oct_single(sm_oct_pend == 2u);                 /* (nobody came with it) */
+        if (sm_oct_pend == 2u && !sm_ui.kbd && ((fm1_in.buttons >> panel.btn[B_OCTUP]) & 1u))
+            sm_oct_late = 1;                              /* (OCT+ held on: its page turn at its release, unless REC / PLAY came) */
+        else
+            sm_oct_single(sm_oct_pend == 2u);             /* (nobody came with it) */
         sm_oct_pend = 0;
     }
+    if (sm_oct_late && !((fm1_in.buttons >> panel.btn[B_OCTUP]) & 1u)) {
+        if (!sm_oct_used)
+            sm_oct_single(1);
+        sm_oct_late = 0;
+    }
+    if (!((fm1_in.buttons >> panel.btn[B_OCTUP]) & 1u) && !sm_oct_late)
+        sm_oct_used = 0;
     if (dn && up) {
         sm_oct_toggle();
         sm_oct_pend = 0;
@@ -1191,6 +1204,16 @@ static void sm_input_poll(void)
         notes = 0;
     sm_msg_poll(now);
     sm_save_poll(pressed, now);
+    if (!sm_layer && !sm_ui.kbd && ((fm1_in.buttons >> panel.btn[B_OCTUP]) & 1u) &&
+        (pressed & ((1u << panel.btn[B_REC]) | (1u << panel.btn[B_PLAY])))) {   /* OCT+ held + REC / PLAY: the page copied / pasted (Tim) */
+        if ((pressed >> panel.btn[B_REC]) & 1u)
+            sm_page_copy();
+        else
+            sm_page_paste();
+        pressed &= ~((1u << panel.btn[B_REC]) | (1u << panel.btn[B_PLAY]));
+        sm_oct_pend = 0;                                  /* (no page turn at OCT+'s release) */
+        sm_oct_used = 1;
+    }
     sm_rec_poll(pressed);
     sm_lrec_poll();                                       /* (live record: the notes the audio stream placed) */
     if (((pressed >> panel.btn[B_PLAY]) & 1u) && sm_key_arm) {   /* a trig held + PLAY (Tim): the trig copied pasted there, no transport */

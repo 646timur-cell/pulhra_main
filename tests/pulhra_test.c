@@ -9253,6 +9253,56 @@ static int test_master_dyn(void)
     return bad;
 }
 
+/* the page clipboard (Tim): OCT+ held + REC copies the page in view of the selected track (its steps, their locks), OCT+ held +
+ * PLAY pastes it onto the page in view (another track's too); OCT+ held past its window and let go after them: no page turn */
+static int test_page_copy(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    draw_setup();
+    ksnd(0)->len = 32u;
+    ksnd(1)->len = 32u;
+    sm_step_toggle(0, 2);
+    sm_step_toggle(0, 9);
+    stp(0, 9)->vel = 77;
+    sm_lock_set(0, 9, P_FCUT, 33);
+    sm_step_toggle(0, 20);                                /* (page 2: not copied) */
+    btn_down(B_OCTUP);
+    sm_input_poll();
+    ms(SM_OCT_PAIR_US / 1000u + 100u);
+    sm_input_poll();
+    press(B_REC);
+    sm_input_poll();
+    bad += check("PGCOPY: OCT+ held + REC: PAGE COPIED, REC not turned on", sm_msg == SM_MSG_PCOPY && !sm_rec);
+    btn_up(B_OCTUP);
+    sm_input_poll();
+    bad += check("PGCOPY: ... OCT+ let go after: no page turn", sm_ui.bank == 0u);
+    sm_ui.trk = 1;
+    oct_tap(B_OCTUP);                                     /* T2, page 2 */
+    bad += check("PGCOPY: OCT+ tapped alone: the page turns (17..32)", sm_ui.bank == 1u);
+    btn_down(B_OCTUP);
+    sm_input_poll();
+    press(B_PLAY);
+    sm_input_poll();
+    btn_up(B_OCTUP);
+    ms(SM_OCT_PAIR_US / 1000u + 100u);
+    sm_input_poll();
+    bad += check("PGCOPY: T2 page 2, OCT+ held + PLAY: T1's page 1 pasted there (steps 19 and 26, VEL 77, its lock), no transport",
+                 stp(1, 18)->n && stp(1, 25)->n && stp(1, 25)->vel == 77u && lk_val(1, 25, P_FCUT) == 33 && !stp(1, 2)->n && !sm_playing &&
+                 sm_msg == SM_MSG_PPASTE && sm_ui.bank == 1u);
+    btn_down(B_OCTUP);                                    /* OCT+ held long alone: the page turns at its release */
+    sm_input_poll();
+    ms(SM_OCT_PAIR_US / 1000u + 400u);
+    sm_input_poll();
+    bad += check("PGCOPY: OCT+ held past its window: no turn yet", sm_ui.bank == 1u);
+    btn_up(B_OCTUP);
+    sm_input_poll();
+    bad += check("PGCOPY: ... let go: the page turns (round to 1..16)", sm_ui.bank == 0u);
+    bad += check("PGCOPY: ... T1 as it was", stp(0, 2)->n && stp(0, 9)->n && stp(0, 20)->n && lk_val(0, 9, P_FCUT) == 33);
+    return bad;
+}
+
 /* the KIT's lanes' mix (Tim): AMP's K1..K4 the lane in edit's LVL CHO DLY REV, FX's sends its own; LVL 0 silences that lane
  * alone; a lane's REV send feeds the reverb (the track's own sends off); a version 3 bank loads widened, the mix at its defaults */
 static uint32_t lane_hit_peak(uint32_t L)                /* T4's KIT, lane L hit alone: the mix's peak, then rung out */
@@ -9414,6 +9464,33 @@ static int test_kit_lane_mix(void)
         h2 = ev_notes(3, DR_KIT_NOTE + 1u);
         printf("pulhra: LMIX COND: L1 %u hits, L2 %u\n", h1, h2);
         bad += check("LMIX: ... playing: L1 every pass, L2 every other (its 1:2)", h1 >= 4u && h2 * 2u <= h1 + 1u && h2 * 2u + 2u >= h1);
+    }
+    {                                                     /* SEQ's CLEAR on the KIT: the lane in edit alone (Tim) */
+        in_reset();
+        host_ticks = 1000u;
+        seq_reset();
+        draw_setup();
+        sm_ui.trk = 3;
+        sm_sound_load(SM_KIT_MACH, 0);
+        sm_input_poll();
+        sm_kit_lane = 0;
+        sm_step_toggle(3, 0);
+        sm_step_toggle(3, 4);
+        sm_kit_lane = 1;
+        sm_step_toggle(3, 4);
+        sm_step_toggle(3, 8);
+        sm_lock_set(3, 8, SM_LC(1), SM_COND_AB0);
+        sm_lock_set(3, 4, SM_LP(0, 0), 30);
+        layer_hold(B_SEQ);
+        key_dn(WHITE[0]);                                 /* SEQ + F3: CLEAR */
+        sm_input_poll();
+        key_up(WHITE[0]);
+        sm_input_poll();
+        draw_full();
+        bad += check("LMIX: SEQ + F3 on the KIT, L2 in edit: L2's hits gone (step 9 no trig, its condition gone), L1's kept, CLEAR L2",
+                     stp(3, 0)->n && stp(3, 0)->note[0] && stp(3, 4)->n && stp(3, 4)->note[0] && !stp(3, 4)->note[1] && !stp(3, 8)->n &&
+                     lk_val(3, 8, SM_LC(1)) == LK_NONE && lk_val(3, 4, SM_LP(0, 0)) == 30 && lint_has("CLEAR L2", 0, 0));
+        layer_let_go(B_SEQ);
     }
     /* a version 3 bank: the patterns 3824 bytes each, no lanes' mix */
     nor_wipe();
@@ -11522,6 +11599,7 @@ int main(void)
     bad += test_master_dyn();
     bad += test_kit_lane_mix();
     bad += test_redraw();
+    bad += test_page_copy();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;

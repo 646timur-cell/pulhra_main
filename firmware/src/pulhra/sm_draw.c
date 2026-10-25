@@ -879,7 +879,8 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
             o->dim |= (uint8_t)((sm_sh_acc[sm_ui.trk % SM_NTRK] ? 0u : 4u) | (sm_trn_acc[sm_ui.trk % SM_NTRK] ? 0u : 8u));   /* (0: dim) */
         } else if (sm_msg == SM_MSG_CLEARED || sm_msg == SM_MSG_PTNCLR) {   /* SEQ + F3: CLEAR T1, F5 held: PTN CLEAR, on the map
                                                                             too (blinks with the header) */
-            char tn[3] = {'T', (char)('1' + sm_ui.trk % SM_NTRK), 0};
+            int kit = sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT]);
+            char tn[3] = {kit ? 'L' : 'T', (char)('1' + (kit ? sm_kit_lane % 4u : sm_ui.trk % SM_NTRK)), 0};   /* (KIT: CLEAR L2) */
             smd_cat(o->w, &n, sm_msg == SM_MSG_PTNCLR ? "PTN CLEAR" : "CLEAR ");
             if (sm_msg == SM_MSG_CLEARED)
                 smd_cat(o->w, &n, tn);

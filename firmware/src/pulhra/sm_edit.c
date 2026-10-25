@@ -27,8 +27,10 @@ static uint8_t sm_clip_kind;                              /* SM_CLIP_* */
 static sm_pattern_t sm_undo_buf __attribute__((section(".noinit")));    /* UNDO: the pattern before the last edit */
 static uint8_t sm_undo_ok, sm_undo_pat;                   /* ... there is one, of this pattern */
 
+static uint8_t sm_pg_ok;
 static void sm_edit_init(void)
 {
+    sm_pg_ok = 0;
     sm_clip_kind = SM_CLIP_NONE;
     sm_undo_ok = 0;
     sm_undo_pat = 0;
@@ -147,6 +149,97 @@ static void sm_edit_clear(uint32_t mask, int snap)
             sm_put_track(t, 0, 0, 0, 0);
     sm_acc_reset(mask);
     sm_msg_show(SM_MSG_CLEARED);
+}
+
+/* CLEAR on the KIT (Tim): the lane in edit alone: its hits off every step (a step no lane hits any more: no trig, its locks
+ * gone), its own locks (its values, mix, filter, condition) gone; the other lanes as they were. One UNDO */
+static void sm_clear_lane(uint32_t L)
+{
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t s, i, n, t = SM_KIT_TRK;
+    L %= 4u;
+    sm_undo_snap();
+    for (s = 0; s < SM_NSTEP; s++) {
+        sm_step_t *x = &p->step[t][s];
+        if (!x->n || !x->note[L])
+            continue;
+        if (!(x->note[(L + 1u) & 3u] | x->note[(L + 2u) & 3u] | x->note[(L + 3u) & 3u]) && !(x->flags & SMF_REST)) {
+            x->n = 0;                                     /* (one byte: the audio stream sees the trig or nothing) */
+            SM_BARRIER();
+            sm_lock_clear_step(t, s);
+        }
+        x->note[L] = 0;
+    }
+    n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock;
+    for (i = 0; i < n; i++) {
+        uint32_t q = p->lock[i].param;
+        if (q == SM_LOCK_DEAD || SM_TS_T(p->lock[i].ts) != t)
+            continue;
+        if ((sm_is_lp(q) && (q - SM_LP0) / 9u == L) || (sm_is_lm(q) && (q - SM_LM0) / 4u == L) ||
+            (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L))
+            p->lock[i].param = SM_LOCK_DEAD;
+    }
+    if (!sm_playing)
+        sm_lock_compact(p);
+    sm_msg_show(SM_MSG_CLEARED);
+}
+
+/* the page clipboard (Tim: OCT+ held + REC copies the page of steps in view of the selected track, OCT+ held + PLAY pastes it
+ * onto the page in view, any track): its 16 steps and their locks (up to SM_PG_NL). In .noinit (RAM has no room): valid only
+ * with sm_pg_ok, which the boot clears */
+#define SM_PG_NL 96u
+static struct {
+    sm_step_t st[16];
+    uint8_t nl, ofs[SM_PG_NL], par[SM_PG_NL];
+    int16_t val[SM_PG_NL];
+} sm_pg __attribute__((section(".noinit")));
+static void sm_page_copy(void)
+{
+    const sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank * 16u, i, n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock;
+    for (i = 0; i < 16u; i++)
+        sm_pg.st[i] = p->step[t][(b + i) % SM_NSTEP];
+    sm_pg.nl = 0;
+    for (i = 0; i < n && sm_pg.nl < SM_PG_NL; i++) {
+        uint32_t s = SM_TS_S(p->lock[i].ts);
+        if (p->lock[i].param == SM_LOCK_DEAD || SM_TS_T(p->lock[i].ts) != t || s < b || s >= b + 16u)
+            continue;
+        sm_pg.ofs[sm_pg.nl] = (uint8_t)(s - b);
+        sm_pg.par[sm_pg.nl] = p->lock[i].param;
+        sm_pg.val[sm_pg.nl++] = p->lock[i].val;
+    }
+    sm_pg_ok = 1;
+    sm_msg_show(SM_MSG_PCOPY);
+}
+static void sm_page_paste(void)
+{
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t t = sm_ui.trk % SM_NTRK, b = sm_ui.bank * 16u, i, j;
+    if (!sm_pg_ok) {
+        sm_msg_show(SM_MSG_GEMPTY);
+        return;
+    }
+    sm_undo_snap();
+    for (i = 0; i < 16u && b + i < SM_NSTEP; i++) {       /* (the order of a trig's paste, sm_trig_put: n 0, the locks, the fields, n) */
+        sm_step_t *x = &p->step[t][b + i], y = sm_pg.st[i];
+        uint32_t had = x->n;
+        x->n = 0;
+        SM_BARRIER();
+        sm_lock_clear_step(t, b + i);
+        if (had)
+            sm_unlock_req(t, b + i);
+        for (j = 0; j < sm_pg.nl; j++)
+            if (sm_pg.ofs[j] == i && !sm_lock_set(t, b + i, sm_pg.par[j], sm_pg.val[j]))
+                break;
+        y.n = 0;
+        *x = y;
+        SM_LOCK_PREEMPT();
+        SM_BARRIER();
+        x->n = sm_pg.st[i].n;
+    }
+    sm_acc_reset(1u << t);
+    sm_msg_show(SM_MSG_PPASTE);
+    sm_dirty = 1;
 }
 
 /* COPY: the pattern; a track (as track 0 of the clipboard: its sound, steps, live locks) */

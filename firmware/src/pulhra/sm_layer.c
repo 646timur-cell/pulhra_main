@@ -320,7 +320,10 @@ static void sm_seq_tool(uint32_t w, uint32_t t)
 {
     switch (w) {
     case SM_W_CLEAR:
-        sm_edit_clear(1u << t, 1);
+        if (sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT]))  /* (the KIT: the lane in edit alone, Tim) */
+            sm_clear_lane(sm_kit_lane);
+        else
+            sm_edit_clear(1u << t, 1);
         sm_lay_cleared = 1;
         break;
     case SM_W_COPY_PAT: sm_copy_pat(); break;
