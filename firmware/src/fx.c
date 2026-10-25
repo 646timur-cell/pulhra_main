@@ -1014,8 +1014,16 @@ static __attribute__((noinline)) void master_comp(uint32_t n)
         cp_env = 0;
         return;
     }
-    mk = 4096 + ((4096 * 32767 / (cmp_gain(32767, th, r8) | 1) - 4096) >> 1);   /* (Q12: half the reduction at full scale) */
-    mk = clamp(mk, 4096, 16384);
+    {                                                     /* MKUP (COMP's PRESETS, Tim): 0 .. +18 dB, Q12 */
+        static const uint32_t DB6[6] = {65536, 73533, 82505, 92572, 103870, 116544};   /* (10^(k/20), Q16) */
+        int32_t db = clamp(song.g[G_CMKUP], 0, 18);
+        mk = 4096;
+        while (db >= 6) {
+            mk <<= 1;
+            db -= 6;
+        }
+        mk = (int32_t)(((uint32_t)mk * DB6[db]) >> 16);
+    }
     for (i = 0; i < n; i++) {
         int32_t l = mix_l[i] + wet[i], r = mix_r[i] + wet[i], a = l < 0 ? -l : l, b = r < 0 ? -r : r;
         a = a > b ? a : b;

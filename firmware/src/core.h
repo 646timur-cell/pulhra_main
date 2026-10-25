@@ -177,6 +177,7 @@ enum {                          /* global parameters */
 #define G_CRAT G_SAVE            /* its ratio (N_CRATIO) */
 #define G_CATK G_CLRSEQ          /* its attack (F_TIME) */
 #define G_CREL G_INITSND         /* its release (F_TIME) */
+#define G_CMKUP G_SYNC           /* its makeup gain, 0 .. +18 dB (COMP's PRESETS knob, Tim) */
 #define G_CSC G_ENGSEL           /* its key: OFF (the master's own level), KICK (the kick, on T1..T3), 1/4 (each beat, on T1..T3) */
 #endif
 #define G_MHPF G_DRLVL           /* STRANGE: the inert globals of the old drum part are the master HPF and LPF (stored */

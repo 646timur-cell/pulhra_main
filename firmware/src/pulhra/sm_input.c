@@ -1290,7 +1290,10 @@ static void sm_input_poll(void)
         sm_preset_turn(pre);
         sm_home_page(k, sel, now);
     } else {
-        sm_preset_turn(pre);
+        if (sm_page_param(4) == (SM_GLB | G_CTHR))       /* COMP: PRESETS is the makeup (Tim) */
+            sm_turn_glob(G_CMKUP, pre);
+        else
+            sm_preset_turn(pre);
         for (i = 0; i < 4; i++)
             if (sm_page_param(i) != SM_NOPARAM && k[i]) {
                 sm_filt_auto(sm_page_param(i));

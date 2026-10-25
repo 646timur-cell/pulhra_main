@@ -274,6 +274,7 @@ static uint32_t smd_page_sig(void)
 {
     const sm_sound_t *s = smd_snd();
     uint32_t h = smd_mix(smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine), s->preset);
+    h = smd_mix(h, (uint32_t)(uint16_t)song.g[G_CMKUP]);  /* (COMP's title: MKUP) */
     if (sm_snd_kit(s))                                    /* (the KIT: the lane in edit, its machine and sound) */
         h = smd_mix(smd_mix(smd_mix(h, sm_kit_lane), (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u]),
                     (uint32_t)(uint8_t)s->p[P_E4 + sm_kit_lane % 4u]);
@@ -355,7 +356,18 @@ static void smd_page(void)
     } else if (sm_cur_page()->fam == SMFAM_DEEP) {      /* DLY . GLOBAL (the deep pages are the project's, no preset) */
         n = 0;
         smd_cat(b, &n, sm_cur_page()->name);
-        smd_cat(b, &n, " \x12 GLOBAL");
+        if (sm_page_param(4) == (SM_GLB | G_CTHR)) {      /* COMP . MKUP +6 (its PRESETS knob) */
+            char v[4];
+            int32_t db = clamp(song.g[G_CMKUP], 0, 18);
+            v[0] = '+';
+            v[1] = (char)(db >= 10 ? '0' + db / 10 : '0' + db);
+            v[2] = (char)(db >= 10 ? '0' + db % 10 : 0);
+            v[3] = 0;
+            smd_cat(b, &n, " \x12 MKUP ");
+            smd_cat(b, &n, v);
+        } else {
+            smd_cat(b, &n, " \x12 GLOBAL");
+        }
     } else {
         smd_upper(b, sm_cur_page()->name, 8u);
         for (n = 0; b[n]; n++) {}

@@ -9189,8 +9189,42 @@ static int test_master_dyn(void)
         }
         quiet = mix_l[1];
         printf("pulhra: COMP -18 dB 4:1: 30000 -> %d, 1500 -> %d\n", loud, quiet);
-        bad += check("DYN: COMP THR -18 4:1: 26 dB in, about 13 dB out (the loud squeezed, the quiet made up)",
-                     loud * 2 < quiet * 11 && loud < 30000 && quiet > 1500);
+        bad += check("DYN: COMP THR -18 4:1: 26 dB in, about 13 dB out (the loud squeezed, the quiet as it was: MKUP 0)",
+                     loud * 2 < quiet * 11 && loud < 30000 && quiet > 1400 && quiet < 1600);
+    }
+    {                                                     /* MKUP: COMP's PRESETS knob, in the title; +12 dB: x4 on a quiet mix */
+        int32_t q0, q12;
+        song.g[G_CMKUP] = 0;
+        for (b = 0; b < 50u; b++) {
+            for (i = 0; i < CTL; i++) {
+                mix_l[i] = mix_r[i] = (i & 1u) ? 1000 : -1000;
+                wet[i] = 0;
+            }
+            master_comp(CTL);
+        }
+        q0 = mix_l[1];
+        song.g[G_CMKUP] = 12;
+        for (b = 0; b < 50u; b++) {
+            for (i = 0; i < CTL; i++) {
+                mix_l[i] = mix_r[i] = (i & 1u) ? 1000 : -1000;
+                wet[i] = 0;
+            }
+            master_comp(CTL);
+        }
+        q12 = mix_l[1];
+        bad += check("DYN: MKUP 0: a quiet mix as it is; +12 dB: x4", q0 >= 990 && q0 <= 1000 && q12 >= 3950 && q12 <= 4050);
+        song.g[G_CMKUP] = 0;
+        in_reset();
+        host_ticks = 1000u;
+        draw_setup();
+        sm_ui.page = (uint8_t)page_by_name("COMP");
+        turn(EN_PRESET, 6);
+        sm_input_poll();
+        draw_full();
+        bad += check("DYN: COMP: PRESETS +6: MKUP +6 dB, in the title", song.g[G_CMKUP] == 6 && lint_has("COMP \x12 MKUP +6", 0, 0));
+        song.g[G_CMKUP] = 0;
+        song.g[G_CTHR] = -18;
+        song.g[G_CRAT] = 3;
     }
     song.g[G_CTHR] = 0;
     mix_l[0] = 12345;
@@ -9206,11 +9240,14 @@ static int test_master_dyn(void)
     song.g[G_CTHR] = -12;
     song.g[G_CRAT] = 5;
     song.g[G_CSC] = 2;
+    song.g[G_CMKUP] = 9;
     bad += check("DYN: saved", sm_proj_save() == 0);
     song.g[G_RPRE] = song.g[G_RTONE] = song.g[G_CTHR] = song.g[G_CSC] = 0;
     bank_reboot();
     bad += check("DYN: ... after a reboot: PRE 33, TONE -20, THR -12, RATIO 10:1, SC 1/4", song.g[G_RPRE] == 33 && song.g[G_RTONE] == -20 &&
-                 song.g[G_CTHR] == -12 && song.g[G_CRAT] == 5 && song.g[G_CSC] == 2 && song.g[G_DRLVL] == 0 && song.g[G_DRREV] == 0);
+                 song.g[G_CTHR] == -12 && song.g[G_CRAT] == 5 && song.g[G_CSC] == 2 && song.g[G_DRLVL] == 0 && song.g[G_DRREV] == 0 &&
+                 song.g[G_CMKUP] == 9);
+    song.g[G_CMKUP] = 0;
     song.g[G_RPRE] = song.g[G_RTONE] = song.g[G_CTHR] = song.g[G_CSC] = 0;
     song.g[G_CRAT] = 3;
     return bad;
@@ -9931,7 +9968,7 @@ static int test_fx_project_migration(void)
     {
         uint32_t newest = sm_seq_newer(sm_fp_seq[0], sm_fp_seq[1]) ? 0u : 1u;
         st_read(SM_FL_PROJ + newest * SM_FL_SEC, &hd, sizeof hd);
-        bad += check("MIGRATE: ... the newer copy's header: version 5, 62 bytes", hd.version == SM_PROJ_VER && SM_PROJ_VER == 5u && hd.size == sizeof(sm_prec_t) && sizeof(sm_prec_t) == 62u);
+        bad += check("MIGRATE: ... the newer copy's header: version 6, 64 bytes", hd.version == SM_PROJ_VER && SM_PROJ_VER == 6u && hd.size == sizeof(sm_prec_t) && sizeof(sm_prec_t) == 64u);
     }
     bank_reboot();
     bad += check("MIGRATE: ... reboot: DMIX 12, BPM 150.0 kept", song.g[G_DMIX] == 12 && smp.bpm10 == 1500u);
