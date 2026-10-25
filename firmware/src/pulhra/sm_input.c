@@ -1302,6 +1302,10 @@ static void sm_input_poll(void)
             sm_midi_trnoff = (uint8_t)!sm_midi_trnoff;
             sm_dirty = 1;
         }
+        if (sel && (sel & 1)) {                           /* SELECT: DIV 1:1 / 1:2, the clock's every second pulse (an odd turn flips) */
+            sm_midi_div = (uint8_t)!sm_midi_div;
+            sm_dirty = 1;
+        }
         w = (uint8_t)((((int32_t)sm_midi_src + k[3]) % 3 + 3) % 3);
         if (k[3] && w != sm_midi_src) {
             sm_midi_src = w;

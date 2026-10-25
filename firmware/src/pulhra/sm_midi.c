@@ -35,6 +35,7 @@ static uint8_t sm_midi_src = 1;
  * 3's byte after the source: CLK in bits 0..1, TRNS OFF bit 2; 0 = AUTO, ON) */
 enum { SM_CLK_AUTO, SM_CLK_INT, SM_CLK_USB, SM_CLK_JACK, SM_CLK_COUNT };
 static uint8_t sm_midi_clk = SM_CLK_AUTO, sm_midi_trnoff;
+static uint8_t sm_midi_div, sm_ext_odd;                    /* SETUP's SELECT: the clock's every 2nd pulse only (Tim: KO II's THRU doubled it); the parity */
 /* the CLK choices SETUP offers (Tim: no external clock of a port not in use): AUTO, INT, and the port MIDI SRC is (USB, the
  * jack); SRC INT: AUTO and INT only */
 static int sm_midi_clk_ok(uint32_t c)
@@ -137,6 +138,8 @@ static void sm_ext_pulse(uint32_t ms, uint32_t src)
     if (src == 2u && sm_ext_n && (uint32_t)(ms - sm_ext_ts[(sm_ext_n - 1u) % 25u]) < SM_EXT_DUP_MS)
         return;                                           /* (Tim: KO II's MIDI THRU sent each pulse twice, its own and the one
                                                              through: 240 BPM for 120. A copy within 3 ms is dropped) */
+    if (sm_midi_div && (sm_ext_odd ^= 1u) == 0u)
+        return;                                           /* (DIV 1:2: every second pulse, the first after Start counted) */
     if (sm_ext_n && (uint32_t)(ms - sm_ext_ts[(sm_ext_n - 1u) % 25u]) >= SM_EXT_TIMEOUT_MS)
         sm_ext_n = 0;                                     /* (a gap: measure anew) */
     sm_ext_ts[sm_ext_n % 25u] = ms;
@@ -213,6 +216,7 @@ static void sm_midi_drain(void)
                         sm_seq_stop();                    /* (Start: from the top, playing or not; Continue: on if stopped) */
                     sm_seq_play();
                     sm_ext_cnt = 0;                       /* (the pulses count the grid from here) */
+                    sm_ext_odd = 0;
                 }
             }
             continue;

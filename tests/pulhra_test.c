@@ -11412,6 +11412,24 @@ static int test_midi_clock_dup(void)
     bad += check("CLKDUP: each pulse twice on the jack: the tempo 125.0, not 250.0", sm_bpm_eff() == 1250u);
     midi_enqueue(0xFu | 0xFCu << 8, 2u);
     mix_blocks(1);
+    sm_midi_div = 1;                                      /* SETUP's CLK DIV 1:2: two clocks interleaved (a pulse every 10 ms) */
+    base_ms = fm1_ms + SM_EXT_TIMEOUT_MS + 10u;
+    fm1_ms = base_ms;
+    c0 = seq_clock;
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);
+    for (ms = 0; ms < 3000u; ms++) {
+        fm1_ms = base_ms + ms;
+        if (ms % 10u == 0u)
+            midi_enqueue(0xFu | 0xF8u << 8, 2u);
+        while (seq_clock < c0 + (uint32_t)(((uint64_t)(ms + 1u) * FS) / 1000u)) {
+            events_block(CTL);
+            seq_clock += CTL;
+        }
+    }
+    bad += check("CLKDUP: CLK DIV 1:2, 48 pulses a beat (two clocks interleaved): 125.0", sm_bpm_eff() == 1250u);
+    sm_midi_div = 0;
+    midi_enqueue(0xFu | 0xFCu << 8, 2u);
+    mix_blocks(1);
     fm1_ms = base_ms + 3000u + SM_EXT_TIMEOUT_MS + 10u;
     midi_reset();
     return bad;

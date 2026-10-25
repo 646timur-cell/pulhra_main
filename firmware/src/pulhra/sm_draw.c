@@ -703,6 +703,8 @@ static uint32_t smd_sel_sig(void)
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
     if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP)   /* (the selected track's volume) */
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
+    if (sm_page_home() == SMH_SETUP)
+        return smd_mix(h, sm_midi_div);
     return id == SM_NOPARAM ? h : smd_mix(smd_mix(h, id), (uint32_t)smd_sel_val(id));
 }
 static void smd_select(void)
@@ -722,7 +724,10 @@ static void smd_select(void)
         x = sm_px_text(4, 2, 2u, "LEVEL", T_TEXT, 0) + 4 + 12;
         val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
-    } else if (sm_page_home()) {                           /* (nothing on SELECT for EUCLID / MIDI / SETUP) */
+    } else if (sm_page_home() == SMH_SETUP) {              /* SETUP's SELECT: the clock's DIV (1:2 takes every second pulse) */
+        int32_t x = sm_px_text(4, 2, 2u, "CLK DIV", T_TEXT, 0) + 4 + 12;
+        sm_px_text(x, 2, 2u, sm_midi_div ? "1:2" : "1:1", T_TEXT, 1);
+    } else if (sm_page_home()) {                           /* (nothing on SELECT for EUCLID / MIDI) */
     } else if (d) {
         char lab[8], val[12];
         const char *unit;
