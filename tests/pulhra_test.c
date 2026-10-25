@@ -9218,6 +9218,18 @@ static int test_master_dyn(void)
 
 /* the KIT's lanes' mix (Tim): AMP's K1..K4 the lane in edit's LVL CHO DLY REV, FX's sends its own; LVL 0 silences that lane
  * alone; a lane's REV send feeds the reverb (the track's own sends off); a version 3 bank loads widened, the mix at its defaults */
+static uint32_t lane_hit_peak(uint32_t L)                /* T4's KIT, lane L hit alone: the mix's peak, then rung out */
+{
+    uint32_t b, pk = 0;
+    trk_note_on(&trk[3], DR_KIT_NOTE + L, 120);
+    for (b = 0; b < 30u; b++) {
+        uint32_t a = block_peak(0, 0);
+        pk = a > pk ? a : pk;
+    }
+    trk_all_off(&trk[3]);
+    play_blocks(400);
+    return pk;
+}
 static int test_kit_lane_mix(void)
 {
     int bad = 0;
@@ -9304,6 +9316,28 @@ static int test_kit_lane_mix(void)
         dr_lm[3][0][0] = 112;
         bad += check("LMIX: L1's LVL 0: its hit gone (112: heard; the reverb's tail of before only)", p1 > 1000u && p0 * 20u < p1);
     }
+    {                                                     /* FILTER: the lane's own (Tim): L3 (HAT) low-passed low, L2 untouched */
+        uint32_t ph, pl, p2a, p2b;
+        sm_kit_lane = 2;
+        sm_ui.page = (uint8_t)page_by_name("FILTER");
+        bad += check("LMIX: KIT, FILTER: SELECT the lane's CUT, K1 RES, K4 FILT (ENV / LFO > FLT the track's)",
+                     sm_page_param(4) == SM_LF(2, 1) && sm_page_param(0) == SM_LF(2, 2) && sm_page_param(3) == SM_LF(2, 0) &&
+                     sm_page_param(1) == P_ED_FLT);
+        ph = lane_hit_peak(2);
+        p2a = lane_hit_peak(1);
+        turn(EN_K4, 1);                                   /* FILT: LP */
+        turn(EN_SELECT, -100);                            /* CUT: the bottom */
+        sm_input_poll();
+        play_blocks(2);
+        pl = lane_hit_peak(2);
+        p2b = lane_hit_peak(1);
+        printf("pulhra: LMIX: HAT open %u, LP at the bottom %u; L2 %u -> %u\n", ph, pl, p2a, p2b);
+        bad += check("LMIX: ... L3 LP, CUT turned down: its hit far quieter; L2 as it was (its noise aside)",
+                     cpat()->lflt[2][0] == 1 && cpat()->lflt[2][1] < 40 && dr_lf[3][2][0] == 1 && cpat()->lflt[1][0] == 0 &&
+                     pl * 4u < ph && p2b * 10u > p2a * 8u && p2b * 10u < p2a * 12u);   /* (the snare's noise: +-20 %) */
+        cpat()->lflt[2][0] = 0;
+        dr_lf[3][2][0] = 0;
+    }
     /* a version 3 bank: the patterns 3824 bytes each, no lanes' mix */
     nor_wipe();
     in_reset();
@@ -9328,7 +9362,7 @@ static int test_kit_lane_mix(void)
     bank_reboot();
     bad += check("LMIX: a version 3 bank loads: its trigs and lanes where they were, the lanes' mix the defaults",
                  smp.pat[0].step[2][40].n && smp.pat[1].step[0][63].n && smp.pat[1].lane[2][0] == 33 &&
-                 smp.pat[1].lmix[2][0] == 112 && smp.pat[7].lmix[3][3] == 0);
+                 smp.pat[1].lmix[2][0] == 112 && smp.pat[7].lmix[3][3] == 0 && smp.pat[3].lflt[1][0] == 0 && smp.pat[3].lflt[1][1] == 127);
     return bad;
 }
 

@@ -157,6 +157,12 @@ static uint32_t sm_page_param(uint32_t k)
             return SM_LM(L, 2u);
         if (id == P_REV)
             return SM_LM(L, 3u);
+        if (id == P_FLT)                                  /* (FILTER: the lane's own FILT CUT RES; ENV / LFO > FLT the track's) */
+            return SM_LF(L, 0u);
+        if (id == P_FCUT)
+            return SM_LF(L, 1u);
+        if (id == P_FRES)
+            return SM_LF(L, 2u);
     }
     if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5 && pg->fam == SMFAM_ENV) {
         if (id == P_FCUT)

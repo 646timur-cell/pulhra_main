@@ -40,15 +40,20 @@
 #define SM_BMAGIC 0x31425753u                             /* "SWB1" */
 #define SM_PMAGIC 0x31505753u                             /* "SWP1" */
 #define SM_STORE_VER 1u                                   /* version 1 of the project object (and of the banks) */
-#define SM_BANK_VER 4u                                    /* 4: the KIT's lanes' mix (sm_pattern_t.lmix) at each pattern's end: a
+#define SM_BANK_VER 5u                                    /* 5: the lanes' filters (sm_pattern_t.lflt) after the mix; 4 and 3 load
+                                                             widened (sm_bank_fill) */
+#define SM_PAT4_BYTES 3840u
+#define SM_BANK_VER4 4u                                    /* 4: the KIT's lanes' mix (sm_pattern_t.lmix) at each pattern's end: a
                                                              version 3 bank (3824-byte patterns) loads widened, the defaults there
                                                              (sm_bank_v3) */
 #define SM_PAT3_BYTES 3824u
 #define SM_BANK_VER3 3u                                    /* the banks': 3 = 64 steps (a lock's place trk << 6 | step), the speed per
                                                              track, 183 locks and the KIT's lanes. Versions 1 and 2 (32 steps, other
                                                              places) are not loaded */
-_Static_assert(sizeof(sm_pattern_t) == SM_PAT3_BYTES + 16u && __builtin_offsetof(sm_pattern_t, lmix) == SM_PAT3_BYTES,
-               "a pattern's size is the banks' layout (version 4: version 3's and the lanes' mix)");
+_Static_assert(sizeof(sm_pattern_t) == SM_PAT4_BYTES + 12u && __builtin_offsetof(sm_pattern_t, lmix) == SM_PAT3_BYTES &&
+               __builtin_offsetof(sm_pattern_t, lflt) == SM_PAT4_BYTES,
+               "a pattern's size is the banks' layout (version 5: version 4's and the lanes' filters; 4: 3's and the mix)");
+static uint32_t sm_pat_bytes(uint32_t ver) { return ver == SM_BANK_VER3 ? SM_PAT3_BYTES : ver == SM_BANK_VER4 ? SM_PAT4_BYTES : (uint32_t)sizeof(sm_pattern_t); }
 #define SM_PROJ_VER 5u                                    /* 5: the reverb's PRE and TONE, the compressor (sm_prec_t.g4) */
 #define SM_PROJ_VER_OLD 4u                                    /* the project object's: version 2 adds the global effects, 3 the MIDI routing,
                                                              4 the master dynamics and the reverb's pre-delay */
@@ -371,6 +376,9 @@ static void sm_bank_clamp(uint32_t s0)
                 for (L = 0; L < 4u; L++)
                     for (k = 0; k < 4u; k++)
                         smp.pat[s0 + i].lmix[L][k] = (int8_t)clamp(smp.pat[s0 + i].lmix[L][k], SM_LMD[k].min, SM_LMD[k].max);
+                for (L = 0; L < 4u; L++)
+                    for (k = 0; k < 3u; k++)
+                        smp.pat[s0 + i].lflt[L][k] = (int8_t)clamp(smp.pat[s0 + i].lflt[L][k], SM_LFD[k].min, SM_LFD[k].max);
             }
             for (p = 0; p < P_COUNT; p++) {
                 const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), p);
@@ -390,16 +398,18 @@ static void sm_bank_fill(uint32_t h, uint32_t b)
     SM_BARRIER();
     SM_STORE_PREEMPT();
     if (flash_ok && sl < SM_FL_NSLOT) {
-        uint32_t nb = sm_fs_ver[sl] == SM_BANK_VER3 ? SM_BPAT * SM_PAT3_BYTES : SM_BANK_BYTES;
+        uint32_t pb = sm_pat_bytes(sm_fs_ver[sl]), nb = SM_BPAT * pb;
         ok = !st_read(sm_slot_addr(sl) + SM_FL_DATA, &smp.pat[s0], nb) && st_crc32(&smp.pat[s0], nb) == sm_fs_crc[sl];
-        if (ok && sm_fs_ver[sl] == SM_BANK_VER3)
-            for (i = SM_BPAT; i-- > 0;) {                 /* (version 3: widened in place, the last pattern first) */
+        if (ok && pb < sizeof(sm_pattern_t))
+            for (i = SM_BPAT; i-- > 0;) {                 /* (an older version: widened in place, the last pattern first) */
                 volatile uint8_t *d = (uint8_t *)&smp.pat[s0 + i];   /* (volatile: the loop stays a loop, not a memmove call) */
-                const uint8_t *src = (uint8_t *)&smp.pat[s0] + i * SM_PAT3_BYTES;
-                uint32_t j = SM_PAT3_BYTES;
+                const uint8_t *src = (uint8_t *)&smp.pat[s0] + i * pb;
+                uint32_t j = pb;
                 while (j--)                               /* (backwards: d >= src, overlapping; no memmove in libc.c) */
                     d[j] = src[j];
-                sm_lmix_default(&smp.pat[s0 + i]);
+                if (pb < SM_PAT4_BYTES)
+                    sm_lmix_default(&smp.pat[s0 + i]);
+                sm_lflt_default(&smp.pat[s0 + i]);
             }
         if (!ok)
             sm_msg_show(SM_MSG_FLASH);
@@ -431,8 +441,8 @@ static void sm_store_boot(void)
     memset(sm_fs_top, SM_BANK_NONE, sizeof sm_fs_top);
     memset(sm_fp_ok, 0, sizeof sm_fp_ok);
     for (i = 0; flash_ok && i < SM_FL_NSLOT; i++) {
-        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || (hd.version != SM_BANK_VER && hd.version != SM_BANK_VER3) || hd.bank >= SM_NBANK ||
-            hd.size != (hd.version == SM_BANK_VER3 ? SM_BPAT * SM_PAT3_BYTES : SM_BANK_BYTES) || sm_flash_crc(sm_slot_addr(i) + SM_FL_DATA, hd.size) != hd.crc)
+        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || (hd.version != SM_BANK_VER && hd.version != SM_BANK_VER4 && hd.version != SM_BANK_VER3) || hd.bank >= SM_NBANK ||
+            hd.size != SM_BPAT * sm_pat_bytes(hd.version) || sm_flash_crc(sm_slot_addr(i) + SM_FL_DATA, hd.size) != hd.crc)
             continue;
         sm_fs_bank[i] = hd.bank;
         sm_fs_used[i] = hd.used;

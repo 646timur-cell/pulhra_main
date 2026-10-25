@@ -65,12 +65,19 @@ static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
  * (0..8: E1 .. E8, the ninth) SM_LP(L, k); their value the pattern's (sm_pattern_t.lane), the core's dr_lp (eng_dr.c) */
 #define SM_LP0 ((uint32_t)P_COUNT)
 #define SM_LM0 (SM_LP0 + 36u)                             /* the lanes' mix (Tim): lane L's LVL CHO DLY REV, SM_LM(L, j) */
-#define SM_NPID (SM_LM0 + 16u)                            /* every id a lock, a command, a push may carry */
+#define SM_LF0 (SM_LM0 + 16u)                             /* the lanes' filter (Tim): lane L's FILT CUT RES, SM_LF(L, j) */
+#define SM_NPID (SM_LF0 + 12u)                            /* every id a lock, a command, a push may carry */
+#define SM_LF(L, j) (SM_LF0 + (uint32_t)(L) * 3u + (uint32_t)(j))
 #define SM_LP(L, k) (SM_LP0 + (uint32_t)(L) * 9u + (uint32_t)(k))
 #define SM_LM(L, j) (SM_LM0 + (uint32_t)(L) * 4u + (uint32_t)(j))
 _Static_assert(SM_NPID < 0xFFu, "a parameter id is a byte (0xFF: a removed lock)");
 static int sm_is_lp(uint32_t id) { return id >= SM_LP0 && id < SM_LM0; }
-static int sm_is_lm(uint32_t id) { return id >= SM_LM0 && id < SM_NPID; }
+static int sm_is_lm(uint32_t id) { return id >= SM_LM0 && id < SM_LF0; }
+static int sm_is_lf(uint32_t id) { return id >= SM_LF0 && id < SM_NPID; }
+static const char *const SM_LFN[5] = {"OFF", "LP", "BP", "HP", "NOTCH"};
+static const param_desc_t SM_LFD[3] = {                   /* (the track's FILT CUT RES, a lane's; no HYB) */
+    {"FILT", F_ENUM, 0, 4, 0, SM_LFN, 0}, {"CUT", F_CUTOFF, 0, 127, 127, 0, 0}, {"RES", F_PCT, 0, 127, 0, 0, 0},
+};
 static const param_desc_t SM_LMD[4] = {                   /* (the track's LEVEL and sends, a lane's) */
     {"LVL", F_DB, 0, 127, 112, 0, 0}, {"CHO", F_PCT, 0, 127, 0, 0, 0}, {"DLY", F_PCT, 0, 127, 0, 0, 0}, {"REV", F_PCT, 0, 127, 0, 0, 0},
 };
@@ -81,6 +88,8 @@ static int32_t sm_pget(const sm_pattern_t *pt, uint32_t t, uint32_t id)
         return pt->lane[(id - SM_LP0) / 9u][(id - SM_LP0) % 9u];
     if (sm_is_lm(id))
         return pt->lmix[(id - SM_LM0) / 4u][(id - SM_LM0) % 4u];
+    if (sm_is_lf(id))
+        return pt->lflt[(id - SM_LF0) / 3u][(id - SM_LF0) % 3u];
     return id < P_COUNT ? pt->kit.snd[t % SM_NTRK].p[id] : 0;
 }
 static void sm_pset(sm_pattern_t *pt, uint32_t t, uint32_t id, int32_t v)
@@ -89,6 +98,8 @@ static void sm_pset(sm_pattern_t *pt, uint32_t t, uint32_t id, int32_t v)
         pt->lane[(id - SM_LP0) / 9u][(id - SM_LP0) % 9u] = (int8_t)v;
     else if (sm_is_lm(id))
         pt->lmix[(id - SM_LM0) / 4u][(id - SM_LM0) % 4u] = (int8_t)v;
+    else if (sm_is_lf(id))
+        pt->lflt[(id - SM_LF0) / 3u][(id - SM_LF0) % 3u] = (int8_t)v;
     else if (id < P_COUNT)
         pt->kit.snd[t % SM_NTRK].p[id] = (int8_t)v;
 }
@@ -100,6 +111,8 @@ static const param_desc_t *sm_desc_trk(const sm_sound_t *s, uint32_t id)
         return sm_snd_kit(s) ? sm_desc_lp16(s->p[P_E0 + (id - SM_LP0) / 9u], id) : 0;
     if (sm_is_lm(id))
         return sm_snd_kit(s) ? &SM_LMD[(id - SM_LM0) % 4u] : 0;
+    if (sm_is_lf(id))
+        return sm_snd_kit(s) ? &SM_LFD[(id - SM_LF0) % 3u] : 0;
     if (id >= P_IA && id <= P_IC)
         return ins_desc(s->p[P_ITYPE], id - P_IA);
     return sm_desc_safe(sm_engine_of(s->machine), id);
@@ -111,6 +124,8 @@ static const param_desc_t *sm_desc_core(uint32_t t, uint32_t id)
         return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? sm_desc_lp16(trk[t % SM_NTRK].p[P_E0 + (id - SM_LP0) / 9u], id) : 0;
     if (sm_is_lm(id))
         return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? &SM_LMD[(id - SM_LM0) % 4u] : 0;
+    if (sm_is_lf(id))
+        return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? &SM_LFD[(id - SM_LF0) % 3u] : 0;
     return sm_desc_safe(eng_idx(trk[t % SM_NTRK].eng_req), id);
 }
 
@@ -244,6 +259,13 @@ static void sm_lmix_default(sm_pattern_t *p)             /* the lanes' mix: LVL 
         for (j = 0; j < 4u; j++)
             p->lmix[L][j] = (int8_t)SM_LMD[j].def;
 }
+static void sm_lflt_default(sm_pattern_t *p)             /* the lanes' filters: off, open */
+{
+    uint32_t L, j;
+    for (L = 0; L < 4u; L++)
+        for (j = 0; j < 3u; j++)
+            p->lflt[L][j] = (int8_t)SM_LFD[j].def;
+}
 static void sm_lanes_default(sm_pattern_t *p)
 {
     const sm_sound_t *s = &p->kit.snd[SM_KIT_TRK];
@@ -254,6 +276,7 @@ static void sm_lanes_default(sm_pattern_t *p)
         else
             dr_lane_init(p->lane[L], (uint32_t)ENG_DKIT.edit[L].def, 0);
     sm_lmix_default(p);
+    sm_lflt_default(p);
 }
 static void sm_pat_blank(sm_pattern_t *p, const sm_kit_t *k)
 {

@@ -171,6 +171,7 @@ static void sm_copy_trk(uint32_t t)
     sm_clip.nlock = (uint16_t)k;
     memcpy(sm_clip.lane, p->lane, sizeof sm_clip.lane);  /* (a KIT's lanes go with T4's sound) */
     memcpy(sm_clip.lmix, p->lmix, sizeof sm_clip.lmix);
+    memcpy(sm_clip.lflt, p->lflt, sizeof sm_clip.lflt);
     sm_clip_kind = SM_CLIP_TRK;
 }
 
@@ -187,6 +188,7 @@ static void sm_paste_trk(uint32_t t)
     {
         memcpy(smp.pat[smp.cur % SM_NPAT].lane, sm_clip.lane, sizeof sm_clip.lane);   /* brings them) */
         memcpy(smp.pat[smp.cur % SM_NPAT].lmix, sm_clip.lmix, sizeof sm_clip.lmix);
+        memcpy(smp.pat[smp.cur % SM_NPAT].lflt, sm_clip.lflt, sizeof sm_clip.lflt);
     }
     sm_acc_reset(1u << t);
 }

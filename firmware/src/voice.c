@@ -648,6 +648,15 @@ static int mf_filters_on(const int16_t *p)
 {
     return p[P_FLT] > 0 && p[P_FLT] <= 5;              /* (v4: HYBRID is FILT's HYB) */
 }
+#if FELUCCA_SWAMP
+static int mf_lane_filter_on(const track_t *t, const voice_t *v)   /* PULHRA's KIT: the voice's lane's FILT */
+{
+    int16_t f = dr_lf[(uint32_t)(t - trk) % NPART][dr_lane(v->note)][0];
+    return f > 0 && f <= 4;
+}
+#else
+#define mf_lane_filter_on(t, v) 0
+#endif
 /* one SVF sample: x in, the stage's state s[0..1]; *bp, *lp out */
 static inline void mf_svf(const tsvf_t *c, int32_t x, int32_t *s, int32_t *bp, int32_t *lp)
 {
@@ -662,8 +671,20 @@ static __attribute__((noinline)) void mf_filter_voice(track_t *t, voice_t *v, co
 {
     const int16_t *p = t->p;
     int32_t buf[CTL], *st = mf_fst[(uint32_t)(t - trk) % NPART][(uint32_t)(v - t->v) % NVOICE];
-    int32_t k = 8192 - p[P_FRES] * 7800 / 127, kh = 8192 - p[P_HRES] * 7800 / 127, bp, lp;
-    uint32_t i, ty = (uint32_t)p[P_FLT], hyb = ty == 5u, sel = ty >= 1u && ty <= 4u;
+    int32_t fres = p[P_FRES], fcut = p[P_FCUT], fty = p[P_FLT], kh = 8192 - p[P_HRES] * 7800 / 127, k, bp, lp;
+    uint32_t i, ty, hyb, sel;
+#if FELUCCA_SWAMP
+    if (t->engine == ENGI_DKIT) {                       /* PULHRA's KIT: each lane its own filter (Tim; no HYB) */
+        const int16_t *lf = dr_lf[(uint32_t)(t - trk) % NPART][dr_lane(v->note)];
+        fty = clamp(lf[0], 0, 4);
+        fcut = lf[1];
+        fres = lf[2];
+    }
+#endif
+    k = 8192 - fres * 7800 / 127;
+    ty = (uint32_t)fty;
+    hyb = ty == 5u;
+    sel = ty >= 1u && ty <= 4u;
     tsvf_t c, ch, cl;
     if (n > CTL)
         n = CTL;
@@ -679,7 +700,7 @@ static __attribute__((noinline)) void mf_filter_voice(track_t *t, voice_t *v, co
         tsvf_coef_k(&cl, b + (p[P_HWIDTH] << 8), kh);
     }
     if (sel)
-        tsvf_coef_k(&c, (p[P_FCUT] << 8) + m->cutoff, k);
+        tsvf_coef_k(&c, (fcut << 8) + m->cutoff, k);
     for (i = 0; i < n; i++) {
         int32_t x = clamp(buf[i], -120000, 120000);
         if (hyb) {
@@ -802,7 +823,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         if (mod.on)                                     /* the modulation matrix (mod.c) */
             mod_voice(t, v, &m, fine);
 #if FELUCCA_MONOFM
-        if (mf_filters_on(p)) {                          /* the track's filters (ENV > HYBRID, FILTER): the voice alone, then into */
+        if (FELUCCA_SWAMP && t->engine == ENGI_DKIT ? mf_lane_filter_on(t, v) : mf_filters_on(p)) {   /* the track's filters (ENV > HYBRID, FILTER): the voice alone, then into */
             mf_filter_voice(t, v, e, n, &m, spread_on > v->side ? spread_buf : out);   /* the sum */
             nr++;
             continue;

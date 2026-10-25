@@ -665,8 +665,9 @@ static const engine_t ENG_DPERC = {
 enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_N };
 static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "PERC"};
 static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC};
-static int16_t dr_lp[NPART][4][9];                        /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's */
+static int16_t dr_lp[NPART][4][9] __attribute__((section(".pool")));   /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's (the pool: RAM keeps its 4 KiB headroom) */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
+static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
 static int32_t dr_ls[3][CTL] __attribute__((section(".pool")));                             /* the KIT's lanes' sends this block (CHO DLY REV, at the lanes' LVL; fx.c
                                                              mix_part takes them at the track's LEVEL, the track's own sends off) */
 static int32_t dr_kbuf[CTL] __attribute__((section(".pool")));   /* (the pool: RAM keeps its 4 KiB headroom) */
