@@ -130,9 +130,13 @@ static void sm_kbd_note(uint32_t t, uint32_t note, uint32_t vel)
  * *4 and *8 fall between pulses: tempo only), the step due within a quarter step is started now, one started up to a quarter
  * step early has its next start moved to a whole step from now. A gap of SM_EXT_TIMEOUT_MS starts the measuring over */
 static uint32_t sm_ext_ts[25], sm_ext_n, sm_ext_cnt;
-static void sm_ext_pulse(uint32_t ms)
+#define SM_EXT_DUP_MS 3u                                  /* (a pulse is 8.3 ms apart at 300 BPM: closer on the jack is a copy) */
+static void sm_ext_pulse(uint32_t ms, uint32_t src)
 {
     uint32_t m8, per, step_q8, q;
+    if (src == 2u && sm_ext_n && (uint32_t)(ms - sm_ext_ts[(sm_ext_n - 1u) % 25u]) < SM_EXT_DUP_MS)
+        return;                                           /* (Tim: KO II's MIDI THRU sent each pulse twice, its own and the one
+                                                             through: 240 BPM for 120. A copy within 3 ms is dropped) */
     if (sm_ext_n && (uint32_t)(ms - sm_ext_ts[(sm_ext_n - 1u) % 25u]) >= SM_EXT_TIMEOUT_MS)
         sm_ext_n = 0;                                     /* (a gap: measure anew) */
     sm_ext_ts[sm_ext_n % 25u] = ms;
@@ -197,7 +201,7 @@ static void sm_midi_drain(void)
         mi_r++;
         if ((pkt & 0x0Fu) == 0x0Fu && status == 0xF8u) {  /* MIDI clock from the clock's port: the tempo, the steps' phase */
             if (src == sm_midi_clk_port())
-                sm_ext_pulse(midi_in_ms[at]);
+                sm_ext_pulse(midi_in_ms[at], src);
             continue;
         }
         if ((pkt & 0x0Fu) == 0x0Fu && status >= 0xFAu && status <= 0xFCu) {   /* realtime from the clock's port: the transport in */

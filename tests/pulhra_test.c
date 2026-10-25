@@ -11388,6 +11388,35 @@ static int test_midi_clock_in(void)
     return bad;
 }
 
+/* the same clock twice on the jack (Tim: KO II's MIDI THRU sent its own pulse and the one through): 125.0, not 250.0 */
+static int test_midi_clock_dup(void)
+{
+    int bad = 0;
+    uint32_t ms, base_ms, c0;
+    midi_reset();
+    sm_midi_src = 2u;
+    base_ms = fm1_ms;
+    c0 = seq_clock;
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);
+    for (ms = 0; ms < 3000u; ms++) {
+        fm1_ms = base_ms + ms;
+        if (ms % 20u == 0u) {
+            midi_enqueue(0xFu | 0xF8u << 8, 2u);
+            midi_enqueue(0xFu | 0xF8u << 8, 2u);          /* (the copy, the same millisecond) */
+        }
+        while (seq_clock < c0 + (uint32_t)(((uint64_t)(ms + 1u) * FS) / 1000u)) {
+            events_block(CTL);
+            seq_clock += CTL;
+        }
+    }
+    bad += check("CLKDUP: each pulse twice on the jack: the tempo 125.0, not 250.0", sm_bpm_eff() == 1250u);
+    midi_enqueue(0xFu | 0xFCu << 8, 2u);
+    mix_blocks(1);
+    fm1_ms = base_ms + 3000u + SM_EXT_TIMEOUT_MS + 10u;
+    midi_reset();
+    return bad;
+}
+
 int main(void)
 {
     int bad = 0;
@@ -11600,6 +11629,7 @@ int main(void)
     bad += test_kit_lane_mix();
     bad += test_redraw();
     bad += test_page_copy();
+    bad += test_midi_clock_dup();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
