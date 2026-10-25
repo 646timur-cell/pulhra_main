@@ -147,10 +147,10 @@ static uint32_t sm_page_param(uint32_t k)
     }
     if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {
         /* the KIT (Tim): each lane its own LVL and sends, the lane in edit's: AMP's K1..K4 LVL CHO DLY REV (the ADSR does nothing
-         * on a hit), the sends of FX / MIX its own (SELECT on AMP, MIX's K1: the track's LEVEL, all the lanes) */
+         * on a hit; SELECT its LVL too), the sends of FX / MIX its own (MIX's K1: the track's LEVEL, all the lanes) */
         uint32_t L = sm_kit_lane % 4u;
-        if (pg->id[0] == P_ATK && k < 4u)
-            return SM_LM(L, k);
+        if (pg->id[0] == P_ATK)                           /* (SELECT too: the lane's LVL, Tim; the track's LEVEL is MIX's K1) */
+            return SM_LM(L, k < 4u ? k : 0u);
         if (id == P_CHOR)
             return SM_LM(L, 1u);
         if (id == P_DLY)

@@ -9233,8 +9233,19 @@ static int test_kit_lane_mix(void)
     play_blocks(4);
     sm_kit_lane = 1;
     sm_ui.page = (uint8_t)page_by_name("AMP");
-    bad += check("LMIX: KIT, AMP: K1..K4 the lane's LVL CHO DLY REV, SELECT the track's LEVEL",
-                 sm_page_param(0) == SM_LM(1, 0) && sm_page_param(3) == SM_LM(1, 3) && sm_page_param(4) == P_LEVEL);
+    bad += check("LMIX: KIT, AMP: K1..K4 the lane's LVL CHO DLY REV, SELECT its LVL too",
+                 sm_page_param(0) == SM_LM(1, 0) && sm_page_param(3) == SM_LM(1, 3) && sm_page_param(4) == SM_LM(1, 0));
+    {
+        int8_t l0 = cpat()->lmix[0][0], l2 = cpat()->lmix[2][0], t0 = ksnd(3)->p[P_LEVEL];
+        turn(EN_SELECT, -10);
+        sm_input_poll();
+        turn(EN_K1, -5);
+        sm_input_poll();
+        play_blocks(2);
+        bad += check("LMIX: ... SELECT -10, K1 -5: L2's LVL alone down 15 (L1, L3, the track's LEVEL kept), on the core",
+                     cpat()->lmix[1][0] == 112 - 15 && dr_lm[3][1][0] == 112 - 15 && cpat()->lmix[0][0] == l0 && cpat()->lmix[2][0] == l2 &&
+                     ksnd(3)->p[P_LEVEL] == t0 && dr_lm[3][0][0] == l0);
+    }
     turn(EN_K4, 20);
     sm_input_poll();
     play_blocks(2);
