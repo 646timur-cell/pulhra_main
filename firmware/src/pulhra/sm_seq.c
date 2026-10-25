@@ -56,6 +56,8 @@ static int32_t sm_gate[SM_NTRK];                          /* samples left of the
 static uint32_t sm_lfsr = 0xACE1u;                        /* COND's chance (32-bit Galois LFSR; the test seeds it) */
 static uint16_t sm_loop[SM_NTRK];                         /* the track's passes since PLAY, 0 the first */
 static uint8_t sm_pre[SM_NTRK];                           /* the result of the track's last condition (PRE) */
+static uint8_t sm_lpre[4];                                /* the KIT's lanes' last results (PRE of a lane's condition) */
+static uint8_t sm_lmask[SM_NTRK];                         /* the KIT's lanes the trig playing let through (its ratchet parts too) */
 static uint32_t sm_late_q8[SM_NTRK], sm_early_q8[SM_NTRK];   /* a nudged fire pending: late (this step's), early (the next's) */
 static uint8_t sm_late_st[SM_NTRK], sm_early_st[SM_NTRK], sm_done[SM_NTRK];   /* their steps; the step fired early */
 static uint32_t sm_rat_q8[SM_NTRK], sm_rat_d[SM_NTRK];    /* the next ratchet part, the length of a part (q8) */
@@ -238,6 +240,7 @@ static void sm_seq_init(void)
     memset(sm_lk_step, 0xFF, sizeof sm_lk_step);
     memset(sm_gen, 0, sizeof sm_gen);
     memset(sm_pre, 0, sizeof sm_pre);
+    memset(sm_lpre, 0, sizeof sm_lpre);
     for (t = 0; t < SM_NTRK; t++) {
         sm_seq_idle(t);
         sm_midi_forget(t);
@@ -275,6 +278,7 @@ static void sm_seq_play(void)
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
     memset(sm_pre, 0, sizeof sm_pre);
+    memset(sm_lpre, 0, sizeof sm_lpre);
     memset(sm_rskip, 0, sizeof sm_rskip);
     for (t = 0; t < SM_NTRK; t++) {
         sm_loop[t] = 0xFFFFu;                             /* (step 0's start counts it to 0) */
@@ -332,7 +336,7 @@ static uint32_t sm_cond_ab_of(uint32_t c, uint32_t *b)    /* condition c (>= SM_
     *b = bb;
     return i + 1u;
 }
-static int sm_cond_ok(uint32_t t, uint32_t c, uint32_t next_pass)
+static int sm_cond_pre(uint32_t t, uint32_t c, uint32_t next_pass, uint8_t *pre)
 {
     uint32_t r, b, a, loop = (sm_loop[t] == 0xFFFFu ? 0u : sm_loop[t]) + next_pass;
     if (c < SM_COND_1ST) {
@@ -340,9 +344,9 @@ static int sm_cond_ok(uint32_t t, uint32_t c, uint32_t next_pass)
             return 1;
         r = (sm_rand() >> 8) % 100u < c;
     } else if (c == SM_COND_PRE) {
-        return sm_pre[t];
+        return *pre;
     } else if (c == SM_COND_NPRE) {
-        return !sm_pre[t];
+        return !*pre;
     } else if (c == SM_COND_1ST || c == SM_COND_N1ST) {
         r = (loop == 0u) == (c == SM_COND_1ST);
     } else if (c == SM_COND_FILL || c == SM_COND_NFILL) {
@@ -353,9 +357,10 @@ static int sm_cond_ok(uint32_t t, uint32_t c, uint32_t next_pass)
     } else {
         return 1;                                         /* (a byte from nowhere: plays) */
     }
-    sm_pre[t] = (uint8_t)r;
+    *pre = (uint8_t)r;
     return (int)r;
 }
+static int sm_cond_ok(uint32_t t, uint32_t c, uint32_t next_pass) { return sm_cond_pre(t, c, next_pass, &sm_pre[t % SM_NTRK]); }
 
 static int32_t sm_lock_find(const sm_pattern_t *p, uint32_t t, uint32_t s, uint32_t param);   /* sm_lock.c */
 
@@ -485,6 +490,20 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
     sm_rat_q8[t] = SM_Q8_NONE;
     sm_ps[t].n = 0;
     sm_seq_locks(t, st);                                  /* (before the notes: they start with the step's values) */
+    sm_lmask[t] = 0xFu;
+    if (sm_trk_kit(t, pt)) {                              /* the KIT: each lane's own condition, a lock of SM_LC(L) (Tim) */
+        uint32_t L;
+        for (L = 0; L < 4u; L++) {
+            int32_t i;
+            if (!e.note[L])
+                continue;
+            i = sm_lock_find(pt, t, st, SM_LC(L));
+            if (i >= 0 && !sm_cond_pre(t, (uint32_t)(uint16_t)pt->lock[i].val, next_pass, &sm_lpre[L])) {
+                e.note[L] = 0;
+                sm_lmask[t] &= (uint8_t)~(1u << L);
+            }
+        }
+    }
     if ((f & SMF_PSLIDE) && pt->nlock)                    /* (no locks: nothing to glide) */
         sm_ps_begin(t, st, (int32_t)at, step_q8);
     if (f & SMF_REST) {                                   /* a lock trig: no note; a note held sounds on (with the locks) */
@@ -533,6 +552,12 @@ static void sm_seq_part(uint32_t t)
     }
     SM_BARRIER();
     sm_step_eff(s, &pt->kit.snd[t], &e);
+    if (sm_lmask[t] != 0xFu) {                            /* (the KIT: the lanes their conditions held back stay out) */
+        uint32_t L;
+        for (L = 0; L < 4u; L++)
+            if (!((sm_lmask[t] >> L) & 1u))
+                e.note[L] = 0;
+    }
     sm_seq_notes(t, &e, sm_rat_vel[t], 0);
     sm_gate[t] = (int32_t)((sm_rat_d[t] >> 8) * (uint32_t)clamp(trk[t].p[P_SGATE], 1, 127) / 128u);
     sm_rat_left[t]--;

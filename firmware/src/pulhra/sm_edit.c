@@ -302,7 +302,7 @@ static int sm_trig_copy(uint32_t t, uint32_t st)
     sm_tclip = p->step[t][st];
     sm_tclip_nl = 0;
     for (i = 0; i < n && sm_tclip_nl < P_COUNT; i++)
-        if (p->lock[i].ts == ts && p->lock[i].param < P_COUNT) {
+        if (p->lock[i].ts == ts && p->lock[i].param < SM_NPID) {   /* (the KIT's lanes' values and conditions too) */
             sm_tclip_p[sm_tclip_nl] = p->lock[i].param;
             sm_tclip_v[sm_tclip_nl++] = p->lock[i].val;
         }

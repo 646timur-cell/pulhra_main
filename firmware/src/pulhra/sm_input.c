@@ -801,8 +801,14 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
         return;
     sm_step_eff(s, sd, &e);
     f[0] = &s->note[0]; f[1] = &s->vel; f[2] = &s->len; f[3] = &s->cond;
+    if (k[3] && sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {   /* the KIT: COND the lane in edit's own (a lock of SM_LC(L), Tim) */
+        const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+        int32_t li = sm_lock_find(pt, t, (uint32_t)st, SM_LC(sm_kit_lane % 4u));
+        uint32_t cur = li >= 0 ? (uint32_t)(uint16_t)pt->lock[li].val : e.cond;
+        (void)sm_lock_set(t, (uint32_t)st, SM_LC(sm_kit_lane % 4u), (int32_t)sm_field_turn(3, cur, k[3]));
+    }
     for (i = 0; i < 4u; i++)
-        if (k[i]) {
+        if (k[i] && !(i == 3u && sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT]))) {
             uint32_t old = i == 0u ? e.note[0] : 0u;
             *f[i] = (uint8_t)sm_field_turn(i, i == 0u ? e.note[0] : i == 1u ? e.vel : i == 2u ? e.len : e.cond, k[i]);
             if (i == 0u && s->n > 1u && !sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {   /* a chord: NOTE moves every note (Tim) */

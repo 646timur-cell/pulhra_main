@@ -9338,6 +9338,46 @@ static int test_kit_lane_mix(void)
         cpat()->lflt[2][0] = 0;
         dr_lf[3][2][0] = 0;
     }
+    {                                                     /* COND a lane's own (Tim): L2 on step 1 at 1:2, L1 always */
+        uint32_t h1 = 0, h2 = 0;
+        in_reset();
+        host_ticks = 1000u;
+        seq_reset();
+        draw_setup();
+        sm_ui.trk = 3;
+        sm_sound_load(SM_KIT_MACH, 0);
+        sm_input_poll();
+        ksnd(3)->len = 4u;
+        sm_kit_lane = 0;
+        sm_step_toggle(3, 0);                             /* (L1 in edit: the step's L1 hit) */
+        sm_kit_lane = 1;
+        sm_step_toggle(3, 0);                             /* (L2 too) */
+        sm_ui.page = (uint8_t)page_by_name("STEP");
+        sm_ui.sel_step = 0;
+        press(B_REC);
+        sm_input_poll();
+        key_dn(WHITE[0]);
+        sm_input_poll();
+        turn(EN_K4, 200);                                 /* (COND: towards the conditions; set to 1:2 below) */
+        sm_input_poll();
+        key_up(WHITE[0]);
+        sm_input_poll();
+        press(B_REC);
+        sm_input_poll();
+        bad += check("LMIX: KIT, STEP's COND on L2: a lock of L2's condition, the step's own COND untouched",
+                     lk_val(3, 0, SM_LC(1)) != LK_NONE && stp(3, 0)->cond == SM_INH && lk_val(3, 0, SM_LC(0)) == LK_NONE);
+        sm_lock_set(3, 0, SM_LC(1), SM_COND_AB0);         /* 1:2 */
+        seq_nev = 0;
+        press(B_PLAY);
+        sm_input_poll();
+        blocks_of(16.0);                                  /* (four passes of four steps) */
+        press(B_PLAY);
+        sm_input_poll();
+        h1 = ev_notes(3, DR_KIT_NOTE);
+        h2 = ev_notes(3, DR_KIT_NOTE + 1u);
+        printf("pulhra: LMIX COND: L1 %u hits, L2 %u\n", h1, h2);
+        bad += check("LMIX: ... playing: L1 every pass, L2 every other (its 1:2)", h1 >= 4u && h2 * 2u <= h1 + 1u && h2 * 2u + 2u >= h1);
+    }
     /* a version 3 bank: the patterns 3824 bytes each, no lanes' mix */
     nor_wipe();
     in_reset();

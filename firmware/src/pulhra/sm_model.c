@@ -66,14 +66,17 @@ static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
 #define SM_LP0 ((uint32_t)P_COUNT)
 #define SM_LM0 (SM_LP0 + 36u)                             /* the lanes' mix (Tim): lane L's LVL CHO DLY REV, SM_LM(L, j) */
 #define SM_LF0 (SM_LM0 + 16u)                             /* the lanes' filter (Tim): lane L's FILT CUT RES, SM_LF(L, j) */
-#define SM_NPID (SM_LF0 + 12u)                            /* every id a lock, a command, a push may carry */
+#define SM_LC0 (SM_LF0 + 12u)                             /* a lane's trig condition (Tim): only a lock (a KIT step's lane L,
+                                                             SM_LC(L)); no base, no core value (sm_desc_core: none) */
+#define SM_LC(L) (SM_LC0 + (uint32_t)(L))
+#define SM_NPID (SM_LC0 + 4u)                            /* every id a lock, a command, a push may carry */
 #define SM_LF(L, j) (SM_LF0 + (uint32_t)(L) * 3u + (uint32_t)(j))
 #define SM_LP(L, k) (SM_LP0 + (uint32_t)(L) * 9u + (uint32_t)(k))
 #define SM_LM(L, j) (SM_LM0 + (uint32_t)(L) * 4u + (uint32_t)(j))
 _Static_assert(SM_NPID < 0xFFu, "a parameter id is a byte (0xFF: a removed lock)");
 static int sm_is_lp(uint32_t id) { return id >= SM_LP0 && id < SM_LM0; }
 static int sm_is_lm(uint32_t id) { return id >= SM_LM0 && id < SM_LF0; }
-static int sm_is_lf(uint32_t id) { return id >= SM_LF0 && id < SM_NPID; }
+static int sm_is_lf(uint32_t id) { return id >= SM_LF0 && id < SM_LC0; }
 static const char *const SM_LFN[5] = {"OFF", "LP", "BP", "HP", "NOTCH"};
 static const param_desc_t SM_LFD[3] = {                   /* (the track's FILT CUT RES, a lane's; no HYB) */
     {"FILT", F_ENUM, 0, 4, 0, SM_LFN, 0}, {"CUT", F_CUTOFF, 0, 127, 127, 0, 0}, {"RES", F_PCT, 0, 127, 0, 0, 0},

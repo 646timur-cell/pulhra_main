@@ -441,7 +441,17 @@ static void smd_step_knob(uint32_t k, smd_knob_t *o)
         break;
     case 1: smd_int(o->val, e.vel, 0); o->pos = (uint32_t)(e.vel > 1u ? e.vel - 1u : 0u) * 256u / 126u; break;
     case 2: i = e.len < SM_NLEN ? e.len : 0u; smd_upper(o->val, SM_LEN_N[i], 5u); o->pos = i * 256u / (SM_NLEN - 1u); break;
-    default: sm_cond_name(e.cond, o->val); o->pos = sm_cond_place(e.cond) * 256u / (SM_COND_PLACES - 1u); break;
+    default:
+        if (p && sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {   /* (the KIT: the lane in edit's condition) */
+            int32_t li = sm_lock_find(&smp.pat[smp.cur % SM_NPAT], sm_ui.trk % SM_NTRK, (uint32_t)st, SM_LC(sm_kit_lane % 4u));
+            if (li >= 0) {
+                e.cond = (uint8_t)smp.pat[smp.cur % SM_NPAT].lock[li].val;
+                o->filled = 1;
+            }
+        }
+        sm_cond_name(e.cond, o->val);
+        o->pos = sm_cond_place(e.cond) * 256u / (SM_COND_PLACES - 1u);
+        break;
     }
     o->v = (int32_t)o->pos;
 }
