@@ -9379,6 +9379,39 @@ static int test_mono_rev2(void)
     mono_held(ENGI_MFMST, 0, -1, 0, 300, &r1, &b1);
     printf("pulhra: MONO: VO-6 TALKING rms %.0f, FM-ST %.0f\n", r0, r1);
     bad += check("MONO: VO-6 within 6 dB of FM-ST (was 10 dB under)", 20 * log10(r1 / r0) < 6.0);
+    {                                                     /* BBOX (Tim: too quiet): every hit sounds (SHAKER was silent: its
+                                                           * band-pass at the kit's Nyquist), BD within 4 dB of the KICK */
+        static int32_t L[CTL * 120];
+        uint32_t z, b, nl, i, quiet = 0;
+        double ebd = 0, ek = 0;
+        for (z = 0; z < 16u; z++) {
+            int32_t pk = 0;
+            dr_load(ENGI_MBBOX);
+            nl = 0;
+            trk_note_on(&trk[0], 48u + z, 100);
+            for (b = 0; b < 100u; b++)
+                block_peak(L, &nl);
+            trk_all_off(&trk[0]);
+            play_blocks(50);
+            for (i = 0; i < nl; i++) {
+                pk = abs(L[i]) > pk ? abs(L[i]) : pk;
+                if (!z)
+                    ebd += (double)L[i] * L[i];
+            }
+            quiet += pk < 2000;
+        }
+        dr_load(ENGI_DKICK);
+        nl = 0;
+        trk_note_on(&trk[0], 48, 100);
+        for (b = 0; b < 100u; b++)
+            block_peak(L, &nl);
+        trk_all_off(&trk[0]);
+        play_blocks(50);
+        for (i = 0; i < nl; i++)
+            ek += (double)L[i] * L[i];
+        printf("pulhra: MONO: BBOX hits under 2000: %u; BD against the KICK %.1f dB\n", quiet, 10 * log10(ebd / ek));
+        bad += check("MONO: BBOX: all 16 hits sound, BD within 4 dB of the DRUM KICK", quiet == 0 && fabs(10 * log10(ebd / ek)) < 4.0);
+    }
     return bad;
 }
 

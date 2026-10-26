@@ -752,9 +752,14 @@ def bbox_kit():
     k.append(cb)
     k.append(sweep(0.06, 2500, 2500, 0.015))                                           # CLAVE
     k.append(metal(0.5, 0.25, (240.1, 341.9, 453.3, 615.7, 811.0, 1103.0)))            # CYMBAL
-    k.append(noise_bp(0.14, 6000, 0.8, 0.04))                                          # SHAKER
+    k.append(noise_bp(0.14, 4300, 0.8, 0.04))                                          # SHAKER (4.3 kHz: 6 kHz was the
+    #                                                                                    12 kHz rate's Nyquist, the band-pass silent)
     k.append(sweep(0.18, 2600, 90, 0.07, 0.0, 0.02))                                   # ZAP
-    return [q12(x) for x in k]
+    def punch(x, d=1.8):                                   # (26.10, Tim: too quiet) a soft saturation: the body up, the peak the same
+        m = max(1e-9, max(abs(v) for v in x))
+        return [math.tanh(d * v / m) for v in x]
+
+    return [q12(punch(x)) for x in k]
 
 
 def main(out):

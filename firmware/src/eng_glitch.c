@@ -273,9 +273,12 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     gl_slot_t *S = gl_slot(t, v);
     uint32_t i, bits = (uint32_t)p[P_E5] / 9u, hn = 1u + (uint32_t)p[P_E5] / 8u, stut = p[P_E2] != 0;
     int32_t mask = -(1 << bits);
-    int32_t dk = 32767;
+    int32_t dk = 32767, bb = 0;                          /* bb: BBOX's own kit, louder (26.10, Tim: too quiet) */
     if (!S || !S->len)
         return;
+#if FELUCCA_MONOFM
+    bb = gl_src(t) == GL_BBX;
+#endif
     if (n > CTL)
         n = CTL;
 #if FELUCCA_MONOFM
@@ -322,6 +325,8 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
             }
             s = S->held;
         }
+        if (bb)                                          /* (x1.8 into a knee: ~5 dB more, the peaks held) */
+            s = clamp(soft_knee((s * 29) >> 4, 24000), -32767, 32767);
         out[i] += voice_amp(s, m, i);
     }
 }
