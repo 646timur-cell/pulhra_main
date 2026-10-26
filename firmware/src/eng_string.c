@@ -32,7 +32,7 @@ typedef struct {
     int32_t neck[SR_NLEN];
     int32_t bridge[SR_BLEN];
     uint32_t w, rng;
-    int32_t lp, apx, apy;                                /* the bridge's low-pass, its all-pass */
+    int32_t lp, apx, apy, ap2x, ap2y;                    /* the bridge's low-pass, its two all-passes (26.10: STIF deeper) */
     int32_t b[6];                                        /* the body's three SVFs */
     int32_t dcx, dcy;                                    /* the output's DC block */
     int32_t xn, xl, xlp;                                 /* the exciter: samples left, its length, its low-pass */
@@ -63,7 +63,7 @@ static void string_note_on(track_t *t, voice_t *v)
             S->neck[i] = 0;
         for (i = 0; i < SR_BLEN; i++)
             S->bridge[i] = 0;
-        S->lp = S->apx = S->apy = S->dcx = S->dcy = S->xlp = 0;
+        S->lp = S->apx = S->apy = S->ap2x = S->ap2y = S->dcx = S->dcy = S->xlp = 0;
         for (i = 0; i < 6u; i++)
             S->b[i] = 0;
         S->rng = (uint32_t)rng() | 1u;
@@ -79,7 +79,7 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     uint32_t i, w, mode = (uint32_t)clamp(p[P_E0], 0, SR_NMODE - 1), body = (uint32_t)clamp(p[P_E6], 0, SB_N - 1);
     uint32_t L, Lb, Ln, comp;
     int32_t pres = p[P_E1], kb, g, c, slope, bmix = p[P_E7] * 258, t60, jaw = body == SB_SITAR ? SQ_ONE / 48 : 0;
-    int32_t lp, apx, apy, xn, xl, xlp, kx, gb[3], xf, dtn = MF_E8(p) * 258;
+    int32_t lp, apx, apy, ap2x, ap2y, xn, xl, xlp, kx, gb[3], xf, dtn = MF_E8(p) * 258;
     uint32_t xd;
     tsvf_t bf[3];
     if (!S)
@@ -93,9 +93,17 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     if (L < (8u << 16))
         L = 8u << 16;
     kb = clamp(5000 + p[P_E4] * 216 + m->cutoff, 3000, 32767);   /* BRIT: the bridge's low-pass (ENV / LFO -> FLT) */
-    c = p[P_E5] * 160;                                   /* STIF: the all-pass, 0 .. 0.62 (Q15) */
-    /* their delays at low frequencies: (1 - k) / k, (1 - c) / (1 + c) samples (Q16), taken off the neck line */
-    comp = ((uint32_t)(32768 - kb) << 16) / (uint32_t)kb + ((uint32_t)(32768 - c) << 16) / (uint32_t)(32768 + c);
+    /* STIF (26.10: was one all-pass to +0.62, its delay all but flat: hardly heard): two all-passes of a negative
+     * coefficient, 0 .. -0.85 on a square curve: their delay long at the bottom, short at the top: the upper partials
+     * sharp, as a stiff wire's (a piano's, a bell-like string at the top); halved while they would take over half the loop */
+    c = -(p[P_E5] * p[P_E5] * 1727 / 1000);
+    /* their delays at low frequencies: (1 - k) / k, 2 x (1 - c) / (1 + c) samples (Q16), taken off the neck line */
+    for (;;) {
+        comp = ((uint32_t)(32768 - kb) << 16) / (uint32_t)kb + 2u * (((uint32_t)(32768 - c) << 16) / (uint32_t)(32768 + c));
+        if (c > -64 || comp < (L >> 1))
+            break;
+        c /= 2;
+    }
     Lb = (uint32_t)(((uint64_t)L * (uint32_t)(1311 + p[P_E2] * 160)) >> 32);   /* whole samples */
     if (Lb < 2u)
         Lb = 2u;
@@ -124,6 +132,8 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     lp = S->lp;
     apx = S->apx;
     apy = S->apy;
+    ap2x = S->ap2x;
+    ap2y = S->ap2y;
     xn = S->xn;
     xl = S->xl;
     xlp = S->xlp;
@@ -135,7 +145,10 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         s = px_m(c, br - apy, 15) + apx;                 /* y = c (x - y1) + x1 */
         apx = br;
         apy = s;
-        br = -s;
+        br = px_m(c, s - ap2y, 15) + ap2x;               /* (the second) */
+        ap2x = s;
+        ap2y = br;
+        br = -br;
         if (jaw && br > jaw)                             /* SITAR: the jawari, one side of the bridge's swing */
             br = jaw + ((br - jaw) >> 3);
         nr = -no;                                        /* the nut */
@@ -188,6 +201,8 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     S->lp = lp;
     S->apx = apx;
     S->apy = apy;
+    S->ap2x = ap2x;
+    S->ap2y = ap2y;
     S->xn = xn;
     S->xlp = xlp;
 }

@@ -71,7 +71,8 @@ static void plant_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     fb = clamp(pd[PD_FB] / 2, 0, 24000);
     fold = clamp(pd[PD_FOLD] / 3, 0, 32767);
     nz = clamp(p[P_E6] * 180 + pd[PD_NOISE] / 6, 0, 32767);
-    wob = clamp(p[P_E7] * 40 + (pd[PD_WOB] > 0 ? pd[PD_WOB] / 12 : 0), 0, 8000);
+    wob = clamp(p[P_E7] * p[P_E7] + (pd[PD_WOB] > 0 ? pd[PD_WOB] / 12 : 0), 0, 16000);   /* (26.10: WIND on a square curve,
+                                                          the factory values as they were (40: the same), to ~50 cents, was ~16) */
     {                                                    /* the filter: BLOOM + the branch + the track's FLT routings */
         int32_t ci = clamp(p[P_E5] * 256 + pd[PD_CUT] / 3 + m->cutoff, 0, 127 * 256);
         uint32_t hz = (uint32_t)(((uint64_t)px_exp2(ci * 18) * (40u << 16)) >> 16);   /* 40 Hz .. 20 kHz, 9 octaves (Q16) */
@@ -80,7 +81,7 @@ static void plant_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
         q = clamp(32767 - 18000 - pd[PD_RES] / 3, 3000, 32767);   /* damping: lower is more resonance */
     }
     for (i = 0; i < n; i++) {
-        uint32_t wi = (uint32_t)((int64_t)m->inc * px_m(sine_i(wph), wob, 15) >> 19);   /* (up to ~25 cents) */
+        uint32_t wi = (uint32_t)((int64_t)m->inc * px_m(sine_i(wph), wob, 15) >> 19);   /* (up to ~50 cents) */
         int32_t mo, c, y, hi;
         wph += 2800000u + (uint32_t)(seed & 0xFFFFu) * 8u;   /* the wobble: ~3 .. 6 Hz */
         v->ph[1] += minc;

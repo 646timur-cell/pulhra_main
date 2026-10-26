@@ -155,7 +155,7 @@ static void blow_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         }
         }
         w++;
-        o >>= 6;                                         /* Q20 -> Q15 / 2 */
+        o >>= 5;                                         /* Q20 -> Q15 (26.10: was / 2, BLOW 6 dB under the others) */
         if (air) {                                       /* the breath heard beside the tone */
             S->alp += px_m((nz >> 5) - S->alp, 9000, 15);
             o += px_m(px_m(S->alp, amp, 15), air, 15);

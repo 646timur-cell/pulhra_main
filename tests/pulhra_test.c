@@ -732,12 +732,14 @@ static int test_stop_releases(void)
     bad += check("SEQ: LEN INF holds the notes past their step (gate on, every track)", gated && busy0 >= SM_NTRK);
     bad += check("SEQ: STOP: one block later only fading voices (stage 4) or none, voices_busy == 0",
                  fading && voices_busy() == 0u && !sm_playing && sm_seq_pos(0) == 0u);
-    for (b = 0; b < 400u; b++) {
+    /* (the one-block fade cuts each note where it stands: that step rings out of the master's high-pass, ~0.1 s, its size
+     * the samples' at the stop: a bowed STRING's could leave 20 at 400 blocks (26.10). 1000 blocks: the step gone) */
+    for (b = 0; b < 1000u; b++) {
         uint32_t a = block_peak(0, 0);
-        if (b >= 390u)
+        if (b >= 990u)
             peak = a > peak ? a : peak;
     }
-    bad += check("SEQ: ... 400 blocks later silence (|x| <= 2)", peak <= 2u);
+    bad += check("SEQ: ... 1000 blocks later silence (|x| <= 2)", peak <= 2u);
     return bad;
 }
 
@@ -9332,7 +9334,7 @@ static int test_slice_rev(void)
  * (k 8: the ninth); its rms over all but the first tenth, and the brightness (share of the first difference) */
 static void mono_held(uint32_t eng, uint32_t pr, int32_t k, int32_t v, uint32_t nb, double *rms, double *bright)
 {
-    static int32_t L[CTL * 400];
+    static int32_t L[CTL * 1200];
     uint32_t b, nl = 0, i;
     double e = 0, d = 0;
     draw_setup();
@@ -9444,6 +9446,66 @@ static int test_mono_rev2(void)
         printf("pulhra: MONO: BBOX hits under 2000: %u; BD against the KICK %.1f dB\n", quiet, 10 * log10(ebd / ek));
         bad += check("MONO: BBOX: all 16 hits sound, BD within 4 dB of the DRUM KICK", quiet == 0 && fabs(10 * log10(ebd / ek)) < 4.0);
     }
+    return bad;
+}
+
+/* SOMA, stage 3 of the review (26.10) */
+static double soma_peak_hz(const int32_t *L, uint32_t n, double lo, double hi)   /* the strongest frequency in lo .. hi */
+{
+    double best = 0, bf = lo, f;
+    for (f = lo; f <= hi; f += (hi - lo) / 400.0) {
+        double w = 2 * M_PI * f / FS, c = 2 * cos(w), s1 = 0, s2 = 0, e;
+        uint32_t i;
+        for (i = 0; i < n; i++) {
+            double s0 = L[i] * (0.5 - 0.5 * cos(2 * M_PI * i / (n - 1))) + c * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        e = s1 * s1 + s2 * s2 - c * s1 * s2;
+        if (e > best)
+            best = e, bf = f;
+    }
+    return bf;
+}
+static int test_soma_rev3(void)
+{
+    static int32_t L[CTL * 2400];
+    int bad = 0;
+    double r0, r1, b0, f12[2], f1[2];
+    uint32_t k;
+    mono_held(ENGI_BLOW, 0, -1, 0, 600, &r0, &b0);
+    mono_held(ENGI_MSAW, 0, -1, 0, 600, &r1, &b0);
+    printf("pulhra: SOMA: BLOW CLARINET rms %.0f, SAW %.0f\n", r0, r1);
+    bad += check("SOMA: BLOW within 6 dB of SAW (was ~10 dB under)", 20 * log10(r1 / r0) < 6.0);
+    mono_held(ENGI_RESO, 0, -1, 0, 1200, &r0, &b0);
+    printf("pulhra: SOMA: RESO WET GLASS (rubbed) rms %.0f\n", r0);
+    bad += check("SOMA: RESO: a rubbed waveguide (WET GLASS) within 10 dB of SAW (was ~20 dB under)", 20 * log10(r1 / r0) < 10.0);
+    for (k = 0; k < 2u; k++) {                            /* STRING PIANO WIRE, STIF 0 and 127: its 12th partial stretched */
+        uint32_t b, nl = 0;
+        draw_setup();
+        kit_dry();
+        sm_ui.trk = 0;
+        sm_sound_load(eng_rank(ENGI_STRING), 7);
+        sm_input_poll();
+        for (b = 0; b < 40u; b++)
+            run_block();
+        trk[1].p[P_LEVEL] = trk[2].p[P_LEVEL] = trk[3].p[P_LEVEL] = 0;
+        kit_dry();
+        fx_flush();
+        trk[0].p[P_SUS] = 127;
+        trk[0].p[P_E5] = k ? 127 : 0;
+        trk_note_on(&trk[0], 48, 100);
+        for (b = 0; b < 2400u; b++)
+            block_peak(L, &nl);
+        trk_all_off(&trk[0]);
+        play_blocks(200);
+        f1[k] = soma_peak_hz(L + 4096, 32768, 120, 140);
+        f12[k] = soma_peak_hz(L + 4096, 32768, f1[k] * 11.6, f1[k] * 12.8);
+    }
+    printf("pulhra: SOMA: STRING STIF 0: f1 %.1f, 12th %.1f (x%.4f); STIF 127: f1 %.1f, 12th %.1f (x%.4f)\n", f1[0], f12[0],
+           f12[0] / f1[0] / 12, f1[1], f12[1], f12[1] / f1[1] / 12);
+    bad += check("SOMA: STRING: STIF stretches the upper partials (the 12th at least 0.8 % sharper against the first)",
+                 f12[1] / f1[1] > f12[0] / f1[0] * 1.008);
     return bad;
 }
 
@@ -11843,6 +11905,7 @@ int main(void)
     bad += test_page_copy();
     bad += test_slice_rev();
     bad += test_mono_rev2();
+    bad += test_soma_rev3();
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);

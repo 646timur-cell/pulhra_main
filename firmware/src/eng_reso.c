@@ -239,7 +239,8 @@ static void reso_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
                 y = -y;
             if (dirt > 40)
                 y = sx_sat(y + px_m(y, dirt * 96, 15));
-            S->wg[w & RS_WMASK] = y + (ex == RX_FRIC || ex == RX_SCRAPE ? x >> 2 : x << 2);   /* (hits: louder) */
+            S->wg[w & RS_WMASK] = y + (ex == RX_FRIC || ex == RX_SCRAPE ? x : x << 2);   /* (hits: louder; 26.10: rubbing
+                                                          * was x / 4, 12 dB under) */
             w++;
             s = (S->wg[(w - tap) & RS_WMASK] + y) >> 1;
             s += px_m(x, dirt * 64, 15) >> 2;
