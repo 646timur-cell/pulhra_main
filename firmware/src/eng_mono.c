@@ -54,6 +54,37 @@ static int32_t mf_norm(int32_t w)
 {
     return (int32_t)(((int64_t)32767 << 15) / (w < 32767 ? 32767 : w));
 }
+/* floor(sqrt(x)) */
+static uint32_t mf_isqrt(uint32_t x)
+{
+    uint32_t r = 0, b = 1u << 30;
+    while (b > x)
+        b >>= 2;
+    while (b) {
+        if (x >= r + b) {
+            x -= r + b;
+            r = (r >> 1) + b;
+        } else {
+            r >>= 1;
+        }
+        b >>= 2;
+    }
+    return r;
+}
+/* the weight (Q15) of a sum of free-running (incoherent) oscillators: the square root of the sum of their levels'
+ * squares, l[0..n-1] Q15 (26.10: the unison as loud as one saw, not a fifth of it) */
+static int32_t mf_pw(const int32_t *l, uint32_t n)
+{
+    uint32_t k, a = 0;
+    for (k = 0; k < n; k++) {
+        uint32_t q = (uint32_t)clamp(l[k], 0, 65535) >> 4;   /* (Q11: twelve of them fit) */
+        a += q * q;
+    }
+    return (int32_t)(mf_isqrt(a) << 4);
+}
+/* the end of a sum: its gain g (Q15) without overflow (o up to 2^20) and 7/8 of it (the sum's peaks), a knee at -2 dB, never
+ * past full scale */
+static inline int32_t mf_out(int32_t o, int32_t g) { return clamp(soft_knee((((o >> 5) * g) >> 13) * 7, 26000), -32767, 32767); }
 /* a fresh voice (from silence): its phases to the given seeds, so unison pairs do not start in phase */
 static int mf_fresh(const voice_t *v) { return !v->env && !v->env_out; }
 
@@ -70,7 +101,7 @@ static void msaw_note_on(track_t *t, voice_t *v)
         v->ph[2] = r * 2654435761u;
         v->s[0] = (int32_t)(r * 40503u);
         v->s[1] = (int32_t)(r ^ 0x5BD1E995u);
-        v->s[2] = v->s[3] = v->s[4] = v->s[6] = 0;    /* (a voice's state from another engine: never read) */
+        v->s[2] = v->s[3] = v->s[4] = v->s[6] = v->s[7] = 0;   /* (a voice's state from another engine: never read) */
         v->s[5] = (int32_t)(r * 69069u + 1u);
     }
 }
@@ -80,25 +111,31 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     uint32_t i, b, iu1, iu2, ix1, ix2, isub, ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
     uint32_t px1 = (uint32_t)v->s[0], px2 = (uint32_t)v->s[1], ps1 = (uint32_t)v->s[2], ps2 = (uint32_t)v->s[3];
     int32_t ul = p[P_E0] * 258, xl = p[P_E2] * 258, sx = p[P_E4] * 258, s1 = p[P_E5] * 258, s2 = p[P_E6] * 258;
-    int32_t wc = p[P_E1] * p[P_E1] * 100 / (127 * 127), age = p[P_E3], g, drift = 0, sy = p[P_E8];   /* (UNIW: a square curve, 0 ..
+    int32_t wc = p[P_E1] * p[P_E1] * 100 / (127 * 127), age = p[P_E3], g, drift = 0, drift2 = 0, sy = p[P_E8];   /* (UNIW: a square curve, 0 ..
                                                           +-100 cents (Tim: the width hardly heard; 60 is ~22 as the old linear
                                                           +-50), fine near 0; SYNC: the ninth, SELECT) */
     uint32_t bs, pm = (uint32_t)v->s[6];
-    if (age) {                                           /* AGE: a slow walk of up to +-12 cents on the pairs, a third of
-                                                          * it on the saw */
+    if (age) {                                           /* AGE (26.10: deeper): two slow walks of up to +-32 cents, each
+                                                          * oscillator its own mix of them (the pairs drift apart and
+                                                          * together, the beating never the same), a third on the saw */
         uint32_t rs = (uint32_t)v->s[5];
-        v->s[4] = sx_walk(v->s[4], &rs, age * 40, age * 24);
+        v->s[4] = sx_walk(v->s[4], &rs, age * age / 2, age * age / 2);   /* (a square curve: fine low, deep at the top) */
+        v->s[7] = sx_walk(v->s[7], &rs, age * age / 3, age * age / 2);
         v->s[5] = (int32_t)rs;
         drift = v->s[4] >> 8;
+        drift2 = v->s[7] >> 8;
     }
     b = mf_mul(mf_inc(t, m), drift / 3);
     iu1 = mf_mul(b, wc + drift);
-    iu2 = mf_mul(b, -wc - drift);
-    ix1 = mf_mul(b, 2 * wc - drift);
-    ix2 = mf_mul(b, -2 * wc + drift);
+    iu2 = mf_mul(b, -wc + drift2);
+    ix1 = mf_mul(b, 2 * wc - drift2);
+    ix2 = mf_mul(b, -2 * wc - drift + drift2 / 2);
     isub = b >> 1;
     bs = sy ? mf_mul(b, sy * 2400 / 127) : b;           /* SYNC: the saw a slave up to 2 octaves over the note, reset at */
-    g = mf_norm(32767 + 2 * ul + 2 * xl + (sx + s1 + s2) / 2);   /* the note's period (the unison pairs stay free) */
+    {                                                    /* the note's period (the unison pairs stay free) */
+        int32_t lv[5] = {32767, ul, ul, xl, xl};
+        g = mf_norm(mf_pw(lv, 5) + (sx + s1 + s2) / 2);
+    }
     for (i = 0; i < n; i++) {
         int32_t o = osc_saw(ph0, bs);
         if (ul)
@@ -123,7 +160,7 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         px2 += ix2;
         ps1 += isub;
         ps2 += isub >> 1;
-        out[i] += voice_amp(clamp(mulq15(o, g), -32767, 32767), m, i);
+        out[i] += voice_amp(mf_out(o, g), m, i);
     }
     v->ph[0] = ph0;
     v->ph[1] = ph1;
@@ -167,7 +204,10 @@ static void mpulse_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         pwf += mulq15(spike - pwf, tri);
     }
     pw = (uint32_t)pwf << 17;
-    g = mf_norm(32767 + 2 * ul + (s1 + s2) / 2);
+    {
+        int32_t lv[3] = {32767, ul, ul};
+        g = mf_norm(mf_pw(lv, 3) + (s1 + s2) / 2);
+    }
     for (i = 0; i < n; i++) {
         int32_t o = osc_pulse(ph0, bs, pw);              /* (at half scale, doubled after the gain: no overflow) */
         if (ul)
@@ -186,7 +226,7 @@ static void mpulse_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         ph2 += iu2;
         ps1 += b >> 1;
         ps2 += b >> 2;
-        out[i] += voice_amp(clamp(mulq15(o, g) << 1, -32767, 32767), m, i);
+        out[i] += voice_amp(mf_out(o << 1, g), m, i);
     }
     v->ph[0] = ph0;
     v->ph[1] = ph1;
@@ -251,7 +291,14 @@ static void mens_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         pc[np] = S->pc[k];
         np++;
     }
-    g = mf_norm((int32_t)np * (32767 + cl) * 2 / 2);
+    {                                                    /* (the pitches and their chorus copies: free, a power sum) */
+        int32_t lv[8];
+        for (k = 0; k < np; k++) {
+            lv[2u * k] = 32767;
+            lv[2u * k + 1u] = cl;
+        }
+        g = mf_norm(mf_pw(lv, np * 2u));
+    }
     for (i = 0; i < n; i++) {
         int32_t o = 0;
         for (k = 0; k < np; k++) {
@@ -264,7 +311,7 @@ static void mens_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             ph[k] += inc[k];
             pc[k] += incc[k];
         }
-        out[i] += voice_amp(clamp(mulq15(o, g), -32767, 32767), m, i);
+        out[i] += voice_amp(mf_out(o, g), m, i);
     }
     S->age = age + n < 0x40000000u ? age + n : age;
     for (k = 0, np = 0; k < 4u; k++) {
@@ -713,7 +760,7 @@ static void mvo_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
             v->s[2u * j + 1u] = bd;
             y += j == 0 ? bd : j == 1 ? (bd * 3) >> 2 : bd >> 1;
         }
-        out[i] += voice_amp(clamp(soft_knee(y >> 2, 26000), -32767, 32767), m, i);
+        out[i] += voice_amp(clamp(soft_knee((y * 3) >> 2, 24000), -32767, 32767), m, i);   /* (26.10: 9 dB up, as loud as the others) */
     }
     v->ph[1] = (uint32_t)glp;
     v->s[6] = at + (int32_t)n;
@@ -729,13 +776,23 @@ static void msine_note_on(track_t *t, voice_t *v)
         v->ph[0] = v->ph[1] = v->ph[2] = 0;
         v->s[0] = 0;
     }
+    v->s[1] = 32767;                                     /* (DROP: from its top at each note) */
 }
 static void msine_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
-    uint32_t i, b = mf_inc(t, m), ph = v->ph[0], ps = v->ph[1], p2 = v->ph[2], b2 = mfm_rinc(b, p[P_E4]);
+    uint32_t i, b = mf_inc(t, m), ph, ps, p2, b2;
     int32_t fold = p[P_E0] * 258, sub = p[P_E1] * 258, fb = p[P_E2] * 128, sym = p[P_E3] * 256, l2 = p[P_E5] * 258;
     int32_t drv = p[P_E6], prev = v->s[0], g = mf_norm(32767 + sub / 2 + l2 / 2);
+    if (p[P_E8] && v->s[1] > 32) {                       /* DROP (the ninth, 26.10): the pitch from up to 4 octaves over the
+                                                          * note down to it, ~45 ms (a sine kick, a zap) */
+        b = mf_mul(b, mulq15(v->s[1], p[P_E8] * 4800 / 127));
+        v->s[1] = mulq15(v->s[1], 32768 - (int32_t)(n * 32768u / 1985u));   /* (tau 1985 samples) */
+    }
+    ph = v->ph[0];
+    ps = v->ph[1];
+    p2 = v->ph[2];
+    b2 = mfm_rinc(b, p[P_E4]);
     for (i = 0; i < n; i++) {
         int32_t y = sine_i(fb ? ph + ((uint32_t)((prev * fb) >> 15) << 16) : ph);   /* FB: the sine on itself */
         prev = (prev + y) >> 1;
@@ -765,17 +822,27 @@ static void mnoise_note_on(track_t *t, voice_t *v)
     (void)t;
     if (mf_fresh(v)) {
         v->s[0] = (int32_t)(rng() | 1u);
-        v->s[1] = v->s[2] = v->s[4] = v->s[5] = 0;
+        v->s[1] = v->s[2] = v->s[4] = v->s[5] = v->s[6] = 0;
     }
     v->s[3] = 32767;                                     /* (DCAY: from full at each note) */
+    v->s[7] = 32767;                                     /* (SWEP: from its start) */
 }
 static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
-    uint32_t i, ph = v->ph[0], seed = (uint32_t)v->s[0], b = mf_inc(t, m) << 3;   /* (held 8 x the note's pitch) */
+    uint32_t i, ph = v->ph[0], seed = (uint32_t)v->s[0], b0 = mf_inc(t, m), b;
     int32_t rate = p[P_E0], held = v->s[1], lp = v->s[2], k = 1200 + (127 - p[P_E1]) * 250, env = v->s[3];
-    int32_t res = p[P_E3], lo = v->s[4], bd = v->s[5], rk = 0, rq = 0;
+    int32_t res = p[P_E3], lo = v->s[4], bd = v->s[5], rk = 0, rq = 0, hl = v->s[6], kh = 0, ng;
     uint32_t sh = MBITS_SH[clamp(p[P_E4], 0, 6)];
+    if (p[P_E6] && v->s[7] > 32) {                       /* SWEP (26.10): the note's rate and RES's pitch from up to 4
+                                                          * octaves away (- under, + over) back to the note, ~120 ms */
+        b0 = mf_mul(b0, mulq15(v->s[7], p[P_E6] * 4800 / 64));
+        v->s[7] = mulq15(v->s[7], 32768 - (int32_t)(n * 32768u / 5292u));
+    }
+    b = b0 << 3;                                         /* (held 8 x the note's pitch) */
+    if (p[P_E5])                                         /* HP (26.10): a one-pole high-pass ~50 Hz .. ~7 kHz */
+        kh = (int32_t)(sx_expmap(p[P_E5], 233u << 16, 7) >> 16);
+    ng = (int32_t)mf_isqrt((32768u << 12) / (uint32_t)k); /* (COLR's level made up: the low-passed noise as loud, Q6) */
     if (p[P_E2]) {                                       /* DCAY: its own fall, 1 the shortest (~5 ms) .. 127 ~3 s (0: held) */
         int32_t kd = (int32_t)(32768u - 32768u * n / (uint32_t)(sx_expmap(p[P_E2], 220u << 16, 9) >> 16));
         env = mulq15(env, clamp(kd, 0, 32767));
@@ -783,7 +850,7 @@ static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         env = 32767;
     }
     if (res) {                                           /* RES: a band-pass ringing at the note (Chamberlin) */
-        uint32_t f = (uint32_t)(((uint64_t)mf_inc(t, m) * 44100u) >> 32);
+        uint32_t f = (uint32_t)(((uint64_t)b0 * 44100u) >> 32);
         mvo_coef(f < 60u ? 60u : f > 6000u ? 6000u : f, 8u + (127u - (uint32_t)res) * 2u, &rk, &rq);
     }
     for (i = 0; i < n; i++) {
@@ -793,12 +860,17 @@ static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         if (!rate || ph < was || (int32_t)(sx_noise(&seed) & 127) >= rate)
             held = sx_noise(&seed) >> 5;                 /* RATE: how often the note's clock holds it (0: white) */
         lp += px_m(held - lp, k, 15);
-        y = clamp(lp, -32767, 32767);
+        y = clamp((lp * ng) >> 6, -32767, 32767);
+        if (kh) {
+            hl += px_m(y - hl, kh, 15);
+            y -= hl;
+        }
         if (res) {
             int32_t hi = y - lo - px_m(bd, rq, 15);
             bd = clamp(bd + px_m(hi, rk, 15), -400000, 400000);
             lo = clamp(lo + px_m(bd, rk, 15), -400000, 400000);
             y = y + mulq15(clamp(soft_knee(bd, 26000), -32767, 32767) - y, res * 258);
+            y = soft_knee((y >> 2) * (4 + res * 12 / 127), 26000);   /* (26.10: the narrowed noise's level made up, to x4) */
         }
         y = clamp(mulq15(y, env), -32767, 32767) >> sh << sh;   /* (BITS: down to 3) */
         out[i] += voice_amp(y, m, i);
@@ -810,6 +882,7 @@ static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     v->s[3] = env;
     v->s[4] = lo;
     v->s[5] = bd;
+    v->s[6] = hl;
 }
 
 /* ================================================================== presets === */
@@ -1022,13 +1095,15 @@ static const engine_t ENG_MSINE = {
     .edit = {{"FOLD", F_PCT, 0, 127, 0, 0, 0}, {"SUB", F_PCT, 0, 127, 0, 0, 0}, {"FB", F_PCT, 0, 127, 0, 0, 0},
              {"SYM", F_BIPCT, -64, 63, 0, 0, 0}, {"RAT2", F_ENUM, 0, 19, 3, N_MFM_RAT, 0}, {"LVL2", F_PCT, 0, 127, 0, 0, 0},
              {"DRIV", F_PCT, 0, 127, 0, 0, 0}, MF_TUNE},
+    .e8 = {"DROP", F_PCT, 0, 127, 0, 0, 0},              /* (26.10: the pitch drop at the note) */
     .xyd = {{XY_E(0), 0, 0}, {XY_E(1), 0, 0}},
     .xya = {{60, 0, 0}, {60, 0, 0}},
 };
 static const engine_t ENG_MNOISE = {
     MF_ENGINE("NOISE", "NOISE", "SHAPE", MNOISE_PRESETS, mnoise_note_on, mnoise_render, P_E0, P_E1, P_E2, P_E3),
     .edit = {{"RATE", F_PCT, 0, 127, 0, 0, 0}, {"COLR", F_PCT, 0, 127, 0, 0, 0}, {"DCAY", F_PCT, 0, 127, 0, 0, 0},
-             {"RES", F_PCT, 0, 127, 0, 0, 0}, {"BITS", F_ENUM, 0, 6, 0, N_MBITS, 0}, MF_NONE, MF_NONE, MF_TUNE},
+             {"RES", F_PCT, 0, 127, 0, 0, 0}, {"BITS", F_ENUM, 0, 6, 0, N_MBITS, 0}, {"HP", F_PCT, 0, 127, 0, 0, 0},
+             {"SWEP", F_INT, -64, 63, 0, 0, 0}, MF_TUNE},
     .xyd = {{XY_E(0), 0, 0}, {XY_E(1), 0, 0}},
     .xya = {{60, 0, 0}, {60, 0, 0}},
 };

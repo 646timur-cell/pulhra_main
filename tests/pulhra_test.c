@@ -336,7 +336,8 @@ static int test_machine_switch_no_click(void)
     /* the brief's "<= 4 x the median step" cannot hold for a SAW note alone (its own edges are 40 x the median, see
      * premax): the seam is held to the note's own steepest step instead, with the end of the fade at exactly 0 */
     bad += check("SWITCH: no step at the seam beyond the SAW note's own steepest step", med > 0 && mx <= premax);
-    bad += check("SWITCH: the old engine is silent after the fade (4 blocks), nothing hangs", endfade <= 2u && tail <= 2u);
+    /* (after the fade: the mix's high-pass settling, a few LSB at most; 26.10: the SAW's unison 5 dB louder leaves 3) */
+    bad += check("SWITCH: the old engine is silent after the fade (4 blocks), nothing hangs", endfade <= 4u && tail <= 2u);
     /* a note that comes during the fade waits and then plays on the new engine */
     sm_core_init();
     kit_dry();
@@ -9295,6 +9296,92 @@ static int test_slice_rev(void)
     return bad;
 }
 
+/* MONO, stage 2 of the review (26.10): a machine's factory sound pr held (the amp sustained) for nb blocks, k = v set first
+ * (k 8: the ninth); its rms over all but the first tenth, and the brightness (share of the first difference) */
+static void mono_held(uint32_t eng, uint32_t pr, int32_t k, int32_t v, uint32_t nb, double *rms, double *bright)
+{
+    static int32_t L[CTL * 400];
+    uint32_t b, nl = 0, i;
+    double e = 0, d = 0;
+    draw_setup();
+    kit_dry();
+    sm_ui.trk = 0;
+    sm_sound_load(eng_rank(eng), pr);
+    sm_input_poll();
+    for (b = 0; b < 40u; b++)
+        run_block();
+    trk[1].p[P_LEVEL] = trk[2].p[P_LEVEL] = trk[3].p[P_LEVEL] = 0;
+    kit_dry();
+    fx_flush();
+    trk[0].p[P_ATK] = 0;
+    trk[0].p[P_SUS] = 127;
+    if (k >= 0)
+        trk[0].p[k == 8 ? P_E8 : P_E0 + k] = (int16_t)v;
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < nb; b++)
+        block_peak(L, &nl);
+    trk_all_off(&trk[0]);
+    play_blocks(100);
+    for (i = nl / 10u + 1u; i < nl; i++) {
+        e += (double)L[i] * L[i];
+        d += (double)(L[i] - L[i - 1]) * (L[i] - L[i - 1]);
+    }
+    *rms = sqrt(e / (nl - nl / 10u));
+    *bright = e > 0 ? d / e : 0;
+}
+static int test_mono_rev2(void)
+{
+    int bad = 0;
+    double r0, r1, rp, b0, b1;
+    mono_held(ENGI_MSAW, 0, -1, 0, 300, &r0, &b0);
+    mono_held(ENGI_MPULSE, 0, -1, 0, 300, &rp, &b1);
+    printf("pulhra: MONO: SUPER SAW rms %.0f, PULSE BASS %.0f\n", r0, rp);
+    bad += check("MONO: SAW: the unison a power sum: SUPER SAW within 3 dB of PULSE BASS", fabs(20 * log10(r0 / rp)) < 3.0);
+    mono_held(ENGI_MSAW, 0, 0, 0, 300, &r1, &b1);
+    bad += check("MONO: SAW: UNIL 0 .. 110 the level within 3 dB (a fuller sound, not a quieter one)", fabs(20 * log10(r0 / r1)) < 3.0);
+    mono_held(ENGI_MNOISE, 0, 5, 0, 200, &r0, &b0);
+    mono_held(ENGI_MNOISE, 0, 5, 127, 200, &r1, &b1);
+    printf("pulhra: MONO: NOISE HP 0 rms %.0f bright %.3f, HP 127 rms %.0f bright %.3f\n", r0, b0, r1, b1);
+    bad += check("MONO: NOISE: HP (was empty) takes the lows: quieter, brighter", r1 < r0 * 0.7 && b1 > b0);
+    mono_held(ENGI_MNOISE, 2, -1, 0, 200, &r0, &b0);
+    mono_held(ENGI_MNOISE, 0, -1, 0, 200, &r1, &b1);
+    printf("pulhra: MONO: NOISE DARK WIND rms %.0f, WHITE %.0f\n", r0, r1);
+    bad += check("MONO: NOISE: COLR's level made up: DARK WIND within 4 dB of WHITE", fabs(20 * log10(r0 / r1)) < 4.0);
+    {
+        double s0, s1;
+        mono_held(ENGI_MNOISE, 0, 3, 100, 10, &s0, &b0);
+        {                                                 /* SWEP +63 with RES 100: brighter at the start than without */
+            static int32_t L[CTL * 20];
+            uint32_t b, nl = 0, i;
+            double e = 0, d = 0;
+            trk[0].p[P_E6] = 63;
+            trk[0].p[P_E3] = 100;
+            trk_note_on(&trk[0], 48, 100);
+            for (b = 0; b < 10u; b++)
+                block_peak(L, &nl);
+            trk_all_off(&trk[0]);
+            play_blocks(100);
+            for (i = 1; i < nl; i++) {
+                e += (double)L[i] * L[i];
+                d += (double)(L[i] - L[i - 1]) * (L[i] - L[i - 1]);
+            }
+            s1 = e > 0 ? d / e : 0;
+            trk[0].p[P_E6] = 0;
+        }
+        printf("pulhra: MONO: NOISE RES 100 brightness at the note %.4f, with SWEP +63 %.4f\n", b0, s1);
+        bad += check("MONO: NOISE: SWEP (was empty) moves RES's pitch: the note's start another colour", fabs(s1 - b0) > b0 * 0.3);
+    }
+    mono_held(ENGI_MSINE, 0, 8, 0, 6, &r0, &b0);
+    mono_held(ENGI_MSINE, 0, 8, 127, 6, &r1, &b1);
+    printf("pulhra: MONO: SINE first 6 blocks brightness DROP 0 %.4f, DROP 127 %.4f\n", b0, b1);
+    bad += check("MONO: SINE: DROP (the ninth, new) a pitch from above at the note", b1 > b0 * 4.0);
+    mono_held(ENGI_MVO, 0, -1, 0, 300, &r0, &b0);
+    mono_held(ENGI_MFMST, 0, -1, 0, 300, &r1, &b1);
+    printf("pulhra: MONO: VO-6 TALKING rms %.0f, FM-ST %.0f\n", r0, r1);
+    bad += check("MONO: VO-6 within 6 dB of FM-ST (was 10 dB under)", 20 * log10(r1 / r0) < 6.0);
+    return bad;
+}
+
 /* the page clipboard (Tim): OCT+ held + REC copies the page in view of the selected track (its steps, their locks), OCT+ held +
  * PLAY pastes it onto the page in view (another track's too); OCT+ held past its window and let go after them: no page turn */
 static int test_page_copy(void)
@@ -11690,6 +11777,7 @@ int main(void)
     bad += test_redraw();
     bad += test_page_copy();
     bad += test_slice_rev();
+    bad += test_mono_rev2();
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);
