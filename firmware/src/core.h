@@ -89,10 +89,13 @@
 #define ENGI_DHAT 45u            /* HAT: six squares (the 808's), CL / OP */
 #define ENGI_DCYM 46u            /* CYM: crash, ride, china */
 #define ENGI_DKIT 47u            /* KIT: four lanes of them on T4 (its sequencer four rows) */
-#define ENGI_DPERC 48u           /* PERC: TOM CONGA RIM BELL CLAVE (the KIT's sixth lane machine) */
+#define ENGI_DPERC 48u           /* CONGA (was PERC): conga, bongo, tom; strokes OPEN MUTE SLAP BASS */
 #define ENGI_DBELL 49u           /* BELL: the cowbell, after the Analog Rhythm's CB (a lane machine) */
 #define ENGI_DRIM 50u            /* RIM: the rimshot, after the Analog Rhythm's RS (a lane machine) */
-#define SWAMP_NDRUM 9            /* (how many: ENGINES, the DRUM page's places: the KIT one of them, not on the page) */
+#define ENGI_DSHK 51u            /* SHKR: a shaker on white noise (a lane machine) */
+#define ENGI_DBELS 52u           /* BELLS: triangle, glockenspiel, chime, hand bell, agogo, clave (a lane machine) */
+#define ENGI_DTAMB 53u           /* TAMB: the tambourine, its strokes and metals (a lane machine) */
+#define SWAMP_NDRUM 12            /* (how many: ENGINES, the DRUM page's places: the KIT one of them, not on the page) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (FELUCCA_MONOFM ? 27 + SWAMP_NDRUM * FELUCCA_SWAMP : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,

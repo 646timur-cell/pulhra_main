@@ -8657,13 +8657,13 @@ static void dr_hit(int32_t *L, uint32_t blocks, uint32_t *pk, double *bright, ui
 static int test_drum_machines(void)
 {
     static int32_t L[CTL * 6000];
-    static const uint32_t E[7] = {ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM, ENGI_DBELL, ENGI_DRIM};
-    static const char *const N[7] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "BELL", "RIM"};
-    double br[7];
-    uint32_t len[7], pk, k, ok = 1, quiet, act;
+    static const uint32_t E[8] = {ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM, ENGI_DBELL, ENGI_DRIM, ENGI_DSHK};
+    static const char *const N[8] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "BELL", "RIM", "SHKR"};
+    double br[8];
+    uint32_t len[8], pk, k, ok = 1, quiet, act;
     int bad = 0;
     char w[160];
-    for (k = 0; k < 7u; k++) {
+    for (k = 0; k < 8u; k++) {
         uint32_t b;
         dr_load(E[k]);
         ok &= trk[0].engine == E[k] && eng_rank(E[k]) >= MF_PAGE[3];
@@ -8679,29 +8679,61 @@ static int test_drum_machines(void)
         bad += check(w, pk > 2500u && pk < 65534u && act == 0u && quiet <= 2u);
     }
     bad += check("DRUM: every machine on the DRUM page, loaded", ok);
-    {                                                     /* PERC: each mode a hit that rings out by itself, never past full scale */
-        uint32_t md, pkc, lc, okp = 1, lens[DR_PM_N];
-        double bb, bm[DR_PM_N];
-        for (md = 0; md < DR_PM_N; md++) {
-            uint32_t b;
-            dr_load(ENGI_DPERC);
-            trk[0].p[P_E0] = (int16_t)md;
-            dr_hit(L, 6000, &pkc, &bm[md], &lens[md]);
-            act = dr_active(0);
-            quiet = 0;
-            for (b = 0; b < 50u; b++) {
-                uint32_t a = block_peak(0, 0);
-                quiet = a > quiet ? a : quiet;
+    {                                                     /* CONGA, BELLS, TAMB (26.10, PERC split): every mode / stroke / state a
+                                                           * hit that rings out by itself, never past full scale */
+        static const struct { uint32_t eng; uint32_t k; uint32_t n; const char *nm; } M[3] = {
+            {ENGI_DPERC, 4, DR_ST_N, "CONGA STRK"}, {ENGI_DBELS, 0, DR_BM_N, "BELLS MODE"}, {ENGI_DTAMB, 0, DR_TS_N, "TAMB STAT"}};
+        uint32_t j, md, pkc, okp = 1, lens[3][8];
+        double bm[3][8];
+        for (j = 0; j < 3u; j++)
+            for (md = 0; md < M[j].n; md++) {
+                uint32_t b;
+                dr_load(M[j].eng);
+                trk[0].p[P_E0 + M[j].k] = (int16_t)md;
+                if (M[j].eng == ENGI_DPERC)
+                    trk[0].p[P_E0] = DR_PM_CONGA;
+                dr_hit(L, 6000, &pkc, &bm[j][md], &lens[j][md]);
+                act = dr_active(0);
+                quiet = 0;
+                for (b = 0; b < 50u; b++) {
+                    uint32_t a = block_peak(0, 0);
+                    quiet = a > quiet ? a : quiet;
+                }
+                printf("  %s %u: peak %u, brightness %.4f, rings %.0f ms, voices %u, quiet %u\n", M[j].nm, md, pkc, bm[j][md], lens[j][md] * 1000.0 / FS, act, quiet);
+                okp &= pkc > 2500u && pkc < 65534u && act == 0u && quiet <= 2u;
             }
-            printf("  PERC %s: peak %u, brightness %.4f, rings %.0f ms\n", N_DR_PMODE[md], pkc, bm[md], lens[md] * 1000.0 / FS);
-            okp &= pkc > 2500u && pkc < 65534u && act == 0u && quiet <= 2u;
-        }
-        bad += check("DRUM: PERC: TOM CONGA RIM BELL CLAVE each a hit, rings out, never past full scale", okp);
-        bad += check("DRUM: PERC: the TOM rings longer than the RIM and the CLAVE, darker than the CLAVE",
-                     lens[DR_PM_TOM] > lens[DR_PM_RIM] && lens[DR_PM_TOM] > lens[DR_PM_CLAVE] && bm[DR_PM_TOM] < bm[DR_PM_CLAVE]);
+        bad += check("DRUM: CONGA strokes, BELLS modes, TAMB states: each a hit, rings out, never past full scale", okp);
+        bad += check("DRUM: CONGA: OPEN rings longer than MUTE, SLAP brighter than OPEN",
+                     lens[0][DR_ST_OPEN] > lens[0][DR_ST_MUTE] && bm[0][DR_ST_SLAP] > bm[0][DR_ST_OPEN] * 2.0);
+        bad += check("DRUM: BELLS: the TRI rings longer than the AGGO and the CLAV, the CLAV the shortest",
+                     lens[1][DR_BM_TRI] > lens[1][DR_BM_AGGO] && lens[1][DR_BM_AGGO] > lens[1][DR_BM_CLAV]);
+        bad += check("DRUM: TAMB: ROLL rings longer than HIT, TAP the shortest, SHAK longer than TAP (its back stroke)",
+                     lens[2][DR_TS_ROLL] > lens[2][DR_TS_HIT] && lens[2][DR_TS_TAP] < lens[2][DR_TS_HIT] &&
+                     lens[2][DR_TS_SHAK] > lens[2][DR_TS_TAP]);
     }
     bad += check("DRUM: KICK the darkest, HAT brighter than SNARE and KICK, CYM brighter than SNARE",
                  br[0] < br[1] && br[0] < br[2] && br[3] > br[1] && br[4] > br[1]);
+    {                                                     /* SHKR: every factory sound; DBL a second stroke; brighter than SNARE */
+        uint32_t pr, okk = 1, pkc, lc, l2;
+        double bb;
+        for (pr = 0; pr < NELEM(DSHK_PRESETS); pr++) {
+            uint32_t i;
+            dr_load(ENGI_DSHK);
+            for (i = 0; i < 8u; i++)
+                trk[0].p[P_E0 + i] = DSHK_PRESETS[pr].e[i];
+            dr_hit(L, 2000, &pkc, &bb, &lc);
+            printf("  SHKR %s: peak %u, brightness %.3f, rings %.0f ms\n", DSHK_PRESETS[pr].name, pkc, bb, lc * 1000.0 / FS);
+            okk &= pkc > 2500u && pkc < 65534u && bb > br[1] && lc * 1000u / FS < 400u;
+        }
+        dr_load(ENGI_DSHK);
+        trk[0].p[P_E8] = 0;
+        dr_hit(L, 2000, &pkc, &bb, &lc);
+        trk[0].p[P_E8] = 100;
+        dr_hit(L, 2000, &pkc, &bb, &l2);
+        printf("  SHKR DBL 0: %.0f ms, DBL 100: %.0f ms\n", lc * 1000.0 / FS, l2 * 1000.0 / FS);
+        bad += check("DRUM: SHKR: each factory sound a hit under 400 ms, brighter than the SNARE", okk);
+        bad += check("DRUM: SHKR: DBL a second stroke (the hit 75 ms longer)", l2 > lc + FS / 20u);
+    }
     bad += check("DRUM: RIM short (under 150 ms), BELL longer than RIM, CYM rings longest of the metal",
                  len[6] * 1000u / FS < 150u && len[5] > len[6] && len[4] > len[5] && len[4] > len[3]);
     {                                                     /* CYM (after the AR): the low band dies first: early bright < late bright */
@@ -9802,11 +9834,11 @@ static int test_kit_lane_pages(void)
     ksnd(3)->p[P_E0] = DR_KM_KICK;
     sm_lane_machine(0);
     sm_ui.page = (uint8_t)page_by_name("EDIT 1");
-    turn(EN_SELECT, 10);                                  /* (SELECT past the end: the last, RIM) */
+    turn(EN_SELECT, 20);                                  /* (SELECT past the end: the last, TAMB) */
     sm_input_poll();
     draw_full();
-    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to RIM (its values the RIM's)", ksnd(3)->p[P_E0] == DR_KM_RIM &&
-                 cpat()->lane[0][0] == DRIM_PRESETS[0].e[0] && cpat()->lane[0][3] == DRIM_PRESETS[0].e[3] && lint_has("RIM", 0, 0));
+    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to TAMB (its values the TAMB's)", ksnd(3)->p[P_E0] == DR_KM_TAMB &&
+                 cpat()->lane[0][1] == DTAMB_PRESETS[0].e[1] && cpat()->lane[0][3] == DTAMB_PRESETS[0].e[3] && lint_has("TAMB", 0, 0));
     layer_hold(B_EDIT);
     while (sm_lay_epage != 3u) {
         press(B_OCTUP);

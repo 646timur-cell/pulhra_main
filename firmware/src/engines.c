@@ -156,6 +156,9 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_DPERC,                  /* 48 (ENGI_DPERC) */
     &ENG_DBELL,                  /* 49 (ENGI_DBELL) */
     &ENG_DRIM,                   /* 50 (ENGI_DRIM) */
+    &ENG_DSHK,                   /* 51 (ENGI_DSHK) */
+    &ENG_DBELS,                  /* 52 (ENGI_DBELS) */
+    &ENG_DTAMB,                  /* 53 (ENGI_DTAMB) */
 #endif
 };
 
@@ -228,7 +231,7 @@ static const uint8_t ENGINE_ORDER[] = {                 /* MONOFM: the EDIT laye
     ENGI_JUNK, ENGI_LYRA, ENGI_CHAOS, ENGI_DRIFT, ENGI_PLANT,  /* springs, drones, the organic */
     ENGI_GLITCH, ENGI_ERROR, ENGI_RITUAL, ENGI_MECH, ENGI_BIO, /* 3 SLICE: the slice machines */
 #if FELUCCA_SWAMP
-    ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM, ENGI_DKIT, ENGI_DPERC, ENGI_DBELL, ENGI_DRIM,   /* 4 DRUM (PULHRA): the drum machines (the KIT
+    ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM, ENGI_DKIT, ENGI_DPERC, ENGI_DBELL, ENGI_DRIM, ENGI_DSHK, ENGI_DBELS, ENGI_DTAMB,   /* 4 DRUM (PULHRA): the drum machines (the KIT
                                                                                         not on the page: pulhra/sm_layer.c sm_epage_mach) */
 #endif
 };

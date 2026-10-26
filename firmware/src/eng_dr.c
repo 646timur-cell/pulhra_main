@@ -580,19 +580,31 @@ static const engine_t ENG_DCYM = {
     .xya = {{40, 40, 0}, {50, 40, 0}},
 };
 
-/* ===================================================================== PERC === */
-/* the analog percussion (Tim: the KIT's sixth machine), MODE one of: TOM (a sine shell swept down BEND, a fifth above it at
- * TONE, skin noise), CONGA (higher, a tighter shell, its partial a minor sixth up), RIM (two high sines, short, driven: the
- * 808's rim shot), BELL (two squares 540 : 800, a band-pass at TONE: the 808's cowbell), CLAVE (one high sine, a click).
- * TUNE moves each mode inside its range, DCAY its decay, NOIS a band-passed noise on the skin, SLAP the attack (a
- * high-passed spike, with the velocity), DRIV the clip; the ninth, BTIM, the bend's time */
-enum { DR_PM_TOM, DR_PM_CONGA, DR_PM_RIM, DR_PM_BELL, DR_PM_CLAVE, DR_PM_N };
-static const char *const N_DR_PMODE[DR_PM_N] = {"TOM", "CONGA", "RIM", "BELL", "CLAVE"};
-static const uint8_t DR_PM_LO[DR_PM_N] = {36, 52, 71, 66, 88};       /* TUNE's range, MIDI notes: lo .. lo + span */
-static const uint8_t DR_PM_SPAN[DR_PM_N] = {36, 30, 18, 18, 12};
-static const uint16_t DR_PM_IV[DR_PM_N] = {112, 130, 340, 109, 282};  /* the second partial above, 1/16 semitone */
-static const uint8_t DR_PM_DLO[DR_PM_N] = {34, 28, 8, 24, 6};        /* DCAY: dr_tau's place lo, span */
-static const uint8_t DR_PM_DSP[DR_PM_N] = {50, 45, 34, 46, 34};
+/* ==================================================================== CONGA === */
+/* the hand drums (Tim, 26.10: PERC split; RIM and the cowbell machines of their own): MODE CONGA, BONGO or TOM, each a sine
+ * shell swept down BEND (BTIM, the ninth, its time) with its partial at TONE's level, skin noise (NOIS), the slap's spike
+ * (SLAP, with the velocity), DRIV. STRK the stroke (lockable: a pattern of them), as a player's: OPEN (the shell rings),
+ * MUTE (the palm on it: short, dull), SLAP (the crack: a snap of noise, the shell a breath), BASS (the heel: an octave
+ * down, a thud). TUNE moves each mode inside its range, DCAY its decay */
+enum { DR_PM_CONGA, DR_PM_BONGO, DR_PM_TOM, DR_PM_N };
+static const char *const N_DR_PMODE[DR_PM_N] = {"CONGA", "BONGO", "TOM"};
+static const uint8_t DR_PM_LO[DR_PM_N] = {50, 62, 36};         /* TUNE's range, MIDI notes: lo .. lo + span */
+static const uint8_t DR_PM_SPAN[DR_PM_N] = {24, 22, 36};
+static const uint16_t DR_PM_IV[DR_PM_N] = {130, 150, 112};     /* the second partial above, 1/16 semitone */
+static const uint8_t DR_PM_DLO[DR_PM_N] = {26, 20, 34};        /* DCAY: dr_tau's place lo, span */
+static const uint8_t DR_PM_DSP[DR_PM_N] = {44, 40, 50};
+enum { DR_ST_OPEN, DR_ST_MUTE, DR_ST_SLAP, DR_ST_BASS, DR_ST_N };
+static const char *const N_DR_STRK[DR_ST_N] = {"OPEN", "MUTE", "SLAP", "BASS"};
+static const struct {
+    int8_t dlo, oct;                                     /* DCAY's place moved, the pitch (1/16 semitone x 16) */
+    uint8_t part, nois, slap, crack;                     /* the partial's level (x/8), the skin noise (x/8), the spike (x/8), a
+                                                          * snap of high noise (0..127) */
+} DR_STRK[DR_ST_N] = {
+    {0, 0, 8, 8, 8, 0},                                  /* OPEN */
+    {-14, 0, 3, 5, 6, 0},                                /* MUTE */
+    {-18, 2, 10, 14, 14, 110},                           /* SLAP */
+    {-6, -12, 2, 3, 3, 0},                               /* BASS */
+};
 static void dperc_start(track_t *t, voice_t *v, const int16_t *e)
 {
     dr_slot_t *S;
@@ -604,51 +616,48 @@ static void dperc_start(track_t *t, voice_t *v, const int16_t *e)
 static void dperc_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
 {
     dr_slot_t *S = dr_slot(t, v);
-    uint32_t md = (uint32_t)clamp(e[0], 0, DR_PM_N - 1);
+    uint32_t md = (uint32_t)clamp(e[0], 0, DR_PM_N - 1), st = (uint32_t)clamp(e[4], 0, DR_ST_N - 1);
     int32_t note = clamp(m->pitch16 - 48 * 16, -48 * 16, 48 * 16);
-    int32_t b16 = (DR_PM_LO[md] << 4) + clamp(e[1], 0, 127) * (DR_PM_SPAN[md] << 4) / 127 + note;
+    int32_t b16 = (DR_PM_LO[md] << 4) + clamp(e[1], 0, 127) * (DR_PM_SPAN[md] << 4) / 127 + note + DR_STRK[st].oct * 16;
     uint32_t inc1 = pitch_inc((uint32_t)clamp(b16, 0, 2047)), inc2 = pitch_inc((uint32_t)clamp(b16 + DR_PM_IV[md], 0, 2047));
-    uint32_t kb = dv_kb(dr_tau(e[2], DR_PM_DLO[md], DR_PM_DSP[md])), kn = dv_k(18000u), ksn = dv_k(1800u);
-    uint32_t ksw = dv_k(dr_tau(e[8], 12, 50));
-    int32_t bend = md <= DR_PM_CONGA ? clamp(e[3], 0, 127) : clamp(e[3], 0, 127) / 4;   /* (up to an octave: TOM, CONGA) */
-    int32_t tone = clamp(e[4], 0, 127), nlev = clamp(e[5], 0, 127) * 200, slap = clamp(e[6], 0, 127) * 2 * v->vel;
-    int32_t drv = clamp(e[7], 0, 127) + (md == DR_PM_RIM ? 40 : 0), lev2 = md == DR_PM_BELL ? 32767 : tone * 200;
-    int32_t ab, db, nz = S->e[0], sw = S->e[1], sn = S->cnt ? S->cnt : (S->n ? 0 : 32767), x1 = S->x1;
-    tsvf_t cn, cb;
+    uint32_t kb = dv_kb(dr_tau(e[2], (uint32_t)clamp(DR_PM_DLO[md] + DR_STRK[st].dlo, 2, 100), DR_PM_DSP[md]));
+    uint32_t kn = dv_k(st == DR_ST_SLAP ? 9000u : 18000u), ksn = dv_k(1800u), kcr = dv_k(6000u), ksw = dv_k(dr_tau(e[8], 12, 50));
+    int32_t bend = clamp(e[3], 0, 127), tone = clamp(e[5], 0, 127), nlev = clamp(e[6], 0, 127) * 25 * DR_STRK[st].nois;
+    int32_t slap = clamp(e[6], 0, 127) * v->vel * DR_STRK[st].slap / 4, crack = DR_STRK[st].crack * 258, drv = clamp(e[7], 0, 127);
+    int32_t lev2 = tone * 25 * DR_STRK[st].part, ab, db, nz = S->e[0], sw = S->e[1];
+    int32_t sn = S->cnt ? S->cnt : (S->n ? 0 : 32767), x1 = S->x1, cr = S->n ? (int32_t)S->ph[2] : 32767;
+    if (!DR_STRK[st].crack)
+        cr = 0;
+    tsvf_t cn, ch;
     uint32_t i;
     S->n = 1;                                             /* (the slap started: once a hit) */
     tsvf_coef(&cn, dr_cut(b16 + (19 << 4)), 40);          /* the skin noise around two octaves and a half up */
-    tsvf_coef(&cb, dr_cut((88 << 4) + tone * (14 << 4) / 127), 70);   /* BELL: 1.3 .. 3 kHz */
+    tsvf_coef(&ch, dr_cut(1840), 30);                     /* SLAP's crack: ~6 kHz */
     if (v->s[6]) {
         kb = dv_kb(DR_CHOKE_US);
-        nz = sn = 0;
+        nz = sn = cr = 0;
     }
     dv_slow(&S->q[0], kb, &ab, &db);
     for (i = 0; i < n; i++) {
-        int32_t z = DR_NOISE(S), x, o1, o2;
+        int32_t z = DR_NOISE(S), x;
         uint32_t ext = (uint32_t)((sw * bend) >> 7);
         S->ph[0] += inc1 + (uint32_t)((inc1 >> 15) * ext);
         S->ph[1] += inc2 + (uint32_t)((inc2 >> 15) * ext);
         sw = (sw * (int32_t)ksw) >> 15;
-        if (md == DR_PM_BELL) {
-            o1 = S->ph[0] < 0x80000000u ? 16000 : -16000;
-            o2 = S->ph[1] < 0x80000000u ? 16000 : -16000;
-            x = clamp(dv_bp(&cb, o1 + o2, &S->f[2]) * 2, -32767, 32767);
-        } else {
-            o1 = sine_i(S->ph[0]);
-            o2 = sine_i(S->ph[1]);
-            x = o1 + ((o2 * lev2) >> 15);
-            x = md == DR_PM_RIM ? x : (x * 3) >> 2;
-        }
-        x = (x * (ab >> 5)) >> 15;
+        x = sine_i(S->ph[0]) + ((sine_i(S->ph[1]) * clamp(lev2, 0, 32767)) >> 15);
+        x = (((x * 3) >> 2) * (ab >> 5)) >> 15;
         ab += db;
         if (nz > 64) {
-            x += (((clamp(dv_bp(&cn, z, &S->f[0]) * 2, -32767, 32767) * nz) >> 15) * nlev) >> 15;
+            x += (((clamp(dv_bp(&cn, z, &S->f[0]) * 2, -32767, 32767) * nz) >> 15) * clamp(nlev, 0, 32767)) >> 15;
             nz = (nz * (int32_t)kn) >> 15;
         }
         if (sn > 64) {
-            x += ((((z - x1) >> 1) * sn >> 15) * slap) >> 15;
+            x += ((((z - x1) >> 1) * sn >> 15) * clamp(slap, 0, 65535)) >> 15;
             sn = (sn * (int32_t)ksn) >> 15;
+        }
+        if (crack && cr > 64) {
+            x += (((clamp(dv_bp(&ch, z, &S->f[2]) * 2, -32767, 32767) * cr) >> 15) * crack) >> 15;
+            cr = (cr * (int32_t)kcr) >> 15;
         }
         x1 = z;
         out[i] += voice_amp(dr_out(x, drv), m, i);
@@ -657,25 +666,28 @@ static void dperc_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
     S->e[1] = sw;
     S->cnt = sn;
     S->x1 = x1;
+    S->ph[2] = (uint32_t)cr;
     v->s[0] = S->q[0];
+    v->s[2] = cr > 64;
 }
 DR_WRAP(dperc)
 #define DR_CAT_PERC "DDDDDD"
 static const preset_t DPERC_PRESETS[] = {
-    /* MODE TUNE DCAY BEND TONE NOIS SLAP DRIV */
-    {"PC TOM LO", {DR_PM_TOM, 30, 70, 50, 40, 30, 40, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
-    {"PC TOM HI", {DR_PM_TOM, 80, 55, 45, 40, 25, 50, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
-    {"PC CONGA", {DR_PM_CONGA, 60, 45, 20, 60, 15, 80, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
-    {"PC RIM", {DR_PM_RIM, 50, 30, 0, 70, 20, 90, 30}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
-    {"PC COWBELL", {DR_PM_BELL, 64, 50, 0, 64, 0, 30, 20}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
-    {"PC CLAVE", {DR_PM_CLAVE, 60, 30, 0, 30, 0, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    /* MODE TUNE DCAY BEND STRK TONE NOIS/SLAP DRIV */
+    {"CG OPEN", {DR_PM_CONGA, 50, 60, 20, DR_ST_OPEN, 60, 50, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"CG SLAP", {DR_PM_CONGA, 60, 60, 20, DR_ST_SLAP, 60, 70, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"BG HI", {DR_PM_BONGO, 80, 50, 25, DR_ST_OPEN, 60, 60, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"BG MUTE", {DR_PM_BONGO, 50, 50, 20, DR_ST_MUTE, 50, 60, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"TOM LO", {DR_PM_TOM, 30, 70, 50, DR_ST_OPEN, 40, 40, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"TOM HI", {DR_PM_TOM, 80, 55, 45, DR_ST_OPEN, 40, 50, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
 };
 static const engine_t ENG_DPERC = {
-    .name = "PERC", .page_title = {"SHELL", "SKIN"}, .presets = DPERC_PRESETS, .npresets = NELEM(DPERC_PRESETS),
-    .note_on = dperc_note_on, .render = dperc_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E3},
+    .name = "CONGA", .page_title = {"SHELL", "STROKE"}, .presets = DPERC_PRESETS, .npresets = NELEM(DPERC_PRESETS),
+    .note_on = dperc_note_on, .render = dperc_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E4},
     .edit = {{"MODE", F_ENUM, 0, DR_PM_N - 1, 0, N_DR_PMODE, 0}, {"TUNE", F_PCT, 0, 127, 64, 0, 0},
-             {"DCAY", F_PCT, 0, 127, 50, 0, 0}, {"BEND", F_PCT, 0, 127, 40, 0, 0}, {"TONE", F_PCT, 0, 127, 50, 0, 0},
-             {"NOIS", F_PCT, 0, 127, 20, 0, 0}, {"SLAP", F_PCT, 0, 127, 50, 0, 0}, {"DRIV", F_PCT, 0, 127, 10, 0, 0}},
+             {"DCAY", F_PCT, 0, 127, 50, 0, 0}, {"BEND", F_PCT, 0, 127, 20, 0, 0},
+             {"STRK", F_ENUM, 0, DR_ST_N - 1, 0, N_DR_STRK, 0}, {"TONE", F_PCT, 0, 127, 50, 0, 0},
+             {"SLAP", F_PCT, 0, 127, 50, 0, 0}, {"DRIV", F_PCT, 0, 127, 0, 0, 0}},
     .e8 = {"BTIM", F_PCT, 0, 127, 40, 0, 0},
     .xyd = {{XY_E(1), XY_E(3), 0}, {XY_E(2), XY_E(6), 0}},
     .xya = {{40, 40, 0}, {40, 40, 0}},
@@ -820,16 +832,336 @@ static const engine_t ENG_DRIM = {
     .xya = {{40, 40, 0}, {40, 40, 0}},
 };
 
+/* =================================================================== SHAKER === */
+/* white noise (Tim: a shaker on white noise) through a state-variable filter at TONE (1.5 .. 12 kHz, RES), its band or its
+ * high-pass (WIDE: narrow .. open); GRN: the noise cut into beads (0 a smooth hiss, up: fewer, harder grains); ATK the
+ * swoosh in (0 .. 40 ms), DCAY its fall (10 .. 150 ms), BITE a click at the strike, DRIV; the ninth, DBL: the shake back,
+ * a second stroke 75 ms later at DBL's level */
+#define DR_SHK_GAP 3307                                   /* (75 ms) */
+static void dshk_start(track_t *t, voice_t *v, const int16_t *e)
+{
+    dr_slot_t *S;
+    dr_start(t, v);
+    S = dr_slot(t, v);
+    S->e[0] = 0;                                          /* (the swoosh from silence) */
+    S->e[1] = 0;
+    S->q[1] = 32767;                                      /* (the click) */
+    v->s[2] = clamp(e[8], 0, 127) > 0;                    /* (DBL: alive till the second stroke) */
+}
+static void dshk_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), grn = clamp(e[3], 0, 127), gm = grn * 258;
+    int32_t wide = clamp(e[5], 0, 127), bite = clamp(e[6], 0, 127) * 2 * (64 + v->vel / 2) / 127, drv = clamp(e[7], 0, 127);
+    int32_t dbl = clamp(e[8], 0, 127), rise = 32767 / (1 + clamp(e[2], 0, 127) * 14), a, d, at = S->e[0], g = S->e[1];
+    int32_t ck = S->q[1], x1 = S->x1, gc = 32767 + grn * 600;   /* (the beads' level made up) */
+    uint32_t kb = dv_kb(dr_tau(e[1], 28, 42)), kg = dv_k(400u), kc = dv_k(1200u), i;
+    uint32_t thr = grn ? (dv_exp2((uint32_t)(4096 * 12 - grn * 4096 * 5 / 127)) >> 16) * 97391u : 0u;   /* (beads a second:
+                                                          ~4000 at 1 .. ~130 at 127; x 2^32 / fs) */
+    tsvf_t c;
+    tsvf_coef(&c, dr_cut((90 << 4) + clamp(e[0], 0, 127) * (37 << 4) / 127 + note), clamp(e[4], 0, 127) * 100 / 127);
+    if (dbl && !S->n && S->cnt >= DR_SHK_GAP) {           /* DBL: the shake back */
+        S->n = 1;
+        S->q[0] = (DR_Q30 >> 7) * dbl;
+        at = 0;
+        v->s[2] = 0;
+    }
+    if (v->s[6]) {
+        kb = dv_kb(DR_CHOKE_US);
+        ck = 0;
+        S->n = 1;
+        v->s[2] = 0;
+    }
+    dv_slow(&S->q[0], kb, &a, &d);
+    for (i = 0; i < n; i++) {
+        int32_t z = DR_NOISE(S), x, bp, lp;
+        if (gm) {                                         /* GRN: beads gate the noise */
+            if ((uint32_t)noise32(&S->rng) < thr)
+                g = 32767;
+            x = (z * (32767 - gm + ((g * gm) >> 15))) >> 15;
+            x = (x * (gc >> 2)) >> 13;
+            g = (g * (int32_t)kg) >> 15;
+        } else {
+            x = z;
+        }
+        {
+            int32_t v3 = x - S->f[1];
+            int32_t v1 = (c.a1 * S->f[0] + c.a2 * v3) >> 13;
+            int32_t v2 = S->f[1] + ((c.a2 * S->f[0] + c.a3 * v3) >> 13);
+            S->f[0] = clamp(2 * v1 - S->f[0], -150000, 150000);
+            S->f[1] = clamp(2 * v2 - S->f[1], -150000, 150000);
+            bp = v1;
+            lp = v2;
+        }
+        x = (((bp * 2) * (127 - wide)) >> 7) + (((x - lp - bp) * wide) >> 7);
+        if (ck > 64) {
+            x += ((((z - x1) >> 1) * ck >> 15) * bite) >> 7;
+            ck = (ck * (int32_t)kc) >> 15;
+        }
+        x1 = z;
+        x = (clamp(x, -65535, 65535) * (((a >> 5) * at) >> 15)) >> 15;
+        at = at + rise > 32767 ? 32767 : at + rise;
+        a += d;
+        out[i] += voice_amp(dr_out(x, drv), m, i);
+    }
+    S->cnt = S->cnt + (int32_t)n < (1 << 30) ? S->cnt + (int32_t)n : S->cnt;
+    S->e[0] = at;
+    S->e[1] = g;
+    S->q[1] = ck;
+    S->x1 = x1;
+    v->s[0] = S->q[0];
+}
+DR_WRAP(dshk)
+#define DR_CAT_SHKR "DDDD"
+static const preset_t DSHK_PRESETS[] = {
+    /* TONE DCAY ATK GRN RES WIDE BITE DRIV */
+    {"SH SHAKER", {70, 40, 30, 20, 20, 60, 20, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"SH CABASA", {95, 30, 8, 50, 30, 90, 50, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"SH MARACA", {60, 25, 15, 75, 40, 40, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"SH EGG", {80, 55, 55, 10, 10, 70, 10, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+};
+static const engine_t ENG_DSHK = {
+    .name = "SHKR", .page_title = {"SHAKE", "GRAIN"}, .presets = DSHK_PRESETS, .npresets = NELEM(DSHK_PRESETS),
+    .note_on = dshk_note_on, .render = dshk_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E3},
+    .edit = {{"TONE", F_PCT, 0, 127, 70, 0, 0}, {"DCAY", F_PCT, 0, 127, 40, 0, 0}, {"ATK", F_PCT, 0, 127, 30, 0, 0},
+             {"GRN", F_PCT, 0, 127, 20, 0, 0}, {"RES", F_PCT, 0, 127, 20, 0, 0}, {"WIDE", F_PCT, 0, 127, 60, 0, 0},
+             {"BITE", F_PCT, 0, 127, 20, 0, 0}, {"DRIV", F_PCT, 0, 127, 0, 0, 0}},
+    .e8 = {"DBL", F_PCT, 0, 127, 0, 0, 0},
+    .xyd = {{XY_E(0), XY_E(3), 0}, {XY_E(1), XY_E(2), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+
+/* ==================================================================== BELLS === */
+/* small bells and tuned metal (Tim, 26.10: «колокольчики»): four sine partials at the MODE's ratios, struck (STRK: a click
+ * of noise), each its own decay: the first DCAY's (30 ms .. 4 s), the others shorter by DAMP; HARD lifts the upper partials
+ * (a hard mallet), SPRD stretches their ratios (inharmonic), SHIM a beating copy of the lower two; DRIV. MODE: TRI (the
+ * triangle), GLOK (glockenspiel), CHIM (a chime), HBEL (a hand bell), AGGO (agogo), CLAV (the clave) */
+enum { DR_BM_TRI, DR_BM_GLOK, DR_BM_CHIM, DR_BM_HBEL, DR_BM_AGGO, DR_BM_CLAV, DR_BM_N };
+static const char *const N_DR_BMODE[DR_BM_N] = {"TRI", "GLOK", "CHIM", "HBEL", "AGGO", "CLAV"};
+static const struct {
+    uint8_t lo, span;                                    /* TUNE's range, MIDI notes */
+    uint16_t r[4];                                       /* the partials' ratios to the first, Q8 */
+    uint8_t lev[4];                                      /* their levels (x/32) */
+    uint8_t dlo, dsp;                                    /* DCAY: dr_tau's place lo, span */
+    uint8_t g;                                           /* the output's gain (x/16): the modes as loud */
+} DR_BEL[DR_BM_N] = {
+    {86, 20, {256, 727, 1283, 1918}, {32, 22, 18, 14}, 50, 50, 4},   /* TRI: a bright, long ring, near-harmonic */
+    {79, 24, {256, 706, 1382, 2286}, {32, 10, 5, 2}, 40, 46, 7},     /* GLOK: a bar's 1 : 2.76 : 5.4 : 8.93 */
+    {72, 24, {256, 594, 1088, 1697}, {32, 20, 12, 8}, 52, 50, 5},    /* CHIM: a tube's 1 : 2.32 : 4.25 : 6.63 */
+    {67, 24, {256, 515, 725, 1037}, {32, 24, 14, 10}, 46, 50, 4},    /* HBEL: a bell's 1 : 2.01 : 2.83 : 4.05 */
+    {68, 18, {256, 595, 1065, 1418}, {32, 18, 10, 6}, 24, 40, 6},    /* AGGO: short, a little clangy */
+    {88, 12, {256, 1015, 1530, 2080}, {32, 6, 3, 2}, 8, 30, 11},      /* CLAV: wood, a very short knock */
+};
+static void dbels_start(track_t *t, voice_t *v, const int16_t *e)
+{
+    dr_slot_t *S;
+    (void)e;
+    dr_start(t, v);
+    S = dr_slot(t, v);
+    S->f[2] = S->f[3] = DR_Q30;                           /* (the upper partials' envelopes, as q[]) */
+}
+static void dbels_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    uint32_t md = (uint32_t)clamp(e[0], 0, DR_BM_N - 1), inc[4], i, k;
+    int32_t note = clamp(m->pitch16 - 48 * 16, -36 * 16, 36 * 16);
+    int32_t b16 = (DR_BEL[md].lo << 4) + clamp(e[1], 0, 127) * (DR_BEL[md].span << 4) / 127 + note;
+    uint32_t inc0 = pitch_inc((uint32_t)clamp(b16, 0, 2047)), tau = dr_tau(e[2], DR_BEL[md].dlo, DR_BEL[md].dsp);
+    int32_t hard = clamp(e[3], 0, 127), damp = clamp(e[4], 0, 127), sprd = clamp(e[5], 0, 127), shim = clamp(e[6], 0, 127);
+    int32_t drv = clamp(e[7], 0, 127), strk = clamp(e[8], 0, 127) * 2 * (64 + v->vel / 2) / 127, lv[4], a[4], d[4];
+    int32_t cs = S->n ? S->e[0] : 32767, x1 = S->x1;
+    uint32_t kd = 256u - (uint32_t)damp * 200u / 127u, kc = dv_k(1000u);   /* (DAMP: the upper partials' tau x 1 .. 0.22, each
+                                                          * step up) */
+    uint32_t kb[4];
+    S->n = 1;
+    for (k = 0; k < 4u; k++) {
+        uint32_t r = DR_BEL[md].r[k];
+        uint64_t ii;
+        if (k)
+            r += (uint32_t)((int32_t)(r - 256u) * (sprd - 40) / 300);   /* SPRD: 40 as designed, up stretches, down squeezes */
+        ii = ((uint64_t)inc0 * r) >> 8;
+        inc[k] = ii > 0x7F000000u ? 0u : (uint32_t)ii;   /* (over Nyquist: silent) */
+        lv[k] = k ? DR_BEL[md].lev[k] * (256 + hard * 14) : 32767;   /* HARD: the uppers x 1/4 .. 2 (60: as designed) */
+        lv[k] = clamp(lv[k], 0, 32767);
+    }
+    kb[0] = dv_kb(tau);
+    kb[1] = dv_kb(tau * kd >> 8);
+    kb[2] = dv_kb((tau * kd >> 8) * kd >> 8);
+    kb[3] = dv_kb(((tau * kd >> 8) * kd >> 8) * kd >> 8);
+    if (v->s[6]) {
+        kb[0] = kb[1] = kb[2] = kb[3] = dv_kb(DR_CHOKE_US);
+        cs = 0;
+    }
+    dv_slow(&S->q[0], kb[0], &a[0], &d[0]);
+    dv_slow(&S->q[1], kb[1], &a[1], &d[1]);
+    dv_slow(&S->f[2], kb[2], &a[2], &d[2]);
+    dv_slow(&S->f[3], kb[3], &a[3], &d[3]);
+    for (i = 0; i < n; i++) {
+        int32_t z = DR_NOISE(S), x = 0;
+        for (k = 0; k < 4u; k++) {
+            x += (((sine_i(S->ph[k]) * lv[k]) >> 15) * (a[k] >> 5)) >> 15;
+            S->ph[k] += inc[k];
+            a[k] += d[k];
+        }
+        if (shim) {                                       /* SHIM: the lower two again, ~3 Hz and ~5 Hz off */
+            x += (((((sine_i(S->ph[4]) + ((sine_i(S->ph[5]) * lv[1]) >> 15)) * shim) >> 7) * (a[1] >> 5)) >> 15) >> 1;
+            S->ph[4] += inc[0] + 292000u;
+            S->ph[5] += inc[1] + 487000u;
+        }
+        if (cs > 64) {
+            x += ((((z - x1) >> 1) * cs >> 15) * strk) >> 8;
+            cs = (cs * (int32_t)kc) >> 15;
+        }
+        x1 = z;
+        out[i] += voice_amp(dr_out((x * DR_BEL[md].g) >> 4, drv), m, i);
+    }
+    S->e[0] = cs;
+    S->x1 = x1;
+    v->s[0] = S->q[0] > S->q[1] ? S->q[0] : S->q[1];
+}
+
+/* ===================================================================== TAMB === */
+/* the tambourine (Tim, 26.10: its states and its sounds): the jingles, noise cut into beads (DENS) through two resonant
+ * band-passes (TONE, RES; the ninth METL their metal: BRAS, STEL brighter, DARK, MINI a small one), and the skin (a sine
+ * thump, SKIN). STAT how it is played (lockable: a pattern of them): HIT (struck: the skin, the jingles at once), SLAP (the
+ * palm: more skin, a crack), SHAK (shaken: the jingles swoosh in and back, no skin), ROLL (the thumb roll: the jingles
+ * re-struck RATE times a second for the decay), TAP (a light tap: the jingles alone, short). DCAY the jingles' ring, DRIV */
+enum { DR_TS_HIT, DR_TS_SLAP, DR_TS_SHAK, DR_TS_ROLL, DR_TS_TAP, DR_TS_N };
+static const char *const N_DR_TSTAT[DR_TS_N] = {"HIT", "SLAP", "SHAK", "ROLL", "TAP"};
+enum { DR_TM_BRAS, DR_TM_STEL, DR_TM_DARK, DR_TM_MINI, DR_TM_N };
+static const char *const N_DR_TMETL[DR_TM_N] = {"BRAS", "STEL", "DARK", "MINI"};
+static const int16_t DR_TM_P16[DR_TM_N][2] = {{1792, 1880}, {1850, 1950}, {1720, 1800}, {1890, 1990}};   /* the bands, p16 */
+static void dtamb_start(track_t *t, voice_t *v, const int16_t *e)
+{
+    dr_slot_t *S;
+    uint32_t st = (uint32_t)clamp(e[0], 0, DR_TS_N - 1);
+    dr_start(t, v);
+    S = dr_slot(t, v);
+    S->e[0] = st == DR_TS_SHAK ? 0 : 32767;               /* (the jingles' rise: SHAK swooshes in) */
+    S->e[1] = st == DR_TS_SHAK || st == DR_TS_TAP ? 0 : 32767;   /* (the skin) */
+    S->ph[1] = 32767;                                     /* (the burst: struck) */
+    S->ph[0] = 0x40000000u;
+    v->s[2] = st == DR_TS_SHAK;                           /* (SHAK: alive till the back stroke) */
+}
+static void dtamb_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    uint32_t st = (uint32_t)clamp(e[0], 0, DR_TS_N - 1), mt = (uint32_t)clamp(e[8], 0, DR_TM_N - 1), i;
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), tone = clamp(e[1], 0, 127) * 3 - 190 + note / 2;
+    int32_t skin = clamp(e[3], 0, 127) * (st == DR_TS_SLAP ? 400 : 258), dens = clamp(e[4], 0, 127);
+    int32_t per = (int32_t)FS / (6 + clamp(e[5], 0, 127) * 24 / 127), reso = clamp(e[6], 0, 127) * 100 / 127;
+    int32_t drv = clamp(e[7], 0, 127) + (st == DR_TS_SLAP ? 30 : 0), a, d, rise = S->e[0], sk = S->e[1];
+    int32_t bu = (int32_t)S->ph[1], g = S->cnt, x1 = S->x1;
+    uint32_t dlo = st == DR_TS_TAP ? 18u : st == DR_TS_ROLL ? 40u : 30u;
+    uint32_t kb = dv_kb(dr_tau(e[2], dlo, 40)), kg = dv_k(250u), ksk = dv_k(st == DR_TS_SLAP ? 25000u : 40000u);
+    uint32_t kbu = dv_k(st == DR_TS_SLAP ? 2500u : 6000u), inc = pitch_inc((uint32_t)clamp(50 * 16 + note, 0, 2047));
+    uint32_t thr = (dv_exp2((uint32_t)(4096 * 9 + dens * 4096 * 4 / 127)) >> 16) * 97391u;   /* (beads ~500 .. 8000 a second) */
+    tsvf_t c1, c2;
+    tsvf_coef(&c1, dr_cut(DR_TM_P16[mt][0] + tone), 40 + reso / 2);
+    tsvf_coef(&c2, dr_cut(DR_TM_P16[mt][1] + tone), 40 + reso / 2);
+    if (st == DR_TS_SHAK && !S->n && (int32_t)S->ph[2] >= 3087) {   /* SHAK: the back stroke, 70 ms on */
+        S->n = 1;
+        S->q[0] = DR_Q30 / 4 * 3;
+        rise = 0;
+        v->s[2] = 0;
+    }
+    if (st == DR_TS_ROLL && (int32_t)S->ph[3] >= per) {   /* ROLL: struck again */
+        S->ph[3] = 0;
+        bu = 22000 + (DR_NOISE(S) >> 3);
+    }
+    if (v->s[6]) {
+        kb = dv_kb(DR_CHOKE_US);
+        sk = bu = 0;
+        v->s[2] = 0;
+    }
+    dv_slow(&S->q[0], kb, &a, &d);
+    for (i = 0; i < n; i++) {
+        int32_t z = DR_NOISE(S), x, j, env;
+        if ((uint32_t)noise32(&S->rng) < thr)            /* a bead (a jingle against the next) */
+            g = 32767;
+        x = (z * (6000 + ((g * 26767) >> 15))) >> 15;
+        g = (g * (int32_t)kg) >> 15;
+        j = clamp(dv_bp(&c1, x, &S->f[0]), -150000, 150000) + clamp(dv_bp(&c2, x, &S->f[2]), -150000, 150000);
+        S->f[0] = clamp(S->f[0], -150000, 150000);
+        S->f[1] = clamp(S->f[1], -150000, 150000);
+        S->f[2] = clamp(S->f[2], -150000, 150000);
+        S->f[3] = clamp(S->f[3], -150000, 150000);
+        env = (((a >> 5) * rise) >> 15) + (st == DR_TS_ROLL ? (bu >> 1) : (bu >> 2));
+        x = (clamp(j >> 1, -65535, 65535) * clamp(env, 0, 32767)) >> 15;
+        if (sk > 64) {                                    /* the skin: a sine thump from ~150 Hz */
+            x += (((sine_i(S->ph[0]) * sk) >> 15) * skin) >> 15;
+            S->ph[0] += inc;
+            sk = (sk * (int32_t)ksk) >> 15;
+        }
+        if (st == DR_TS_SLAP && bu > 64)
+            x += ((((z - x1) >> 1) * bu) >> 15);
+        x1 = z;
+        bu = (bu * (int32_t)kbu) >> 15;
+        rise = rise + 110 > 32767 ? 32767 : rise + 110;   /* (SHAK: in over ~7 ms) */
+        a += d;
+        out[i] += voice_amp(dr_out(x, drv), m, i);
+    }
+    S->ph[1] = (uint32_t)bu;
+    S->ph[2] += n;
+    S->ph[3] += n;
+    S->cnt = g;
+    S->e[0] = rise;
+    S->e[1] = sk;
+    S->x1 = x1;
+    v->s[0] = S->q[0];
+}
+DR_WRAP(dbels)
+DR_WRAP(dtamb)
+#define DR_CAT_BELS "DDDDDD"
+#define DR_CAT_TAMB "DDDDD"
+static const preset_t DBELS_PRESETS[] = {
+    /* MODE TUNE DCAY HARD DAMP SPRD SHIM DRIV */
+    {"BL TRIANGLE", {DR_BM_TRI, 64, 80, 70, 30, 40, 20, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"BL GLOCK", {DR_BM_GLOK, 64, 60, 60, 60, 40, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"BL CHIME", {DR_BM_CHIM, 64, 90, 50, 40, 40, 30, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 10, 30)},
+    {"BL HANDBELL", {DR_BM_HBEL, 64, 80, 60, 40, 40, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"BL AGOGO", {DR_BM_AGGO, 64, 60, 70, 60, 40, 0, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"BL CLAVE", {DR_BM_CLAV, 64, 50, 40, 60, 40, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+};
+static const preset_t DTAMB_PRESETS[] = {
+    /* STAT TONE DCAY SKIN DENS RATE RES DRIV */
+    {"TB HIT", {DR_TS_HIT, 64, 60, 50, 64, 50, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"TB SLAP", {DR_TS_SLAP, 64, 50, 80, 64, 50, 40, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"TB SHAKE", {DR_TS_SHAK, 70, 50, 0, 80, 50, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"TB ROLL", {DR_TS_ROLL, 64, 90, 0, 70, 60, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"TB TAP", {DR_TS_TAP, 80, 40, 0, 50, 50, 50, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+};
+static const engine_t ENG_DBELS = {
+    .name = "BELLS", .page_title = {"BELLS", "PARTS"}, .presets = DBELS_PRESETS, .npresets = NELEM(DBELS_PRESETS),
+    .note_on = dbels_note_on, .render = dbels_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E3},
+    .edit = {{"MODE", F_ENUM, 0, DR_BM_N - 1, 0, N_DR_BMODE, 0}, {"TUNE", F_PCT, 0, 127, 64, 0, 0},
+             {"DCAY", F_PCT, 0, 127, 70, 0, 0}, {"HARD", F_PCT, 0, 127, 60, 0, 0}, {"DAMP", F_PCT, 0, 127, 50, 0, 0},
+             {"SPRD", F_PCT, 0, 127, 40, 0, 0}, {"SHIM", F_PCT, 0, 127, 0, 0, 0}, {"DRIV", F_PCT, 0, 127, 0, 0, 0}},
+    .e8 = {"STRK", F_PCT, 0, 127, 40, 0, 0},
+    .xyd = {{XY_E(1), XY_E(5), 0}, {XY_E(2), XY_E(3), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+static const engine_t ENG_DTAMB = {
+    .name = "TAMB", .page_title = {"TAMB", "JINGLE"}, .presets = DTAMB_PRESETS, .npresets = NELEM(DTAMB_PRESETS),
+    .note_on = dtamb_note_on, .render = dtamb_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E3},
+    .edit = {{"STAT", F_ENUM, 0, DR_TS_N - 1, 0, N_DR_TSTAT, 0}, {"TONE", F_PCT, 0, 127, 64, 0, 0},
+             {"DCAY", F_PCT, 0, 127, 60, 0, 0}, {"SKIN", F_PCT, 0, 127, 50, 0, 0}, {"DENS", F_PCT, 0, 127, 64, 0, 0},
+             {"RATE", F_PCT, 0, 127, 50, 0, 0}, {"RES", F_PCT, 0, 127, 40, 0, 0}, {"DRIV", F_PCT, 0, 127, 0, 0, 0}},
+    .e8 = {"METL", F_ENUM, 0, DR_TM_N - 1, 0, N_DR_TMETL, 0},
+    .xyd = {{XY_E(1), XY_E(4), 0}, {XY_E(2), XY_E(3), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+
 /* ====================================================================== KIT === */
 /* four lanes on one track (T4 only: pulhra/sm_layer.c), each a whole drum machine of the above (Tim): L1 .. L4 its machine
  * (KICK SNARE CLAP HAT CYM), its own nine values (the pattern's sm_pattern_t.lane; in the core dr_lp, set by the sequencer's
  * loads and its parameter commands, pulhra/sm_kit.c), lockable each. A lane is a note: 36 + lane (C2 .. D#2; any other note its
  * lane by note % 4): the sequencer's lanes (sm_seq.c), the keyboard's F3 G3 A3 B3 (keys). A hit chokes only its own lane's last
  * one. Velocity scales it */
-enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_N };
-static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "PERC", "BELL", "RIM"};
+enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_SHKR, DR_KM_BELS, DR_KM_TAMB, DR_KM_N };
+static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB"};
 static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC,
-                                                  &ENG_DBELL, &ENG_DRIM};
+                                                  &ENG_DBELL, &ENG_DRIM, &ENG_DSHK, &ENG_DBELS, &ENG_DTAMB};
 static int16_t dr_lp[NPART][4][9] __attribute__((section(".pool")));   /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's (the pool: RAM keeps its 4 KiB headroom) */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
@@ -876,6 +1208,12 @@ static void dkit_note_on(track_t *t, voice_t *v)
         dbell_start(t, v, e);
     } else if (m == DR_KM_RIM) {
         drim_start(t, v, e);
+    } else if (m == DR_KM_SHKR) {
+        dshk_start(t, v, e);
+    } else if (m == DR_KM_BELS) {
+        dbels_start(t, v, e);
+    } else if (m == DR_KM_TAMB) {
+        dtamb_start(t, v, e);
     } else {
         dcym_start(t, v, e);
     }
@@ -907,6 +1245,12 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dbell_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_RIM)
         drim_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_SHKR)
+        dshk_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_BELS)
+        dbels_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_TAMB)
+        dtamb_run(t, v, b, n, &km, e);
     else
         dcym_run(t, v, b, n, &km, e);
     for (i = 0; i < n; i++) {                             /* the lane's LVL (as a track's LEVEL, 112: 0 dB) and its sends */
