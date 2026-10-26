@@ -8656,13 +8656,13 @@ static void dr_hit(int32_t *L, uint32_t blocks, uint32_t *pk, double *bright, ui
 static int test_drum_machines(void)
 {
     static int32_t L[CTL * 6000];
-    static const uint32_t E[5] = {ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM};
-    static const char *const N[5] = {"KICK", "SNARE", "CLAP", "HAT", "CYM"};
-    double br[5];
-    uint32_t len[5], pk, k, ok = 1, quiet, act;
+    static const uint32_t E[7] = {ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM, ENGI_DBELL, ENGI_DRIM};
+    static const char *const N[7] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "BELL", "RIM"};
+    double br[7];
+    uint32_t len[7], pk, k, ok = 1, quiet, act;
     int bad = 0;
     char w[160];
-    for (k = 0; k < 5u; k++) {
+    for (k = 0; k < 7u; k++) {
         uint32_t b;
         dr_load(E[k]);
         ok &= trk[0].engine == E[k] && eng_rank(E[k]) >= MF_PAGE[3];
@@ -8701,6 +8701,26 @@ static int test_drum_machines(void)
     }
     bad += check("DRUM: KICK the darkest, HAT brighter than SNARE and KICK, CYM brighter than SNARE",
                  br[0] < br[1] && br[0] < br[2] && br[3] > br[1] && br[4] > br[1]);
+    bad += check("DRUM: RIM short (under 150 ms), BELL longer than RIM, CYM rings longest of the metal",
+                 len[6] * 1000u / FS < 150u && len[5] > len[6] && len[4] > len[5] && len[4] > len[3]);
+    {                                                     /* CYM (after the AR): the low band dies first: early bright < late bright */
+        uint32_t pkc, lc, i;
+        double e1 = 0, d1 = 0, e2 = 0, d2 = 0;
+        dr_load(ENGI_DCYM);
+        dr_hit(L, 1200, &pkc, &d1, &lc);
+        d1 = 0;
+        for (i = 1; i < FS / 20u; i++) {
+            e1 += (double)L[i] * L[i];
+            d1 += (double)(L[i] - L[i - 1]) * (L[i] - L[i - 1]);
+        }
+        for (i = FS / 2u; i < FS / 2u + FS / 20u; i++) {
+            e2 += (double)L[i] * L[i];
+            d2 += (double)(L[i] - L[i - 1]) * (L[i] - L[i - 1]);
+        }
+        printf("  CYM: brightness at the strike %.3f, at 0.5 s %.3f\n", d1 / e1, e2 > 0 ? d2 / e2 : 0);
+        bad += check("DRUM: CYM: its three bands: brighter at 0.5 s than at the strike (the clang dies into the sizzle)",
+                     e2 > 0 && d2 / e2 > d1 / e1);
+    }
     {
         uint32_t lc, lo, pkc;
         double bb;
@@ -9662,11 +9682,11 @@ static int test_kit_lane_pages(void)
     ksnd(3)->p[P_E0] = DR_KM_KICK;
     sm_lane_machine(0);
     sm_ui.page = (uint8_t)page_by_name("EDIT 1");
-    turn(EN_SELECT, 10);                                  /* (SELECT past the end: the last, PERC) */
+    turn(EN_SELECT, 10);                                  /* (SELECT past the end: the last, RIM) */
     sm_input_poll();
     draw_full();
-    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to PERC (its values the PERC's)", ksnd(3)->p[P_E0] == DR_KM_PERC &&
-                 cpat()->lane[0][0] == DPERC_PRESETS[0].e[0] && lint_has("PERC", 0, 0));
+    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to RIM (its values the RIM's)", ksnd(3)->p[P_E0] == DR_KM_RIM &&
+                 cpat()->lane[0][0] == DRIM_PRESETS[0].e[0] && cpat()->lane[0][3] == DRIM_PRESETS[0].e[3] && lint_has("RIM", 0, 0));
     layer_hold(B_EDIT);
     while (sm_lay_epage != 3u) {
         press(B_OCTUP);

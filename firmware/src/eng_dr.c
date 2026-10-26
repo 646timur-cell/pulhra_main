@@ -412,9 +412,11 @@ static void dhat_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmo
 }
 
 /* ====================================================================== CYM === */
-/* the metal of HAT on wider ratios (SPRD: closer .. wider; TYPE: CRASH, RIDE: lower and with a bell, CHINA: the squares
- * ring-modulated in pairs: trashy), plus a bell of two sines (BELL), noise (NOIS), high-passed at TONE; a strike (STRK,
- * 12 ms) over the ring (DCAY: 0.2 .. 3 s) */
+/* after the Analog Rhythm's CY (an 808's cymbal under it): the metal of HAT on wider ratios (SPRD: closer .. wider; TYPE:
+ * CRASH, RIDE: lower and with a bell, CHINA: the squares ring-modulated in pairs: trashy), plus a bell of two sines (BELL)
+ * and noise (NOIS), split in three bands each its own decay: the low (a band-pass ~3.4 kHz) short, the middle (~6.8 kHz)
+ * half the ring, the high (a high-pass above it) the whole ring (DCAY: 0.2 .. 3 s): the strike's clang dies into the
+ * sizzle. TONE tilts low .. high, the ninth HP moves the upper split up and takes the low away; a strike (STRK, 12 ms) */
 static const uint32_t DR_CYM_HZ[3][6] = {
     {420, 593, 818, 1030, 1342, 1587},                  /* CRASH */
     {311, 452, 593, 755, 1012, 1215},                   /* RIDE */
@@ -422,25 +424,34 @@ static const uint32_t DR_CYM_HZ[3][6] = {
 };
 enum { DR_CY_CRASH, DR_CY_RIDE, DR_CY_CHINA, DR_CY_N };
 static const char *const N_DR_CTYPE[DR_CY_N] = {"CRSH", "RIDE", "CHNA"};
-static void dcym_start(track_t *t, voice_t *v, const int16_t *e) { (void)e; dr_start(t, v); }
+static void dcym_start(track_t *t, voice_t *v, const int16_t *e)
+{
+    (void)e;
+    dr_start(t, v);
+    dr_slot(t, v)->cnt = 32767;                           /* (the strike) */
+}
 static void dcym_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
 {
     dr_slot_t *S = dr_slot(t, v);
-    uint32_t inc[6], i, ty = (uint32_t)clamp(e[7], 0, DR_CY_N - 1), kb = dv_kb(dr_tau(e[1], 62, 40)), ks = dv_k(12000u);
+    uint32_t inc[6], i, ty = (uint32_t)clamp(e[7], 0, DR_CY_N - 1), tau = dr_tau(e[1], 62, 40), kb = dv_kb(tau);
+    uint32_t klo = dv_k(tau / 6u + 1u), kmid = dv_k(tau / 2u + 1u), ks = dv_k(12000u);
     int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), spread = 128 + clamp(e[3], 0, 127) * 2;
-    int32_t strk = clamp(e[4], 0, 127) * 258, bell = clamp(e[5], 0, 127) * 200, nz = clamp(e[6], 0, 127) * 150;
-    int32_t a, d, st = S->e[0];
+    int32_t tone = clamp(e[2], 0, 127), hp = clamp(e[8], 0, 127), strk = clamp(e[4], 0, 127) * 258;
+    int32_t bell = clamp(e[5], 0, 127) * 200, nz = clamp(e[6], 0, 127) * 150;
+    int32_t wl = ((127 - tone) * 300 * (127 - hp)) / 127, wm = 20000, wh = 12000 + tone * 160;
+    int32_t a, d, st = S->cnt, el = S->e[0], em = S->e[1];
     uint32_t binc = (uint32_t)(((DR_CYM_HZ[ty][0] * 2u * 97392u) >> 8) << 8), binc2 = binc + (binc >> 1) + (binc >> 4);
-    tsvf_t c;
+    tsvf_t cl, cm;
     dr_metal_inc(inc, DR_CYM_HZ[ty], e[0], note, spread);
-    tsvf_coef(&c, dr_cut((88 << 4) + clamp(e[2], 0, 127) * (34 << 4) / 127 + clamp(e[8], 0, 127) * 2), 20);   /* TONE */
+    tsvf_coef(&cl, dr_cut(1674 + note / 2), 50);                   /* the low band: ~3.4 kHz, Q ~1.4 */
+    tsvf_coef(&cm, dr_cut(1866 + note / 2 + hp * 2), 40);          /* the split: ~6.8 kHz (HP: up to ~11 kHz) */
     if (v->s[6]) {
         kb = dv_kb(DR_CHOKE_US);
-        st = 0;
+        st = el = em = 0;
     }
     dv_slow(&S->q[0], kb, &a, &d);
     for (i = 0; i < n; i++) {
-        int32_t x = 0, z = DR_NOISE(S), lp, bp;
+        int32_t x = 0, z = DR_NOISE(S), lo, bp, lpm, hi, y;
         uint32_t k;
         if (ty == DR_CY_CHINA) {                          /* the pairs multiplied: a ring modulator of squares */
             for (k = 0; k < 6u; k += 2u)
@@ -458,22 +469,36 @@ static void dcym_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmo
             S->ph[6] += binc;
             S->ph[7] += binc2;
         }
-        {
+        {                                                 /* the low band */
             int32_t v3 = x - S->f[1];
-            int32_t v1 = (c.a1 * S->f[0] + c.a2 * v3) >> 13;
-            int32_t v2 = S->f[1] + ((c.a2 * S->f[0] + c.a3 * v3) >> 13);
+            int32_t v1 = (cl.a1 * S->f[0] + cl.a2 * v3) >> 13;
+            int32_t v2 = S->f[1] + ((cl.a2 * S->f[0] + cl.a3 * v3) >> 13);
             S->f[0] = clamp(2 * v1 - S->f[0], -150000, 150000);
             S->f[1] = clamp(2 * v2 - S->f[1], -150000, 150000);
-            bp = v1;
-            lp = v2;
+            lo = v1;
         }
-        x = x - lp - (bp >> 2);
-        x = (clamp(x, -65535, 65535) * clamp((a >> 5) + ((st * strk) >> 15), 0, 40000)) >> 15;
+        {                                                 /* the split: its band the middle, its high-pass the high */
+            int32_t v3 = x - S->f[3];
+            int32_t v1 = (cm.a1 * S->f[2] + cm.a2 * v3) >> 13;
+            int32_t v2 = S->f[3] + ((cm.a2 * S->f[2] + cm.a3 * v3) >> 13);
+            S->f[2] = clamp(2 * v1 - S->f[2], -150000, 150000);
+            S->f[3] = clamp(2 * v2 - S->f[3], -150000, 150000);
+            bp = v1;
+            lpm = v2;
+        }
+        hi = x - lpm - ((bp * 6700) >> 12);
+        y = ((((clamp(lo, -65535, 65535) * wl) >> 15) * el) >> 15) + ((((clamp(bp, -65535, 65535) * wm) >> 15) * em) >> 15)
+            + (((clamp(hi, -65535, 65535) * wh) >> 15) * (a >> 5) >> 15);
+        y = (clamp(y * 2, -65535, 65535) * clamp(32767 + ((st * strk) >> 15), 0, 65535)) >> 15;
+        el = (el * (int32_t)klo) >> 15;
+        em = (em * (int32_t)kmid) >> 15;
         st = (st * (int32_t)ks) >> 15;
         a += d;
-        out[i] += voice_amp(dr_out(x, 0), m, i);
+        out[i] += voice_amp(dr_out(y, 0), m, i);
     }
-    S->e[0] = st;
+    S->cnt = st;
+    S->e[0] = el;
+    S->e[1] = em;
     v->s[0] = S->q[0];
 }
 
@@ -656,15 +681,155 @@ static const engine_t ENG_DPERC = {
     .xya = {{40, 40, 0}, {40, 40, 0}},
 };
 
+/* ===================================================================== BELL === */
+/* the cowbell, after the Analog Rhythm's CB (and the 808's under it): two square oscillators (TUNE: 540 Hz +-12 semitones;
+ * DTUN the second's interval, 0 .. 12 semitones, 6.8 the 808's 540 : 800), BAL between them, through a resonant band-pass
+ * (TONE 830 Hz .. 6.6 kHz, RES); the amplitude in two stages: a short loud one (PNCH: how much of the hit, ~6 ms) over the
+ * ring (DCAY 9 ms .. 0.7 s); DRIV the clip; the ninth, SWEP, a pitch drop at the strike */
+static void dbell_start(track_t *t, voice_t *v, const int16_t *e) { (void)e; dr_start(t, v); }
+static void dbell_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16);
+    int32_t b16 = 1161 + clamp(e[0], -64, 63) * 192 / 64 + note, i16 = clamp(e[3], 0, 127) * 192 / 127;
+    uint32_t inc1 = pitch_inc((uint32_t)clamp(b16, 0, 2047)), inc2 = pitch_inc((uint32_t)clamp(b16 + i16, 0, 2047));
+    uint32_t kb = dv_kb(dr_tau(e[1], 30, 60)), kp = dv_k(6000u), ksw = dv_k(9000u), i;
+    int32_t pn = clamp(e[4], 0, 127), tl = 32767 - pn * 150, bal = clamp(e[6], 0, 127), drv = clamp(e[7], 0, 127);
+    int32_t bend = clamp(e[8], 0, 127) / 4, ab, db, fp = S->e[0], sw = S->e[1];
+    tsvf_t c;
+    tsvf_coef(&c, dr_cut((80 << 4) + clamp(e[2], 0, 127) * (32 << 4) / 127), 30 + clamp(e[5], 0, 127) * 90 / 127);
+    if (v->s[6]) {
+        kb = dv_kb(DR_CHOKE_US);
+        fp = 0;
+    }
+    dv_slow(&S->q[0], kb, &ab, &db);
+    for (i = 0; i < n; i++) {
+        uint32_t ext = (uint32_t)((sw * bend) >> 7);
+        int32_t o1 = (S->ph[0] >> 31) ? -16000 : 16000, o2 = (S->ph[1] >> 31) ? -16000 : 16000, x, g;
+        S->ph[0] += inc1 + (uint32_t)((inc1 >> 15) * ext);
+        S->ph[1] += inc2 + (uint32_t)((inc2 >> 15) * ext);
+        sw = (sw * (int32_t)ksw) >> 15;
+        x = (o1 * (127 - bal) + o2 * bal) >> 6;
+        x = clamp(dv_bp(&c, x, &S->f[0]), -150000, 150000);
+        S->f[0] = clamp(S->f[0], -150000, 150000);
+        S->f[1] = clamp(S->f[1], -150000, 150000);
+        g = (((ab >> 5) * tl) >> 15) + ((fp * pn * 258) >> 15);
+        x = (clamp(x * 3 / 2, -65535, 65535) * clamp(g, 0, 32767)) >> 15;
+        fp = (fp * (int32_t)kp) >> 15;
+        ab += db;
+        out[i] += voice_amp(dr_out(x, drv), m, i);
+    }
+    S->e[0] = fp;
+    S->e[1] = sw;
+    v->s[0] = S->q[0];
+}
+
+/* ====================================================================== RIM === */
+/* the rimshot, after the Analog Rhythm's RS: two resonators struck (TUNE: 455 Hz +-12 semitones; DTUN the second's
+ * interval, 12 .. 36 semitones, 22.5 the 808's 455 : 1667, ringing half as long), BAL between them, a click of noise on the
+ * strike (CLIK, 1.5 ms), a noise rattle under the ring (NOIS), all high-passed at TONE (80 Hz .. 2.6 kHz) and driven (DRIV:
+ * the 808's is clipped); DCAY 3 .. 110 ms; the ninth, SWEP, a pitch drop at the strike */
+static void drim_start(track_t *t, voice_t *v, const int16_t *e) { (void)e; dr_start(t, v); }
+static void drim_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16);
+    int32_t b16 = 1117 + clamp(e[0], -64, 63) * 192 / 64 + note, i16 = 192 + clamp(e[3], 0, 127) * 384 / 127;
+    uint32_t inc1 = pitch_inc((uint32_t)clamp(b16, 0, 2047)), inc2 = pitch_inc((uint32_t)clamp(b16 + i16, 0, 2047));
+    uint32_t tau = dr_tau(e[1], 14, 40), kb = dv_kb(tau), kb2 = dv_kb(tau / 2u + 1u), kc = dv_k(1500u), ksw = dv_k(6000u), i;
+    int32_t bal = clamp(e[5], 0, 127), clk = clamp(e[4], 0, 127) * 2 * (64 + v->vel / 2) / 127, nl = clamp(e[6], 0, 127) * 120;
+    int32_t drv = clamp(e[7], 0, 127), bend = clamp(e[8], 0, 127) / 4, a1, d1, a2, d2, cs = S->e[0], sw = S->e[1], x1 = S->x1;
+    tsvf_t c;
+    if (!S->n) {                                          /* (the strike: once a hit) */
+        S->n = 1;
+        S->ph[0] = S->ph[1] = 0x40000000u;                /* (from the peak: the struck resonator's edge) */
+    }
+    tsvf_coef(&c, dr_cut((40 << 4) + clamp(e[2], 0, 127) * (60 << 4) / 127), 20);
+    if (v->s[6]) {
+        kb = kb2 = dv_kb(DR_CHOKE_US);
+        cs = 0;
+    }
+    dv_slow(&S->q[0], kb, &a1, &d1);
+    dv_slow(&S->q[1], kb2, &a2, &d2);
+    for (i = 0; i < n; i++) {
+        uint32_t ext = (uint32_t)((sw * bend) >> 7);
+        int32_t z = DR_NOISE(S), x, hp;
+        S->ph[0] += inc1 + (uint32_t)((inc1 >> 15) * ext);
+        S->ph[1] += inc2 + (uint32_t)((inc2 >> 15) * ext);
+        sw = (sw * (int32_t)ksw) >> 15;
+        x = ((((sine_i(S->ph[0]) * (127 - bal)) >> 7) * (a1 >> 5)) >> 15) + ((((sine_i(S->ph[1]) * bal) >> 7) * (a2 >> 5)) >> 15);
+        x += (((z * nl) >> 15) * (a2 >> 5)) >> 15;
+        if (cs > 64) {
+            x += ((((z - x1) >> 1) * cs >> 15) * clk) >> 8;
+            cs = (cs * (int32_t)kc) >> 15;
+        }
+        x1 = z;
+        {
+            int32_t v3 = x * 2 - S->f[1];
+            int32_t v1 = (c.a1 * S->f[0] + c.a2 * v3) >> 13;
+            int32_t v2 = S->f[1] + ((c.a2 * S->f[0] + c.a3 * v3) >> 13);
+            S->f[0] = clamp(2 * v1 - S->f[0], -150000, 150000);
+            S->f[1] = clamp(2 * v2 - S->f[1], -150000, 150000);
+            hp = x * 2 - v2 - ((v1 * 7000) >> 12);
+        }
+        a1 += d1;
+        a2 += d2;
+        out[i] += voice_amp(dr_out(hp, drv + 20), m, i);
+    }
+    S->e[0] = cs;
+    S->e[1] = sw;
+    S->x1 = x1;
+    v->s[0] = S->q[0];
+}
+DR_WRAP(dbell)
+DR_WRAP(drim)
+#define DR_CAT_BELL "DDDD"
+#define DR_CAT_RIM "DDDD"
+static const preset_t DBELL_PRESETS[] = {
+    /* TUNE DCAY TONE DTUN PNCH RES BAL DRIV */
+    {"CB 808", {0, 60, 79, 72, 70, 50, 64, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"CB SHORT", {6, 30, 85, 72, 100, 70, 64, 30}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 0)},
+    {"CB LOW", {-30, 70, 60, 60, 50, 40, 50, 20}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"CB AGOGO", {20, 50, 95, 100, 40, 90, 80, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+};
+static const preset_t DRIM_PRESETS[] = {
+    /* TUNE DCAY TONE DTUN CLIK BAL NOIS DRIV */
+    {"RS 808", {0, 40, 60, 56, 60, 70, 10, 40}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"RS CLICK", {10, 20, 90, 70, 100, 90, 0, 20}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 0)},
+    {"RS WOOD", {-20, 50, 30, 40, 30, 30, 0, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"RS NOISE", {0, 35, 70, 56, 80, 60, 70, 50}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+};
+static const engine_t ENG_DBELL = {
+    .name = "BELL", .page_title = {"BELL", "COLOR"}, .presets = DBELL_PRESETS, .npresets = NELEM(DBELL_PRESETS),
+    .note_on = dbell_note_on, .render = dbell_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E3},
+    .edit = {{"TUNE", F_INT, -64, 63, 0, 0, 0}, {"DCAY", F_PCT, 0, 127, 60, 0, 0}, {"TONE", F_PCT, 0, 127, 79, 0, 0},
+             {"DTUN", F_PCT, 0, 127, 72, 0, 0}, {"PNCH", F_PCT, 0, 127, 70, 0, 0}, {"RES", F_PCT, 0, 127, 50, 0, 0},
+             {"BAL", F_PCT, 0, 127, 64, 0, 0}, {"DRIV", F_PCT, 0, 127, 10, 0, 0}},
+    .e8 = {"SWEP", F_PCT, 0, 127, 0, 0, 0},
+    .xyd = {{XY_E(2), XY_E(3), 0}, {XY_E(1), XY_E(4), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+static const engine_t ENG_DRIM = {
+    .name = "RIM", .page_title = {"RIM", "CLICK"}, .presets = DRIM_PRESETS, .npresets = NELEM(DRIM_PRESETS),
+    .note_on = drim_note_on, .render = drim_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E4},
+    .edit = {{"TUNE", F_INT, -64, 63, 0, 0, 0}, {"DCAY", F_PCT, 0, 127, 40, 0, 0}, {"TONE", F_PCT, 0, 127, 60, 0, 0},
+             {"DTUN", F_PCT, 0, 127, 56, 0, 0}, {"CLIK", F_PCT, 0, 127, 60, 0, 0}, {"BAL", F_PCT, 0, 127, 70, 0, 0},
+             {"NOIS", F_PCT, 0, 127, 10, 0, 0}, {"DRIV", F_PCT, 0, 127, 40, 0, 0}},
+    .e8 = {"SWEP", F_PCT, 0, 127, 10, 0, 0},
+    .xyd = {{XY_E(0), XY_E(2), 0}, {XY_E(1), XY_E(4), 0}},
+    .xya = {{40, 40, 0}, {40, 40, 0}},
+};
+
 /* ====================================================================== KIT === */
 /* four lanes on one track (T4 only: pulhra/sm_layer.c), each a whole drum machine of the above (Tim): L1 .. L4 its machine
  * (KICK SNARE CLAP HAT CYM), its own nine values (the pattern's sm_pattern_t.lane; in the core dr_lp, set by the sequencer's
  * loads and its parameter commands, pulhra/sm_kit.c), lockable each. A lane is a note: 36 + lane (C2 .. D#2; any other note its
  * lane by note % 4): the sequencer's lanes (sm_seq.c), the keyboard's F3 G3 A3 B3 (keys). A hit chokes only its own lane's last
  * one. Velocity scales it */
-enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_N };
-static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "PERC"};
-static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC};
+enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_N };
+static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "PERC", "BELL", "RIM"};
+static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC,
+                                                  &ENG_DBELL, &ENG_DRIM};
 static int16_t dr_lp[NPART][4][9] __attribute__((section(".pool")));   /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's (the pool: RAM keeps its 4 KiB headroom) */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
@@ -707,6 +872,10 @@ static void dkit_note_on(track_t *t, voice_t *v)
         dhat_start(t, v, e);
     } else if (m == DR_KM_PERC) {
         dperc_start(t, v, e);
+    } else if (m == DR_KM_BELL) {
+        dbell_start(t, v, e);
+    } else if (m == DR_KM_RIM) {
+        drim_start(t, v, e);
     } else {
         dcym_start(t, v, e);
     }
@@ -734,6 +903,10 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dhat_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_PERC)
         dperc_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_BELL)
+        dbell_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_RIM)
+        drim_run(t, v, b, n, &km, e);
     else
         dcym_run(t, v, b, n, &km, e);
     for (i = 0; i < n; i++) {                             /* the lane's LVL (as a track's LEVEL, 112: 0 dB) and its sends */
