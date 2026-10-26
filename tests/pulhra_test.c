@@ -9253,6 +9253,28 @@ static int test_master_dyn(void)
     return bad;
 }
 
+/* SLICE machines, REV at 127 (every window backwards): the slice heard backwards, not silence (it started on the slice's last
+ * sample, outside the read's pair, and the read never moved) */
+static int test_slice_rev(void)
+{
+    static int32_t L[CTL * 400];
+    int bad = 0;
+    uint32_t b, nl = 0, pk = 0;
+    dr_load(ENGI_GLITCH);
+    trk[0].p[P_E4] = 127;
+    trk[0].p[P_SUS] = 127;
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < 400u; b++) {
+        uint32_t a = block_peak(L, &nl);
+        pk = a > pk ? a : pk;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(100);
+    printf("pulhra: SLICE REV peak %u\n", pk);
+    bad += check("SLICE: GLITCH, REV 127: the slice heard backwards (not silent)", pk > 1000u);
+    return bad;
+}
+
 /* the page clipboard (Tim): OCT+ held + REC copies the page in view of the selected track (its steps, their locks), OCT+ held +
  * PLAY pastes it onto the page in view (another track's too); OCT+ held past its window and let go after them: no page turn */
 static int test_page_copy(void)
@@ -11647,6 +11669,7 @@ int main(void)
     bad += test_kit_lane_mix();
     bad += test_redraw();
     bad += test_page_copy();
+    bad += test_slice_rev();
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);

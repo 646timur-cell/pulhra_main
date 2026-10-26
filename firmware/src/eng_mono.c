@@ -80,7 +80,9 @@ static void msaw_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     uint32_t i, b, iu1, iu2, ix1, ix2, isub, ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
     uint32_t px1 = (uint32_t)v->s[0], px2 = (uint32_t)v->s[1], ps1 = (uint32_t)v->s[2], ps2 = (uint32_t)v->s[3];
     int32_t ul = p[P_E0] * 258, xl = p[P_E2] * 258, sx = p[P_E4] * 258, s1 = p[P_E5] * 258, s2 = p[P_E6] * 258;
-    int32_t wc = p[P_E1] * 50 / 127, age = p[P_E3], g, drift = 0, sy = p[P_E8];   /* (SYNC: the ninth, SELECT) */
+    int32_t wc = p[P_E1] * p[P_E1] * 100 / (127 * 127), age = p[P_E3], g, drift = 0, sy = p[P_E8];   /* (UNIW: a square curve, 0 ..
+                                                          +-100 cents (Tim: the width hardly heard; 60 is ~22 as the old linear
+                                                          +-50), fine near 0; SYNC: the ninth, SELECT) */
     uint32_t bs, pm = (uint32_t)v->s[6];
     if (age) {                                           /* AGE: a slow walk of up to +-12 cents on the pairs, a third of
                                                           * it on the saw */

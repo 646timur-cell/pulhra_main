@@ -208,7 +208,7 @@ static void gl_window(gl_slot_t *S, const int16_t *p, int first)
     int32_t wn = S->wn;
     if (!first && S->rep < (p[P_E3] >= 16 ? 0x7FFFFFFF : p[P_E3])) {
         S->rep++;                                        /* the same window again */
-        S->pos = S->step >= 0 ? S->w0 << 16 : (S->w0 + wn - 1) << 16;
+        S->pos = S->step >= 0 ? S->w0 << 16 : (S->w0 + wn - 2) << 16;
         return;
     }
     S->rep = 1;
@@ -222,7 +222,9 @@ static void gl_window(gl_slot_t *S, const int16_t *p, int first)
         S->step = -S->step;
     S->step = p[P_E4] ? S->step : (S->step < 0 ? -S->step : S->step);
     S->chop = gl_roll(S, p[P_E6]);
-    S->pos = S->step >= 0 ? S->w0 << 16 : (S->w0 + wn - 1) << 16;
+    S->pos = S->step >= 0 ? S->w0 << 16 : (S->w0 + wn - 2) << 16;   /* (backwards: from the sample before the last, the
+                                                             interpolation's pair inside the slice: from its last one, REV at 127
+                                                             was silent, the read never moved) */
 }
 
 static void glitch_note_on(track_t *t, voice_t *v)
@@ -306,6 +308,8 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
             }
             s = a + (((b - a) * f) >> 15);
             S->pos += S->step;
+        } else if (ip >= 0 && S->step) {
+            S->pos += S->step;                            /* (at the slice's edge: on, to the window's end) */
         }
         if (S->chop)
             s = 0;
