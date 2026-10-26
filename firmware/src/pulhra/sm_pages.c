@@ -33,7 +33,7 @@ static const sm_page_t SM_PAGES[] = {
     {"AMP", SMFAM_GLO, {P_ATK, P_DEC, P_SUS, P_REL}, P_LEVEL},   /* SELECT: track volume (ESYNC removed) */
     {"MIX", SMFAM_GLO, {P_LEVEL, P_PAN, P_DIST, P_REV}, SM_NOPARAM},
     {"FILTER", SMFAM_ENV, {P_FRES, P_ED_FLT, P_LD_FLT, P_FLT}, P_FCUT},   /* SELECT: CUTOFF, K1 RES, K2 ENV>FLT, K3 LFO>FLT, K4 TYPE */
-    {"F.ENV", SMFAM_ENV, {P_FATK, P_FDEC, P_ED_FLT, SM_NOPARAM}, SM_NOPARAM},
+    {"F.ENV", SMFAM_ENV, {P_FATK, P_FDEC, P_FSUS, P_FREL}, SM_NOPARAM},   /* the ADSR (Tim); its amount: FILTER's ENV>FLT; HYB: SELECT its WIDTH */
     {"LFO", SMFAM_LFO, {P_LWAVE, P_LPHASE, P_LSYNC, P_LTRIG}, P_LRATE},   /* SELECT: RATE, K1 WAVE, K2 PHASE, K3 SYNC, K4 TRIG */
     {"LFO DEST", SMFAM_LFO, {P_LD_PIT, P_LD_FLT, P_LD_SHP, P_LD_AMP}, P_LFADE},
     {"STEP", SMFAM_SEQ, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_NONE},
@@ -148,11 +148,11 @@ static uint32_t sm_page_param(uint32_t k)
         return two ? SM_LP(L, 8u) : P_E0 + L;
     }
     if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {
-        /* the KIT (Tim): each lane its own LVL and sends, the lane in edit's: AMP's K1..K4 LVL CHO DLY REV (the ADSR does nothing
-         * on a hit; SELECT its LVL too), the sends of FX / MIX its own (MIX's K1: the track's LEVEL, all the lanes) */
+        /* the KIT (Tim): each lane its own envelope, LVL and sends, the lane in edit's: AMP's K1..K4 its ATK DEC SUS REL, SELECT
+         * its LVL; the sends of FX / MIX its own (MIX's K1: the track's LEVEL, all the lanes) */
         uint32_t L = sm_kit_lane % 4u;
-        if (pg->id[0] == P_ATK)                           /* (SELECT too: the lane's LVL, Tim; the track's LEVEL is MIX's K1) */
-            return SM_LM(L, k < 4u ? k : 0u);
+        if (pg->id[0] == P_ATK)                           /* (Tim: K1..K4 the lane's ATK DEC SUS REL, SELECT its LVL; the sends: FX) */
+            return k < 4u ? SM_LE(L, k) : SM_LM(L, 0u);
         if (id == P_CHOR)
             return SM_LM(L, 1u);
         if (id == P_DLY)
@@ -171,7 +171,7 @@ static uint32_t sm_page_param(uint32_t k)
             return P_HBASE;
         if (id == P_FRES)
             return P_HRES;
-        if (pg->id[0] == P_FATK && k == 3u)
+        if (pg->id[0] == P_FATK && k == 4u)
             return P_HWIDTH;
     }
     return id;

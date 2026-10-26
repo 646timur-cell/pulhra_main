@@ -201,6 +201,9 @@ typedef struct {
     int32_t e[2];                /* fast envelopes, Q15 per sample */
     int32_t f[4];                /* filter states */
     int32_t rng, cnt, n, x1;     /* noise; CLAP: samples to the next burst, bursts left; a high-pass's last input */
+    int32_t le;                  /* KIT: the lane's envelope (dkit_env), Q24 */
+    uint16_t lg;                 /* .. its gain at the last block's end, Q15 */
+    uint8_t lst;                 /* .. its stage: 1 attack, 2 decay, 3 sustain, 4 release, 5 done (the hit ends) */
 } dr_slot_t;
 ENG_MEM_FITS("DRUM machines", sizeof(dr_slot_t) * NVOICE);
 static dr_slot_t *dr_slot(track_t *t, voice_t *v)
@@ -1165,6 +1168,8 @@ static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_D
 static int16_t dr_lp[NPART][4][9] __attribute__((section(".pool")));   /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's (the pool: RAM keeps its 4 KiB headroom) */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
+static int8_t dr_le[NPART][4][4] = {[0 ... NPART - 1] = {[0 ... 3] = {0, 64, 127, 127}}};   /* ... each lane's envelope: ATK DEC SUS
+                                                             REL (pulhra sm_pattern_t.lenv; these, the defaults: the hit as it is) */
 static int32_t dr_ls[3][CTL] __attribute__((section(".pool")));                             /* the KIT's lanes' sends this block (CHO DLY REV, at the lanes' LVL; fx.c
                                                              mix_part takes them at the track's LEVEL, the track's own sends off) */
 static int32_t dr_kbuf[CTL] __attribute__((section(".pool")));   /* (the pool: RAM keeps its 4 KiB headroom) */
@@ -1218,6 +1223,57 @@ static void dkit_note_on(track_t *t, voice_t *v)
         dcym_start(t, v, e);
     }
     dr_lane_choke = 0;
+    {                                                     /* the lane's envelope: ATK 0 at full at once (the hit's own attack) */
+        dr_slot_t *S = dr_slot(t, v);
+        const int8_t *le = dr_le[(uint32_t)(t - trk) % NPART][L];
+        S->lst = le[0] ? 1u : 2u;
+        S->le = le[0] ? 0 : 1 << 24;
+        S->lg = le[0] ? 0u : 32767u;
+    }
+}
+/* the lane's envelope (Tim: the AMP page of a KIT lane, ATK DEC SUS REL): one step a block (ATK linear, DEC to SUS and REL
+ * exponential, as the track's ADSR); REL past the note's end (its LEN), REL at the top (INF) none: the hit rings out as it is.
+ * At the defaults (ATK 0, SUS 127, REL INF) a gain of 1 throughout: the hit as before. Its gain Q15 at this block's end */
+static uint32_t dkit_env(track_t *t, voice_t *v, uint32_t L)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    const int8_t *le = dr_le[(uint32_t)(t - trk) % NPART][L];
+    int32_t sus = (int32_t)clamp(le[2], 0, 127) * 132104;    /* (127: ~1.0) */
+    if (!v->gate && S->lst < 4u && le[3] < 127)
+        S->lst = 4;
+    if (S->lst == 1u) {
+        S->le += (int32_t)ENV_LIN[le[0] & 127];
+        if (S->le >= (1 << 24)) {
+            S->le = 1 << 24;
+            S->lst = 2;
+        }
+    } else if (S->lst == 2u) {
+        S->le -= mulq16(S->le - sus, ENV_EXP[le[1] & 127]);
+        if (S->le - sus < (1 << 10)) {
+            S->le = sus;
+            S->lst = 3;
+        }
+    } else if (S->lst == 4u) {
+        S->le -= mulq16(S->le, ENV_EXP[le[3] & 127]);
+        if (S->le < (1 << 10))
+            S->le = 0;
+    }
+    if (S->lst != 1u && S->le < (1 << 10)) {           /* (decayed to SUS 0, or released: the hit is over) */
+        S->le = 0;
+        S->lst = 5;
+    }
+    return (uint32_t)(S->le >= (1 << 24) ? 32767 : S->le >> 9);
+}
+/* the KIT's amplitude: dr_amp, and a lane whose envelope is over ends its hit */
+static int32_t dkit_amp(track_t *t, voice_t *v, int32_t adsr)
+{
+    if (v->active && dr_slot(t, v)->lst == 5u) {
+        v->active = v->gate = 0;
+        v->stage = 0;
+        v->env = 0;
+        return 0;
+    }
+    return dr_amp(t, v, adsr);
 }
 static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
@@ -1227,7 +1283,7 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     int32_t *b = dr_kbuf, lv = LEVEL_Q12[clamp(lm[0], 0, 127)], sc = clamp(lm[1], 0, 127) * 258, sd = clamp(lm[2], 0, 127) * 258;
     int32_t sr = clamp(lm[3], 0, 127) * 258;
     vmod_t km = *m;
-    uint32_t i;
+    uint32_t i, g0 = dr_slot(t, v)->lg, g1;
     km.pitch16 = 48 * 16;                                 /* (each lane at its machine's own TUNE: C3) */
     for (i = 0; i < n; i++)
         b[i] = 0;
@@ -1253,6 +1309,15 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dtamb_run(t, v, b, n, &km, e);
     else
         dcym_run(t, v, b, n, &km, e);
+    g1 = dkit_env(t, v, L);
+    dr_slot(t, v)->lg = (uint16_t)g1;
+    if (g0 != 32767u || g1 != 32767u) {                   /* the envelope, ramped across the block (no step on the block's edge) */
+        int32_t g = (int32_t)g0 << 8, d = (((int32_t)g1 - (int32_t)g0) << 8) / (int32_t)(n ? n : 1u);
+        for (i = 0; i < n; i++) {
+            g += d;
+            b[i] = ((clamp(b[i], -131071, 131071) >> 2) * (g >> 8)) >> 13;   /* (< 2^30) */
+        }
+    }
     for (i = 0; i < n; i++) {                             /* the lane's LVL (as a track's LEVEL, 112: 0 dB) and its sends */
         int32_t x = (clamp(b[i], -131071, 131071) * lv) >> 12;
         out[i] += x;
@@ -1281,7 +1346,7 @@ static const preset_t DKIT_PRESETS[] = {
 static const engine_t ENG_DKIT = {
     .name = "DRUM", .page_title = {"LANES", "SOUNDS"}, .presets = DKIT_PRESETS, .npresets = NELEM(DKIT_PRESETS),
     .note_on = dkit_note_on, .render = dkit_render, .keys = dkit_keys,
-    .mem = sizeof(dr_slot_t) * NVOICE, .amp = dr_amp, .oneshot = 1, .poly = 6,
+    .mem = sizeof(dr_slot_t) * NVOICE, .amp = dkit_amp, .oneshot = 1, .poly = 6,
     .knob = {P_E0, P_E1, P_E2, P_E3},
     .edit = {{"L1", F_ENUM, 0, DR_KM_N - 1, DR_KM_KICK, N_DR_KMACH, 0}, {"L2", F_ENUM, 0, DR_KM_N - 1, DR_KM_SNARE, N_DR_KMACH, 0},
              {"L3", F_ENUM, 0, DR_KM_N - 1, DR_KM_HAT, N_DR_KMACH, 0}, {"L4", F_ENUM, 0, DR_KM_N - 1, DR_KM_CLAP, N_DR_KMACH, 0},

@@ -254,7 +254,8 @@ static void sm_turn(uint32_t id, int32_t s)
 static void sm_filt_auto(uint32_t id)
 {
     sm_sound_t *sd = sm_ui_sound();
-    if (sd->p[P_FLT] || (id != P_FCUT && id != P_FRES && id != P_ED_FLT && id != P_FATK && id != P_FDEC && id != P_LD_FLT))
+    if (sd->p[P_FLT] || (id != P_FCUT && id != P_FRES && id != P_ED_FLT && id != P_FATK && id != P_FDEC && id != P_FSUS && id != P_FREL &&
+                          id != P_LD_FLT))
         return;
     sd->p[P_FLT] = 1;
     sm_param_push(sm_ui.trk % SM_NTRK, P_FLT);
@@ -858,7 +859,7 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
  * levels are x4; CLOCK's tempo 1.0 BPM a detent (K1 and SELECT). Without SHIFT: the detents as they are */
 static int32_t sm_range_mult(const param_desc_t *d)
 {
-    if (!d || d->fmt == F_ENUM || d->names || d->max - d->min < 64)
+    if (!d || d->fmt == F_ENUM || (d->names && d->fmt != F_TIME) || d->max - d->min < 64)
         return 1;
     return d->max - d->min >= 256 ? 8 : 4;
 }

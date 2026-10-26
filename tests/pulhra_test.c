@@ -924,11 +924,12 @@ static int test_knob_writes_model_and_core(void)
     in_reset();
     press(B_ENV);
     sm_input_poll();
-    press(B_ENV);                                         /* F.ENV: the fourth knob has no parameter */
+    press(B_ENV);                                         /* F.ENV: SELECT has no parameter (FILT not HYB) */
     sm_input_poll();
     {
-        sm_sound_t before = *ksnd(0);
-        turn(EN_K4, 5);
+        sm_sound_t before;
+        ksnd(0)->p[P_FLT] = 1;
+        before = *ksnd(0);
         turn(EN_SELECT, 5);
         sm_input_poll();
         bad += check("INPUT: a knob without a parameter (0xFF) changes nothing", !memcmp(&before, ksnd(0), sizeof before));
@@ -1006,12 +1007,14 @@ static int test_filter_play(void)
                  trk[1].p[P_FLT] == 5 && trk[1].p[P_HBASE] == ksnd(1)->p[P_HBASE] && trk[1].p[P_HRES] == ksnd(1)->p[P_HRES] &&
                  ksnd(1)->p[P_HBASE] >= 100 && ksnd(1)->p[P_HRES] > 90 && ksnd(1)->p[P_FCUT] == TP[P_FCUT].def &&
                  ksnd(1)->p[P_FRES] == TP[P_FRES].def && (b1 > 1.5 * b0 || b1 < 0.67 * b0));
-    {                                                     /* F.ENV's K4: WIDTH under HYB, nothing otherwise */
+    {                                                     /* F.ENV: K1..K4 the ADSR; SELECT WIDTH under HYB, nothing otherwise */
         uint32_t w;
         sm_ui.page = (uint8_t)page_by_name("F.ENV");
-        w = sm_page_param(3);
+        w = sm_page_param(4);
         ksnd(sm_ui.trk)->p[P_FLT] = 1;
-        bad += check("FILTER: F.ENV K4 is HYBRID's WIDTH under HYB, none under LP", w == P_HWIDTH && sm_page_param(3) == SM_NOPARAM);
+        bad += check("FILTER: F.ENV K1..K4 ATK DEC SUS REL, SELECT HYBRID's WIDTH under HYB, none under LP",
+                     w == P_HWIDTH && sm_page_param(4) == SM_NOPARAM && sm_page_param(0) == P_FATK &&
+                     sm_page_param(1) == P_FDEC && sm_page_param(2) == P_FSUS && sm_page_param(3) == P_FREL);
     }
     return bad;
 }
@@ -3187,10 +3190,11 @@ static int test_lock_long_hold(void)
     sm_input_poll();
     bad += check("FIX1: held past SM_HOLD_US, let go without a turn: trig and lock intact",
                  cpat()->step[0][3].n == 1u && lk_val(0, 3, P_FCUT) == 33);
-    sm_ui.page = (uint8_t)page_by_name("F.ENV");          /* K4 has no parameter there */
+    sm_ui.page = (uint8_t)page_by_name("F.ENV");          /* SELECT has no parameter there (FILT not HYB) */
+    ksnd(0)->p[P_FLT] = 1;
     key_dn(WHITE[3]);
     sm_input_poll();
-    turn(EN_K4, 2);
+    turn(EN_SELECT, 2);
     sm_input_poll();
     key_up(WHITE[3]);
     sm_input_poll();
@@ -9524,6 +9528,51 @@ static void save_tap(void)
     btn_up(B_SAVE);
     sm_input_poll();
 }
+/* F.ENV as a full ADSR (Tim): SUS held while the note is, REL after it; SUS and REL 0: the decay to 0, the note's end ignored */
+static int test_fenv_adsr(void)
+{
+    int bad = 0;
+    uint32_t b;
+    track_t *t = &trk[0];
+    voice_t *v;
+    int32_t held, rel1, rel2;
+    sm_core_init();
+    t->p[P_FATK] = 0;
+    t->p[P_FDEC] = 20;
+    t->p[P_FSUS] = 64;
+    t->p[P_FREL] = 40;
+    trk_note_on(t, 60, 100);
+    for (b = 0; b < 400u; b++)
+        block_peak(0, 0);
+    v = &t->v[0];
+    held = v->fenv;
+    bad += check("F.ENV: SUS 64 held while the note is (stage 3, ~half)", v->fstage == 3u && held > (7 << 20) && held < (9 << 20));
+    trk_note_off(t, 60);
+    for (b = 0; b < 3u; b++)
+        block_peak(0, 0);
+    rel1 = v->fenv;
+    for (b = 0; b < 20u; b++)
+        block_peak(0, 0);
+    rel2 = v->fenv;
+    bad += check("F.ENV: REL after the note's end (stage 4), falling", v->fstage == 4u && rel1 < held && rel2 < rel1 && rel2 > 0);
+    trk_all_off(t);
+    for (b = 0; b < 2000u; b++)
+        block_peak(0, 0);
+    t->p[P_FSUS] = 0;
+    t->p[P_FREL] = 0;
+    t->p[P_FDEC] = 127;
+    trk_note_on(t, 60, 100);
+    for (b = 0; b < 3u; b++)
+        block_peak(0, 0);
+    v = &t->v[0];
+    trk_note_off(t, 60);
+    for (b = 0; b < 3u; b++)
+        block_peak(0, 0);
+    bad += check("F.ENV: SUS REL 0: the decay runs on past the note's end (as before)", v->fstage == 2u && v->fenv > (1 << 23));
+    trk_all_off(t);
+    return bad;
+}
+
 static int test_preset_page(void)
 {
     int bad = 0;
@@ -9705,27 +9754,27 @@ static int test_kit_lane_mix(void)
     play_blocks(4);
     sm_kit_lane = 1;
     sm_ui.page = (uint8_t)page_by_name("AMP");
-    bad += check("LMIX: KIT, AMP: K1..K4 the lane's LVL CHO DLY REV, SELECT its LVL too",
-                 sm_page_param(0) == SM_LM(1, 0) && sm_page_param(3) == SM_LM(1, 3) && sm_page_param(4) == SM_LM(1, 0));
+    bad += check("LMIX: KIT, AMP: K1..K4 the lane's ATK DEC SUS REL, SELECT its LVL",
+                 sm_page_param(0) == SM_LE(1, 0) && sm_page_param(3) == SM_LE(1, 3) && sm_page_param(4) == SM_LM(1, 0));
     {
         int8_t l0 = cpat()->lmix[0][0], l2 = cpat()->lmix[2][0], t0 = ksnd(3)->p[P_LEVEL];
         turn(EN_SELECT, -10);
         sm_input_poll();
-        turn(EN_K1, -5);
+        turn(EN_SELECT, -5);
         sm_input_poll();
         play_blocks(2);
-        bad += check("LMIX: ... SELECT -10, K1 -5: L2's LVL alone down 15 (L1, L3, the track's LEVEL kept), on the core",
+        bad += check("LMIX: ... SELECT -15: L2's LVL alone down 15 (L1, L3, the track's LEVEL kept), on the core",
                      cpat()->lmix[1][0] == 112 - 15 && dr_lm[3][1][0] == 112 - 15 && cpat()->lmix[0][0] == l0 && cpat()->lmix[2][0] == l2 &&
                      ksnd(3)->p[P_LEVEL] == t0 && dr_lm[3][0][0] == l0);
     }
-    turn(EN_K4, 20);
-    sm_input_poll();
-    play_blocks(2);
-    bad += check("LMIX: ... K4 +20: L2's REV 20, in the pattern and the core", cpat()->lmix[1][3] == 20 && dr_lm[3][1][3] == 20 &&
-                 cpat()->lmix[0][3] == 0);
     sm_ui.page = (uint8_t)page_by_name("FX");
     bad += check("LMIX: ... FX: CHO DLY REV the lane's", sm_page_param(1) == SM_LM(1, 1) && sm_page_param(3) == SM_LM(1, 3) &&
                  sm_page_param(0) == P_DIST);
+    turn(EN_K4, 20);
+    sm_input_poll();
+    play_blocks(2);
+    bad += check("LMIX: ... FX K4 +20: L2's REV 20, in the pattern and the core", cpat()->lmix[1][3] == 20 && dr_lm[3][1][3] == 20 &&
+                 cpat()->lmix[0][3] == 0);
     draw_full();
     bad += check("LMIX: ... drawn, REV 20 (no fault)", lint_has("REV", 0, 0));
     {                                                     /* L2 alone hit: its REV send reaches the reverb's bus */
@@ -9889,7 +9938,114 @@ static int test_kit_lane_mix(void)
     bank_reboot();
     bad += check("LMIX: a version 3 bank loads: its trigs and lanes where they were, the lanes' mix the defaults",
                  smp.pat[0].step[2][40].n && smp.pat[1].step[0][63].n && smp.pat[1].lane[2][0] == 33 &&
-                 smp.pat[1].lmix[2][0] == 112 && smp.pat[7].lmix[3][3] == 0 && smp.pat[3].lflt[1][0] == 0 && smp.pat[3].lflt[1][1] == 127);
+                 smp.pat[1].lmix[2][0] == 112 && smp.pat[7].lmix[3][3] == 0 && smp.pat[3].lflt[1][0] == 0 && smp.pat[3].lflt[1][1] == 127 &&
+                 smp.pat[1].lenv[2][2] == 127 && smp.pat[1].lenv[0][1] == 64 && smp.pat[6].lenv[3][3] == 127);
+    /* a version 5 bank: the patterns 3852 bytes each, no lanes' envelopes */
+    nor_wipe();
+    in_reset();
+    host_ticks = 1000u;
+    smp.pat[1].lflt[2][1] = 50;
+    smp.pat[1].lenv[2][2] = 10;
+    bad += check("LENV: saved (version 6)", sm_bank_save(0) == 0);
+    for (sl = 0; sl < SM_FL_NSLOT; sl++) {
+        memcpy(&hd, nor + sm_slot_addr(sl), sizeof hd);
+        if (hd.magic == SM_BMAGIC && hd.bank == 0u) {
+            uint8_t *d = nor + sm_slot_addr(sl) + SM_FL_DATA;
+            for (i = 0; i < SM_BPAT; i++)
+                memmove(d + i * SM_PAT5_BYTES, d + i * sizeof(sm_pattern_t), SM_PAT5_BYTES);
+            hd.version = SM_BANK_VER5;
+            hd.size = SM_BPAT * SM_PAT5_BYTES;
+            hd.crc = st_crc32(d, hd.size);
+            hd.hcrc = st_crc32(&hd, sizeof hd - 4u);
+            memcpy(nor + sm_slot_addr(sl), &hd, sizeof hd);
+        }
+    }
+    bank_reboot();
+    bad += check("LENV: a version 5 bank loads: its lanes' filters kept, the envelopes the defaults",
+                 smp.pat[1].lflt[2][1] == 50 && smp.pat[1].lenv[2][2] == 127 && smp.pat[1].lenv[2][0] == 0 && smp.pat[5].lenv[1][3] == 127);
+    return bad;
+}
+
+/* the KIT's lanes' envelopes (Tim: AMP on a KIT, the lane in edit's ATK DEC SUS REL): the defaults the hit as it is; SUS 0 and a
+ * short DEC cut it short; REL (not INF) after the note's end; ATK a slow rise */
+static double kit_hit_energy(uint32_t L, uint32_t hold, uint32_t blocks, uint32_t *first)
+{
+    uint32_t b, i;
+    double e = 0;
+    trk_note_on(&trk[3], DR_KIT_NOTE + L, 120);
+    for (b = 0; b < blocks; b++) {
+        int32_t buf[CTL];
+        uint32_t nl = 0;
+        if (b == hold)
+            trk_note_off(&trk[3], DR_KIT_NOTE + L);
+        block_peak(buf, &nl);
+        seq_clock += CTL;
+        for (i = 0; i < CTL; i++) {
+            double x = (double)buf[i];
+            e += x * x;
+            if (first && b == 0 && i < 8u)
+                *first += (uint32_t)(x < 0 ? -x : x);
+        }
+    }
+    trk_all_off(&trk[3]);
+    play_blocks(600);
+    return e;
+}
+static int test_kit_lane_env(void)
+{
+    int bad = 0;
+    double e0, e1, e2, e3, e4;
+    uint32_t f0 = 0, f1 = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    sm_kit_lane = 2;                                      /* L3: HAT (KIT 808) */
+    sm_ui.page = (uint8_t)page_by_name("AMP");
+    bad += check("LENV: AMP on the KIT: the lane's ATK DEC SUS REL, defaults 0 64 127 INF (drawn)",
+                 sm_page_param(2) == SM_LE(2, 2) && cpat()->lenv[2][0] == 0 && cpat()->lenv[2][1] == 64 &&
+                 cpat()->lenv[2][2] == 127 && cpat()->lenv[2][3] == 127 && dr_le[3][2][2] == 127);
+    draw_full();
+    bad += check("LENV: ... REL shows INF", lint_has("INF", 0, 0));
+    e0 = kit_hit_energy(2, 2, 300, &f0);
+    turn(EN_K3, -127);                                    /* SUS 0 */
+    sm_input_poll();
+    turn(EN_K2, -40);                                     /* DEC 24 */
+    sm_input_poll();
+    play_blocks(2);
+    e1 = kit_hit_energy(2, 2, 300, 0);
+    bad += check("LENV: SUS 0, DEC 24: on the core, the hit cut short (less than half its energy)",
+                 dr_le[3][2][2] == 0 && dr_le[3][2][1] == 24 && cpat()->lenv[2][1] == 24 && e1 > 0 && e1 * 2 < e0);
+    turn(EN_K3, 127);                                     /* SUS 127 */
+    sm_input_poll();
+    turn(EN_K4, -110);                                    /* REL 17: short */
+    sm_input_poll();
+    play_blocks(2);
+    e2 = kit_hit_energy(2, 2, 300, 0);
+    e3 = kit_hit_energy(2, 60, 300, 0);
+    bad += check("LENV: REL 17 after the note's end: a short note cut short, a long one longer", e2 * 2 < e0 && e3 > e2 * 1.5);
+    turn(EN_K4, 127);                                     /* REL INF */
+    sm_input_poll();
+    turn(EN_K1, 60);                                      /* ATK 60 */
+    sm_input_poll();
+    play_blocks(2);
+    e4 = kit_hit_energy(2, 2, 300, &f1);
+    bad += check("LENV: ATK 60: the hit's start soft (its first samples quieter)", f1 * 4 < f0 + 4u && e4 > 0);
+    turn(EN_K1, -127);
+    turn(EN_K2, 127);
+    sm_input_poll();
+    sm_input_poll();
+    {
+        uint32_t L;
+        for (L = 0; L < 4u; L++) {
+            dr_le[3][L][0] = 0; dr_le[3][L][1] = 64; dr_le[3][L][2] = 127; dr_le[3][L][3] = 127;
+            cpat()->lenv[L][0] = 0; cpat()->lenv[L][1] = 64; cpat()->lenv[L][2] = 127; cpat()->lenv[L][3] = 127;
+        }
+    }
     return bad;
 }
 
@@ -12024,6 +12180,8 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_kit_lane_env();
+    bad += test_fenv_adsr();
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);

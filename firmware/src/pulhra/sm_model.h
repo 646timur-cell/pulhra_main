@@ -93,6 +93,8 @@ typedef struct {
                                                              a version 3 bank loads with the defaults, sm_bank.c) */
     int8_t lflt[4][3];                                    /* ... and each lane's filter (Tim): FILT (OFF LP BP HP NOTCH), CUT, RES (bank
                                                              version 5; an older bank loads with them off) */
+    int8_t lenv[4][4];                                    /* ... and each lane's amplitude envelope (Tim): ATK DEC SUS REL (bank version
+                                                             6; an older bank loads with the defaults: the hit as it is) */
 } sm_pattern_t;
 
 /* the pattern change (smp.mode, the project's, as MONOFM's): SEQUENTIAL at the end of the pattern playing (its master length),

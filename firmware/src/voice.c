@@ -598,6 +598,9 @@ static int32_t env_tick(track_t *t, voice_t *v)
 static int32_t fenv_tick(const track_t *t, voice_t *v)
 {
     const int16_t *p = t->p;
+    int32_t sus = (int32_t)(p[P_FSUS] & 127) * 132104;         /* SUS 0..127 -> Q24 (127: ~full) */
+    if (!v->gate && v->fstage && v->fstage < 4u && (p[P_FSUS] || p[P_FREL]))
+        v->fstage = 4;                                      /* released (SUS and REL 0: the decay runs on, as before) */
     if (v->fstage == 1u) {
         v->fenv += (int32_t)ENV_LIN[p[P_FATK] & 127];
         if (v->fenv >= (1 << 24)) {
@@ -605,7 +608,13 @@ static int32_t fenv_tick(const track_t *t, voice_t *v)
             v->fstage = 2;
         }
     } else if (v->fstage == 2u) {
-        v->fenv -= mulq16(v->fenv, ENV_EXP[p[P_FDEC] & 127]);
+        v->fenv -= mulq16(v->fenv - sus, ENV_EXP[p[P_FDEC] & 127]);
+        if (v->fenv - sus < (1 << 10)) {
+            v->fenv = sus;
+            v->fstage = sus ? 3u : 0u;                      /* 3: the sustain, held to the note's end */
+        }
+    } else if (v->fstage == 4u) {                           /* REL (0: DEC's rate) down to 0 */
+        v->fenv -= mulq16(v->fenv, ENV_EXP[(p[P_FREL] ? p[P_FREL] : p[P_FDEC]) & 127]);
         if (v->fenv < (1 << 10)) {
             v->fenv = 0;
             v->fstage = 0;

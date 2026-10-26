@@ -82,7 +82,9 @@ static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy 
     return 0x97000u + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;
 }
 
+#if !FELUCCA_SWAMP
 static uint8_t st_buf[ST_PAYLOAD_MAX] __attribute__((aligned(4), section(".pool")));   /* (main loop only) */
+#endif
 
 static int st_head(uint32_t obj, uint32_t copy, st_hdr_t *h)   /* commit record valid: 0 */
 {
@@ -96,12 +98,29 @@ static int st_head(uint32_t obj, uint32_t copy, st_hdr_t *h)   /* commit record 
     return 0;
 }
 
+#if FELUCCA_SWAMP
+/* PULHRA reads the settings only, once at boot, and writes no object here: no st_buf (3.75 KiB of the pool, the KIT lanes'
+ * envelopes), the payload's CRC checked in small pieces, the winner read into dst (st_load) */
+static int st_body(uint32_t obj, uint32_t copy, const st_hdr_t *h)   /* payload CRC ok: 0 */
+{
+    uint8_t b[64];
+    uint32_t off, c = 0xFFFFFFFFu, base = st_sector(obj, copy) + ST_PAYLOAD_OFF;
+    for (off = 0; off < h->len; off += sizeof b) {
+        uint32_t n = h->len - off > sizeof b ? (uint32_t)sizeof b : h->len - off;
+        if (st_read(base + off, b, n))
+            return -1;
+        c = st_crc32_add(c, b, n);
+    }
+    return ~c == h->crc ? 0 : -1;
+}
+#else
 static int st_body(uint32_t obj, uint32_t copy, const st_hdr_t *h)   /* payload -> st_buf, CRC ok: 0 */
 {
     if (st_read(st_sector(obj, copy) + ST_PAYLOAD_OFF, st_buf, h->len) || st_crc32(st_buf, h->len) != h->crc)
         return -1;
     return 0;
 }
+#endif
 
 /* the current copy: the newest valid sequence (A on a tie), -1 when
  * neither is valid. Headers first, so only the winner's payload is read (it
@@ -129,6 +148,18 @@ static int st_current(uint32_t obj, st_hdr_t *h)
 }
 
 /* load the whole object into dst; returns its length, or -1 if it does not fit */
+#if FELUCCA_SWAMP
+static int st_load(uint32_t obj, void *dst, uint32_t max)
+{
+    st_hdr_t h;
+    int c;
+    if (obj >= OBJ_COUNT || (c = st_current(obj, &h)) < 0 || h.len > max ||
+        st_read(st_sector(obj, (uint32_t)c) + ST_PAYLOAD_OFF, dst, h.len))
+        return -1;
+    return (int)h.len;
+}
+#define ST_STAGE(src, len) ((const uint8_t *)(src))  /* (st_save_to: the source as it is, a RAM one: the tests' only) */
+#else
 static int st_load(uint32_t obj, void *dst, uint32_t max)
 {
     uint32_t i;
@@ -139,6 +170,14 @@ static int st_load(uint32_t obj, void *dst, uint32_t max)
         ((uint8_t *)dst)[i] = st_buf[i];
     return (int)h.len;
 }
+static const uint8_t *ST_STAGE(const void *src, uint32_t len)
+{
+    uint32_t off;
+    for (off = 0; off < len; off++)
+        st_buf[off] = ((const uint8_t *)src)[off];    /* the driver wants RAM sources */
+    return st_buf;
+}
+#endif
 
 /* save into copy `to` (0 A, 1 B; -1: the one that is not the current copy, as st_save) */
 static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
@@ -146,6 +185,7 @@ static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
     uint32_t seq, base, off;
     int cur, rc;
     st_hdr_t h;
+    const uint8_t *buf;
     if (obj >= OBJ_COUNT || len > ST_PAYLOAD_MAX || to > 1)
         return -1;
     cur = st_current(obj, &h);
@@ -153,13 +193,12 @@ static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
     if (to < 0)
         to = cur == 0 ? 1 : 0;                        /* write the other copy */
     base = st_sector(obj, (uint32_t)to);
-    for (off = 0; off < len; off++)
-        st_buf[off] = ((const uint8_t *)src)[off];    /* the driver wants RAM sources */
+    buf = ST_STAGE(src, len);
     if ((rc = st_erase(base)) != 0)
         return rc;
     for (off = 0; off < len; off += 256u) {
         uint32_t n = len - off > 256u ? 256u : len - off;
-        if ((rc = st_prog(base + ST_PAYLOAD_OFF + off, st_buf + off, n)) != 0)
+        if ((rc = st_prog(base + ST_PAYLOAD_OFF + off, buf + off, n)) != 0)
             return rc;
     }
     h.magic = ST_MAGIC;
@@ -167,7 +206,7 @@ static int st_save_to(uint32_t obj, const void *src, uint32_t len, int to)
     h.slot = (uint16_t)to;
     h.seq = seq + 1u;
     h.len = len;
-    h.crc = st_crc32(st_buf, len);
+    h.crc = st_crc32(buf, len);
     h.rsv[0] = h.rsv[1] = 0xFFFFFFFFu;
     h.hcrc = st_crc32(&h, sizeof h - 4u);
     if ((rc = st_prog(base, &h, sizeof h)) != 0)       /* the commit record, last */

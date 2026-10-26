@@ -182,6 +182,9 @@ static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-",
 #define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
 #define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
 
+#if FELUCCA_MONOFM
+static const char *const N_FREL[] = {"DEC", 0};   /* F.ENV's REL 0 (F_TIME with a name: its 0's) */
+#endif
 static const param_desc_t TP[P_COUNT] = {
     [P_LEVEL] = PD("LVL", F_DB, 0, 127, 104),
     [P_ATK] = PD("ATK", F_TIME, 0, 127, 10),
@@ -289,7 +292,8 @@ static const param_desc_t TP[P_COUNT] = {
     [P_DLCUT] = PD("LCUT", F_PCT, 0, 127, 0),
     [P_DOUT] = PD("OUT", F_BIPCT, -64, 63, 0),
     [P_LN6] = PD("-", F_INT, 0, 0, 0),
-    [P_LN7] = PD("-", F_INT, 0, 0, 0),
+    [P_FSUS] = PD("SUS", F_PCT, 0, 127, 0),
+    [P_FREL] = {"REL", F_TIME, 0, 127, 0, N_FREL, 0},   /* 0: "DEC", the decay's rate (as before) */
 #endif
     [P_LSYNC] = PE("SYNC", N_LSYNC, 0),
     [P_LTRIG] = PE("TRIG", N_LTRIG, 0),
@@ -534,7 +538,12 @@ static void param_format(const param_desc_t *d, int32_t v, char *val, const char
         *unit = "%";
         break;
     case F_TIME: {
-        uint32_t ms10 = TIME_MS_X10[v & 127];
+        uint32_t ms10;
+        if (d->names && ((!v && d->names[0]) || (v == d->max && d->names[1]))) {   /* a name at 0 or at the top */
+            str_cpy(val, v ? d->names[1] : d->names[0], 6);
+            break;
+        }
+        ms10 = TIME_MS_X10[v & 127];
         if (ms10 < 100u) {
             fmt_fix(val, (int32_t)ms10, 1);
             *unit = "ms";

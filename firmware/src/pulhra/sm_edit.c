@@ -176,7 +176,8 @@ static void sm_clear_lane(uint32_t L)
         if (q == SM_LOCK_DEAD || SM_TS_T(p->lock[i].ts) != t)
             continue;
         if ((sm_is_lp(q) && (q - SM_LP0) / 9u == L) || (sm_is_lm(q) && (q - SM_LM0) / 4u == L) ||
-            (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L))
+            (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L) ||
+            (sm_is_le(q) && (q - SM_LE0) / 4u == L))
             p->lock[i].param = SM_LOCK_DEAD;
     }
     if (!sm_playing)
@@ -265,6 +266,7 @@ static void sm_copy_trk(uint32_t t)
     memcpy(sm_clip.lane, p->lane, sizeof sm_clip.lane);  /* (a KIT's lanes go with T4's sound) */
     memcpy(sm_clip.lmix, p->lmix, sizeof sm_clip.lmix);
     memcpy(sm_clip.lflt, p->lflt, sizeof sm_clip.lflt);
+    memcpy(sm_clip.lenv, p->lenv, sizeof sm_clip.lenv);
     sm_clip_kind = SM_CLIP_TRK;
 }
 
@@ -282,6 +284,7 @@ static void sm_paste_trk(uint32_t t)
         memcpy(smp.pat[smp.cur % SM_NPAT].lane, sm_clip.lane, sizeof sm_clip.lane);   /* brings them) */
         memcpy(smp.pat[smp.cur % SM_NPAT].lmix, sm_clip.lmix, sizeof sm_clip.lmix);
         memcpy(smp.pat[smp.cur % SM_NPAT].lflt, sm_clip.lflt, sizeof sm_clip.lflt);
+        memcpy(smp.pat[smp.cur % SM_NPAT].lenv, sm_clip.lenv, sizeof sm_clip.lenv);
     }
     sm_acc_reset(1u << t);
 }

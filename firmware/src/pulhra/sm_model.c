@@ -69,7 +69,9 @@ static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
 #define SM_LC0 (SM_LF0 + 12u)                             /* a lane's trig condition (Tim): only a lock (a KIT step's lane L,
                                                              SM_LC(L)); no base, no core value (sm_desc_core: none) */
 #define SM_LC(L) (SM_LC0 + (uint32_t)(L))
-#define SM_NPID (SM_LC0 + 4u)                            /* every id a lock, a command, a push may carry */
+#define SM_LE0 (SM_LC0 + 4u)                              /* the lanes' envelope (Tim): lane L's ATK DEC SUS REL, SM_LE(L, j) */
+#define SM_LE(L, j) (SM_LE0 + (uint32_t)(L) * 4u + (uint32_t)(j))
+#define SM_NPID (SM_LE0 + 16u)                           /* every id a lock, a command, a push may carry */
 #define SM_LF(L, j) (SM_LF0 + (uint32_t)(L) * 3u + (uint32_t)(j))
 #define SM_LP(L, k) (SM_LP0 + (uint32_t)(L) * 9u + (uint32_t)(k))
 #define SM_LM(L, j) (SM_LM0 + (uint32_t)(L) * 4u + (uint32_t)(j))
@@ -77,12 +79,18 @@ _Static_assert(SM_NPID < 0xFFu, "a parameter id is a byte (0xFF: a removed lock)
 static int sm_is_lp(uint32_t id) { return id >= SM_LP0 && id < SM_LM0; }
 static int sm_is_lm(uint32_t id) { return id >= SM_LM0 && id < SM_LF0; }
 static int sm_is_lf(uint32_t id) { return id >= SM_LF0 && id < SM_LC0; }
+static int sm_is_le(uint32_t id) { return id >= SM_LE0 && id < SM_LE0 + 16u; }
 static const char *const SM_LFN[5] = {"OFF", "LP", "BP", "HP", "NOTCH"};
 static const param_desc_t SM_LFD[3] = {                   /* (the track's FILT CUT RES, a lane's; no HYB) */
     {"FILT", F_ENUM, 0, 4, 0, SM_LFN, 0}, {"CUT", F_CUTOFF, 0, 127, 127, 0, 0}, {"RES", F_PCT, 0, 127, 0, 0, 0},
 };
 static const param_desc_t SM_LMD[4] = {                   /* (the track's LEVEL and sends, a lane's) */
     {"LVL", F_DB, 0, 127, 112, 0, 0}, {"CHO", F_PCT, 0, 127, 0, 0, 0}, {"DLY", F_PCT, 0, 127, 0, 0, 0}, {"REV", F_PCT, 0, 127, 0, 0, 0},
+};
+static const char *const SM_LRELN[2] = {0, "INF"};     /* (REL at the top: none, the hit rings out as it is) */
+static const param_desc_t SM_LED[4] = {                   /* (the track's ADSR, a lane's: the defaults the hit as it is) */
+    {"ATK", F_TIME, 0, 127, 0, 0, 0}, {"DEC", F_TIME, 0, 127, 64, 0, 0}, {"SUS", F_PCT, 0, 127, 127, 0, 0},
+    {"REL", F_TIME, 0, 127, 127, SM_LRELN, 0},
 };
 /* the value of id on track t of pattern pt: a lane's, else the sound's */
 static int32_t sm_pget(const sm_pattern_t *pt, uint32_t t, uint32_t id)
@@ -93,6 +101,8 @@ static int32_t sm_pget(const sm_pattern_t *pt, uint32_t t, uint32_t id)
         return pt->lmix[(id - SM_LM0) / 4u][(id - SM_LM0) % 4u];
     if (sm_is_lf(id))
         return pt->lflt[(id - SM_LF0) / 3u][(id - SM_LF0) % 3u];
+    if (sm_is_le(id))
+        return pt->lenv[(id - SM_LE0) / 4u][(id - SM_LE0) % 4u];
     return id < P_COUNT ? pt->kit.snd[t % SM_NTRK].p[id] : 0;
 }
 static void sm_pset(sm_pattern_t *pt, uint32_t t, uint32_t id, int32_t v)
@@ -103,6 +113,8 @@ static void sm_pset(sm_pattern_t *pt, uint32_t t, uint32_t id, int32_t v)
         pt->lmix[(id - SM_LM0) / 4u][(id - SM_LM0) % 4u] = (int8_t)v;
     else if (sm_is_lf(id))
         pt->lflt[(id - SM_LF0) / 3u][(id - SM_LF0) % 3u] = (int8_t)v;
+    else if (sm_is_le(id))
+        pt->lenv[(id - SM_LE0) / 4u][(id - SM_LE0) % 4u] = (int8_t)v;
     else if (id < P_COUNT)
         pt->kit.snd[t % SM_NTRK].p[id] = (int8_t)v;
 }
@@ -116,6 +128,8 @@ static const param_desc_t *sm_desc_trk(const sm_sound_t *s, uint32_t id)
         return sm_snd_kit(s) ? &SM_LMD[(id - SM_LM0) % 4u] : 0;
     if (sm_is_lf(id))
         return sm_snd_kit(s) ? &SM_LFD[(id - SM_LF0) % 3u] : 0;
+    if (sm_is_le(id))
+        return sm_snd_kit(s) ? &SM_LED[(id - SM_LE0) % 4u] : 0;
     if (id >= P_IA && id <= P_IC)
         return ins_desc(s->p[P_ITYPE], id - P_IA);
     return sm_desc_safe(sm_engine_of(s->machine), id);
@@ -129,6 +143,8 @@ static const param_desc_t *sm_desc_core(uint32_t t, uint32_t id)
         return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? &SM_LMD[(id - SM_LM0) % 4u] : 0;
     if (sm_is_lf(id))
         return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? &SM_LFD[(id - SM_LF0) % 3u] : 0;
+    if (sm_is_le(id))
+        return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? &SM_LED[(id - SM_LE0) % 4u] : 0;
     return sm_desc_safe(eng_idx(trk[t % SM_NTRK].eng_req), id);
 }
 
@@ -423,6 +439,13 @@ static void sm_lflt_default(sm_pattern_t *p)             /* the lanes' filters: 
         for (j = 0; j < 3u; j++)
             p->lflt[L][j] = (int8_t)SM_LFD[j].def;
 }
+static void sm_lenv_default(sm_pattern_t *p)             /* the lanes' envelopes: the hit as it is */
+{
+    uint32_t L, j;
+    for (L = 0; L < 4u; L++)
+        for (j = 0; j < 4u; j++)
+            p->lenv[L][j] = (int8_t)SM_LED[j].def;
+}
 static void sm_lanes_default(sm_pattern_t *p)
 {
     const sm_sound_t *s = &p->kit.snd[SM_KIT_TRK];
@@ -434,6 +457,7 @@ static void sm_lanes_default(sm_pattern_t *p)
             dr_lane_init(p->lane[L], (uint32_t)ENG_DKIT.edit[L].def, 0);
     sm_lmix_default(p);
     sm_lflt_default(p);
+    sm_lenv_default(p);
 }
 static void sm_pat_blank(sm_pattern_t *p, const sm_kit_t *k)
 {
