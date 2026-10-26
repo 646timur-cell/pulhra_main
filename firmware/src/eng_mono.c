@@ -814,15 +814,15 @@ static void mnoise_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
 
 /* ================================================================== presets === */
 /* name, {E1 .. E8}, {A D S R}, fenv, mono, FX(dist, chorus, delay, reverb); categories a letter a preset (category.c) */
-#define MONO_CAT_MSAW "BLPLBLL"
+#define MONO_CAT_MSAW "BLPLBLL"                 /* (UNIW on its square curve since 26.10: the values keep the old widths) */
 static const preset_t MSAW_PRESETS[] = {
-    {"SUPER SAW", {110, 60, 90, 20, 0, 0, 0, 0}, {0, 64, 127, 40}, 0, 1, FX(0, 20, 20, 40)},
-    {"SAW LEAD", {50, 30, 0, 10, 0, 40, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(10, 0, 30, 30)},
-    {"HOOVER", {127, 110, 127, 60, 90, 60, 0, 0}, {10, 64, 127, 60}, 0, 1, FX(20, 30, 20, 50)},
-    {"WIDE PAD", {90, 40, 70, 70, 0, 50, 20, 0}, {90, 64, 127, 110}, 0, 0, FX(0, 40, 30, 110)},
+    {"SUPER SAW", {110, 62, 90, 20, 0, 0, 0, 0}, {0, 64, 127, 40}, 0, 1, FX(0, 20, 20, 40)},
+    {"SAW LEAD", {50, 44, 0, 10, 0, 40, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(10, 0, 30, 30)},
+    {"HOOVER", {127, 84, 127, 60, 90, 60, 0, 0}, {10, 64, 127, 60}, 0, 1, FX(20, 30, 20, 50)},
+    {"WIDE PAD", {90, 50, 70, 70, 0, 50, 20, 0}, {90, 64, 127, 110}, 0, 0, FX(0, 40, 30, 110)},
     {"SUB SAW", {0, 0, 0, 0, 80, 110, 60, 0}, {0, 64, 127, 20}, 0, 1, FX(10, 0, 0, 10)},
-    {"OLD SYNTH", {70, 20, 30, 110, 40, 0, 0, 0}, {5, 64, 127, 50}, 0, 1, FX(0, 20, 20, 50)},
-    {"SYNC LEAD", {40, 25, 0, 15, 0, 50, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(15, 0, 30, 30)},   /* (SYNC 80: mf_preset_e8) */
+    {"OLD SYNTH", {70, 36, 30, 110, 40, 0, 0, 0}, {5, 64, 127, 50}, 0, 1, FX(0, 20, 20, 50)},
+    {"SYNC LEAD", {40, 40, 0, 15, 0, 50, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(15, 0, 30, 30)},   /* (SYNC 80: mf_preset_e8) */
 };
 #define MONO_CAT_MPULSE "BLLPBK"
 static const preset_t MPULSE_PRESETS[] = {
