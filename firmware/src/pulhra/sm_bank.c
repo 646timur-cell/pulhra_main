@@ -65,6 +65,8 @@ static uint32_t sm_pat_bytes(uint32_t ver) { return ver == SM_BANK_VER3 ? SM_PAT
 #define SM_SAVE_HOLD_US 800000u                           /* SEQ + F#5 held this long: SAVE */
 #define SM_GLO_HOLD_US 800000u                            /* GLO + a pattern key held this long: save the current into it */
 
+static void sm_up_boot(void);                             /* the user sounds (sm_upre.c): power-on, and the SAVE at STOP */
+static void sm_up_poll(void);
 typedef struct {
     uint32_t magic;
     uint16_t version;
@@ -444,6 +446,7 @@ static void sm_store_boot(void)
     memset(sm_fs_bank, SM_BANK_NONE, sizeof sm_fs_bank);
     memset(sm_fs_top, SM_BANK_NONE, sizeof sm_fs_top);
     memset(sm_fp_ok, 0, sizeof sm_fp_ok);
+    sm_up_boot();                                         /* (the user sounds' index: sm_upre.c) */
     for (i = 0; flash_ok && i < SM_FL_NSLOT; i++) {
         if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || (hd.version != SM_BANK_VER && hd.version != SM_BANK_VER4 && hd.version != SM_BANK_VER3) || hd.bank >= SM_NBANK ||
             hd.size != SM_BPAT * sm_pat_bytes(hd.version) || sm_flash_crc(sm_slot_addr(i) + SM_FL_DATA, hd.size) != hd.crc)
@@ -718,6 +721,7 @@ static void sm_bank_poll(uint32_t now)
         sm_as_t0 = now;                                   /* (the quiet counts while stopped) */
         return;
     }
+    sm_up_poll();                                         /* (a user sound's SAVE that waited for STOP) */
     if (sm_save_pend) {
         sm_save_pend = 0;
         sm_msg_show(sm_store_all() ? SM_MSG_FLASH : SM_MSG_SAVED);

@@ -134,7 +134,7 @@ static const param_desc_t *sm_desc_core(uint32_t t, uint32_t id)
 
 /* the INSERT TYPEs a track offers, in the order of the knob: OFF CRUSH PHASR FLANG CHOR (fx.c IT_*, the values stored). The
  * drives (SOFT HARD FOLD FUZZ) are DIST's own on a track; the master inserts of stage 4 offer all of them */
-static const uint8_t SM_ITYPES[5] = {IT_OFF, IT_CRUSH, IT_PHASER, IT_FLANGER, IT_CHORUS};
+static const uint8_t SM_ITYPES[8] = {IT_OFF, IT_CRUSH, IT_PHASER, IT_FLANGER, IT_CHORUS, IT_SHIMMER, IT_TREMOLO, IT_RING};
 
 /* value v of parameter id (descriptor d) turned by s detents, in its range. INSERT TYPE walks SM_ITYPES only (a value not in the
  * list, from an older kit, turns from the first listed one above it) */
@@ -163,6 +163,120 @@ static void sm_ens_semi(sm_sound_t *s)
     for (i = 0; i < 3u; i++)
         if (s->p[P_E0 + i] > 24)
             s->p[P_E0 + i] = JI_SEMI[(s->p[P_E0 + i] - 25) & 3];
+}
+/* (26.10, the review's stage 5) the factory sounds' levels brought together: each sound's loudest 200 ms (held 4 s at C3, velocity
+ * 100) against -18.5 dBFS, the track's LEVEL moved by the difference (0.5 dB a step from its 104; a short hit's boost at most
+ * 6 dB, any at most +8 / -6 dB; under 1.5 dB: none). The SLICE kits (stage 4) and the DRUM page's are not in it */
+static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
+    {ENGI_MSAW, 1, 3},   /* SAW 1: -19.8 dBFS */
+    {ENGI_MSAW, 2, 4},   /* SAW 2: -20.7 dBFS */
+    {ENGI_MSAW, 4, 3},   /* SAW 4: -19.8 dBFS */
+    {ENGI_MSAW, 6, 5},   /* SAW 6: -20.9 dBFS */
+    {ENGI_MPULSE, 2, 10},   /* PULSE 2: -23.5 dBFS */
+    {ENGI_MPULSE, 3, -3},   /* PULSE 3: -16.8 dBFS */
+    {ENGI_MPULSE, 5, 12},   /* PULSE 5: -30.6 dBFS */
+    {ENGI_MENS, 0, 3},   /* ENS 0: -19.8 dBFS */
+    {ENGI_MENS, 2, 13},   /* ENS 2: -25.0 dBFS */
+    {ENGI_MENS, 4, 3},   /* ENS 4: -20.0 dBFS */
+    {ENGI_MSID, 1, -6},   /* SID 1: -15.7 dBFS */
+    {ENGI_MSID, 2, 3},   /* SID 2: -19.8 dBFS */
+    {ENGI_MSID, 3, 12},   /* SID 3: -37.5 dBFS */
+    {ENGI_MSID, 5, -3},   /* SID 5: -17.2 dBFS */
+    {ENGI_MWAVE, 0, 11},   /* WAVE 0: -24.2 dBFS */
+    {ENGI_MWAVE, 1, 15},   /* WAVE 1: -26.0 dBFS */
+    {ENGI_MWAVE, 2, 5},   /* WAVE 2: -21.1 dBFS */
+    {ENGI_MWAVE, 3, -3},   /* WAVE 3: -17.2 dBFS */
+    {ENGI_MWAVE, 5, 7},   /* WAVE 5: -21.8 dBFS */
+    {ENGI_MDDRAW, 0, 14},   /* DDRAW 0: -25.3 dBFS */
+    {ENGI_MDDRAW, 2, 8},   /* DDRAW 2: -22.4 dBFS */
+    {ENGI_MDDRAW, 3, 7},   /* DDRAW 3: -21.8 dBFS */
+    {ENGI_MBBOX, 3, -5},   /* BBOX 3: -16.2 dBFS */
+    {ENGI_MBBOX, 4, -3},   /* BBOX 4: -16.9 dBFS */
+    {ENGI_MFMST, 0, 8},   /* FM-ST 0: -22.4 dBFS */
+    {ENGI_MFMST, 2, 9},   /* FM-ST 2: -23.0 dBFS */
+    {ENGI_MFMST, 3, -3},   /* FM-ST 3: -17.1 dBFS */
+    {ENGI_MFMPAR, 1, 13},   /* FM-PAR 1: -25.2 dBFS */
+    {ENGI_MFMPAR, 3, 9},   /* FM-PAR 3: -22.9 dBFS */
+    {ENGI_MFMDYN, 0, 12},   /* FM-DYN 0: -37.5 dBFS */
+    {ENGI_MFMDYN, 3, 12},   /* FM-DYN 3: -28.6 dBFS */
+    {ENGI_MVO, 0, 4},   /* VO-6 0: -20.3 dBFS */
+    {ENGI_MVO, 2, 3},   /* VO-6 2: -20.2 dBFS */
+    {ENGI_MSINE, 2, 6},   /* SINE 2: -21.7 dBFS */
+    {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
+    {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
+    {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */
+    {ENGI_STRING, 1, -9},   /* STRING 1: -14.0 dBFS */
+    {ENGI_STRING, 2, -5},   /* STRING 2: -15.8 dBFS */
+    {ENGI_STRING, 3, 12},   /* STRING 3: -30.5 dBFS */
+    {ENGI_STRING, 4, 12},   /* STRING 4: -24.7 dBFS */
+    {ENGI_STRING, 5, 13},   /* STRING 5: -25.0 dBFS */
+    {ENGI_STRING, 6, -8},   /* STRING 6: -14.4 dBFS */
+    {ENGI_STRING, 7, 16},   /* STRING 7: -26.7 dBFS */
+    {ENGI_STRING, 8, -9},   /* STRING 8: -14.2 dBFS */
+    {ENGI_STRING, 9, -7},   /* STRING 9: -15.0 dBFS */
+    {ENGI_STRING, 10, 12},   /* STRING 10: -31.4 dBFS */
+    {ENGI_STRING, 11, 8},   /* STRING 11: -22.5 dBFS */
+    {ENGI_MODAL, 0, 12},   /* MODAL 0: -28.1 dBFS */
+    {ENGI_MODAL, 2, -6},   /* MODAL 2: -15.5 dBFS */
+    {ENGI_MODAL, 3, -5},   /* MODAL 3: -16.1 dBFS */
+    {ENGI_MODAL, 4, -6},   /* MODAL 4: -15.3 dBFS */
+    {ENGI_MODAL, 5, 6},   /* MODAL 5: -21.7 dBFS */
+    {ENGI_MODAL, 6, -6},   /* MODAL 6: -15.5 dBFS */
+    {ENGI_MODAL, 8, -4},   /* MODAL 8: -16.4 dBFS */
+    {ENGI_MODAL, 9, -4},   /* MODAL 9: -16.5 dBFS */
+    {ENGI_MODAL, 11, -3},   /* MODAL 11: -16.8 dBFS */
+    {ENGI_BLOW, 1, -6},   /* BLOW 1: -15.7 dBFS */
+    {ENGI_BLOW, 2, -4},   /* BLOW 2: -16.7 dBFS */
+    {ENGI_BLOW, 3, -5},   /* BLOW 3: -16.2 dBFS */
+    {ENGI_BLOW, 4, -5},   /* BLOW 4: -16.1 dBFS */
+    {ENGI_BLOW, 6, -7},   /* BLOW 6: -15.0 dBFS */
+    {ENGI_BLOW, 9, -4},   /* BLOW 9: -16.6 dBFS */
+    {ENGI_RESO, 0, 4},   /* RESO 0: -20.6 dBFS */
+    {ENGI_RESO, 1, 9},   /* RESO 1: -23.1 dBFS */
+    {ENGI_RESO, 3, -7},   /* RESO 3: -15.2 dBFS */
+    {ENGI_RESO, 4, 7},   /* RESO 4: -21.9 dBFS */
+    {ENGI_RESO, 5, -7},   /* RESO 5: -14.9 dBFS */
+    {ENGI_RESO, 6, -5},   /* RESO 6: -15.8 dBFS */
+    {ENGI_RESO, 7, -3},   /* RESO 7: -17.2 dBFS */
+    {ENGI_RESO, 8, 12},   /* RESO 8: -40.3 dBFS */
+    {ENGI_RESO, 9, -4},   /* RESO 9: -16.5 dBFS */
+    {ENGI_JUNK, 0, 12},   /* JUNK 0: -29.1 dBFS */
+    {ENGI_JUNK, 1, 12},   /* JUNK 1: -38.9 dBFS */
+    {ENGI_JUNK, 3, 3},   /* JUNK 3: -19.8 dBFS */
+    {ENGI_JUNK, 5, -5},   /* JUNK 5: -16.1 dBFS */
+    {ENGI_JUNK, 6, -3},   /* JUNK 6: -16.9 dBFS */
+    {ENGI_JUNK, 7, -5},   /* JUNK 7: -16.0 dBFS */
+    {ENGI_JUNK, 9, -7},   /* JUNK 9: -15.1 dBFS */
+    {ENGI_LYRA, 0, -3},   /* LYRA 0: -16.8 dBFS */
+    {ENGI_LYRA, 1, -3},   /* LYRA 1: -17.1 dBFS */
+    {ENGI_LYRA, 8, 3},   /* LYRA 8: -20.0 dBFS */
+    {ENGI_LYRA, 9, -3},   /* LYRA 9: -16.9 dBFS */
+    {ENGI_LYRA, 10, 9},   /* LYRA 10: -23.2 dBFS */
+    {ENGI_CHAOS, 1, 6},   /* CHAOS 1: -21.5 dBFS */
+    {ENGI_CHAOS, 3, 3},   /* CHAOS 3: -19.8 dBFS */
+    {ENGI_CHAOS, 4, 4},   /* CHAOS 4: -20.5 dBFS */
+    {ENGI_CHAOS, 5, 5},   /* CHAOS 5: -20.8 dBFS */
+    {ENGI_CHAOS, 8, 6},   /* CHAOS 8: -21.7 dBFS */
+    {ENGI_CHAOS, 9, 15},   /* CHAOS 9: -26.0 dBFS */
+    {ENGI_CHAOS, 10, 3},   /* CHAOS 10: -19.8 dBFS */
+    {ENGI_DRIFT, 1, 3},   /* DRIFT 1: -19.9 dBFS */
+    {ENGI_DRIFT, 2, 10},   /* DRIFT 2: -23.5 dBFS */
+    {ENGI_DRIFT, 3, 7},   /* DRIFT 3: -21.8 dBFS */
+    {ENGI_DRIFT, 4, -5},   /* DRIFT 4: -16.1 dBFS */
+    {ENGI_DRIFT, 6, 6},   /* DRIFT 6: -21.3 dBFS */
+    {ENGI_DRIFT, 7, 14},   /* DRIFT 7: -25.7 dBFS */
+    {ENGI_PLANT, 2, -5},   /* PLANT 2: -16.2 dBFS */
+    {ENGI_PLANT, 3, -3},   /* PLANT 3: -17.1 dBFS */
+    {ENGI_PLANT, 4, -3},   /* PLANT 4: -17.1 dBFS */
+    {ENGI_PLANT, 7, -3},   /* PLANT 7: -17.2 dBFS */
+};
+static int32_t sm_lvl_trim(uint32_t eng, uint32_t pre)
+{
+    uint32_t i;
+    for (i = 0; i < NELEM(SM_LVL_TRIM); i++)
+        if (SM_LVL_TRIM[i].eng == eng && SM_LVL_TRIM[i].pre == pre)
+            return SM_LVL_TRIM[i].steps;
+    return 0;
 }
 static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t preset)
 {
@@ -203,6 +317,7 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
     s->p[P_VOICE] = (int8_t)(pr->mono ? V_LEGATO : V_POLY);
     for (i = 0; i < 4u; i++)
         s->p[P_DIST + i] = (int8_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
+    s->p[P_LEVEL] = (int8_t)clamp((int32_t)s->p[P_LEVEL] + sm_lvl_trim(sm_engine_of(machine), preset), 0, 127);
     sm_ens_semi(s);
 }
 

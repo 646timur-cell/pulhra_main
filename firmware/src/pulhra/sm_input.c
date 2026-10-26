@@ -131,6 +131,9 @@ static void sm_page_paste(void);
 static uint8_t sm_tclip_ok;                               /* (sm_edit.c: a trig copied) */
 static void sm_edit_pat_changed(void);
 static void sm_eu_gen(void);
+static void sm_pr_open(void);                             /* the PRESET page (sm_upre.c) */
+static void sm_pr_page(const int32_t *k);
+static void sm_pr_confirm(void);
 static void sm_acc_reset(uint32_t mask);
 static void sm_undo_snap(void);
 static void sm_put_begin(uint32_t mask);
@@ -223,7 +226,18 @@ static void sm_turn(uint32_t id, int32_t s)
         sm_turn_held(id, s);
         return;
     }
-    sm_turn_base(t, id, s);
+    {
+        int32_t ty0 = sm_ui_sound()->p[P_ITYPE];
+        sm_turn_base(t, id, s);
+        if (id == P_ITYPE && sm_ui_sound()->p[P_ITYPE] != ty0) {   /* (26.10) a new INSERT TYPE: its A B C at its own defaults
+                                                             (each type means them otherwise: SHIMR's PTCH, RING's FREQ) */
+            uint32_t k;
+            for (k = 0; k < 3u; k++) {
+                sm_ui_sound()->p[P_IA + k] = (int8_t)ins_desc(sm_ui_sound()->p[P_ITYPE], k)->def;
+                sm_param_push(t, P_IA + k);
+            }
+        }
+    }
     if (sm_rec && sm_live && sm_playing) {               /* REC (live), playing: the knob records onto the trig playing (ARM: never; a held trig locks) */
         uint32_t st = *(volatile uint8_t *)&sm_pos[t];
         sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};
@@ -407,6 +421,10 @@ static int32_t sm_step_edit(void);
 static uint32_t sm_key_held_trk(void);
 static void sm_oct_single(uint32_t up)
 {
+    if (up && sm_page_home() == SMH_PRESET) {             /* PRESET: OCT+ loads or saves what K3 / K4 asked */
+        sm_pr_confirm();
+        return;
+    }
     if (sm_ui.kbd) {
         int32_t o = clamp((int32_t)sm_ui.oct + (up ? 1 : -1), -3, 3);
         if ((int8_t)o != sm_ui.oct) {
@@ -1140,6 +1158,8 @@ static void sm_save_poll(uint32_t pressed, uint32_t now)
         }
     }
     if (!((fm1_in.buttons >> b) & 1u)) {
+        if (sm_save_st == 1u && !sm_layer)                /* a tap: the PRESET page (again: back to the page before) */
+            sm_pr_open();
         sm_save_st = 0;
     } else if (sm_save_st == 1u &&
                (uint32_t)(now - sm_save_t0) >= (uint32_t)HOLD_MS[settings_hold % 4u] * 1000u * FM1_TICKS_PER_US) {
@@ -1313,6 +1333,8 @@ static void sm_input_poll(void)
                 sm_midi_clk = SM_CLK_AUTO;
             sm_dirty = 1;
         }
+    } else if (sm_page_home() == SMH_PRESET) {            /* K1 machine, K2 category, K3 LOAD, K4 SAVE (OCT+ does it) */
+        sm_pr_page(k);
     } else if (sm_page_home()) {
         sm_preset_turn(pre);
         sm_home_page(k, sel, now);

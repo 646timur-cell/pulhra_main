@@ -15,8 +15,8 @@
  * button of their own: SHIFT + EDIT the VOICE page, SHIFT + FX the deep FX pages DLY / REV / CHORUS in turn, SHIFT + SEQ the
  * EUCLID page, SHIFT + HOME the SETUP pages MIDI / SETUP; sm_layer.c) */
 enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_LFO, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_SCL, SMFAM_VOICE, SMFAM_DEEP, SMFAM_EUCL, SMFAM_MENU,
-       SMFAM_SETUP, SMFAM_COUNT };
-enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU, SMH_MIDI, SMH_SETUP };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
+       SMFAM_SETUP, SMFAM_PRESET, SMFAM_COUNT };
+enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU, SMH_MIDI, SMH_SETUP, SMH_PRESET };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
 
 typedef struct {
     const char *name;
@@ -63,6 +63,8 @@ static const sm_page_t SM_PAGES[] = {
     {"MICRO", SMFAM_SCL, {P_FM4_LEVEL, P_MAMT, P_ROOT, SM_NOPARAM}, SM_NOPARAM},
     {"MIDI", SMFAM_SETUP, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_MIDI},
     {"SETUP", SMFAM_SETUP, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_SETUP},
+    /* PRESET (SAVE tapped, sm_upre.c): K1 the machine, K2 the category, K3 a sound to LOAD, K4 a user place to SAVE into, OCT+ does it */
+    {"PRESET", SMFAM_PRESET, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_PRESET},
 };
 
 /* what the screen and the keys share (the main loop's alone; sm_draw only reads): the page, the selected track, the step
@@ -87,7 +89,7 @@ static uint32_t sm_map_open(void) { return sm_layer != 0; }
 static uint32_t sm_fam_btn(uint32_t fam)
 {
     return fam == SMFAM_EDIT || fam == SMFAM_VOICE ? B_EDIT : fam == SMFAM_GLO ? B_GLO : fam == SMFAM_SEQ || fam == SMFAM_EUCL ? B_SEQ :
-           fam == SMFAM_HOME || fam == SMFAM_MENU || fam == SMFAM_SETUP ? B_HOME : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX || fam == SMFAM_DEEP ? B_FX :
+           fam == SMFAM_HOME || fam == SMFAM_MENU || fam == SMFAM_SETUP ? B_HOME : fam == SMFAM_PRESET ? B_SAVE : fam == SMFAM_ARP ? B_ARP : fam == SMFAM_FX || fam == SMFAM_DEEP ? B_FX :
            fam == SMFAM_LFO ? B_LFO : fam == SMFAM_SCL ? B_SCL : B_ENV;
 }
 

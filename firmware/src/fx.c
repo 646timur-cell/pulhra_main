@@ -780,7 +780,15 @@ static __attribute__((noinline)) void rev_side_mix(int32_t *l, int32_t *r, uint3
  * recordings) comes after, so its edges stay sharp (no flanger feedback or phaser ringing smears them) and a STUT
  * repeats the processed sound. State in the pool, per track (ins[], 580 B each); noinline, its own loops: the audio
  * ISR's inlined path gains one test per part (track_t ins_run) */
-enum { IT_OFF, IT_SOFT, IT_HARD, IT_FOLD, IT_FUZZ, IT_CRUSH, IT_PHASER, IT_FLANGER, IT_CHORUS, IT_N };
+/* (26.10, Tim) three more:
+ *   SHIMR                FDBK (the shifted sound fed back: each pass a step higher, 0 .. 0.85), TONE (a one-pole
+ *                        low-pass on it), PTCH (+7 +12 +19 +24 semitones): a two-head pitch shifter over the line at half
+ *                        the rate (11.6 ms; the heads 9 ms apart, crossfaded): the sound and its octave (and the octave's
+ *                        octave, fed back) for a shimmer; with the track's REV send the shimmer reverb;
+ *   TREM                 RATE (F_LFOHZ), DEPTH, SHAPE (a sine .. a square, its edges ~1 ms);
+ *   RING                 FREQ (the carrier, F_CUTOFF's 30 Hz .. 16 kHz), SHAPE (a sine .. a square), DRIFT (the carrier
+ *                        wandering, a slow sine, up to +-half its frequency) */
+enum { IT_OFF, IT_SOFT, IT_HARD, IT_FOLD, IT_FUZZ, IT_CRUSH, IT_PHASER, IT_FLANGER, IT_CHORUS, IT_SHIMMER, IT_TREMOLO, IT_RING, IT_N };
 #define IL_LEN 256u                     /* FLANG / CHOR: the line, samples (a power of 2: masked) */
 static const uint8_t INS_HOLD[16] = {64, 48, 40, 32, 24, 20, 16, 12, 10, 8, 6, 5, 4, 3, 2, 1};   /* CRUSH RATE */
 typedef struct {
@@ -918,6 +926,88 @@ static __attribute__((noinline)) void ins_swept(ins_t *s, const track_t *t, int3
     }
 }
 
+/* SHIMR, TREM, RING (26.10) */
+static const uint16_t INS_SHIFT_Q8[4] = {384, 512, 767, 1024};   /* PTCH: the ratios +7 +12 +19 +24, Q8 */
+#define IS_W 200u                                         /* SHIMR: the heads' window, line samples (at half the rate) */
+static __attribute__((noinline)) void ins_mod(ins_t *s, const track_t *t, int32_t *b, uint32_t n, int32_t tw)
+{
+    uint32_t i;
+    int32_t a = clamp(t->p[P_IA], 0, 127), bb = clamp(t->p[P_IB], 0, 127), c = clamp(t->p[P_IC], 0, 127);
+    if (s->type == IT_SHIMMER) {
+        uint32_t r8 = INS_SHIFT_Q8[clamp(t->p[P_IC], 0, 3)], inc = (uint32_t)(((uint64_t)(r8 - 256u) << 24) / IS_W);   /* (the
+                                                             phase's turn a window: a line sample of delay a sample times r - 1) */
+        int32_t fbk = a * 219, k = ins_lpk(bb) >> 1;      /* FDBK 0 .. 0.85 (Q15); TONE's low-pass, Q15 */
+        for (i = 0; i < n; i++) {
+            int32_t x = b[i];
+            s->w += clamp(tw - s->w, -SL_SLOPE, SL_SLOPE);
+            s->hp += x;                                   /* (two samples summed: the line at half the rate) */
+            if (s->cnt ^= 1u) {                           /* (between two of the line's: halfway; then two poles at ~7 kHz,
+                                                             the half rate's images down) */
+                s->px[0] += ((((s->lp2 + s->hold) >> 1) - s->px[0]) * 21000) >> 15;
+                s->px[1] += ((s->px[0] - s->px[1]) * 21000) >> 15;
+                b[i] = pf_mix(x, x + s->px[1], s->w);
+                continue;
+            }
+            s->lp2 = s->hold;
+            {
+                uint32_t pa = s->ph, pb = s->ph + 0x80000000u, ga, gb, da, db;
+                int32_t ya, yb, y, r0, r1, fr;
+                s->line[s->wp] = (int16_t)clamp((s->hp >> 3) + softclip(mulq15(s->fb, fbk)), -32767, 32767);
+                s->hp = 0;
+                da = (pa >> 16) * IS_W + (2u << 16);       /* the heads' delays, Q16 line samples (2 .. 202) */
+                db = (pb >> 16) * IS_W + (2u << 16);
+                r0 = (int32_t)(s->wp - (da >> 16)) & (int32_t)(IL_LEN - 1u);
+                r1 = (r0 - 1) & (int32_t)(IL_LEN - 1u);
+                fr = (int32_t)((da >> 1) & 0x7FFFu);
+                ya = s->line[r0] + (((s->line[r1] - s->line[r0]) * fr) >> 15);
+                r0 = (int32_t)(s->wp - (db >> 16)) & (int32_t)(IL_LEN - 1u);
+                r1 = (r0 - 1) & (int32_t)(IL_LEN - 1u);
+                fr = (int32_t)((db >> 1) & 0x7FFFu);
+                yb = s->line[r0] + (((s->line[r1] - s->line[r0]) * fr) >> 15);
+                ga = (pa < 0x80000000u ? pa : ~pa) >> 15;  /* (a triangle each, 0 where its head jumps: they sum to 1) */
+                gb = (pb < 0x80000000u ? pb : ~pb) >> 15;
+                y = (int32_t)(((int64_t)ya * (int32_t)ga + (int64_t)yb * (int32_t)gb) >> 16);
+                s->wp = (uint16_t)((s->wp + 1u) & (IL_LEN - 1u));
+                s->ph -= inc;                              /* (the delay shortening: the pitch up) */
+                s->lp1 += mulq15(y - s->lp1, k);
+                s->fb = s->lp1;
+                y = s->lp1 << 2;                           /* (the line at a quarter: back to the track's level, at half) */
+                s->dc += ((y << 8) - s->dc) >> 9;
+                s->hold = y - (s->dc >> 8);
+            }
+            s->px[0] += ((s->lp2 - s->px[0]) * 21000) >> 15;
+            s->px[1] += ((s->px[0] - s->px[1]) * 21000) >> 15;
+            b[i] = pf_mix(x, x + s->px[1], s->w);
+        }
+        return;
+    }
+    if (s->type == IT_TREMOLO) {                          /* the gain: 1 at the top, 1 - DEPTH at the bottom */
+        uint32_t inc = LFO_INC[a] / CTL;
+        for (i = 0; i < n; i++, s->ph += inc) {
+            int32_t sn = osc_sine(s->ph), sh = sn + (((sn >= 0 ? 32767 : -32767) - sn) * c) / 127, g;
+            g = 32767 - (bb * (32767 - sh)) / 254;
+            s->lp1 += (g - s->lp1) >> 5;                  /* (~0.7 ms: a square's edges without a click) */
+            s->w += clamp(tw - s->w, -SL_SLOPE, SL_SLOPE);
+            b[i] = pf_mix(b[i], mulq15(b[i], clamp(s->lp1, 0, 32767)), s->w);
+        }
+        return;
+    }
+    {                                                     /* RING: the track times a carrier */
+        uint32_t hz = CUTOFF_HZ[a], dinc = LFO_INC[24] / CTL, inc;
+        int32_t dr = c * 128, car, sh;
+        for (i = 0; i < n; i++) {
+            int32_t wob = mulq15(osc_sine((uint32_t)s->lp2), dr);   /* DRIFT: a slow sine, up to +-0.5 of FREQ */
+            inc = (uint32_t)((hz * 97392u) >> 0) + (uint32_t)(((int64_t)(hz * 97392u) * wob) >> 16);   /* (2^32 / 44100) */
+            s->lp2 = (int32_t)((uint32_t)s->lp2 + dinc);
+            car = osc_sine(s->ph);
+            sh = car + (((car >= 0 ? 32767 : -32767) - car) * bb) / 127;
+            s->ph += inc;
+            s->w += clamp(tw - s->w, -SL_SLOPE, SL_SLOPE);
+            b[i] = pf_mix(b[i], mulq15(b[i], sh), s->w);
+        }
+    }
+}
+
 /* the INSERT at rest at once (mix_part: TYPE turned OFF while the part was silent, its fade never ran) */
 static __attribute__((noinline)) void ins_rest(track_t *t)
 {
@@ -941,7 +1031,9 @@ static __attribute__((noinline)) void track_insert(track_t *t, int32_t *b, uint3
         memset(s, 0, sizeof *s);                        /* starting: no stale line or filter */
         s->type = (uint8_t)ty;
     }
-    if (s->type >= IT_PHASER)
+    if (s->type >= IT_SHIMMER)
+        ins_mod(s, t, b, n, tw);
+    else if (s->type >= IT_PHASER)
         ins_swept(s, t, b, n, tw);
     else
         ins_drive(s, t, b, n, tw);

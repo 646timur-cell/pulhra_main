@@ -8450,6 +8450,11 @@ static void fx_mean(int dty, int ity, double *bright, double *rms)
             trk[0].p[P_DTYPE] = (int16_t)dty;
         }
         trk[0].p[P_ITYPE] = (int16_t)ity;
+        if (ity >= IT_SHIMMER) {                          /* (26.10: SHIMR TREM RING at their own defaults, as the TYPE knob sets) */
+            uint32_t q;
+            for (q = 0; q < 3u; q++)
+                trk[0].p[P_IA + q] = (int16_t)ins_desc(ity, q)->def;
+        }
         fx_render(L, 300, 300);
         fx_fig(L + CTL * 40, CTL * 260, &b, &r);
         sb += b;
@@ -9509,6 +9514,118 @@ static int test_soma_rev3(void)
     return bad;
 }
 
+/* the PRESET page (Tim, 26.10): SAVE tapped opens it; K4 + OCT+ saves the selected track's sound into a user place, named after
+ * the machine and the category ("SAW BASS01"); K3 + OCT+ loads; the places survive a power-on (the flash scanned again), a full
+ * sector moves to the other one; a SAVE while playing is written at STOP; the KIT loads on T4 alone */
+static void save_tap(void)
+{
+    btn_down(B_SAVE);
+    sm_input_poll();
+    btn_up(B_SAVE);
+    sm_input_poll();
+}
+static int test_preset_page(void)
+{
+    int bad = 0;
+    uint32_t i, k, ok = 1;
+    char nm[12];
+    sm_sound_t keep;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    st_erase(SM_UP_SEC0);
+    st_erase(SM_UP_SEC0 + SM_FL_SEC);
+    sm_up_boot();
+    sm_ui.trk = 0;
+    sm_sound_load(eng_rank(ENGI_MSAW), 0);                /* T1 SUPER SAW (a BASS, category.c) */
+    sm_input_poll();
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    save_tap();
+    draw_full();
+    bad += check("PRESET: SAVE tapped opens the page (PRESET in the header), K1 the track's machine",
+                 sm_page_home() == SMH_PRESET && lint_has("PRESET", 0, 0) && sm_pr.mach == eng_rank(ENGI_MSAW) && sm_pr.arm == 0u);
+    turn(EN_K4, 1);
+    sm_input_poll();
+    turn(EN_K4, -1);                                      /* (back to U01: SAVE asked) */
+    sm_input_poll();
+    draw_full();
+    bad += check("PRESET: K4 asks SAVE (the row: SAVE SAW BASS01, OCT+)", sm_pr.arm == 2u && sm_pr.place == 0u && lint_has("SAVE SAW BASS01", 0, 0) &&
+                 lint_has("OCT+", 0, 0));
+    keep = *ksnd(0);
+    oct_tap(B_OCTUP);
+    sm_up_name(0, nm);
+    bad += check("PRESET: OCT+ saves it: U01 SAW BASS01, SAVED", sm_up_used(0) && !strcmp(nm, "SAW BASS01") && sm_msg == SM_MSG_SAVED);
+    sm_sound_load(eng_rank(ENGI_MSAW), 3);                /* another sound on T1, then U01 back */
+    sm_input_poll();
+    for (i = 0; i < 40u && (!i || !(sm_pr_item(sm_pr.item, &k) == 1 && k == 0u)); i++) {   /* (a turn at least: it asks LOAD) */
+        turn(EN_K3, 1);
+        sm_input_poll();
+    }
+    oct_tap(B_OCTUP);
+    run_block();
+    printf("pulhra: PRESET: load: arm %u msg %u item %u, p equal %d, machine %u / %u\n", sm_pr.arm, sm_msg, sm_pr.item,
+           !memcmp(ksnd(0)->p, keep.p, sizeof keep.p), ksnd(0)->machine, keep.machine);
+    bad += check("PRESET: K3 to U01, OCT+ loads it: the sound saved, LOADED", sm_pr.arm == 0u && sm_msg == SM_MSG_LOADED &&
+                 !memcmp(ksnd(0)->p, keep.p, sizeof keep.p) && ksnd(0)->machine == keep.machine);
+    sm_up_boot();                                         /* (a power-on: the index from the flash) */
+    sm_up_name(0, nm);
+    bad += check("PRESET: after a power-on U01 is there, its name", sm_up_used(0) && !strcmp(nm, "SAW BASS01"));
+    for (i = 0; i < 40u; i++) {                           /* 40 saves over 24 places: the sector fills, the other takes them */
+        memset(&sm_up.rec, 0, sizeof sm_up.rec);
+        sm_up.rec.place = (uint8_t)(i % SM_UP_N);
+        sm_up.rec.cat = CAT_LEAD;
+        sm_up.rec.snd = *ksnd(0);
+        sm_up.rec.snd.p[P_E0] = (int8_t)i;
+        sm_pr_autoname(sm_up.rec.name, ksnd(0)->machine, CAT_LEAD, sm_up.rec.place);
+        ok &= sm_up_write(&sm_up.rec) == 0;
+    }
+    sm_up_boot();
+    for (i = 0; i < SM_UP_N; i++) {
+        sm_urec_t r;
+        ok &= sm_up_used(i) && !st_read(sm_up_addr(sm_up_rat(i)), &r, sizeof r) && sm_up_rec_ok(&r) &&
+              r.snd.p[P_E0] == (int8_t)(i < 40u - SM_UP_N ? i + SM_UP_N : i);
+    }
+    bad += check("PRESET: 40 saves over 24 places (a sector full: the other one): every place its newest, after a power-on", ok);
+    push(SMC_PLAY, 0, 0, 0, 0);
+    run_block();
+    sm_input_poll();
+    turn(EN_K4, 1);
+    sm_input_poll();
+    oct_tap(B_OCTUP);
+    bad += check("PRESET: a SAVE while playing waits (SAVE AT STOP)", sm_up.pend && sm_msg == SM_MSG_SAVEPEND);
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    for (i = 0; i < 3u; i++)
+        sm_input_poll();
+    sm_bank_poll(host_ticks);
+    bad += check("PRESET: ... written at STOP", !sm_up.pend);
+    sm_pr.mach = (uint8_t)SM_KIT_MACH;                    /* the KIT on T1: refused */
+    sm_pr.cat = 0;
+    sm_pr.item = 0;
+    sm_pr.arm = 1;
+    oct_tap(B_OCTUP);
+    bad += check("PRESET: the KIT loads on T4 alone (T4 ONLY)", sm_msg == SM_MSG_T4ONLY && ksnd(0)->machine != SM_KIT_MACH);
+    turn(EN_K2, 2);                                       /* K2: LEAD; K1 to SAW: its LEAD sounds and the user's */
+    sm_input_poll();
+    sm_pr.mach = (uint8_t)eng_rank(ENGI_MSAW);
+    sm_pr.item = 0;
+    {
+        uint32_t n = sm_pr_count(), fl = 0, us = 0;
+        for (i = 0; i < n; i++) {
+            int32_t u = sm_pr_item(i, &k);
+            fl += u == 0 && preset_cat(ENGI_MSAW, k) == CAT_LEAD;
+            us += u == 1;
+        }
+        printf("pulhra: PRESET: SAW, LEAD: %u sounds (%u factory, %u user)\n", n, fl, us);
+        bad += check("PRESET: K2 filters: SAW's LEAD list all LEAD (factory and user)", n == fl + us && fl >= 1u && us >= 1u);
+    }
+    save_tap();
+    bad += check("PRESET: SAVE tapped again: back to the page before (FILTER)", !strcmp(sm_cur_page()->name, "FILTER"));
+    sm_msg = SM_MSG_NONE;
+    return bad;
+}
+
 /* the page clipboard (Tim): OCT+ held + REC copies the page in view of the selected track (its steps, their locks), OCT+ held +
  * PLAY pastes it onto the page in view (another track's too); OCT+ held past its window and let go after them: no page turn */
 static int test_page_copy(void)
@@ -10027,7 +10144,7 @@ static int test_fx_dist_types(void)
 static int test_fx_insert_types(void)
 {
     static int32_t L0[CTL * 400], L1[CTL * 400];
-    int bad = 0, ok = 1, seen[9] = {0}, i;
+    int bad = 0, ok = 1, seen[IT_N] = {0}, i;
     uint32_t ty, n;
     rng_state = 0x1234567u;                               /* (the voices' random phases: the same run whatever the tests before drew) */
     in_reset();
@@ -10037,18 +10154,18 @@ static int test_fx_insert_types(void)
     for (i = 0; i < 24; i++) {                            /* up through the whole knob, then down */
         turn(EN_K1, 1);
         sm_input_poll();
-        seen[ksnd(0)->p[P_ITYPE] % 9]++;
+        seen[ksnd(0)->p[P_ITYPE] % IT_N]++;
     }
-    ok = ksnd(0)->p[P_ITYPE] == IT_CHORUS;
+    ok = ksnd(0)->p[P_ITYPE] == IT_RING;
     for (i = 0; i < 24; i++) {
         turn(EN_K1, -1);
         sm_input_poll();
-        seen[ksnd(0)->p[P_ITYPE] % 9]++;
+        seen[ksnd(0)->p[P_ITYPE] % IT_N]++;
     }
-    bad += check("FX: INSERT TYPE up 24 detents ends on CHOR, down 24 ends on OFF", ok && ksnd(0)->p[P_ITYPE] == IT_OFF);
-    bad += check("FX: ... the types visited are OFF CRUSH PHASR FLANG CHOR only: no SOFT / HARD / FOLD / FUZZ",
+    bad += check("FX: INSERT TYPE up 24 detents ends on RING (the last, 26.10), down 24 ends on OFF", ok && ksnd(0)->p[P_ITYPE] == IT_OFF);
+    bad += check("FX: ... the types visited are OFF CRUSH PHASR FLANG CHOR SHIMR TREM RING only: no SOFT / HARD / FOLD / FUZZ",
                  seen[IT_SOFT] == 0 && seen[IT_HARD] == 0 && seen[IT_FOLD] == 0 && seen[IT_FUZZ] == 0 && seen[IT_CRUSH] && seen[IT_PHASER] &&
-                 seen[IT_FLANGER] && seen[IT_CHORUS] && seen[IT_OFF]);
+                 seen[IT_FLANGER] && seen[IT_CHORUS] && seen[IT_OFF] && seen[IT_SHIMMER] && seen[IT_TREMOLO] && seen[IT_RING]);
     turn(EN_K1, 1);
     sm_input_poll();
     bad += check("FX: ... one detent from OFF is CRUSH (5), then PHASR 6, FLANG 7, CHOR 8", ksnd(0)->p[P_ITYPE] == IT_CRUSH);
@@ -10070,7 +10187,7 @@ static int test_fx_insert_types(void)
         fx_mean(-1, 0, &bn, &rn);
         nul = fmax(fabs(bn - b0) / b0, fabs(rn - r0) / r0);       /* (two means of the same sound: the run-to-run difference) */
         printf("pulhra: INSERT OFF twice: brightness %.4f %.4f, rms %.0f %.0f (spread %.4f)\n", b0, bn, r0, rn, nul);
-        for (ty = 1; ty < 5u; ty++) {
+        for (ty = 1; ty < NELEM(SM_ITYPES); ty++) {       /* (26.10: SHIMR TREM RING too) */
             char w[100];
             double bt, rt, dd;
             fx_mean(-1, SM_ITYPES[ty], &bt, &rt);
@@ -11906,6 +12023,7 @@ int main(void)
     bad += test_slice_rev();
     bad += test_mono_rev2();
     bad += test_soma_rev3();
+    bad += test_preset_page();
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
     printf("pulhra: %d failed\n", bad);

@@ -500,6 +500,45 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         o->dim = 0; o->inv = 0;
         return;
     }
+    if (sm_page_home() == SMH_PRESET) {                   /* K1 MACH, K2 CAT, K3 LOAD (F01 / U07), K4 SAVE (U07) */
+        static const char *const LB[4] = {"MACH", "CAT", "LOAD", "SAVE"};
+        uint32_t i, kk = k & 3u, n = sm_pr_count(), it = 0;
+        int32_t u = sm_pr_item(sm_pr.item, &it);
+        for (i = 0; LB[kk][i]; i++)
+            o->lab[i] = LB[kk][i];
+        o->lab[i] = 0;
+        o->dim = o->inv = 0;
+        if (kk == 0u) {
+            smd_upper(o->val, ENGINES[sm_engine_of(sm_pr.mach)]->name, 5u);
+            o->v = sm_pr.mach;
+            o->pos = (uint32_t)sm_pr.mach * 256u / (SM_NMACHINE - 1u);
+        } else if (kk == 1u) {
+            smd_upper(o->val, sm_pr.cat ? CAT_NAME[sm_pr.cat % CAT_N] : "ALL", 5u);
+            o->v = sm_pr.cat;
+            o->pos = (uint32_t)sm_pr.cat * 256u / (CAT_N - 1u);
+        } else if (kk == 2u) {
+            if (u < 0) {
+                o->val[0] = '-';
+                o->val[1] = 0;
+            } else {
+                o->val[0] = u ? 'U' : 'F';
+                smd_two(o->val + 1, it + 1u);
+                o->val[3] = 0;
+            }
+            o->v = sm_pr.item;
+            o->pos = n > 1u ? (uint32_t)sm_pr.item * 256u / (n - 1u) : 0u;
+            o->inv = sm_pr.arm == 1u;
+        } else {
+            o->val[0] = 'U';
+            smd_two(o->val + 1, sm_pr.place + 1u);
+            o->val[3] = 0;
+            o->v = sm_pr.place;
+            o->pos = (uint32_t)sm_pr.place * 256u / (SM_UP_N - 1u);
+            o->dim = !sm_up_used(sm_pr.place);
+            o->inv = sm_pr.arm == 2u;
+        }
+        return;
+    }
     if (sm_page_home() == SMH_SETUP) {                    /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC (the notes' MIDI source) */
         static const char *const CLK_N[SM_CLK_COUNT] = {"AUTO", "INT", "USB", "JACK"};
         static const char *const PM_N[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
@@ -567,10 +606,10 @@ static const char *smd_label(uint32_t id, const param_desc_t *d)
     return id == P_AHOLD ? "LATCH" : id == P_AORDER ? "ORDER" : id == P_DOUT ? "LVL" : id == P_ITYPE ? "TYPE" :
            id == (SM_GLB | G_DCOLOR) ? "COLOR" : id == (SM_GLB | G_CRATE) ? "RATE" : id == (SM_GLB | G_CDEPTH) ? "DEPTH" : d->label;
 }
-static uint32_t smd_itype_place(int32_t v)                /* the place of an INSERT TYPE in the track's list (0..4) */
+static uint32_t smd_itype_place(int32_t v)                /* the place of an INSERT TYPE in the track's list (0..7) */
 {
-    uint32_t i;
-    for (i = 0; i < 4u && (int32_t)SM_ITYPES[i] < v; i++) {}
+    uint32_t i, n = (uint32_t)(sizeof SM_ITYPES / sizeof SM_ITYPES[0]);
+    for (i = 0; i + 1u < n && (int32_t)SM_ITYPES[i] < v; i++) {}
     return i;
 }
 static void smd_knob_get(uint32_t k, smd_knob_t *o)
@@ -624,7 +663,7 @@ static void smd_knob_get(uint32_t k, smd_knob_t *o)
     if (o->d->max > o->d->min)
         o->pos = (uint32_t)((o->v - o->d->min) * 256 / (o->d->max - o->d->min));
     if (id == P_ITYPE)                                    /* (the track's INSERT list is five of the nine: the ring walks it) */
-        o->pos = smd_itype_place(o->v) * 256u / 4u;
+        o->pos = smd_itype_place(o->v) * 256u / (uint32_t)(sizeof SM_ITYPES / sizeof SM_ITYPES[0] - 1u);
     smd_upper(o->lab, smd_label(id, o->d), 5u);
     param_format(o->d, o->v, o->val, &unit);
     o->val[5] = 0;
@@ -701,10 +740,15 @@ static uint32_t smd_sel_sig(void)
         h = smd_mix(h, (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u] * 4u + sm_kit_lane);
     if (sm_page_is_step())
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
-    if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP)   /* (the selected track's volume) */
+    if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP && sm_page_home() != SMH_PRESET)   /* (the
+                                                             selected track's volume) */
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
     if (sm_page_home() == SMH_SETUP)
         return smd_mix(h, sm_midi_div);
+    if (sm_page_home() == SMH_PRESET)                     /* (what the row names: the sound, the place, what OCT+ does) */
+        return smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, sm_pr.mach), sm_pr.cat), sm_pr.item), sm_pr.place),
+                       smd_mix(sm_pr.arm + 4u * sm_up.seq + 64u * sm_up.pend, sm_ui.trk * 256u + s->preset));   /* (SAVE's name: the
+                                                             track's machine and its sound's category) */
     return id == SM_NOPARAM ? h : smd_mix(smd_mix(h, id), (uint32_t)smd_sel_val(id));
 }
 static void smd_select(void)
@@ -715,7 +759,36 @@ static void smd_select(void)
     if (smd_panel())                                      /* (MIXER, the KIT's STEP page: the four-row panel is there, smd_strip4) */
         return;
     smd_begin(0, SMD_SEL_Y, 240u, SMD_SEL_H, T_BG);
-    if (sm_page_is_step() || (sm_page_home() && sm_page_home() != SMH_EUCLID && sm_page_home() != SMH_MIDI &&
+    if (sm_page_home() == SMH_PRESET) {                   /* PRESET: the sound K3 points at, or the SAVE K4 asks (inverted: OCT+) */
+        char b[24], nm[12];
+        uint32_t n = 0, it = 0;
+        int32_t u = sm_pr_item(sm_pr.item, &it);
+        b[0] = 0;
+        if (sm_pr.arm == 2u) {
+            const sm_sound_t *sd = &smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK];
+            sm_pr_autoname(nm, sd->machine, sm_pr_save_cat(sd), sm_pr.place);
+            smd_cat(b, &n, "SAVE ");
+            smd_cat(b, &n, nm);
+            smd_cat(b, &n, sm_up_used(sm_pr.place) ? " OVR" : "");
+        } else if (u < 0) {
+            smd_cat(b, &n, "NO SOUNDS");
+        } else {
+            if (u)
+                sm_up_name(it, nm);
+            else
+                smd_upper(nm, ENGINES[sm_engine_of(sm_pr.mach)]->presets[it].name, 11u);
+            if (sm_pr.arm == 1u)
+                smd_cat(b, &n, "LOAD ");
+            smd_cat(b, &n, nm);
+        }
+        b[sm_pr.arm ? 15 : 19] = 0;                      /* (15: OCT+ beside it) */
+        if (sm_pr.arm)
+            sm_px_text(4, 2, 2u, b, T_TEXT, 1);
+        else
+            sm_px_text(4, 2, 2u, b, T_TEXT, 0);
+        if (sm_pr.arm)                                    /* (OCT+ at the right: what does it) */
+            sm_px_text(240 - 4 - 12 * 4, 2, 2u, "OCT+", T_TEXT, 0);
+    } else if (sm_page_is_step() || (sm_page_home() && sm_page_home() != SMH_EUCLID && sm_page_home() != SMH_MIDI &&
                               sm_page_home() != SMH_SETUP)) {   /* STEP and HOME (MIXER, CLOCK): the selected track's volume */
         char val[12];
         const char *unit;
