@@ -166,7 +166,8 @@ static void sm_ens_semi(sm_sound_t *s)
 }
 /* (26.10, the review's stage 5) the factory sounds' levels brought together: each sound's loudest 200 ms (held 4 s at C3, velocity
  * 100) against -18.5 dBFS, the track's LEVEL moved by the difference (0.5 dB a step from its 104; a short hit's boost at most
- * 6 dB, any at most +8 / -6 dB; under 1.5 dB: none). The SLICE kits (stage 4) and the DRUM page's are not in it */
+ * 6 dB, any at most +8 / -6 dB; under 1.5 dB: none). The SLICE machines' too (stage 4, their kits and sounds new); the DRUM
+ * page's are not in it */
 static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_MSAW, 1, 3},   /* SAW 1: -19.8 dBFS */
     {ENGI_MSAW, 2, 4},   /* SAW 2: -20.7 dBFS */
@@ -269,6 +270,44 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_PLANT, 3, -3},   /* PLANT 3: -17.1 dBFS */
     {ENGI_PLANT, 4, -3},   /* PLANT 4: -17.1 dBFS */
     {ENGI_PLANT, 7, -3},   /* PLANT 7: -17.2 dBFS */
+    {ENGI_GLITCH, 0, 16},   /* GLITCH 0: -27.1 dBFS */
+    {ENGI_GLITCH, 1, 8},   /* GLITCH 1: -22.4 dBFS */
+    {ENGI_GLITCH, 2, 12},   /* GLITCH 2: -34.4 dBFS */
+    {ENGI_GLITCH, 3, 16},   /* GLITCH 3: -26.6 dBFS */
+    {ENGI_GLITCH, 4, 12},   /* GLITCH 4: -30.4 dBFS */
+    {ENGI_GLITCH, 5, 13},   /* GLITCH 5: -25.2 dBFS */
+    {ENGI_GLITCH, 6, 12},   /* GLITCH 6: -29.0 dBFS */
+    {ENGI_ERROR, 0, 12},   /* ERROR 0: -29.0 dBFS */
+    {ENGI_ERROR, 1, -5},   /* ERROR 1: -16.0 dBFS */
+    {ENGI_ERROR, 2, 13},   /* ERROR 2: -25.1 dBFS */
+    {ENGI_ERROR, 3, 15},   /* ERROR 3: -25.9 dBFS */
+    {ENGI_ERROR, 5, 16},   /* ERROR 5: -26.9 dBFS */
+    {ENGI_ERROR, 6, 12},   /* ERROR 6: -28.5 dBFS */
+    {ENGI_ERROR, 7, -3},   /* ERROR 7: -17.1 dBFS */
+    {ENGI_RITUAL, 0, 8},   /* RITUAL 0: -22.7 dBFS */
+    {ENGI_RITUAL, 1, 11},   /* RITUAL 1: -24.0 dBFS */
+    {ENGI_RITUAL, 2, 8},   /* RITUAL 2: -22.3 dBFS */
+    {ENGI_RITUAL, 3, 12},   /* RITUAL 3: -30.8 dBFS */
+    {ENGI_RITUAL, 4, 4},   /* RITUAL 4: -20.7 dBFS */
+    {ENGI_RITUAL, 5, 12},   /* RITUAL 5: -38.2 dBFS */
+    {ENGI_RITUAL, 6, 12},   /* RITUAL 6: -27.7 dBFS */
+    {ENGI_RITUAL, 7, 16},   /* RITUAL 7: -27.4 dBFS */
+    {ENGI_MECH, 0, 12},   /* MECH 0: -42.5 dBFS */
+    {ENGI_MECH, 1, 12},   /* MECH 1: -36.4 dBFS */
+    {ENGI_MECH, 2, 12},   /* MECH 2: -36.2 dBFS */
+    {ENGI_MECH, 3, 4},   /* MECH 3: -20.3 dBFS */
+    {ENGI_MECH, 4, 7},   /* MECH 4: -21.8 dBFS */
+    {ENGI_MECH, 5, 13},   /* MECH 5: -24.9 dBFS */
+    {ENGI_MECH, 6, 12},   /* MECH 6: -24.5 dBFS */
+    {ENGI_MECH, 7, 13},   /* MECH 7: -25.0 dBFS */
+    {ENGI_BIO, 0, 16},   /* BIO 0: -27.5 dBFS */
+    {ENGI_BIO, 1, 7},   /* BIO 1: -22.1 dBFS */
+    {ENGI_BIO, 2, 15},   /* BIO 2: -26.1 dBFS */
+    {ENGI_BIO, 3, 12},   /* BIO 3: -27.4 dBFS */
+    {ENGI_BIO, 4, 12},   /* BIO 4: -39.1 dBFS */
+    {ENGI_BIO, 5, 9},   /* BIO 5: -23.1 dBFS */
+    {ENGI_BIO, 6, 13},   /* BIO 6: -25.1 dBFS */
+    {ENGI_BIO, 7, 12},   /* BIO 7: -24.6 dBFS */
 };
 static int32_t sm_lvl_trim(uint32_t eng, uint32_t pre)
 {

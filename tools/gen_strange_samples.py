@@ -29,6 +29,31 @@ def norm(x, peak=30000):
     return [max(-32768, min(32767, int(v / m * peak))) for v in x]
 
 
+def level(x, target=0.22, dmax=5.0):
+    """(26.10, Tim: the kits' slices at one loudness) the slice's sounding part (its samples above 3 % of the peak) brought
+    to an RMS of `target` (of the peak) through a soft saturation, tanh(d x) / tanh(d), d at most dmax: a quiet crackle comes
+    up, a full tone is left; the peak stays 1"""
+    m = max(1e-9, max(abs(v) for v in x))
+    y = [v / m for v in x]
+
+    def rms(z):
+        act = [v * v for v in z if abs(v) > 0.03]
+        return math.sqrt(sum(act) / len(act)) if act else 0.0
+
+    lo, hi = 1.0, dmax
+    if rms(y) >= target:
+        return y
+    for _ in range(18):                                   # (bisect the drive)
+        d = (lo + hi) / 2
+        t = math.tanh(d)
+        if rms([math.tanh(d * v) / t for v in y]) < target:
+            lo = d
+        else:
+            hi = d
+    t = math.tanh(hi)
+    return [math.tanh(hi * v) / t for v in y]
+
+
 def fade(x, a=64, b=256):
     n = len(x)
     for i in range(min(a, n)):
@@ -166,6 +191,13 @@ def glass_rub():
         x.append(am*(math.sin(TAU*f*tt)+0.4*math.sin(TAU*f*1.004*tt)+0.25*math.sin(TAU*f*2.74*tt))*(1-math.exp(-tt*30)))
     nz=bp([R.uniform(-1,1) for _ in range(n)],f,8)
     return [a+0.6*b for a,b in zip(x,nz)]
+def glass_bottle():   # (26.10: was SHARDS, too like CRACK) a bottle blown: a hollow low tone, breath, a flutter
+    n=N(0.55); x=[]; ph=0; nz=bp([R.uniform(-1,1) for _ in range(n)],230,6)
+    for i in range(n):
+        tt=i/GR; f=228*(1+0.004*math.sin(TAU*5.5*tt)); ph+=f/GR
+        e=min(1,tt/0.06)*(1-0.35*tt/0.55)
+        x.append(e*(0.8*math.sin(TAU*ph)+0.18*math.sin(TAU*2*ph)+0.07*math.sin(TAU*3*ph))+0.5*e*nz[i])
+    return x
 def glass_shards():
     n=N(0.5); x=[0.0]*n
     for k in range(34):
@@ -271,12 +303,12 @@ def degauss():   # a CRT degauss: a 50 Hz thump, buzz, decaying wobble
 
 
 def glitch_kit():
-    """16 slices, C3 .. D#4: GLASS TAP, CRACK, RUB, SHARDS; SW TUNE (a heterodyne through zero beat), SW CLICKS (data
+    """16 slices, C3 .. D#4: GLASS TAP, CRACK, RUB, BOTTLE (blown; was SHARDS); SW TUNE (a heterodyne through zero beat), SW CLICKS (data
     bursts, their rate, pitch and fading jumping), SW STATIC, SW SSB (a duck voice), SW CW, RTTY; NEON START (a
     relaxation oscillator speeding up on its choke), CHOKE HUM, ARC, RELAY, TUBE WARM, DEGAUSS"""
     global R
     R = random.Random(7)
-    fs = (glass_tap, glass_crack, glass_rub, glass_shards, sw_tune, sw_clicks, sw_static, sw_ssb, sw_cw, rtty,
+    fs = (glass_tap, glass_crack, glass_rub, glass_bottle, sw_tune, sw_clicks, sw_static, sw_ssb, sw_cw, rtty,
           neon_start, choke_hum, arc, relay, tube_warm, degauss)
     return [fade(f(), 16, 300) for f in fs]
 
@@ -334,7 +366,7 @@ def _hits(n, times, fn):
 
 def ritual_kit():
     """BELL, GONG, CHAINS, STONE GRIND, STONE KNOCK, CANDLE, CHOIR BREATH, CAVE DRIP, COFFIN, BONES, FRAME DRUM, BOWL,
-    THROAT, CRYPT WIND, DOOR CREAK, TOLLING"""
+    THROAT, CRYPT WIND, WIND CHIMES (26.10: was DOOR CREAK), TOLLING"""
     rnd = random.Random(31)
     k = []
     n = _n(0.5)                                                   # a small temple bell
@@ -392,14 +424,13 @@ def ritual_kit():
     x = _bp(_noise(n, rnd), 500, 3)
     k.append([v * math.sin(math.pi * i / n) ** 2 + 0.2 * math.sin(TAU * (640 + 40 * math.sin(TAU * 2 * i / RG)) * i / RG)
               * math.sin(math.pi * i / n) ** 3 for i, v in enumerate(x)])
-    n = _n(0.45)                                                  # a door creaking: stick-slip
-    x, ph, rate = [], 0.0, 30.0
-    for i in range(n):
-        rate = 30 + 40 * math.sin(TAU * 1.7 * i / RG) ** 2
-        ph += rate / RG
-        x.append((1 if (ph % 1) < 0.08 else 0) * rnd.uniform(0.6, 1))
-    y = _bp(x, 900, 6)
-    k.append([a + 0.5 * b for a, b in zip(y, _bp(x, 1700, 8))])
+    n = _n(0.55)                                                  # wind chimes (26.10: was DOOR CREAK, too like STONE GRIND):
+    x = [0.0] * n                                                 # five tubes touched in turn, each its own ring
+    for t, f, a in ((0, 1568, 1), (int(RG * 0.07), 1865, 0.8), (int(RG * 0.15), 2093, 0.7), (int(RG * 0.22), 1397, 0.9),
+                    (int(RG * 0.31), 2489, 0.6)):
+        for j in range(n - t):
+            x[t + j] += a * (math.sin(TAU * f * j / RG) + 0.3 * math.sin(TAU * f * 2.76 * j / RG) * (f * 2.76 < RG / 2)) * math.exp(-j / (RG * 0.22))
+    k.append(x)
     n = _n(0.55)                                                  # tolling: a big bell, far away (dull)
     b = _modes(n, [(196, 1, 0.5), (392 * 1.19, 0.5, 0.4), (196 * 2.0, 0.6, 0.45), (196 * 3.0, 0.2, 0.2)], rnd)
     k.append(onepole(b, 0.5))
@@ -407,8 +438,8 @@ def ritual_kit():
 
 
 def mech_kit():
-    """CLOCK TICK, TOCK, RATCHET, TYPEWRITER, CARRIAGE, REEL UP, TAPE STOP, PROJECTOR, PISTON, WIND-UP, SHUTTER, SERVO,
-    HAMMER, CHAIN DRIVE, STEAM, MUSIC BOX"""
+    """CLOCK TICK, TOCK, RATCHET, TYPEWRITER, CARRIAGE, REEL UP, TAPE STOP, PROJECTOR, PISTON, COIN SPIN, PHONE BELL (26.10:
+    were WIND-UP, SHUTTER), SERVO, HAMMER, CHAIN DRIVE, STEAM, MUSIC BOX"""
     rnd = random.Random(53)
     k = []
     n = _n(0.25)
@@ -450,15 +481,23 @@ def mech_kit():
     th = _modes(n, [(60, 1, 0.06), (130, 0.5, 0.04)], rnd)
     hs = _bp(_noise(n, rnd), 3000, 1)
     k.append([a + 0.4 * b * (i > RG * 0.05) * math.exp(-max(0, i - RG * 0.05) / (RG * 0.1)) for i, (a, b) in enumerate(zip(th, hs))])
-    n = _n(0.45)                                                  # winding up a spring: clicks, slowing
-    times, t, gap = [], 0, 220
+    n = _n(0.55)                                                  # a coin spinning down (26.10: was WIND-UP, too like the TICK):
+    x = [0.0] * n                                                 # its ring, the rattle speeding up as it settles
+    t, gap = 0, int(RG * 0.06)
     while t < n:
-        times.append((t, 0.7 + 0.3 * rnd.random()))
-        t += int(gap)
-        gap *= 1.12
-    k.append(_hits(n, times, lambda a: [a * math.sin(TAU * 2200 * j / RG) * math.exp(-j / 10) for j in range(80)]))
-    n = _n(0.3)                                                   # a shutter: two clacks and the blade's whirr
-    k.append(_hits(n, [(0, 1), (int(RG * 0.07), 0.8)], lambda a: [a * rnd.uniform(-1, 1) * math.exp(-j / 20) for j in range(200)]))
+        for j in range(min(220, n - t)):
+            x[t + j] += 0.5 * math.sin(TAU * 3500 * j / RG) * math.exp(-j / 30)
+        t += gap
+        gap = max(40, int(gap * 0.86))
+    for i in range(n):
+        x[i] += 0.5 * math.sin(TAU * 2950 * i / RG) * math.exp(-i / (RG * 0.3)) * (0.6 + 0.4 * math.sin(TAU * (8 + 30 * i / n) * i / RG))
+    k.append(x)
+    n = _n(0.5)                                                   # an old telephone bell (26.10: was SHUTTER, too like the RATCHET):
+    bells = _hits(                                                # (the clapper between two bells at 20 Hz)
+                  n, [(int(i * RG / 20), 1 if i % 2 else 0.8) for i in range(int(0.45 * 20))],
+                  lambda a: [a * (math.sin(TAU * (1020 if a == 1 else 1240) * j / RG) + 0.4 * math.sin(TAU * 2.4 * (1020 if a == 1 else 1240) * j / RG))
+                             * math.exp(-j / (RG * 0.05)) for j in range(int(RG * 0.12))])
+    k.append(bells)
     n = _n(0.45)                                                  # a servo: a geared whirr, up and back
     x, ph = [], 0.0
     for i in range(n):
@@ -484,8 +523,8 @@ def mech_kit():
 
 
 def bio_kit():
-    """HEARTBEAT, BREATH IN, BREATH OUT, TONGUE CLICK, KNUCKLES, SQUELCH, TWIG SNAP, LEAVES, BUBBLES, RAIN ON LEAVES,
-    CICADA, FROG, BIRD, WOOD CREAK, PURR, GULP"""
+    """HEARTBEAT, BREATH IN, BREATH OUT, TONGUE CLICK, KNUCKLES, SQUELCH, WHISTLE, LIP TRILL, BUBBLES, HOWL (26.10: were TWIG
+    SNAP, LEAVES, RAIN ON LEAVES), CICADA, FROG, BIRD, WOOD CREAK, PURR, GULP"""
     rnd = random.Random(71)
     k = []
     n = _n(0.5)                                                   # a heartbeat: lub-dub
@@ -516,18 +555,32 @@ def bio_kit():
         ph += f / RG
         x.append(math.sin(TAU * ph) * (0.5 + 0.5 * math.sin(TAU * 17 * i / RG)) * math.sin(math.pi * i / n))
     k.append([v + 0.3 * w for v, w in zip(x, _bp(_noise(n, rnd), 800, 3))])
-    n = _n(0.3)                                                   # a twig snapping
-    k.append(_hits(n, [(0, 1), (int(RG * 0.01), 0.6), (int(RG * 0.025), 0.4)],
-                   lambda a: [a * (rnd.uniform(-1, 1) + 0.6 * math.sin(TAU * 2300 * j / RG)) * math.exp(-j / 25) for j in range(300)]))
-    n = _n(0.5)                                                   # leaves rustling
-    x = _bp(_noise(n, rnd), 3200, 0.8)
-    k.append([v * (0.3 + 0.7 * abs(math.sin(TAU * 3.3 * i / RG)) * rnd.uniform(0.6, 1)) for i, v in enumerate(x)])
+    n = _n(0.5)                                                   # a whistle (26.10: was TWIG SNAP, too like KNUCKLES): a person's,
+    x, ph = [], 0.0                                               # gliding up and back down, a little breath
+    for i in range(n):
+        u = i / n
+        f = 1500 + 700 * math.sin(math.pi * u) + 40 * math.sin(TAU * 6 * i / RG)
+        ph += f / RG
+        x.append(math.sin(TAU * ph) * math.sin(math.pi * u) ** 0.5)
+    k.append([a + 0.08 * b for a, b in zip(x, _bp(_noise(n, rnd), 1800, 1.5))])
+    n = _n(0.45)                                                  # a lip trill (26.10: was LEAVES, too like RAIN and the BIRD):
+    x, ph = [], 0.0                                               # a buzz flapping at 28 Hz, the pitch gliding
+    for i in range(n):
+        ph += (180 + 60 * i / n) / RG
+        flap = 0.5 + 0.5 * math.sin(TAU * 28 * i / RG)
+        x.append((2 * (ph % 1) - 1) * flap ** 2 * math.sin(math.pi * i / n))
+    k.append(_bp(x, 600, 1.2))
     n = _n(0.45)                                                  # bubbles rising
     k.append(_hits(n, [(rnd.randrange(n - 600), rnd.uniform(0.3, 1)) for _ in range(12)],
                    lambda a: [a * math.sin(TAU * f * (1 + j / 600) * j / RG) * math.exp(-j / 260) for f in [rnd.uniform(500, 1400)] for j in range(500)]))
-    n = _n(0.5)                                                   # rain on leaves
-    k.append(_hits(n, [(rnd.randrange(n), rnd.uniform(0.1, 1)) for _ in range(60)],
-                   lambda a: [a * math.sin(TAU * f * j / RG) * math.exp(-j / 30) for f in [rnd.uniform(1500, 4000)] for j in range(150)]))
+    n = _n(0.55)                                                  # a howl far off (26.10: was RAIN ON LEAVES): a tone rising, held,
+    x, ph = [], 0.0                                               # falling, a breath around it
+    for i in range(n):
+        u = i / n
+        f = 420 + 330 * math.sin(math.pi * min(1, u * 1.4)) - 120 * max(0, u - 0.7)
+        ph += f / RG
+        x.append((math.sin(TAU * ph) + 0.25 * math.sin(TAU * 2 * ph)) * math.sin(math.pi * u) * (0.85 + 0.15 * math.sin(TAU * 5 * i / RG)))
+    k.append([a + 0.12 * b for a, b in zip(x, _bp(_noise(n, rnd), 900, 2))])
     n = _n(0.5)                                                   # a cicada: a pulsed buzz
     k.append([math.sin(TAU * 3300 * i / RG) * (0.5 + 0.5 * math.sin(TAU * 230 * i / RG)) * (1 if (i // 160) % 3 else 0.5)
               * math.sin(math.pi * i / n) for i in range(n)])
@@ -646,15 +699,21 @@ def error_kit():
         ph += f / ER
         x.append(max(-0.6, min(0.6, 1.6 * math.sin(TAU * ph) * math.exp(-i / 1400))))
     sl.append(x)
-    # 11 a CD skip: one fragment again and again
-    frag = [math.sin(TAU * 311 * i / ER) * 0.6 + rnd.uniform(-0.3, 0.3) for i in range(150)]
-    sl.append([frag[i % 150] * (1 if (i // 150) % 4 != 3 else 0.3) for i in range(EL)])
-    # 12 data: an LFSR's bytes as sound, its taps changing
-    x, s = [], 0xACE1
+    # 11 a broken bass (26.10: was a CD skip, too like the FM chirp, and the engine's STUT does it): a square at 55 Hz,
+    #    its bits dropping, a hole
+    x, ph = [], 0.0
     for i in range(EL):
-        b = ((s >> 0) ^ (s >> 2) ^ (s >> 3) ^ (s >> (5 if i < EL // 2 else 7))) & 1
-        s = (s >> 1) | (b << 15)
-        x.append(((s & 0xFF) - 128) / 128)
+        ph += 55 / ER
+        v = 0.8 if (ph % 1) < 0.5 else -0.8
+        x.append(v * (0 if 1100 < i < 1250 else 1) * math.exp(-i / 2500))
+    sl.append(onepole(crush(x, 3, 4), 0.35))
+    # 12 a bad clock (26.10: was the LFSR's data, too like the FM chirp): a tone whose pitch jumps in steps, its rate
+    #    stuttering, a little hiss
+    x, ph = [], 0.0
+    for i in range(EL):
+        st = (i // 160) % 7
+        ph += (330 * (1.0, 1.06, 0.94, 1.12, 0.89, 1.0, 1.19)[st]) / ER
+        x.append(math.sin(TAU * ph) * 0.8 + 0.05 * rnd.uniform(-1, 1))
     sl.append([v * e for v, e in zip(x, env(0.12))])
     # 13 a beep, square, with a fault in the middle
     sl.append([(0.5 if (int(1000 * t[i] * 2) % 2) else -0.5) * (0 if 800 < i < 1000 else 1) * (i < 1500) for i in range(EL)])
@@ -765,8 +824,8 @@ def bbox_kit():
 def main(out):
     data, zones = bytearray(), []
 
-    def add(x, rate, root, lo, hi):
-        s = norm(x)
+    def add(x, rate, root, lo, hi, lev=False):
+        s = norm(level(x) if lev else x)
         enc, (pred, idx) = ima_encode(s, 0)
         zones.append((len(data), len(s), 0, len(s) - 1, round(rate / 44100 * 65536), root * 16, pred, idx, lo, hi, 0))
         data.extend(enc)
@@ -776,19 +835,19 @@ def main(out):
     add(metal(), SR, 62, 0, 127)
     z_glitch = len(zones)
     for k, x in enumerate(glitch_kit()):
-        add(x, GR, 48 + k, 48 + k, 48 + k)
+        add(x, GR, 48 + k, 48 + k, 48 + k, True)
     z_rit = len(zones)
     for k, x in enumerate(ritual_kit()):
-        add(x, RG, 48 + k, 48 + k, 48 + k)
+        add(x, RG, 48 + k, 48 + k, 48 + k, True)
     z_mec = len(zones)
     for k, x in enumerate(mech_kit()):
-        add(x, RG, 48 + k, 48 + k, 48 + k)
+        add(x, RG, 48 + k, 48 + k, 48 + k, True)
     z_bio = len(zones)
     for k, x in enumerate(bio_kit()):
-        add(x, RG, 48 + k, 48 + k, 48 + k)
+        add(x, RG, 48 + k, 48 + k, 48 + k, True)
     z_err = len(zones)
     for k, x in enumerate(error_kit()):
-        add(x, ER, 48 + k, 48 + k, 48 + k)
+        add(x, ER, 48 + k, 48 + k, 48 + k, True)
     n_main = len(data)
     z_bbx = len(zones)
     for k, x in enumerate(bbox_kit()):

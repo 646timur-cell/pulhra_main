@@ -9,10 +9,11 @@
  *   SLCE   which slice the lowest key plays
  *   PTCH   the slices' pitch, semitones
  *   STUT   a stutter: a window of the slice (170 ms .. 5 ms) played again and again (0: off, the slice once)
- *   REP    how often each window repeats before the next one (16: for ever: a buzz, a loop)
+ *   REP    how often each window repeats before the next one (16: for ever, the window creeping on an eighth a pass:
+ *          a buzz that travels the slice, 26.10)
  *   REV    the chance a window (or the slice) plays backwards
  *   CRSH   bits and rate thrown away (a bitcrusher: 16 bits .. 2, the rate held up to 16 samples)
- *   CHOP   the chance a window is dropped (silence: an underrun)
+ *   CHOP   the chance a window is dropped (silence: an underrun), every pass of it its own
  *   JUMP   the chance a window jumps somewhere else in the slice
  * KIT (EDIT > KIT, OP3's REL): BUILT (the kit above) or a user slot USR1..3, the web uploader's: a slot of several
  * zones (files, or one loop cut at its transients by the uploader) plays a zone a key; a slot of one zone is cut
@@ -208,6 +209,14 @@ static void gl_window(gl_slot_t *S, const int16_t *p, int first)
     int32_t wn = S->wn;
     if (!first && S->rep < (p[P_E3] >= 16 ? 0x7FFFFFFF : p[P_E3])) {
         S->rep++;                                        /* the same window again */
+        if (p[P_E3] >= 16) {                             /* (26.10, Tim: a loop for ever was one window for ever, the same
+                                                          * buzz, or silence when that window was quiet or dropped) REP 16
+                                                          * scans: each pass an eighth of a window on, round the slice */
+            S->w0 += wn / 8 > 1 ? wn / 8 : 1;
+            if (S->w0 + wn > (int32_t)S->len)
+                S->w0 = 0;
+        }
+        S->chop = gl_roll(S, p[P_E6]);                   /* (each pass its own chance: dropouts, never a whole note gone) */
         S->pos = S->step >= 0 ? S->w0 << 16 : (S->w0 + wn - 2) << 16;
         return;
     }
@@ -331,19 +340,17 @@ static void glitch_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     }
 }
 
-#define STRANGE_CAT_GLITCH "FFFFFFFFFF"
-static const preset_t GLITCH_PRESETS[] = {
+#define STRANGE_CAT_GLITCH "FFFFFFPF"
+static const preset_t GLITCH_PRESETS[] = {   /* (26.10, Tim: the SLICE machines cleaned up: eight each, their own, no shared recipes) */
     /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
     {"GLASS & AIR", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
-    {"STUTTER", {0, 0, 70, 3, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 10, 20)},
-    {"CHOKE BUZZ", {11, 0, 110, 16, 0, 20, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
-    {"BACKWARDS", {0, -5, 40, 2, 100, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 20, 40)},
-    {"DEAD AIR", {4, 0, 90, 2, 20, 30, 50, 30}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 30)},
-    {"SW DATA", {5, 7, 60, 4, 60, 60, 30, 90}, {40, 64, 127, 90}, 0, 0, FX(0, 0, 40, 90)},
-    {"CRUSH ARC", {12, -12, 30, 2, 30, 110, 10, 20}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
-    {"RTTY CHOIR", {9, -12, 100, 16, 40, 20, 0, 50}, {90, 64, 127, 110}, 0, 0, FX(0, 30, 30, 110)},
-    {"NEON STRIKE", {10, 0, 80, 6, 0, 10, 20, 60}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 30, 60)},
-    {"GHOST VALVE", {14, -24, 50, 3, 80, 40, 30, 70}, {40, 64, 127, 120}, 0, 0, FX(0, 40, 40, 120)},
+    {"SHORTWAVE", {4, 0, 45, 2, 0, 0, 15, 50}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 20, 40)},
+    {"GLASS RAIN", {1, 7, 75, 3, 40, 0, 25, 80}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 30, 60)},
+    {"ARC WELD", {12, -5, 100, 6, 0, 70, 30, 40}, {0, 64, 127, 30}, 0, 0, FX(10, 0, 0, 30)},
+    {"REVERSE ETHER", {7, -7, 30, 1, 127, 0, 0, 20}, {0, 64, 127, 70}, 0, 0, FX(0, 20, 30, 80)},
+    {"MORSE CUTS", {8, 0, 85, 2, 0, 40, 45, 60}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 30, 40)},
+    {"NEON DRONE", {10, -12, 105, 16, 20, 20, 0, 0}, {60, 64, 127, 110}, 0, 0, FX(0, 30, 20, 100)},
+    {"DEGAUSS BASS", {15, -12, 0, 1, 30, 50, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(20, 0, 0, 20)},
 };
 
 static const engine_t ENG_GLITCH = {
@@ -383,46 +390,41 @@ static const engine_t ENG_GLITCH = {
  *   MECH    CLOCK TICK, TOCK, RATCHET, TYPEWRITER, CARRIAGE, REEL UP, TAPE STOP, PROJECTOR, PISTON, WIND-UP, SHUTTER,
  *           SERVO, HAMMER, CHAIN DRIVE, STEAM, MUSIC BOX
  * the same knobs, KIT too (a user slot instead of the kit) */
-#define STRANGE_CAT_RITUAL "FFFFFFFFFF"
-static const preset_t RITUAL_PRESETS[] = {
+#define STRANGE_CAT_RITUAL "FPFFPFFP"
+static const preset_t RITUAL_PRESETS[] = {   /* (26.10, Tim: the SLICE machines cleaned up: eight each, their own, no shared recipes) */
     /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
     {"CRYPT KIT", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 50)},
     {"LOW TOLL", {15, -12, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 110}, 0, 0, FX(0, 20, 20, 110)},
-    {"CHAIN DRAG", {2, -5, 60, 3, 30, 0, 10, 40}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 20, 70)},
-    {"BONE RAIN", {9, 0, 40, 2, 20, 20, 20, 70}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 60)},
-    {"STONE ALTAR", {3, -7, 90, 6, 40, 10, 0, 30}, {30, 64, 127, 90}, 0, 0, FX(10, 0, 0, 80)},
-    {"CANDLE VIGIL", {5, 0, 110, 16, 30, 0, 20, 60}, {60, 64, 127, 110}, 0, 0, FX(0, 20, 30, 100)},
-    {"BREATH CHOIR", {6, -12, 100, 16, 50, 0, 0, 40}, {80, 64, 127, 120}, 0, 0, FX(0, 40, 30, 120)},
-    {"DRIP CAVE", {7, 5, 0, 1, 10, 0, 0, 20}, {0, 64, 127, 90}, 0, 0, FX(0, 0, 40, 110)},
-    {"BURIAL", {8, -12, 50, 2, 40, 30, 10, 30}, {0, 64, 127, 80}, 0, 0, FX(20, 0, 10, 90)},
-    {"THROAT RITE", {12, -12, 60, 16, 20, 10, 0, 20}, {70, 64, 127, 120}, 0, 0, FX(10, 30, 20, 110)},
+    {"BELL CASCADE", {0, 5, 60, 2, 30, 0, 10, 70}, {0, 64, 127, 70}, 0, 0, FX(0, 0, 30, 90)},
+    {"CHAIN DRAG", {2, -5, 50, 3, 30, 0, 10, 50}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 20, 70)},
+    {"BOWL DRONE", {11, -12, 100, 16, 20, 0, 0, 0}, {60, 64, 127, 120}, 0, 0, FX(0, 30, 20, 120)},
+    {"BONE RITE", {9, 0, 70, 3, 40, 20, 30, 80}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 60)},
+    {"CAVE ECHO", {7, -7, 30, 1, 60, 0, 0, 30}, {0, 64, 127, 90}, 0, 0, FX(0, 0, 40, 110)},
+    {"THROAT CHANT", {12, -12, 90, 16, 10, 10, 0, 0}, {70, 64, 127, 120}, 0, 0, FX(10, 30, 20, 110)},
 };
-#define STRANGE_CAT_MECH "FFFFFFFFFF"
-static const preset_t MECH_PRESETS[] = {
-    {"WORKSHOP", {4, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
-    {"CLOCKWORK", {2, 0, 80, 4, 0, 0, 10, 20}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 40)},
-    {"TYPE POOL", {3, 0, 30, 2, 10, 10, 20, 70}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 40)},
-    {"REEL TO REEL", {5, 0, 100, 16, 0, 0, 0, 0}, {20, 64, 127, 80}, 0, 0, FX(0, 20, 20, 60)},
-    {"TAPE DEATH", {6, -5, 60, 2, 60, 30, 20, 30}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 20, 70)},
-    {"PROJECTOR", {7, 0, 90, 16, 0, 20, 10, 10}, {10, 64, 127, 70}, 0, 0, FX(0, 0, 10, 50)},
-    {"STEAM WORKS", {8, -7, 50, 3, 20, 20, 10, 40}, {0, 64, 127, 70}, 0, 0, FX(20, 0, 10, 60)},
-    {"FORGE", {12, -12, 20, 2, 0, 40, 0, 20}, {0, 64, 127, 70}, 0, 0, FX(30, 0, 0, 70)},
+#define STRANGE_CAT_MECH "FFFPFFFF"
+static const preset_t MECH_PRESETS[] = {   /* (26.10, Tim: the SLICE machines cleaned up: eight each, their own, no shared recipes) */
+    /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
+    {"WORKSHOP", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
+    {"CLOCKWORK", {0, 0, 80, 4, 0, 0, 10, 30}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 40)},
+    {"TYPE POOL", {3, 0, 30, 2, 10, 10, 30, 70}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 40)},
+    {"REEL TO REEL", {5, -5, 100, 16, 0, 0, 0, 0}, {20, 64, 127, 80}, 0, 0, FX(0, 20, 20, 60)},
+    {"TAPE DEATH", {6, -7, 60, 2, 80, 40, 20, 30}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 20, 70)},
+    {"FORGE", {12, -12, 20, 2, 0, 50, 0, 20}, {0, 64, 127, 70}, 0, 0, FX(30, 0, 0, 70)},
     {"SERVO SWARM", {11, 7, 70, 4, 30, 10, 20, 60}, {30, 64, 127, 90}, 0, 0, FX(0, 20, 20, 80)},
-    {"BROKEN BOX", {15, 0, 40, 3, 40, 20, 30, 50}, {0, 64, 127, 90}, 0, 0, FX(0, 20, 30, 90)},
+    {"MUSIC BOX RUIN", {15, 0, 50, 3, 70, 30, 20, 50}, {0, 64, 127, 90}, 0, 0, FX(0, 20, 30, 90)},
 };
-#define STRANGE_CAT_BIO "FFFFFFFFFF"
-static const preset_t BIO_PRESETS[] = {
+#define STRANGE_CAT_BIO "FPFFFFFP"
+static const preset_t BIO_PRESETS[] = {   /* (26.10, Tim: the SLICE machines cleaned up: eight each, their own, no shared recipes) */
     /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
     {"BODY KIT", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 10, 40)},
-    {"HEART LOOP", {0, -5, 90, 16, 0, 0, 0, 0}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 10, 60)},
-    {"BREATHING", {1, 0, 60, 3, 50, 0, 0, 30}, {40, 64, 127, 110}, 0, 0, FX(0, 20, 20, 100)},
-    {"PULHRA NIGHT", {11, 0, 50, 4, 20, 0, 20, 60}, {30, 64, 127, 110}, 0, 0, FX(0, 20, 30, 110)},
-    {"CICADA HEAT", {10, 0, 90, 3, 0, 20, 10, 20}, {60, 64, 127, 110}, 0, 0, FX(0, 0, 20, 90)},
-    {"FOREST RAIN", {9, 0, 70, 6, 30, 0, 10, 80}, {50, 64, 127, 110}, 0, 0, FX(0, 0, 30, 110)},
+    {"HEART LOOP", {0, -5, 85, 16, 0, 0, 0, 0}, {0, 64, 127, 80}, 0, 0, FX(10, 0, 10, 60)},
+    {"BREATHING", {1, 0, 50, 2, 60, 0, 0, 30}, {40, 64, 127, 110}, 0, 0, FX(0, 20, 20, 100)},
+    {"NIGHT FOREST", {10, 0, 60, 3, 20, 0, 20, 70}, {30, 64, 127, 110}, 0, 0, FX(0, 20, 30, 110)},
     {"CRUNCH", {4, -7, 30, 2, 20, 60, 20, 40}, {0, 64, 127, 50}, 0, 0, FX(20, 0, 0, 40)},
     {"WET LAB", {5, -5, 50, 3, 40, 20, 10, 50}, {0, 64, 127, 80}, 0, 0, FX(0, 20, 20, 70)},
     {"DAWN BIRDS", {12, 0, 40, 2, 20, 0, 20, 70}, {30, 64, 127, 100}, 0, 0, FX(0, 20, 30, 110)},
-    {"PURR DRONE", {14, -12, 80, 16, 10, 10, 0, 10}, {60, 64, 127, 120}, 0, 0, FX(10, 20, 20, 110)},
+    {"PURR DRONE", {14, -12, 90, 16, 10, 10, 0, 0}, {60, 64, 127, 120}, 0, 0, FX(10, 20, 20, 110)},
 };
 #define GL_EDIT {{"SLCE", F_INT, 0, 15, 0, 0, 0}, {"PTCH", F_SEMI, -24, 24, 0, 0, 0}, {"STUT", F_PCT, 0, 127, 0, 0, 0}, \
                  {"REP", F_INT, 1, 16, 1, 0, 0}, {"REV", F_PCT, 0, 127, 0, 0, 0}, {"CRSH", F_PCT, 0, 127, 0, 0, 0}, \
@@ -487,18 +489,17 @@ static const engine_t ENG_BIO = {
 /* ERROR: the classic broken digital (the first GLITCH kit, 11,025 Hz): crushed noise, click trains, an FM chirp, a
  * stutter, dropouts, a zap, a rate sweep, crackle, a modem, a thump, a CD skip, LFSR data, a faulty beep, a tick, a
  * reversed swell, a grain smear */
-#define STRANGE_CAT_ERROR "FFFFFFFFFF"
-static const preset_t ERROR_PRESETS[] = {
+#define STRANGE_CAT_ERROR "FFFFPFFF"
+static const preset_t ERROR_PRESETS[] = {   /* (26.10, Tim: the SLICE machines cleaned up: eight each, their own, no shared recipes) */
+    /* name, {SLCE, PTCH, STUT, REP, REV, CRSH, CHOP, JUMP}, {A D S R}, fenv, mono */
     {"BROKEN KIT", {0, 0, 0, 1, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
-    {"STUTTER", {0, 0, 70, 3, 0, 0, 0, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 10, 20)},
-    {"BUZZ LOOP", {3, 0, 110, 16, 0, 20, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 0, 30)},
-    {"BACKWARDS", {0, -5, 40, 2, 100, 0, 0, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 20, 40)},
-    {"UNDERRUN", {4, 0, 90, 2, 20, 30, 50, 30}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 30)},
-    {"DATA RAIN", {11, 7, 60, 4, 60, 60, 30, 90}, {40, 64, 127, 90}, 0, 0, FX(0, 0, 40, 90)},
-    {"CRUSH BOX", {0, -12, 30, 2, 30, 110, 10, 20}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 20)},
-    {"MODEM CHOIR", {8, -12, 100, 16, 40, 20, 0, 50}, {90, 64, 127, 110}, 0, 0, FX(0, 30, 30, 110)},
-    {"SKIPPING CD", {10, 0, 80, 6, 0, 10, 20, 60}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 30, 60)},
-    {"GHOST GLITCH", {14, -24, 50, 3, 80, 40, 30, 70}, {40, 64, 127, 120}, 0, 0, FX(0, 40, 40, 120)},
+    {"BUFFER SKIP", {10, 0, 70, 4, 0, 0, 20, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 10, 20)},
+    {"BIT ROT", {0, -5, 20, 2, 30, 100, 10, 30}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 10, 30)},
+    {"LOST PACKETS", {4, 0, 60, 1, 10, 30, 70, 70}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 20, 30)},
+    {"MODEM SCAN", {8, 0, 100, 16, 0, 20, 0, 0}, {20, 64, 127, 90}, 0, 0, FX(0, 20, 30, 90)},
+    {"REWIND", {14, -12, 40, 2, 120, 0, 0, 40}, {0, 64, 127, 60}, 0, 0, FX(0, 0, 30, 60)},
+    {"GRAIN STORM", {15, 12, 110, 3, 60, 0, 30, 100}, {20, 64, 127, 90}, 0, 0, FX(0, 20, 40, 100)},
+    {"DEAD PIXEL", {12, 0, 90, 6, 20, 80, 40, 20}, {0, 64, 127, 40}, 0, 0, FX(10, 0, 10, 30)},
 };
 static const engine_t ENG_ERROR = {
     .name = "ERROR",
