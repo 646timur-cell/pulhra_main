@@ -1248,16 +1248,186 @@ static const engine_t ENG_DZAP = {
     .xya = {{40, 40, 0}, {50, 40, 0}},
 };
 
+/* ====================================================================== TOM === */
+/* a tuned tom (Tim, 31.10; after the Analog Rhythm's tom): a sine body (TUNE 40 .. 400 Hz) bent down from SWEP above it over
+ * STIM, a second membrane mode at 1.59 x (TONE its level, its own shorter fall), a burst of skin noise band-passed at the
+ * body's second octave (NOIS), a click (HIT); DCAY the body's fall, DRIV; the ninth, TYPE: TOM (both modes, a soft click),
+ * SYN (a pure sine, a longer sweep: the Simmons), 909 (a triangle-ish body, a hard click). ph[0] the body, ph[1] the mode;
+ * e[0] the sweep, e[1] the mode's level (Q15), f[0..1] the noise's band-pass */
+enum { DR_TT_TOM, DR_TT_SYN, DR_TT_909, DR_TT_N };
+static const char *const N_DR_TTYPE[DR_TT_N] = {"TOM", "SYN", "909"};
+static void dtom_start(track_t *t, voice_t *v, const int16_t *e) { (void)e; dr_start(t, v); }
+static void dtom_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    uint32_t ty = (uint32_t)clamp(e[8], 0, DR_TT_N - 1), i;
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), pe = S->e[0], me = S->e[1], a, d, pe1;
+    int32_t b16 = (28 + clamp(e[0], 0, 127) * 40 / 127) * 16 + note, sw16 = clamp(e[1], 0, 127) * 18 * 16 / 127;
+    int32_t tone = ty == DR_TT_SYN ? 0 : clamp(e[4], 0, 127) * 200, nois = clamp(e[5], 0, 127) * 180;
+    int32_t hit = clamp(e[6], 0, 127) * (ty == DR_TT_909 ? 300 : 160), drv = clamp(e[7], 0, 127);
+    uint32_t ks = dv_k(dr_tau(e[2], ty == DR_TT_SYN ? 40 : 20, 60)), km = dv_k(dr_tau(e[3], 10, 50));
+    uint32_t kb = dv_kb(dr_tau(e[3], 30, 60)), inc0, inc1;
+    tsvf_t c;
+    if (v->s[6])
+        kb = dv_kb(DR_CHOKE_US);
+    tsvf_coef(&c, dr_cut(b16 + 24 * 16), 40);
+    inc0 = pitch_inc((uint32_t)clamp(b16 + ((sw16 * pe) >> 15), 0, 2047));
+    for (i = 0, pe1 = pe; i < n; i++)
+        pe1 = (pe1 * (int32_t)ks) >> 15;
+    inc1 = pitch_inc((uint32_t)clamp(b16 + ((sw16 * pe1) >> 15), 0, 2047));
+    dv_slow(&S->q[0], kb, &a, &d);
+    for (i = 0; i < n; i++) {
+        uint32_t inc = inc0 + (uint32_t)(((int32_t)inc1 - (int32_t)inc0) / (int32_t)(n ? n : 1u) * (int32_t)i);
+        int32_t x, body = ty == DR_TT_909 ? (sine_i(S->ph[0]) + osc_tri(S->ph[0])) >> 1 : sine_i(S->ph[0]), z;
+        x = (body * (a >> 5)) >> 15;
+        if (tone)                                         /* the second mode, 1.59 x */
+            x += (((sine_i(S->ph[1]) * me) >> 15) * tone) >> 15;
+        z = DR_NOISE(S);
+        if (nois && S->cnt < 2400)                        /* the skin: noise, ~50 ms, band-passed */
+            x += ((clamp(dv_bp(&c, z, &S->f[0]), -60000, 60000) * nois) >> 15) * (2400 - S->cnt) / 2400;
+        if (hit && S->cnt < 90)                           /* the click */
+            x += (((z * hit) >> 15) * (90 - S->cnt)) / 90;
+        S->f[0] = clamp(S->f[0], -150000, 150000);
+        S->f[1] = clamp(S->f[1], -150000, 150000);
+        S->ph[0] += inc;
+        S->ph[1] += inc + (inc >> 1) + (inc >> 4) + (inc >> 5);   /* (1.59) */
+        me = (me * (int32_t)km) >> 15;
+        S->cnt++;
+        a += d;
+        out[i] += voice_amp(dr_out(x, drv), m, i);
+    }
+    S->e[0] = pe1;
+    S->e[1] = me;
+    v->s[0] = S->q[0];
+}
+DR_WRAP(dtom)
+#define DR_CAT_TOM "DDDDDD"
+static const preset_t DTOM_PRESETS[] = {
+    /* TUNE SWEP STIM DCAY TONE NOIS HIT DRIV (TYPE) */
+    {"TM LOW TOM", {30, 40, 40, 70, 50, 40, 30, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"TM MID TOM", {60, 40, 40, 60, 50, 40, 30, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"TM HI TOM", {90, 40, 35, 55, 50, 40, 30, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"TM FLOOR", {15, 30, 50, 85, 40, 30, 20, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 30)},
+    {"TM SIMMONS", {55, 110, 70, 60, 0, 60, 20, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 10, 30)},
+    {"TM 909 TOM", {50, 50, 30, 55, 20, 20, 90, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+};
+static const engine_t ENG_DTOM = {
+    .name = "TOM", .page_title = {"BODY", "SKIN"}, .presets = DTOM_PRESETS, .npresets = NELEM(DTOM_PRESETS),
+    .note_on = dtom_note_on, .render = dtom_render, DR_MEM, .knob = {P_E0, P_E1, P_E3, P_E5},
+    .edit = {{"TUNE", F_PCT, 0, 127, 60, 0, 0}, {"SWEP", F_PCT, 0, 127, 40, 0, 0}, {"STIM", F_PCT, 0, 127, 40, 0, 0},
+             {"DCAY", F_PCT, 0, 127, 60, 0, 0}, {"TONE", F_PCT, 0, 127, 50, 0, 0}, {"NOIS", F_PCT, 0, 127, 40, 0, 0},
+             {"HIT", F_PCT, 0, 127, 30, 0, 0}, {"DRIV", F_PCT, 0, 127, 0, 0, 0}},
+    .e8 = {"TYPE", F_ENUM, 0, DR_TT_N - 1, 0, N_DR_TTYPE, 0},
+    .xyd = {{XY_E(0), XY_E(1), 0}, {XY_E(3), XY_E(5), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+
+/* ===================================================================== SAMP === */
+/* a slice as a hit (Tim, 31.10: the SLICE machines' kits on a KIT lane): KIT (GLITCH RITUAL MECH BIO ERROR, BBOX's drums),
+ * SLCE its slice, PTCH semitones (the note too), DCAY its fall (127: the slice whole), TONE a low-pass (127 open), CRSH bits
+ * and rate thrown away, DRIV; the ninth, GAIN (64: as the slice is). Read from the flash as it plays (one ADPCM decode a source sample, forward). ph[0] the read
+ * position's fraction (Q16), cnt the next source sample, e[0] e[1] the two around it, f[0] the low-pass, f[2] f[3] the
+ * decoder's state, n the hold's countdown, x1 the sample held */
+enum { DR_SK_GLT, DR_SK_RIT, DR_SK_MEC, DR_SK_BIO, DR_SK_ERR, DR_SK_BBX, DR_SK_N };
+static const char *const N_DR_SKIT[DR_SK_N] = {"GLITCH", "RITUAL", "MECH", "BIO", "ERROR", "BBOX"};
+static const smp_zone_t *dsmp_zone(const int16_t *e)
+{
+    static const uint8_t SC[DR_SK_N] = {0, GL_RIT, GL_MEC, GL_BIO, GL_ERR, GL_BBX};
+    return gl_zone(SC[clamp(e[0], 0, DR_SK_N - 1)], (uint32_t)clamp(e[1], 0, 15));
+}
+static void dsmp_start(track_t *t, voice_t *v, const int16_t *e)
+{
+    dr_slot_t *S;
+    const smp_zone_t *z = dsmp_zone(e);
+    int32_t p = 0, ix = 0;
+    dr_start(t, v);
+    S = dr_slot(t, v);
+    S->e[0] = gl_dec(z, 0, &p, &ix);
+    S->e[1] = z->n > 1u ? gl_dec(z, 1, &p, &ix) : S->e[0];
+    S->cnt = 2;
+    S->f[2] = p;
+    S->f[3] = ix;
+    v->s[2] = 1;                                          /* (alive till the slice's end or the fall's) */
+}
+static void dsmp_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    const smp_zone_t *z = dsmp_zone(e);
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), d16 = clamp(e[2], -24, 24) * 16 + note, a, d;
+    int32_t dc = clamp(e[3], 0, 127), tone = clamp(e[4], 0, 127), cr = clamp(e[5], 0, 127), drv = clamp(e[6], 0, 127);
+    uint32_t step = (uint32_t)(((uint64_t)z->rate * (dv_exp2((uint32_t)clamp(d16 * 4096 / 192 + 4 * 4096, 0, 7 * 4096)) >> 4)) >> 16);
+    uint32_t kb = dc >= 127 ? 65536u : dv_kb(dr_tau(dc, 30, 80)), i, gi = (uint32_t)(20 + tone * 107 / 127);
+    int32_t g = SVF_G[gi], gq = (g << 15) / (4096 + g), bits = cr ? 16 - cr * 12 / 127 : 16, hold = cr ? 1 + cr * 15 / 127 : 1;
+    int32_t pr = S->f[2], ix = S->f[3], gn = clamp(e[8], 0, 127);
+    step = step > (4u << 16) ? 4u << 16 : step;
+    if (v->s[6])
+        kb = dv_kb(DR_CHOKE_US);
+    dv_slow(&S->q[0], kb, &a, &d);
+    for (i = 0; i < n; i++) {
+        int32_t x;
+        if ((uint32_t)S->cnt > z->n) {                    /* (the slice played out) */
+            S->q[0] = 0;
+            v->s[2] = 0;
+            break;
+        }
+        x = S->e[0] + (int32_t)(((int64_t)(S->e[1] - S->e[0]) * (int32_t)(S->ph[0] & 0xFFFFu)) >> 16);
+        S->ph[0] += step;
+        while (S->ph[0] >= 65536u) {                      /* (on to the next source sample) */
+            S->ph[0] -= 65536u;
+            S->e[0] = S->e[1];
+            S->e[1] = (uint32_t)S->cnt < z->n ? gl_dec(z, (uint32_t)S->cnt, &pr, &ix) : 0;
+            S->cnt++;
+        }
+        if (cr) {                                         /* CRSH: the rate held, the bits dropped */
+            if (--S->n <= 0) {
+                S->n = hold;
+                S->x1 = (x >> (16 - bits)) << (16 - bits);
+            }
+            x = S->x1;
+        }
+        if (tone < 127)
+            S->f[0] += ((x - S->f[0]) * gq) >> 15, x = S->f[0];
+        x = (((x * (a >> 5)) >> 15) * gn) >> 6;
+        a += d;
+        out[i] += voice_amp(dr_out(x, drv), m, i);
+    }
+    S->f[2] = pr;
+    S->f[3] = ix;
+    v->s[0] = S->q[0];
+}
+DR_WRAP(dsmp)
+#define DR_CAT_SMP "DDDDDDD"
+static const preset_t DSMP_PRESETS[] = {
+    /* KIT SLCE PTCH DCAY TONE CRSH DRIV */
+    {"SP GLASS TAP", {DR_SK_GLT, 0, 0, 127, 127, 0, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"SP RELAY", {DR_SK_GLT, 14, 0, 127, 127, 0, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"SP BELL", {DR_SK_RIT, 0, 0, 127, 127, 0, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 10, 30)},
+    {"SP CLOCK", {DR_SK_MEC, 0, 0, 100, 127, 0, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"SP DRIP", {DR_SK_BIO, 2, 0, 127, 127, 0, 0, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 10, 20)},
+    {"SP BIT HIT", {DR_SK_ERR, 4, 0, 90, 127, 60, 20, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"SP BBOX KICK", {DR_SK_BBX, 0, 0, 127, 127, 0, 10, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 0)},
+};
+static const engine_t ENG_DSMP = {
+    .name = "SAMP", .page_title = {"SLICE", "TONE"}, .presets = DSMP_PRESETS, .npresets = NELEM(DSMP_PRESETS),
+    .note_on = dsmp_note_on, .render = dsmp_render, DR_MEM, .knob = {P_E0, P_E1, P_E2, P_E3},
+    .edit = {{"KIT", F_ENUM, 0, DR_SK_N - 1, 0, N_DR_SKIT, 0}, {"SLCE", F_INT, 0, 15, 0, 0, 0}, {"PTCH", F_INT, -24, 24, 0, 0, "st"},
+             {"DCAY", F_PCT, 0, 127, 127, 0, 0}, {"TONE", F_PCT, 0, 127, 127, 0, 0}, {"CRSH", F_PCT, 0, 127, 0, 0, 0},
+             {"DRIV", F_PCT, 0, 127, 0, 0, 0}, {"-", F_INT, 0, 0, 0, 0, 0}},
+    .e8 = {"GAIN", F_PCT, 0, 127, 64, 0, 0},              /* (64: as the slice is, 127: x2) */
+    .xyd = {{XY_E(1), XY_E(2), 0}, {XY_E(4), XY_E(5), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+
 /* ====================================================================== KIT === */
 /* four lanes on one track (T4 only: pulhra/sm_layer.c), each a whole drum machine of the above (Tim): L1 .. L4 its machine
  * (KICK SNARE CLAP HAT CYM), its own nine values (the pattern's sm_pattern_t.lane; in the core dr_lp, set by the sequencer's
  * loads and its parameter commands, pulhra/sm_kit.c), lockable each. A lane is a note: 36 + lane (C2 .. D#2; any other note its
  * lane by note % 4): the sequencer's lanes (sm_seq.c), the keyboard's F3 G3 A3 B3 (keys). A hit chokes only its own lane's last
  * one. Velocity scales it */
-enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_SHKR, DR_KM_BELS, DR_KM_TAMB, DR_KM_ZAP, DR_KM_N };
-static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB", "ZAP"};
+enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_SHKR, DR_KM_BELS, DR_KM_TAMB, DR_KM_ZAP, DR_KM_TOM, DR_KM_SMP, DR_KM_N };
+static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB", "ZAP", "TOM", "SAMP"};
 static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC,
-                                                  &ENG_DBELL, &ENG_DRIM, &ENG_DSHK, &ENG_DBELS, &ENG_DTAMB, &ENG_DZAP};
+                                                  &ENG_DBELL, &ENG_DRIM, &ENG_DSHK, &ENG_DBELS, &ENG_DTAMB, &ENG_DZAP, &ENG_DTOM, &ENG_DSMP};
 static int16_t dr_lp[NPART][4][9] __attribute__((section(".pool")));   /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's (the pool: RAM keeps its 4 KiB headroom) */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
@@ -1314,6 +1484,10 @@ static void dkit_note_on(track_t *t, voice_t *v)
         dtamb_start(t, v, e);
     } else if (m == DR_KM_ZAP) {
         dzap_start(t, v, e);
+    } else if (m == DR_KM_TOM) {
+        dtom_start(t, v, e);
+    } else if (m == DR_KM_SMP) {
+        dsmp_start(t, v, e);
     } else {
         dcym_start(t, v, e);
     }
@@ -1404,6 +1578,10 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dtamb_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_ZAP)
         dzap_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_TOM)
+        dtom_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_SMP)
+        dsmp_run(t, v, b, n, &km, e);
     else
         dcym_run(t, v, b, n, &km, e);
     g1 = dkit_env(t, v, L);

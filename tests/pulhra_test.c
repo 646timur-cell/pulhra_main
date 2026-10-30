@@ -9847,6 +9847,22 @@ static int test_zap(void)
     p0 = lane_hit_peak(0);
     bad += check("ZAP: a KIT lane (L1), its hit sounds, its sound the ZAP's", trk[3].p[P_E0] == DR_KM_ZAP && p0 > 2000u &&
                  cpat()->lane[0][1] == DZAP_PRESETS[0].e[1]);
+    {                                                     /* TOM and SAMP the same way */
+        static const uint8_t KM[2] = {DR_KM_TOM, DR_KM_SMP};
+        uint32_t j, ok = 1;
+        for (j = 0; j < 2u; j++) {
+            ksnd(3)->p[P_E0] = (int8_t)KM[j];
+            sm_param_push(3, P_E0);
+            sm_lane_machine(0);
+            sm_input_poll();
+            play_blocks(2);
+            p0 = lane_hit_peak(0);
+            if (p0 <= 2000u)
+                printf("pulhra: lane machine %u peak %u\n", KM[j], p0);
+            ok &= trk[3].p[P_E0] == KM[j] && p0 > 2000u;
+        }
+        bad += check("TOM, SAMP: KIT lanes, their hits sound", ok);
+    }
     return bad;
 }
 
@@ -9905,6 +9921,7 @@ static int test_west(void)
     sm_sound_load(m, 0);                                  /* WEST BONGO */
     sm_input_poll();
     kit_dry();
+    fx_flush();
     play_blocks(4);
     trk_note_on(&trk[0], 48, 100);
     for (b = 0; b < 1200u; b++) {
@@ -10569,8 +10586,8 @@ static int test_kit_lane_pages(void)
     turn(EN_SELECT, 20);                                  /* (SELECT past the end: the last, ZAP) */
     sm_input_poll();
     draw_full();
-    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to the last, ZAP (its values the ZAP's)", ksnd(3)->p[P_E0] == DR_KM_ZAP &&
-                 cpat()->lane[0][1] == DZAP_PRESETS[0].e[1] && cpat()->lane[0][3] == DZAP_PRESETS[0].e[3] && lint_has("ZAP", 0, 0));
+    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to the last, SAMP (its values the SAMP's)", ksnd(3)->p[P_E0] == DR_KM_SMP &&
+                 cpat()->lane[0][1] == DSMP_PRESETS[0].e[1] && cpat()->lane[0][3] == DSMP_PRESETS[0].e[3] && lint_has("SAMP", 0, 0));
     layer_hold(B_EDIT);
     while (sm_lay_epage != 3u) {
         press(B_OCTUP);

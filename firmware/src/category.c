@@ -60,7 +60,7 @@ static const char *const PRESET_CAT[NENGINES > 16 ? NENGINES : 16] = {
 #endif
 #if FELUCCA_SWAMP
     DR_CAT_KICK, DR_CAT_SNARE, DR_CAT_CLAP, DR_CAT_HAT, DR_CAT_CYM, DR_CAT_KIT, DR_CAT_PERC, DR_CAT_BELL, DR_CAT_RIM, DR_CAT_SHKR, DR_CAT_BELS, DR_CAT_TAMB,   /* 42..53 */
-    PX_CAT_MACID, DR_CAT_ZAP, PX_CAT_CLOUD, PX_CAT_WEST, PX_CAT_ORGAN,                                                        /* 54.. (eng_px.c, eng_dr.c) */
+    PX_CAT_MACID, DR_CAT_ZAP, PX_CAT_CLOUD, PX_CAT_WEST, PX_CAT_ORGAN, DR_CAT_TOM, DR_CAT_SMP,                                                        /* 54.. (eng_px.c, eng_dr.c) */
 #endif
 };
 static uint32_t preset_cat(uint32_t e, uint32_t k)    /* factory preset k of engine e */
