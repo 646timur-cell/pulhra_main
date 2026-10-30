@@ -170,6 +170,15 @@ static void store_preempt(void);                                           /* th
 #undef trk_note_on
 #undef trk_note_off
 
+/* the white key of machine m on its EDIT page (the DRUM page: its one key) */
+static uint32_t epage_w(uint32_t m)
+{
+    uint32_t pg = sm_epage_of(m), w;
+    for (w = 0; w < sm_epage_n(pg); w++)
+        if (sm_epage_mach(pg, w) == m || pg == 3u)
+            return w;
+    return 0;
+}
 static int check(const char *what, int ok)
 {
     printf("pulhra: %-74s %s\n", what, ok ? "ok" : "FAIL");
@@ -1500,7 +1509,7 @@ static int test_switch_voice_state(void)
             press(B_OCTUP);
             sm_input_poll();
         }
-        k = WHITE[eng_rank(ENGI_CHAOS) - sm_epage_first(sm_lay_epage)];
+        k = WHITE[epage_w(eng_rank(ENGI_CHAOS))];
         key_dn(k);
         sm_input_poll();
         key_up(k);
@@ -1532,7 +1541,7 @@ static int test_edit_layer_every_machine(void)
     for (play = 0; play < 2u; play++)
         for (t = 0; t < SM_NTRK; t++)
             for (m = 0; m < SM_NMACHINE; m++) {
-                if (m >= MF_PAGE_4 && m != SM_KIT_MACH)   /* (the DRUM page: DRUM (the KIT) alone, its lanes the drum machines) */
+                if (sm_place_drum(m) && m != SM_KIT_MACH)   /* (the DRUM page: DRUM (the KIT) alone, its lanes the drum machines) */
                     continue;
                 in_reset();
                 voices_power_on();
@@ -1549,9 +1558,9 @@ static int test_edit_layer_every_machine(void)
                     press(B_OCTUP);
                     sm_input_poll();
                 }
-                key_dn(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
+                key_dn(WHITE[epage_w(m)]);
                 sm_input_poll();
-                key_up(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
+                key_up(WHITE[epage_w(m)]);
                 sm_draw();
                 layer_let_go(B_EDIT);
                 trk_note_on(&trk[t], 64, 100);            /* (during the fade: xp_note) */
@@ -1564,7 +1573,7 @@ static int test_edit_layer_every_machine(void)
                 }
                 if (!sm_mach_ok(m, t))                    /* (the DRUM page: T4's alone; elsewhere its keys load nothing) */
                     ok &= ksnd(t)->machine != m;
-                else if (m >= MF_PAGE_4)                  /* (DRUM on T4: the KIT) */
+                else if (sm_place_drum(m))                  /* (DRUM on T4: the KIT) */
                     ok &= ksnd(t)->machine == SM_KIT_MACH && trk[t].engine == ENGI_DKIT;
                 else if (!(ksnd(t)->machine == m && trk[t].engine == sm_engine_of(m) && !trk[t].xf_on)) {
                     printf("  every machine: T%u machine %u (%s) play %u: model %u core %u xf %u\n", t + 1u, m,
@@ -1591,7 +1600,7 @@ static int test_edit_layer_every_machine(void)
     for (t = 0; t < SM_NTRK; t++)                             /* every machine to every machine, notes on through the switch */
         for (pg = 0; pg < SM_NMACHINE; pg++)
             for (m = 0; m < SM_NMACHINE; m++) {
-                if (m >= MF_PAGE_4 && m != SM_KIT_MACH)   /* (the DRUM page: DRUM (the KIT) alone, its lanes the drum machines) */
+                if (sm_place_drum(m) && m != SM_KIT_MACH)   /* (the DRUM page: DRUM (the KIT) alone, its lanes the drum machines) */
                     continue;
                 in_reset();
                 voices_power_on();
@@ -1610,14 +1619,14 @@ static int test_edit_layer_every_machine(void)
                     press(B_OCTUP);
                     sm_input_poll();
                 }
-                key_dn(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
+                key_dn(WHITE[epage_w(m)]);
                 sm_input_poll();
-                key_up(WHITE[m >= MF_PAGE_4 ? 0u : m - sm_epage_first(sm_lay_epage)]);
+                key_up(WHITE[epage_w(m)]);
                 layer_let_go(B_EDIT);
                 trk_note_on(&trk[t], 64, 100);
                 for (b = 0; b < 60u; b++)
                     run_block();
-                ok &= trk[t].engine == (sm_mach_ok(m, t) && m >= MF_PAGE_4 ? ENGI_DKIT : sm_engine_of(sm_mach_ok(m, t) ? m : pg));   /* (the DRUM
+                ok &= trk[t].engine == (sm_mach_ok(m, t) && sm_place_drum(m) ? ENGI_DKIT : sm_engine_of(sm_mach_ok(m, t) ? m : pg));   /* (the DRUM
                                                                      page off T4: no switch; on T4 its machines the KIT's lanes) */
                 trk_all_off(&trk[t]);
             }
@@ -2601,7 +2610,7 @@ static int test_layer_maps(void)
     layer_draw(SML_EDIT);
     bad += check("MAP: EDIT: the machines of the page, the page keys, the title (all inside their rows, none cut), no INIT",
                  lint_frame("edit") == 0 && lint_has("SAW", 0, 0) && !lint_has("INIT", 0, 0) && lint_has("OCT- OCT+ PAGE", 0, 0) &&
-                 lint_has("MACHINE MONO", 0, 0) && lint_machines() == 13u);
+                 lint_has("MACHINE MONO", 0, 0) && lint_machines() == sm_epage_n(0));
     ok = lint_has("SAW", &y0, &y1);
     bad += check("MAP: the labels of the keys are scale 2 (14 px high)", ok && y1 - y0 == 14);
     bad += check("MAP: the track's machine (SAW) is inverted, its neighbour is not", SCR(10, 56) == INK && SCR(64, 56) == BGC);
@@ -2751,7 +2760,7 @@ static int test_leds_layer(void)
     sm_layer = SML_EDIT;
     sm_lay_epage = 0;
     sm_leds();
-    keys &= wl(0) == 1 && wd(1) == 1 && wl(1) == 0 && wd(12) == 1 && wd(13) == 0 && wd(15) == 0 && wm(0) == 0;   /* SAW lit, 13 machines, no INIT */
+    keys &= wl(0) == 1 && wd(1) == 1 && wl(1) == 0 && wd(sm_epage_n(0) - 1u) == 1 && wd(sm_epage_n(0)) == 0 && wd(15) == 0 && wm(0) == 0;   /* SAW lit, the page's machines, no INIT */
     smp.pat[smp.cur].step[0][5].n = 1;                    /* (the steps are not shown in a layer) */
     sm_leds();
     keys &= wany(5) == 1 && wl(5) == 0;
@@ -9692,6 +9701,128 @@ static int test_kit_lane_cond(void)
     return bad;
 }
 
+/* the user sounds' flash (Tim, 31.10: a sound saved, then not there): 300 saves over the places at random, the sectors compacted
+ * many times, a power-on now and then; every place its newest after each, through the page's list too */
+static int test_preset_store(void)
+{
+    int bad = 0;
+    uint32_t i, k, okw = 1, okr = 1, okl = 1;
+    int32_t want[SM_UP_N];
+    uint32_t rs = 12345u;
+    sm_urec_t r;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    st_erase(SM_UP_SEC0);
+    st_erase(SM_UP_SEC0 + SM_FL_SEC);
+    sm_up_boot();
+    for (k = 0; k < SM_UP_N; k++)
+        want[k] = -1;
+    for (i = 0; i < 300u; i++) {
+        uint32_t pl;
+        rs = rs * 1103515245u + 12345u;
+        pl = (rs >> 16) % SM_UP_N;
+        memset(&r, 0, sizeof r);
+        r.place = (uint8_t)pl;
+        r.cat = (uint8_t)(1u + (rs >> 8) % 7u);
+        sm_sound_from_preset(&r.snd, (rs >> 4) % 20u, 0);
+        r.snd.p[P_E0] = (int8_t)(i & 127u);
+        {
+            int rc = sm_up_write(&r);
+            if (rc && okw)
+                printf("pulhra: dbg write %u rc %d act %u next %u\n", i, rc, sm_up.act, sm_up.next);
+            okw &= rc == 0;
+        }
+        want[pl] = (int32_t)(i & 127u);
+        if ((rs >> 20) % 7u == 0u)
+            sm_up_boot();                                 /* (a power-on) */
+        for (k = 0; k < SM_UP_N; k++) {
+            sm_urec_t q;
+            if (want[k] < 0) {
+                okr &= !sm_up_used(k);
+                continue;
+            }
+            {
+                int g = sm_up_used(k) && !st_read(sm_up_addr(sm_up_rat(k)), &q, sizeof q) && sm_up_rec_ok(&q) &&
+                        q.snd.p[P_E0] == want[k] && q.place == k;
+                if (!g && okr)
+                    printf("pulhra: dbg read i %u place %u used %d got %d want %d act %u next %u\n", i, k, sm_up_used(k), q.snd.p[P_E0], want[k], sm_up.act, sm_up.next);
+                okr &= g;
+            }
+            if (sm_up_used(k)) {                          /* (the page's list: under its machine and category) */
+                uint32_t j, kk, found = 0;
+                sm_pr.mach = sm_up.mach[k];
+                sm_pr.cat = sm_up.cat[k];
+                for (j = 0; sm_pr_item(j, &kk) >= 0; j++)
+                    found |= sm_pr_item(j, &kk) == 1 && kk == k;
+                okl &= found;
+            }
+        }
+    }
+    bad += check("UPRESET: 300 saves at random over the places (the sectors compacted, power-ons): every write ok", okw);
+    bad += check("UPRESET: ... every place its newest sound after each", okr);
+    bad += check("UPRESET: ... every place in the page's list (its machine, its category)", okl);
+    st_erase(SM_UP_SEC0);
+    st_erase(SM_UP_SEC0 + SM_FL_SEC);
+    sm_up_boot();
+    return bad;
+}
+
+/* ACID (31.10): on the MONO page (its 14th key); a note sounds, an accent (velocity 127) louder and brighter than a plain one; a
+ * LEGATO note on a held one (the slide) does not strike the sweep again */
+static double acid_note(uint32_t vel, double *hi)
+{
+    uint32_t b, i, nl;
+    int32_t L[CTL * 2];
+    double e = 0, h = 0, x1 = 0;
+    trk_note_on(&trk[0], 36, vel);
+    for (b = 0; b < 200u; b++) {
+        nl = 0;
+        block_peak(L, &nl);
+        for (i = 0; i < nl; i++) {
+            e += (double)L[i] * L[i];
+            h += ((double)L[i] - x1) * ((double)L[i] - x1);
+            x1 = L[i];
+        }
+    }
+    trk_note_off(&trk[0], 36);
+    play_blocks(300);
+    *hi = h / (e + 1);
+    return e;
+}
+static int test_acid(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_MACID), b;
+    double e0, e1, h0, h1;
+    int32_t fe;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    bad += check("ACID: on the MONO page, after NOISE", sm_epage_of(m) == 0u && sm_epage_mach(0, 13) == m && !sm_place_drum(m));
+    sm_ui.trk = 0;
+    sm_sound_load(m, 0);
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    fx_flush();
+    e0 = acid_note(90, &h0);
+    e1 = acid_note(127, &h1);
+    printf("pulhra: ACID plain %.3g (hi %.3f) accent %.3g (hi %.3f)\n", e0, h0, e1, h1);
+    bad += check("ACID: a note sounds; an accent louder and brighter", e0 > 1e9 && e1 > e0 * 1.3 && h1 > h0);
+    trk_note_on(&trk[0], 36, 90);
+    for (b = 0; b < 100u; b++)
+        run_block();
+    fe = trk[0].v[0].s[4];
+    trk_note_on(&trk[0], 43, 90);                         /* (LEGATO: the slide) */
+    run_block();
+    bad += check("ACID: a legato note (the slide): the sweep not struck again", trk[0].v[0].s[4] <= fe && trk[0].v[0].note == 43);
+    trk_all_off(&trk[0]);
+    play_blocks(300);
+    return bad;
+}
+
 static int test_preset_page(void)
 {
     int bad = 0;
@@ -12302,6 +12433,8 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_acid();
+    bad += test_preset_store();
     bad += test_kit_lane_cond();
     bad += test_step_pages();
     bad += test_amp_vol();

@@ -62,9 +62,19 @@ static void sm_up_boot(void)
     sm_up.next = 0;
     sm_up.pend = 0;
     sm_up.seq = 0;
-    for (s = 0; flash_ok && s < 2u; s++)
+    for (s = 0; flash_ok && s < 2u; s++)                  /* the sector in use: the newest record's */
+        for (o = 0; o + sizeof r <= SM_FL_SEC; o += sizeof r)
+            if (!st_read(sm_up_addr(s << 15 | o), &r, sizeof r) && sm_up_rec_ok(&r) && (!have || r.seq > top)) {
+                top = r.seq;
+                sm_up.act = (uint8_t)s;
+                have = 1;
+            }
+    for (s = 0; flash_ok && have && s < 2u; s++) {        /* each place's newest; of two the same (a compaction's copy before
+                                                             31.10), the one in the sector in use: the other is erased first
+                                                             at the next compaction */
+        uint32_t sc = sm_up.act ^ 1u ^ s;                 /* (the other sector first, the one in use over it) */
         for (o = 0; o + sizeof r <= SM_FL_SEC; o += sizeof r) {
-            uint32_t at = s << 15 | o;
+            uint32_t at = sc << 15 | o;
             if (st_read(sm_up_addr(at), &r, sizeof r) || !sm_up_rec_ok(&r))
                 continue;
             if (sm_up_used(r.place)) {
@@ -75,12 +85,8 @@ static void sm_up_boot(void)
             sm_up.at[r.place] = (uint16_t)(at + 1u);
             sm_up.mach[r.place] = r.snd.machine;
             sm_up.cat[r.place] = r.cat;
-            if (!have || r.seq > top) {
-                top = r.seq;
-                sm_up.act = (uint8_t)s;
-            }
-            have = 1;
         }
+    }
     sm_up.seq = top;
     for (o = 0; o + sizeof r <= SM_FL_SEC; o += sizeof r) {   /* the first record of the sector in use never written (all 1s) */
         uint32_t k, blank = 1;
@@ -115,9 +121,11 @@ static int sm_up_write(sm_urec_t *rec)
     if (!flash_ok)
         return 1;
     rec->magic = SM_UP_MAGIC;
-    rec->seq = sm_up.seq + 1u;
-    rec->crc = sm_up_crc(rec);
-    if ((uint32_t)sm_up.next + sizeof r > SM_FL_SEC) {   /* full: the other sector, every other place's newest record there */
+    if ((uint32_t)sm_up.next + sizeof r > SM_FL_SEC) {   /* full: the other sector, every other place's newest record there,
+                                                             each a sequence number of its own above every one before (Tim,
+                                                             31.10: a copy of the same number as its original, a power-on
+                                                             could index the original, in the sector the next compaction
+                                                             erases first: that place lost, the save failed) */
         uint32_t ns = sm_up.act ^ 1u, o = 0;
         uint16_t nat[SM_UP_N];
         if (st_erase(SM_UP_SEC0 + ns * SM_FL_SEC))
@@ -129,6 +137,8 @@ static int sm_up_write(sm_urec_t *rec)
                 continue;
             if (st_read(sm_up_addr(sm_up_rat(k)), &r, sizeof r) || !sm_up_rec_ok(&r))
                 return 3;
+            r.seq = ++sm_up.seq;
+            r.crc = sm_up_crc(&r);
             if (sm_flash_put(sm_up_addr(ns << 15 | o), &r, sizeof r))
                 return 4;
             nat[k] = (uint16_t)((ns << 15 | o) + 1u);
@@ -138,6 +148,8 @@ static int sm_up_write(sm_urec_t *rec)
         sm_up.act = (uint8_t)ns;
         sm_up.next = (uint16_t)o;
     }
+    rec->seq = sm_up.seq + 1u;
+    rec->crc = sm_up_crc(rec);
     at = (uint32_t)sm_up.act << 15 | sm_up.next;
     sm_up.next = (uint16_t)(sm_up.next + sizeof r);       /* (a failed write leaves its place used: the next one after it) */
     if (sm_flash_put(sm_up_addr(at), rec, sizeof *rec) || st_read(sm_up_addr(at), &r, sizeof r) || memcmp(&r, rec, sizeof r))
@@ -166,7 +178,7 @@ static struct {
 } sm_pr __attribute__((section(".pool")));               /* (the pool: RAM keeps its 4 KiB headroom) */
 
 /* K1's machines: every place but the drum machines of the KIT's lanes (the DRUM page has the KIT alone) */
-static int sm_pr_mach_ok(uint32_t m) { return m < MF_PAGE_4 || m == SM_KIT_MACH; }
+static int sm_pr_mach_ok(uint32_t m) { return !sm_place_drum(m) || m == SM_KIT_MACH; }
 /* a factory sound's category, and a sound's (its factory sound's) */
 static uint32_t sm_pr_fcat(uint32_t m, uint32_t k) { return preset_cat(sm_engine_of(m), k); }
 static uint32_t sm_pr_cat_ok(uint32_t c) { return sm_pr.cat == SM_PR_ALL || c == sm_pr.cat; }

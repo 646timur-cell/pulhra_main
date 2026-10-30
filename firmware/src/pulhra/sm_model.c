@@ -10,15 +10,30 @@ static uint32_t sm_engine_of(uint32_t machine) { return eng_vis(machine); }
  * are four lanes: a step's note[k] the hit of lane k (0 none, SM_INH the track's velocity, 1..127 its own), n 1 while
  * any lane hits (or a lock trig) */
 #define SM_KIT_MACH (MF_PAGE_4 + 5u)
-/* the DRUM places (ENGINE_ORDER): KICK SNARE CLAP HAT CYM, the KIT (+5, not on the page), PERC (+6); a lane machine (DR_KM_*)
- * <-> its place */
-static uint32_t sm_kmach_place(uint32_t km) { return MF_PAGE_4 + (km < 5u ? km : km + 1u); }
-static uint32_t sm_place_kmach(uint32_t m) { uint32_t o = m - MF_PAGE_4; return o < 5u ? o : o - 1u; }
+/* a drum machine's place (a hit, engine_t.oneshot: the DRUM page's, the KIT among them); a lane machine (DR_KM_*) <-> its place
+ * (ENGINE_ORDER: KICK .. TAMB after MF_PAGE_4, the KIT among them; a lane machine added since: at the end) */
+static int sm_place_drum(uint32_t m) { return ENGINES[eng_vis(m)]->oneshot; }
+static uint32_t sm_kmach_place(uint32_t km)
+{
+    uint32_t p;
+    for (p = 0; p < NENG_SHOWN; p++)
+        if (ENGINES[eng_vis(p)] == DR_KENG[km % DR_KM_N])
+            return p;
+    return MF_PAGE_4;
+}
+static uint32_t sm_place_kmach(uint32_t m)
+{
+    uint32_t k;
+    for (k = 0; k < DR_KM_N; k++)
+        if (DR_KENG[k] == ENGINES[eng_vis(m)])
+            return k;
+    return 0;
+}
 #define SM_KIT_TRK 3u
 #define SM_NLANE 4u
 static uint8_t sm_kit_lane;                               /* the KIT lane in edit (the trig keys, the strip): ALGORITHM picks it */
 /* machine m may go on track t: the DRUM page's (MF_PAGE_4 on: KICK .. KIT) on T4 alone (Tim: the drums are T4's) */
-static int sm_mach_ok(uint32_t m, uint32_t t) { return m < MF_PAGE_4 || t % SM_NTRK == SM_KIT_TRK; }
+static int sm_mach_ok(uint32_t m, uint32_t t) { return !sm_place_drum(m) || t % SM_NTRK == SM_KIT_TRK; }
 static int sm_snd_kit(const sm_sound_t *d);
 /* the machine the EDIT layer shows as track t's (inverted, lit): the KIT's lane in edit's machine (KICK .. CYM), else its own */
 static uint32_t sm_mach_shown(const sm_pattern_t *pt, uint32_t t);
@@ -219,6 +234,10 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_MVO, 0, 4},   /* VO-6 0: -20.3 dBFS */
     {ENGI_MVO, 2, 3},   /* VO-6 2: -20.2 dBFS */
     {ENGI_MSINE, 2, 6},   /* SINE 2: -21.7 dBFS */
+    {ENGI_MACID, 2, 5},   /* ACID 2: -21.2 dBFS */
+    {ENGI_MACID, 5, -4},   /* ACID 5: -16.6 dBFS */
+    {ENGI_MACID, 6, -5},   /* ACID 6: -16.1 dBFS */
+    {ENGI_MACID, 7, 12},   /* ACID 7: -24.3 dBFS */
     {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
     {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
     {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */

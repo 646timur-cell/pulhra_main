@@ -71,6 +71,7 @@ static uint8_t eng_mem_owner[NLIVE];       /* engine index + 1 whose state is in
 #include "eng_mono.c"           /* MONOFM: the Monomachine-style machines */
 #if FELUCCA_SWAMP
 #include "eng_dr.c"             /* PULHRA: the drum machines (KICK ..) */
+#include "eng_px.c"             /* PULHRA: the machines added since (ACID ..) */
 #endif
 #endif
 
@@ -159,6 +160,7 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_DSHK,                   /* 51 (ENGI_DSHK) */
     &ENG_DBELS,                  /* 52 (ENGI_DBELS) */
     &ENG_DTAMB,                  /* 53 (ENGI_DTAMB) */
+    &ENG_MACID,                  /* 54 (ENGI_MACID, eng_px.c) */
 #endif
 };
 
@@ -233,6 +235,8 @@ static const uint8_t ENGINE_ORDER[] = {                 /* MONOFM: the EDIT laye
 #if FELUCCA_SWAMP
     ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM, ENGI_DKIT, ENGI_DPERC, ENGI_DBELL, ENGI_DRIM, ENGI_DSHK, ENGI_DBELS, ENGI_DTAMB,   /* 4 DRUM (PULHRA): the drum machines (the KIT
                                                                                         not on the page: pulhra/sm_layer.c sm_epage_mach) */
+    ENGI_MACID,                                                /* PULHRA's added since (append-only: pulhra/sm_layer.c SM_EPG
+                                                                  shows each on its page) */
 #endif
 };
 #define MF_PAGE_2 13u                                    /* the pages' first places in ENGINE_ORDER, then its end */

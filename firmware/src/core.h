@@ -51,7 +51,7 @@
 #if !FELUCCA_SLICE && FELUCCA_MODULE && !FELUCCA_STRANGE
 #error "the sound-module build keeps SLICE: GURDY's engine number (14) follows it"
 #endif
-#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_DARK) + 14 * FELUCCA_DARK + 13 * FELUCCA_MONOFM + SWAMP_NDRUM * FELUCCA_SWAMP)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
+#define NENGINES (14 + (FELUCCA_SLICE || FELUCCA_DARK) + 14 * FELUCCA_DARK + 13 * FELUCCA_MONOFM + (SWAMP_NDRUM + SWAMP_NXENG) * FELUCCA_SWAMP)   /* SLICE (13), then GURDY (14, ported from GHOULBOX), then
                                                             * STRANGE's 15..19: the others keep their numbers */
 #define ENGI_GURDY 14u           /* GURDY: the hurdy-gurdy (eng_gurdy.c, from GHOULBOX by Jason Persinger, GPL-3.0) */
 #define ENGI_LYRA 15u            /* STRANGE: eng_lyra.c (Lyra-8-like organismic pairs, hyper-LFO, delay) */
@@ -96,9 +96,14 @@
 #define ENGI_DBELS 52u           /* BELLS: triangle, glockenspiel, chime, hand bell, agogo, clave (a lane machine) */
 #define ENGI_DTAMB 53u           /* TAMB: the tambourine, its strokes and metals (a lane machine) */
 #define SWAMP_NDRUM 12            /* (how many: ENGINES, the DRUM page's places: the KIT one of them, not on the page) */
+/* PULHRA's machines added since (eng_px.c, 31.10): appended to ENGINES and to ENGINE_ORDER (a stored machine is its place
+ * there: the places of before keep theirs); the EDIT layer shows each on its family's page (pulhra/sm_layer.c SM_EPG) */
+#define ENGI_MACID 54u           /* ACID: a 303-style bass (a saw / square, its own four-pole ladder, the accent, the slide) */
+#define SWAMP_NXENG 1             /* (the engines added: ENGINES) */
+#define SWAMP_NXPL 1              /* (the places added: ENGINE_ORDER; an engine of before may take one) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (FELUCCA_MONOFM ? 27 + SWAMP_NDRUM * FELUCCA_SWAMP : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
+#define NENG_SHOWN (FELUCCA_MONOFM ? 27 + (SWAMP_NDRUM + SWAMP_NXPL) * FELUCCA_SWAMP : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 #define NELEM(a) (sizeof(a) / sizeof((a)[0]))
