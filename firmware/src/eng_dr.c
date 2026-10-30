@@ -1184,16 +1184,80 @@ static const engine_t ENG_DTAMB = {
     .xya = {{40, 40, 0}, {50, 40, 0}},
 };
 
+/* ====================================================================== ZAP === */
+/* FM hits (Tim, 31.10: lasers, blips, metallic clicks): a sine carrier phase-modulated by a sine (RAT its ratio, FM the depth
+ * falling over FMDC, FB the modulator on itself: noisier), the pitch swept down from SWEP above TUNE (30 Hz .. 2.5 kHz) over
+ * STIM, the amplitude falling over DCAY; the ninth, DRIV. ph[0] the carrier, ph[1] the modulator; e[0] the sweep, e[1] the
+ * depth's fall (Q15), x1 the modulator's last output */
+static const char *const N_DR_ZRAT[8] = {"0.5", "1", "1.41", "2", "2.76", "3.5", "5.19", "7.13"};
+static const uint16_t DR_ZRAT_Q8[8] = {128, 256, 361, 512, 707, 896, 1329, 1825};
+static void dzap_start(track_t *t, voice_t *v, const int16_t *e) { (void)e; dr_start(t, v); }
+static void dzap_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), pe = S->e[0], me = S->e[1], x1 = S->x1, a, d;
+    int32_t b16 = (23 + clamp(e[0], 0, 127) * 76 / 127) * 16 + note, sw16 = clamp(e[1], 0, 127) * 72 * 16 / 127;
+    int32_t fm = clamp(e[5], 0, 127) * 82, fb = clamp(e[7], 0, 127) * 16, drv = clamp(e[8], 0, 127);
+    uint32_t ks = dv_k(dr_tau(e[2], 0, 80)), km = dv_k(dr_tau(e[6], 10, 80)), kb = dv_kb(dr_tau(e[3], 20, 70));
+    uint32_t rq = DR_ZRAT_Q8[clamp(e[4], 0, 7)], i, inc0, inc1;
+    int32_t pe1;
+    if (v->s[6])
+        kb = dv_kb(DR_CHOKE_US);
+    inc0 = pitch_inc((uint32_t)clamp(b16 + ((sw16 * pe) >> 15), 0, 2047));   /* (the sweep's pitch at the block's start, end) */
+    for (i = 0, pe1 = pe; i < n; i++)
+        pe1 = (pe1 * (int32_t)ks) >> 15;
+    inc1 = pitch_inc((uint32_t)clamp(b16 + ((sw16 * pe1) >> 15), 0, 2047));
+    dv_slow(&S->q[0], kb, &a, &d);
+    for (i = 0; i < n; i++) {
+        uint32_t inc = inc0 + (uint32_t)(((int32_t)inc1 - (int32_t)inc0) / (int32_t)(n ? n : 1u) * (int32_t)i);
+        int32_t mo, x;
+        mo = sine_i(S->ph[1] + ((uint32_t)(x1 * fb) << 4));
+        x1 = mo;
+        x = sine_i(S->ph[0] + ((uint32_t)(mo * ((fm * me) >> 15)) << 4));
+        S->ph[0] += inc;
+        S->ph[1] += (inc >> 8) * rq;                      /* (wraps: the same frequency, folded) */
+        me = (me * (int32_t)km) >> 15;
+        x = (x * (a >> 5)) >> 15;
+        a += d;
+        out[i] += voice_amp(dr_out(x, drv), m, i);
+    }
+    S->e[0] = pe1;
+    S->e[1] = me;
+    S->x1 = x1;
+    v->s[0] = S->q[0];
+}
+DR_WRAP(dzap)
+#define DR_CAT_ZAP "DDDDDD"
+static const preset_t DZAP_PRESETS[] = {
+    /* TUNE SWEP STIM DCAY RAT FM FMDC FB */
+    {"ZP LASER", {70, 110, 50, 70, 1, 40, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 20, 10)},
+    {"ZP BLIP", {90, 20, 10, 40, 3, 30, 20, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 20, 10)},
+    {"ZP FM PERC", {45, 30, 20, 55, 4, 80, 30, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"ZP METAL", {60, 0, 0, 70, 6, 100, 60, 30}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
+    {"ZP ZAP KICK", {20, 90, 35, 75, 1, 20, 15, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 0)},
+    {"ZP NOISE HIT", {60, 40, 20, 45, 7, 120, 30, 110}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+};
+static const engine_t ENG_DZAP = {
+    .name = "ZAP", .page_title = {"PITCH", "FM"}, .presets = DZAP_PRESETS, .npresets = NELEM(DZAP_PRESETS),
+    .note_on = dzap_note_on, .render = dzap_render, DR_MEM, .knob = {P_E0, P_E1, P_E3, P_E5},
+    .edit = {{"TUNE", F_PCT, 0, 127, 70, 0, 0}, {"SWEP", F_PCT, 0, 127, 110, 0, 0}, {"STIM", F_PCT, 0, 127, 50, 0, 0},
+             {"DCAY", F_PCT, 0, 127, 70, 0, 0}, {"RAT", F_ENUM, 0, 7, 1, N_DR_ZRAT, 0}, {"FM", F_PCT, 0, 127, 40, 0, 0},
+             {"FMDC", F_PCT, 0, 127, 40, 0, 0}, {"FB", F_PCT, 0, 127, 0, 0, 0}},
+    .e8 = {"DRIV", F_PCT, 0, 127, 0, 0, 0},
+    .xyd = {{XY_E(1), XY_E(2), 0}, {XY_E(5), XY_E(7), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+
 /* ====================================================================== KIT === */
 /* four lanes on one track (T4 only: pulhra/sm_layer.c), each a whole drum machine of the above (Tim): L1 .. L4 its machine
  * (KICK SNARE CLAP HAT CYM), its own nine values (the pattern's sm_pattern_t.lane; in the core dr_lp, set by the sequencer's
  * loads and its parameter commands, pulhra/sm_kit.c), lockable each. A lane is a note: 36 + lane (C2 .. D#2; any other note its
  * lane by note % 4): the sequencer's lanes (sm_seq.c), the keyboard's F3 G3 A3 B3 (keys). A hit chokes only its own lane's last
  * one. Velocity scales it */
-enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_SHKR, DR_KM_BELS, DR_KM_TAMB, DR_KM_N };
-static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB"};
+enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_SHKR, DR_KM_BELS, DR_KM_TAMB, DR_KM_ZAP, DR_KM_N };
+static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB", "ZAP"};
 static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC,
-                                                  &ENG_DBELL, &ENG_DRIM, &ENG_DSHK, &ENG_DBELS, &ENG_DTAMB};
+                                                  &ENG_DBELL, &ENG_DRIM, &ENG_DSHK, &ENG_DBELS, &ENG_DTAMB, &ENG_DZAP};
 static int16_t dr_lp[NPART][4][9] __attribute__((section(".pool")));   /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's (the pool: RAM keeps its 4 KiB headroom) */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
@@ -1248,6 +1312,8 @@ static void dkit_note_on(track_t *t, voice_t *v)
         dbels_start(t, v, e);
     } else if (m == DR_KM_TAMB) {
         dtamb_start(t, v, e);
+    } else if (m == DR_KM_ZAP) {
+        dzap_start(t, v, e);
     } else {
         dcym_start(t, v, e);
     }
@@ -1336,6 +1402,8 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dbels_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_TAMB)
         dtamb_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_ZAP)
+        dzap_run(t, v, b, n, &km, e);
     else
         dcym_run(t, v, b, n, &km, e);
     g1 = dkit_env(t, v, L);

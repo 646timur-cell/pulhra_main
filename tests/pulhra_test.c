@@ -9823,6 +9823,33 @@ static int test_acid(void)
     return bad;
 }
 
+static uint32_t lane_hit_peak(uint32_t L);
+/* ZAP (31.10): a KIT lane machine (the last), its hit sounds; a sweep and FM on, a different sound from them off */
+static int test_zap(void)
+{
+    int bad = 0;
+    uint32_t p0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    ksnd(3)->p[P_E0] = DR_KM_ZAP;
+    sm_param_push(3, P_E0);
+    sm_kit_lane = 0;
+    sm_lane_machine(0);
+    sm_input_poll();
+    play_blocks(2);
+    p0 = lane_hit_peak(0);
+    bad += check("ZAP: a KIT lane (L1), its hit sounds, its sound the ZAP's", trk[3].p[P_E0] == DR_KM_ZAP && p0 > 2000u &&
+                 cpat()->lane[0][1] == DZAP_PRESETS[0].e[1]);
+    return bad;
+}
+
 static int test_preset_page(void)
 {
     int bad = 0;
@@ -10422,11 +10449,11 @@ static int test_kit_lane_pages(void)
     ksnd(3)->p[P_E0] = DR_KM_KICK;
     sm_lane_machine(0);
     sm_ui.page = (uint8_t)page_by_name("EDIT 1");
-    turn(EN_SELECT, 20);                                  /* (SELECT past the end: the last, TAMB) */
+    turn(EN_SELECT, 20);                                  /* (SELECT past the end: the last, ZAP) */
     sm_input_poll();
     draw_full();
-    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to TAMB (its values the TAMB's)", ksnd(3)->p[P_E0] == DR_KM_TAMB &&
-                 cpat()->lane[0][1] == DTAMB_PRESETS[0].e[1] && cpat()->lane[0][3] == DTAMB_PRESETS[0].e[3] && lint_has("TAMB", 0, 0));
+    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to the last, ZAP (its values the ZAP's)", ksnd(3)->p[P_E0] == DR_KM_ZAP &&
+                 cpat()->lane[0][1] == DZAP_PRESETS[0].e[1] && cpat()->lane[0][3] == DZAP_PRESETS[0].e[3] && lint_has("ZAP", 0, 0));
     layer_hold(B_EDIT);
     while (sm_lay_epage != 3u) {
         press(B_OCTUP);
@@ -12433,6 +12460,7 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_zap();
     bad += test_acid();
     bad += test_preset_store();
     bad += test_kit_lane_cond();
