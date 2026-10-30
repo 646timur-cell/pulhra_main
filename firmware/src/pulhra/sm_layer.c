@@ -92,8 +92,9 @@ static uint32_t sm_layer_button(uint32_t l)
 /* the pages of machines: each its places of before (engines.c MF_PAGE) and those added since at the end of ENGINE_ORDER
  * (SM_XP(i): the i-th added; ACID on MONO); the DRUM page (Tim): one machine, DRUM (the KIT): its lanes pick KICK .. */
 #define SM_XP(i) (MF_PAGE_4 + SWAMP_NDRUM + (i))
-static const uint8_t SM_EPG_X[SM_NEPAGE][4] = {{SM_XP(0)}, {0}, {0}, {0}};   /* the places added, on each page */
-static const uint8_t SM_EPG_NX[SM_NEPAGE] = {1, 0, 0, 0};
+static const uint8_t SM_EPG_X[SM_NEPAGE][4] = {{SM_XP(0)}, {SM_XP(2)}, {0}, {0}};   /* the places added, on each page (ACID;
+                                                                                    CLOUD; ZAP SM_XP(1) a KIT lane's) */
+static const uint8_t SM_EPG_NX[SM_NEPAGE] = {1, 1, 0, 0};
 static uint32_t sm_epage_n(uint32_t pg)
 {
     pg %= SM_NEPAGE;

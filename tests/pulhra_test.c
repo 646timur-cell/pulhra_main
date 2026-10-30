@@ -2620,7 +2620,7 @@ static int test_layer_maps(void)
                  lint_has("MACHINE SLICE", 0, 0) && lint_machines() == 5u && lint_has("GLIT", 0, 0) && !lint_has("INIT", 0, 0));
     sm_lay_epage = 1;
     layer_draw(SML_EDIT);
-    bad += check("MAP: EDIT page 2: the 9 SOMA machines", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == 9u);
+    bad += check("MAP: EDIT page 2: the SOMA machines (CLOUD the last)", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == sm_epage_n(1) && lint_has("CLOU", 0, 0));
     layer_draw(SML_GLO);
     bad += check("MAP: GLO: the bank's patterns A1..A8, the banks A..D, the M and S rows with T1..T4, the title",
                  lint_frame("glo") == 0 && lint_has("A1", 0, 0) && lint_has("A8", 0, 0) && lint_has("D", 0, 0) && !lint_has("E", 0, 0) &&
@@ -9850,6 +9850,47 @@ static int test_zap(void)
     return bad;
 }
 
+/* CLOUD (31.10): on the SOMA page (the last); its source decoded into the part's memory within ~15 blocks; a held note sounds
+ * (grains), every source and kit slice too; a change of SRC decodes the new one */
+static int test_cloud(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_CLOUD), b, src, pk, ok = 1;
+    cl_part_t *P;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    bad += check("CLOUD: on the SOMA page, the last", sm_epage_of(m) == 1u && sm_epage_mach(1, sm_epage_n(1) - 1u) == m);
+    sm_ui.trk = 0;
+    sm_sound_load(m, 0);
+    sm_input_poll();
+    kit_dry();
+    for (b = 0; b < 20u; b++)
+        run_block();
+    P = cl_part(&trk[0]);
+    bad += check("CLOUD: its source decoded whole (GLASS: 8820 samples)", P->have && P->n == P->len && P->len == 8820u);
+    for (src = 0; src < CL_NSRC; src++) {
+        trk[0].p[P_E0] = (int16_t)src;
+        trk[0].p[P_E1] = (int16_t)(src * 2u);
+        for (b = 0; b < 20u; b++)
+            run_block();
+        trk_note_on(&trk[0], 48, 100);
+        pk = 0;
+        for (b = 0; b < 400u; b++) {
+            uint32_t a = block_peak(0, 0);
+            pk = a > pk ? a : pk;
+        }
+        trk_all_off(&trk[0]);
+        play_blocks(800);
+        ok &= pk > 1500u && P->src == src;
+        if (pk <= 1500u)
+            printf("pulhra: CLOUD src %u peak %u\n", src, pk);
+    }
+    bad += check("CLOUD: every source (and a slice of each kit) sounds", ok);
+    return bad;
+}
+
 static int test_preset_page(void)
 {
     int bad = 0;
@@ -12460,6 +12501,7 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_cloud();
     bad += test_zap();
     bad += test_acid();
     bad += test_preset_store();

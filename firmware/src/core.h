@@ -100,8 +100,9 @@
  * there: the places of before keep theirs); the EDIT layer shows each on its family's page (pulhra/sm_layer.c SM_EPG) */
 #define ENGI_MACID 54u           /* ACID: a 303-style bass (a saw / square, its own four-pole ladder, the accent, the slide) */
 #define ENGI_DZAP 55u            /* ZAP: FM hits, lasers, blips (a lane machine, eng_dr.c) */
-#define SWAMP_NXENG 2             /* (the engines added: ENGINES) */
-#define SWAMP_NXPL 2              /* (the places added: ENGINE_ORDER; an engine of before may take one) */
+#define ENGI_CLOUD 56u           /* CLOUD: a granular cloud over the built-in material (eng_px.c) */
+#define SWAMP_NXENG 3             /* (the engines added: ENGINES) */
+#define SWAMP_NXPL 3              /* (the places added: ENGINE_ORDER; an engine of before may take one) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (FELUCCA_MONOFM ? 27 + (SWAMP_NDRUM + SWAMP_NXPL) * FELUCCA_SWAMP : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
