@@ -163,6 +163,7 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_MACID,                  /* 54 (ENGI_MACID, eng_px.c) */
     &ENG_DZAP,                   /* 55 (ENGI_DZAP, eng_dr.c) */
     &ENG_CLOUD,                  /* 56 (ENGI_CLOUD, eng_px.c) */
+    &ENG_WEST,                   /* 57 (ENGI_WEST, eng_px.c) */
 #endif
 };
 
@@ -237,7 +238,7 @@ static const uint8_t ENGINE_ORDER[] = {                 /* MONOFM: the EDIT laye
 #if FELUCCA_SWAMP
     ENGI_DKICK, ENGI_DSNARE, ENGI_DCLAP, ENGI_DHAT, ENGI_DCYM, ENGI_DKIT, ENGI_DPERC, ENGI_DBELL, ENGI_DRIM, ENGI_DSHK, ENGI_DBELS, ENGI_DTAMB,   /* 4 DRUM (PULHRA): the drum machines (the KIT
                                                                                         not on the page: pulhra/sm_layer.c sm_epage_mach) */
-    ENGI_MACID, ENGI_DZAP, ENGI_CLOUD,                                   /* PULHRA's added since (append-only: pulhra/sm_layer.c SM_EPG
+    ENGI_MACID, ENGI_DZAP, ENGI_CLOUD, ENGI_WEST,                                   /* PULHRA's added since (append-only: pulhra/sm_layer.c SM_EPG
                                                                   shows each on its page) */
 #endif
 };
@@ -246,8 +247,8 @@ static const uint8_t ENGINE_ORDER[] = {                 /* MONOFM: the EDIT laye
 #if FELUCCA_SWAMP
 #define MF_PAGE_4 27u                                    /* PULHRA: the DRUM page after SLICE */
 static const uint8_t MF_PAGE[5] = {0, MF_PAGE_2, MF_PAGE_3, MF_PAGE_4, NENG_SHOWN};
-_Static_assert(sizeof ENGINE_ORDER == NENG_SHOWN && MF_PAGE_2 <= 15u && MF_PAGE_3 - MF_PAGE_2 <= 15u &&
-               MF_PAGE_4 - MF_PAGE_3 <= 15u && NENG_SHOWN - MF_PAGE_4 <= 15u, "PULHRA: four pages of at most 15 machines");
+_Static_assert(sizeof ENGINE_ORDER == NENG_SHOWN && MF_PAGE_4 + SWAMP_NDRUM + SWAMP_NXPL == NENG_SHOWN,
+               "PULHRA: the places of before, then those added since (each shown on its page: pulhra/sm_layer.c SM_EPG_X)");
 static const char *const MF_PAGE_NAME[4] = {"MONO", "SOMA", "SLICE", "DRUM"};
 #else
 static const uint8_t MF_PAGE[4] = {0, MF_PAGE_2, MF_PAGE_3, NENG_SHOWN};

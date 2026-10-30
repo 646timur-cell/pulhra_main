@@ -291,3 +291,95 @@ static const engine_t ENG_CLOUD = {
     .xyd = {{XY_E(2), XY_E(5), 0}, {XY_E(3), XY_E(4), 0}},   /* X: the position, the spread; Y: the size, the density */
     .xya = {{50, 40, 0}, {40, 40, 0}},
 };
+
+/* ===================================================================== WEST === */
+/* a west-coast complex oscillator (Tim, 31.10): a principal oscillator (SHAP: sine .. triangle) frequency-modulated through
+ * zero by a modulator (RAT its ratio, MOD the depth; the ninth, FMEN, how much the low-pass gate's strike opens it more),
+ * into a wavefolder (TIMB: up to 6 folds; SYM its offset: the even partials), into a low-pass gate: struck at each note
+ * (a vactrol: ~2 ms in, LPG its fall 20 ms .. 3 s, 127 held while the note is), opening a two-pole low-pass (CTRL: 0 the
+ * gate a VCA alone, up: the filter too: the "bongo"). ph[0] the principal, ph[1] the modulator; s[0] the gate (Q15), s[1]
+ * s[2] the filter, s[3] the gate's rise (Q15) */
+static const char *const N_WEST_RAT[10] = {"0.5", "1", "1.41", "1.5", "2", "2.76", "3", "3.5", "5.19", "7.13"};
+static const uint16_t WEST_RAT_Q8[10] = {128, 256, 361, 384, 512, 707, 768, 896, 1329, 1825};
+static void west_note_on(track_t *t, voice_t *v)
+{
+    (void)t;
+    if (mf_fresh(v)) {
+        v->ph[0] = v->ph[1] = 0;
+        v->s[1] = v->s[2] = 0;
+        v->s[0] = 0;
+    }
+    v->s[3] = 1;                                         /* (struck: the gate rises) */
+}
+static void west_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    const int16_t *p = t->p;
+    uint32_t i, b = mf_inc(t, m), bm = (b >> 8) * WEST_RAT_Q8[clamp(p[P_E3], 0, 9)], gi;
+    int32_t timb = clamp(p[P_E0], 0, 127), sym = clamp(p[P_E1], -64, 63) * 256, mod = clamp(p[P_E2], 0, 127);
+    int32_t shap = clamp(p[P_E4], 0, 127), lpg = clamp(p[P_E5], 0, 127), ctrl = clamp(p[P_E6], 0, 127);
+    int32_t fmen = clamp(p[P_E8], 0, 127), e = v->s[0], f1 = v->s[1], f2 = v->s[2], ph_k, g, gq, q8;
+    uint32_t kd = lpg >= 127 ? 32768u : dv_k(20000u + (uint32_t)lpg * (uint32_t)lpg * 184u);   /* (20 ms .. ~3 s) */
+    if (v->s[3]) {                                       /* the strike: up over ~2 ms (two blocks), then the fall */
+        e += 16384;
+        if (e >= 32767) {
+            e = 32767;
+            v->s[3] = 0;
+        }
+    } else if (lpg >= 127) {
+        e = v->gate ? 32767 : e;                         /* (held: the gate open while the note is) */
+    }
+    /* the gate's filter: from ~60 Hz closed to fully open, by the gate's level squared (a vactrol's curve), CTRL how much */
+    q8 = 127 * 256 - (((127 - ((e * e) >> 15) * 127 / 32767) * 256 * ctrl) >> 7);
+    q8 = clamp(q8, 12 * 256, 127 * 256);
+    gi = (uint32_t)q8 >> 8;
+    g = SVF_G[gi] + (((SVF_G[gi < 127u ? gi + 1u : 127u] - SVF_G[gi]) * (q8 & 255)) >> 8);
+    gq = (g << 15) / (4096 + g);
+    ph_k = mod * 4 + ((fmen * e) >> 13);                 /* (the FM depth: MOD, opened by the strike with FMEN) */
+    for (i = 0; i < n; i++) {
+        int32_t mo = sine_i(v->ph[1]), x, y, fx;
+        uint32_t inc = (uint32_t)((int32_t)b + (int32_t)(((int64_t)(int32_t)(b >> 4) * mo * ph_k) >> 19));   /* (through zero) */
+        x = sine_i(v->ph[0]);
+        if (shap)                                        /* SHAP: the sine towards the triangle */
+            x += ((osc_tri(v->ph[0]) - x) * shap) >> 7;
+        if (timb || sym) {                               /* the folder: up to 6 folds, SYM's offset first */
+            y = x + ((x * timb * 5) >> 7) + sym;
+            while (y > 32767 || y < -32767)
+                y = y > 32767 ? 65534 - y : -65534 - y;
+            x = y;
+        }
+        f1 += (((x - f1) * gq) >> 15);
+        f2 += (((f1 - f2) * gq) >> 15);
+        fx = ctrl ? f2 : x;
+        fx = (fx * e) >> 15;                             /* the gate's VCA */
+        v->ph[0] += inc;
+        v->ph[1] += bm;
+        if (!v->s[3] && lpg < 127)                       /* the gate's fall */
+            e = (int32_t)(((uint32_t)e * kd) >> 15);
+        out[i] += voice_amp(soft_knee(fx, 26000), m, i);
+    }
+    v->s[0] = e;
+    v->s[1] = f1;
+    v->s[2] = f2;
+}
+#define PX_CAT_WEST "UBUULLPF"
+static const preset_t WEST_PRESETS[] = {
+    /* TIMB SYM MOD RAT SHAP LPG CTRL TUNE (FMEN) */
+    {"WEST BONGO", {20, 0, 40, 2, 0, 20, 127, 0}, {0, 64, 127, 40}, 0, 0, FX(0, 0, 20, 30)},
+    {"FOLD BASS", {70, 0, 0, 1, 0, 127, 60, 0}, {0, 64, 127, 20}, 0, 1, FX(0, 0, 0, 10)},
+    {"BUCHLA BELL", {30, 0, 90, 7, 0, 70, 90, 0}, {0, 64, 127, 70}, 0, 0, FX(0, 0, 30, 50)},
+    {"WOOD PLUCK", {40, 10, 20, 1, 60, 25, 127, 0}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 20, 30)},
+    {"FOLD LEAD", {90, 20, 10, 4, 0, 127, 40, 0}, {0, 64, 127, 40}, 0, 1, FX(10, 0, 30, 30)},
+    {"ZING LEAD", {60, -20, 60, 3, 30, 127, 70, 0}, {5, 64, 127, 50}, 0, 1, FX(0, 20, 30, 40)},
+    {"DRONE FOLD", {50, 30, 30, 5, 40, 127, 30, 0}, {90, 64, 127, 110}, 0, 0, FX(0, 30, 30, 90)},
+    {"METAL PING", {10, 0, 110, 8, 0, 45, 110, 0}, {0, 64, 127, 50}, 0, 0, FX(0, 0, 30, 40)},
+};
+static const engine_t ENG_WEST = {
+    .name = "WEST", .page_title = {"FOLD", "GATE"}, .presets = WEST_PRESETS, .npresets = NELEM(WEST_PRESETS),
+    .note_on = west_note_on, .render = west_render, .knob = {P_E0, P_E2, P_E5, P_E6}, .poly = MF_POLY,
+    .edit = {{"TIMB", F_PCT, 0, 127, 20, 0, 0}, {"SYM", F_BIPCT, -64, 63, 0, 0, 0}, {"MOD", F_PCT, 0, 127, 40, 0, 0},
+             {"RAT", F_ENUM, 0, 9, 2, N_WEST_RAT, 0}, {"SHAP", F_PCT, 0, 127, 0, 0, 0}, {"LPG", F_PCT, 0, 127, 30, 0, 0},
+             {"CTRL", F_PCT, 0, 127, 127, 0, 0}, MF_TUNE},
+    .e8 = {"FMEN", F_PCT, 0, 127, 0, 0, 0},
+    .xyd = {{XY_E(0), XY_E(1), 0}, {XY_E(2), XY_E(5), 0}},   /* X: the folds, SYM; Y: the FM, the gate's fall */
+    .xya = {{50, 30, 0}, {50, 40, 0}},
+};

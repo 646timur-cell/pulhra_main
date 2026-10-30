@@ -2620,7 +2620,7 @@ static int test_layer_maps(void)
                  lint_has("MACHINE SLICE", 0, 0) && lint_machines() == 5u && lint_has("GLIT", 0, 0) && !lint_has("INIT", 0, 0));
     sm_lay_epage = 1;
     layer_draw(SML_EDIT);
-    bad += check("MAP: EDIT page 2: the SOMA machines (CLOUD the last)", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == sm_epage_n(1) && lint_has("CLOU", 0, 0));
+    bad += check("MAP: EDIT page 2: the SOMA machines (CLOUD among them)", lint_frame("soma") == 0 && lint_has("MACHINE SOMA", 0, 0) && lint_machines() == sm_epage_n(1) && lint_has("CLOU", 0, 0));
     layer_draw(SML_GLO);
     bad += check("MAP: GLO: the bank's patterns A1..A8, the banks A..D, the M and S rows with T1..T4, the title",
                  lint_frame("glo") == 0 && lint_has("A1", 0, 0) && lint_has("A8", 0, 0) && lint_has("D", 0, 0) && !lint_has("E", 0, 0) &&
@@ -9861,7 +9861,8 @@ static int test_cloud(void)
     host_ticks = 1000u;
     seq_reset();
     draw_setup();
-    bad += check("CLOUD: on the SOMA page, the last", sm_epage_of(m) == 1u && sm_epage_mach(1, sm_epage_n(1) - 1u) == m);
+    bad += check("CLOUD, WEST: on the SOMA page, after PLANT", sm_epage_of(m) == 1u && sm_epage_mach(1, 9) == m &&
+                 sm_epage_mach(1, 10) == eng_rank(ENGI_WEST));
     sm_ui.trk = 0;
     sm_sound_load(m, 0);
     sm_input_poll();
@@ -9888,6 +9889,49 @@ static int test_cloud(void)
             printf("pulhra: CLOUD src %u peak %u\n", src, pk);
     }
     bad += check("CLOUD: every source (and a slice of each kit) sounds", ok);
+    return bad;
+}
+
+/* WEST (31.10): a note sounds; LPG short (the bongo): struck and gone while the note is held; LPG 127: held */
+static int test_west(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_WEST), b, early = 0, late = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 0;
+    sm_sound_load(m, 0);                                  /* WEST BONGO */
+    sm_input_poll();
+    kit_dry();
+    play_blocks(4);
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < 1200u; b++) {
+        uint32_t a = block_peak(0, 0);
+        if (b < 100u)
+            early = a > early ? a : early;
+        else if (b > 1000u)
+            late = a > late ? a : late;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(400);
+    bad += check("WEST: BONGO struck, gone while held (the gate's fall)", early > 2000u && late * 10u < early);
+    sm_sound_load(m, 1);                                  /* FOLD BASS: LPG 127 */
+    sm_input_poll();
+    play_blocks(4);
+    early = late = 0;
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0; b < 1200u; b++) {
+        uint32_t a = block_peak(0, 0);
+        if (b < 100u)
+            early = a > early ? a : early;
+        else if (b > 1000u)
+            late = a > late ? a : late;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(400);
+    bad += check("WEST: LPG 127 (FOLD BASS): held while the note is", early > 2000u && late * 2u > early);
     return bad;
 }
 
@@ -12501,6 +12545,7 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_west();
     bad += test_cloud();
     bad += test_zap();
     bad += test_acid();

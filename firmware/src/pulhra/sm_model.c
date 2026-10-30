@@ -244,6 +244,12 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_CLOUD, 5, 5},   /* CLOUD 5: -21.1 dBFS */
     {ENGI_CLOUD, 6, 7},   /* CLOUD 6: -21.8 dBFS */
     {ENGI_CLOUD, 7, 9},   /* CLOUD 7: -23.1 dBFS */
+    {ENGI_WEST, 0, 8},   /* WEST 0: -26.6 dBFS (a pluck) */
+    {ENGI_WEST, 2, 5},   /* WEST 2: -21.0 dBFS */
+    {ENGI_WEST, 3, 8},   /* WEST 3: -26.6 dBFS (a pluck) */
+    {ENGI_WEST, 4, 4},   /* WEST 4: -20.6 dBFS */
+    {ENGI_WEST, 5, 4},   /* WEST 5: -20.7 dBFS */
+    {ENGI_WEST, 6, 5},   /* WEST 6: -21.1 dBFS */
     {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
     {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
     {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */
