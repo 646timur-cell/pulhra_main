@@ -383,3 +383,87 @@ static const engine_t ENG_WEST = {
     .xyd = {{XY_E(0), XY_E(1), 0}, {XY_E(2), XY_E(5), 0}},   /* X: the folds, SYM; Y: the FM, the gate's fall */
     .xya = {{50, 30, 0}, {50, 40, 0}},
 };
+
+/* ==================================================================== ORGAN === */
+/* a drawbar organ (Tim, 31.10: dub chords, ambient): six drawbars 0..8 (16' 8' 5 1/3' 4' 2 2/3' 2': the sub, the note, its
+ * fifth, the octave, the twelfth, two octaves), sines from one phase (the sub's: the others its multiples, in tune), PERC a
+ * decaying 2 2/3' at each note (~250 ms), CLIK the key click (a burst of noise, ~3 ms); the ninth, ROTR: a rotary speaker
+ * (0 off, slow .. fast: its tremolo and its doppler, one rotor a part, turned by the block hook). Level: the drawbars'
+ * sum made up (1 / sqrt). ph[0] the sub's phase; s[0] the percussion, s[1] the click (Q15), s[2] random numbers */
+static uint32_t org_rot[NPART];                          /* the rotors' phases */
+static void organ_block(track_t *t)
+{
+    uint32_t pi = (uint32_t)(t - trk) % NPART, r = (uint32_t)clamp(t->p[P_E8], 0, 127);
+    if (r)                                               /* (0.6 .. 7 Hz) */
+        org_rot[pi] += (uint32_t)((uint64_t)(60u + r * r * 640u / 16129u) * CTL * 97391u / 100u);
+}
+static void organ_note_on(track_t *t, voice_t *v)
+{
+    (void)t;
+    if (mf_fresh(v))
+        v->ph[0] = 0;
+    v->s[0] = 32767;
+    v->s[1] = 32767;
+    if (!v->s[2])
+        v->s[2] = (int32_t)(rng() | 1u);
+}
+static void organ_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    static const uint8_t MUL[6] = {1, 2, 3, 4, 6, 8};    /* (of the sub's phase) */
+    const int16_t *p = t->p;
+    uint32_t i, k, b = mf_inc(t, m) >> 1, rot = org_rot[(uint32_t)(t - trk) % NPART];
+    int32_t db[6], sum = 0, g, perc = clamp(p[P_E6], 0, 127) * 200, clik = clamp(p[P_E7], 0, 127) * 120;
+    int32_t pe = v->s[0], ce = v->s[1], rd = clamp(p[P_E8], 0, 127) ? 9000 : 0, am, fmv;
+    uint32_t kp = dv_k(250000u), kc = dv_k(3000u);
+    for (k = 0; k < 6u; k++) {
+        db[k] = clamp(p[P_E0 + k], 0, 8) * 4096 / 8;
+        sum += db[k];
+    }
+    g = sum ? (int32_t)(((int64_t)32767 * 4096) / (int32_t)(mf_isqrt((uint32_t)sum * 4096u) * 2u + 1u)) : 0;   /* (1 / sqrt) */
+    am = rd ? 32767 - ((rd * (sine_i(rot) + 32767)) >> 16) : 32767;   /* ROTR: the horn's tremolo */
+    fmv = rd ? sine_i(rot + 0x40000000u) : 0;            /* .. its doppler (a quarter turn on) */
+    b = b + (uint32_t)(((int64_t)(int32_t)(b >> 8) * fmv) >> 18);   /* (+-~0.4 %) */
+    for (i = 0; i < n; i++) {
+        uint32_t ph = v->ph[0];
+        int32_t x = 0, y;
+        for (k = 0; k < 6u; k++)
+            if (db[k])
+                x += (sine_i(ph * MUL[k]) * db[k]) >> 12;
+        x = (x * g) >> 14;                               /* (+6 dB: as loud as the others) */
+        if (perc && pe > 16) {                           /* PERC: the 2 2/3' struck */
+            x += (((sine_i(ph * 6u) * pe) >> 15) * perc) >> 15;
+            pe = (int32_t)(((uint32_t)pe * kp) >> 15);
+        }
+        if (clik && ce > 16) {                           /* CLIK: the key's contacts */
+            x += (((((int32_t)noise32(&v->s[2]) >> 17) * ce) >> 15) * clik) >> 15;
+            ce = (int32_t)(((uint32_t)ce * kc) >> 15);
+        }
+        y = (x * am) >> 15;
+        v->ph[0] += b;
+        out[i] += voice_amp(soft_knee(y, 26000), m, i);
+    }
+    v->s[0] = pe;
+    v->s[1] = ce;
+}
+#define PX_CAT_ORGAN "KKKPKKPK"
+static const preset_t ORGAN_PRESETS[] = {
+    /* 16' 8' 5 1/3' 4' 2 2/3' 2' PERC CLIK (ROTR) */
+    {"FULL ORGAN", {8, 8, 8, 8, 8, 8, 0, 20}, {2, 64, 127, 20}, 0, 0, FX(10, 0, 0, 30)},
+    {"JAZZ 888", {8, 8, 8, 0, 0, 0, 60, 40}, {0, 64, 127, 15}, 0, 0, FX(0, 0, 0, 25)},
+    {"GOSPEL", {8, 8, 8, 8, 0, 6, 30, 30}, {0, 64, 127, 20}, 0, 0, FX(20, 0, 0, 30)},
+    {"SOFT FLUTE", {0, 8, 0, 4, 0, 0, 0, 0}, {10, 64, 127, 40}, 0, 0, FX(0, 20, 20, 50)},
+    {"DUB CHORD", {0, 8, 4, 6, 0, 0, 40, 10}, {0, 40, 60, 30}, 0, 0, FX(0, 0, 60, 50)},
+    {"REED", {0, 6, 8, 4, 6, 2, 0, 10}, {0, 64, 127, 20}, 0, 0, FX(10, 0, 0, 30)},
+    {"CHURCH", {8, 6, 4, 8, 4, 8, 0, 0}, {60, 64, 127, 90}, 0, 0, FX(0, 0, 0, 90)},
+    {"PERC ORGAN", {0, 8, 0, 0, 0, 0, 100, 30}, {0, 64, 127, 15}, 0, 0, FX(0, 0, 20, 30)},
+};
+static const engine_t ENG_ORGAN = {
+    .name = "ORGAN", .page_title = {"BARS", "BARS 2"}, .presets = ORGAN_PRESETS, .npresets = NELEM(ORGAN_PRESETS),
+    .note_on = organ_note_on, .render = organ_render, .block = organ_block, .knob = {P_E1, P_E2, P_E3, P_E6}, .poly = MF_POLY,
+    .edit = {{"16'", F_INT, 0, 8, 0, 0, 0}, {"8'", F_INT, 0, 8, 8, 0, 0}, {"5'", F_INT, 0, 8, 8, 0, 0},
+             {"4'", F_INT, 0, 8, 0, 0, 0}, {"2'2", F_INT, 0, 8, 0, 0, 0}, {"2'", F_INT, 0, 8, 0, 0, 0},
+             {"PERC", F_PCT, 0, 127, 0, 0, 0}, {"CLIK", F_PCT, 0, 127, 20, 0, 0}},
+    .e8 = {"ROTR", F_PCT, 0, 127, 0, 0, 0},
+    .xyd = {{XY_E(2), XY_E(3), 0}, {XY_E(6), XY_E(8), 0}},
+    .xya = {{40, 40, 0}, {50, 50, 0}},
+};

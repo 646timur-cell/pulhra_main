@@ -9935,6 +9935,38 @@ static int test_west(void)
     return bad;
 }
 
+/* ORGAN (31.10): on the MONO page (after ACID); a chord sounds; ROTR moves the level (the horn's tremolo) */
+static int test_organ(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_ORGAN), b, lo = 0xFFFFFFFFu, hi = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    bad += check("ORGAN: on the MONO page, after ACID", sm_epage_of(m) == 0u && sm_epage_mach(0, 14) == m);
+    sm_ui.trk = 0;
+    sm_sound_load(m, 1);                                  /* JAZZ 888 */
+    sm_input_poll();
+    kit_dry();
+    play_blocks(4);
+    trk[0].p[P_E8] = 100;                                 /* ROTR fast */
+    trk_note_on(&trk[0], 48, 100);
+    trk_note_on(&trk[0], 52, 100);
+    trk_note_on(&trk[0], 55, 100);
+    for (b = 0; b < 1500u; b++) {
+        uint32_t a = block_peak(0, 0);
+        if (b > 500u) {
+            lo = a < lo ? a : lo;
+            hi = a > hi ? a : hi;
+        }
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(400);
+    bad += check("ORGAN: a chord sounds, ROTR's tremolo moves it", hi > 3000u && lo * 10u < hi * 9u);
+    return bad;
+}
+
 static int test_preset_page(void)
 {
     int bad = 0;
@@ -12545,6 +12577,7 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_organ();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

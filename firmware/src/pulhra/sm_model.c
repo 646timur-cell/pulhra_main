@@ -250,6 +250,7 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_WEST, 4, 4},   /* WEST 4: -20.6 dBFS */
     {ENGI_WEST, 5, 4},   /* WEST 5: -20.7 dBFS */
     {ENGI_WEST, 6, 5},   /* WEST 6: -21.1 dBFS */
+    {ENGI_ORGAN, 4, 8},   /* ORGAN 4: -25.3 dBFS (a stab) */
     {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
     {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
     {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */
