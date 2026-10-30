@@ -479,7 +479,7 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
     sm_step_eff(s, &pt->kit.snd[t], &e);                  /* (the inherited fields: the track's defaults now) */
     s = &e;
     f = s->flags;
-    if (!sm_cond_ok(t, s->cond, next_pass)) {
+    if (!sm_trk_kit(t, pt) && !sm_cond_ok(t, s->cond, next_pass)) {   /* (the KIT: each lane its own condition, below) */
         if (sm_slid[t])                                   /* (no note comes: the slide's notes end here) */
             sm_seq_release(t);
         sm_slid[t] = 0;
@@ -491,14 +491,16 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
     sm_ps[t].n = 0;
     sm_seq_locks(t, st);                                  /* (before the notes: they start with the step's values) */
     sm_lmask[t] = 0xFu;
-    if (sm_trk_kit(t, pt)) {                              /* the KIT: each lane's own condition, a lock of SM_LC(L) (Tim) */
+    if (sm_trk_kit(t, pt)) {                              /* the KIT: each lane's own condition, a lock of SM_LC(L) (Tim), else
+                                                             the trig's (the defaults'), each lane on its own: no lane's
+                                                             condition, no lane's PRE gates another's (Tim, 31.10) */
         uint32_t L;
         for (L = 0; L < 4u; L++) {
             int32_t i;
             if (!e.note[L])
                 continue;
             i = sm_lock_find(pt, t, st, SM_LC(L));
-            if (i >= 0 && !sm_cond_pre(t, (uint32_t)(uint16_t)pt->lock[i].val, next_pass, &sm_lpre[L])) {
+            if (!sm_cond_pre(t, i >= 0 ? (uint32_t)(uint16_t)pt->lock[i].val : e.cond, next_pass, &sm_lpre[L])) {
                 e.note[L] = 0;
                 sm_lmask[t] &= (uint8_t)~(1u << L);
             }

@@ -446,7 +446,7 @@ static void sm_oct_single(uint32_t up)
         }
     } else if (up && sm_page_home() == SMH_EUCLID) {
         sm_eu_gen();                                      /* (the EUCLID page: OCT+ generates) */
-    } else if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len > 16u) {
+    } else if (sm_npages() > 1u) {
         uint32_t np = sm_npages();                        /* OCT- the previous page of steps, OCT+ the next (round: 1..16, 17..32, ..) */
         if (!up && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u))
             return;                                       /* (OCT- still down past the pair's window: SHIFT, not a tap) */
@@ -1204,6 +1204,7 @@ static void sm_input_poll(void)
     for (i = 0; i < 4; i++)
         k[i] = panel_enc(EN_K1 + (uint32_t)i);
     sm_pat_poll();
+    sm_bank_fix();                                        /* (the page of steps in view: one there is) */
     sm_bank_poll(now);                                    /* (a bank brought in, a request served, SAVE at STOP, the autosave) */
     fx_bpm10 = (uint16_t)sm_bpm_eff();                    /* (the delay's divisions, LFO SYNC, ESYNC: fx.c beat_samples; the external clock's) */
     /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is

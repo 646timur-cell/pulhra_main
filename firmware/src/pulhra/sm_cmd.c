@@ -129,7 +129,8 @@ static int sm_cmd_push(sm_cmd_t c)
 
 static void sm_seq_play(void);
 static void sm_seq_stop(void);
-static void sm_lock_clear_step(uint32_t t, uint32_t s);  /* sm_lock.c */
+static void sm_lock_clear_step(uint32_t t, uint32_t s);
+static void sm_lock_clear_lane(uint32_t t, uint32_t s, uint32_t L);   /* sm_lock.c */  /* sm_lock.c */
 static void sm_kbd_note(uint32_t t, uint32_t note, uint32_t vel);   /* sm_midi.c: vel 0 lets the note go */
 static void sm_rec_on(uint32_t t, uint32_t note, uint32_t vel);     /* sm_seq.c: live record */
 static void sm_rec_off(uint32_t t, uint32_t note);
@@ -349,7 +350,13 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     if (sm_trk_kit(t, pt)) {                              /* KIT: the lane in edit's hit on / off; the last one off: the trig off */
         uint32_t L = sm_kit_lane % SM_NLANE;
         if (s->n && (s->flags & SMF_REST) == 0 && (sm_kit_mask(s) & ~(1u << L))) {   /* (other lanes hit: this one alone) */
-            s->note[L] = (uint8_t)(s->note[L] ? 0u : SM_INH);
+            if (s->note[L]) {
+                s->note[L] = 0;
+                sm_lock_clear_lane(t, st, L);             /* (its condition and values go with it: a hit placed again is fresh) */
+            } else {
+                sm_lock_clear_lane(t, st, L);
+                s->note[L] = SM_INH;
+            }
             return;
         }
         if (s->n && !s->note[L]) {                        /* (a lock trig, or no lane: this lane joins it) */

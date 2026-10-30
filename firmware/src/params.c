@@ -294,6 +294,9 @@ static const param_desc_t TP[P_COUNT] = {
     [P_LN6] = PD("-", F_INT, 0, 0, 0),
     [P_FSUS] = PD("SUS", F_PCT, 0, 127, 0),
     [P_FREL] = {"REL", F_TIME, 0, 127, 0, N_FREL, 0},   /* 0: "DEC", the decay's rate (as before) */
+#if FELUCCA_SWAMP
+    [P_AVOL] = PD("VOL", F_DBOFS, -64, 15, 0),
+#endif
 #endif
     [P_LSYNC] = PE("SYNC", N_LSYNC, 0),
     [P_LTRIG] = PE("TRIG", N_LTRIG, 0),
@@ -586,6 +589,16 @@ static void param_format(const param_desc_t *d, int32_t v, char *val, const char
         }
         break;
     }
+    case F_DBOFS:                                   /* half dB steps: -64 = -32.0 dB */
+        fmt_fix(val, v * 5, 1);
+        if (v > 0) {
+            char t[8];
+            fmt_fix(t, v * 5, 1);
+            val[0] = '+';
+            str_cpy(val + 1, t, 6);
+        }
+        *unit = "dB";
+        break;
     case F_DB:
         if (v <= 0) {
             str_cpy(val, "OFF", 6);

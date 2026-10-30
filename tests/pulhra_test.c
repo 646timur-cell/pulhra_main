@@ -9573,6 +9573,125 @@ static int test_fenv_adsr(void)
     return bad;
 }
 
+/* AMP VOL (Tim): the machine's own volume, MIX's K1; the factory sounds levelled by it, LEVEL (SELECT) the track's */
+static int test_amp_vol(void)
+{
+    int bad = 0;
+    uint32_t b, p0 = 0, p1 = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 0;
+    sm_sound_load(eng_rank(ENGI_MSAW), 2);                /* SAW 2: +4 half dB */
+    sm_input_poll();
+    play_blocks(4);
+    bad += check("AVOL: a factory sound's level in its VOL (SAW 2: +4), LEVEL the default",
+                 ksnd(0)->p[P_AVOL] == 4 && ksnd(0)->p[P_LEVEL] == TP[P_LEVEL].def && trk[0].p[P_AVOL] == 4);
+    sm_ui.page = (uint8_t)page_by_name("MIX");
+    bad += check("AVOL: MIX K1 the VOL, SELECT the track's LEVEL; AMP's SELECT the LEVEL too",
+                 sm_page_param(0) == P_AVOL && sm_page_param(4) == P_LEVEL);
+    kit_dry();
+    trk[0].p[P_AVOL] = 0;
+    trk_note_on(&trk[0], 60, 100);
+    for (b = 0; b < 300u; b++) {
+        uint32_t a = block_peak(0, 0);
+        p0 = b > 100u && a > p0 ? a : p0;
+    }
+    trk[0].p[P_AVOL] = -12;
+    for (b = 0; b < 300u; b++) {
+        uint32_t a = block_peak(0, 0);
+        p1 = b > 100u && a > p1 ? a : p1;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(400);
+    printf("pulhra: AVOL peaks %u %u\n", p0, p1);
+    bad += check("AVOL: VOL -12 (-6 dB): the held note about half", p1 * 10u > p0 * 4u && p1 * 10u < p0 * 6u);
+    sm_ui.page = (uint8_t)page_by_name("AMP");
+    return bad;
+}
+
+/* the page of steps (Tim, 31.10): P3 on a long track, another track of one page: its first page (OCT pages again); MIXER: the
+ * longest track's pages, its title MIXER . P2/4 */
+static int test_step_pages(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    cpat()->kit.snd[0].len = 64u;
+    cpat()->kit.snd[1].len = 16u;
+    sm_ui.trk = 0;
+    sm_ui.page = (uint8_t)page_by_name("AMP");
+    sm_ui.bank = 2;
+    sm_input_poll();
+    bad += check("PAGES: T1 of 64 steps, P3 in view", sm_ui.bank == 2u && sm_npages() == 4u);
+    sm_ui.trk = 1;                                        /* (as the ALGO knob or HOME + a key) */
+    sm_input_poll();
+    draw_full();
+    bad += check("PAGES: T2 of 16: its first page", sm_ui.bank == 0u);
+    sm_ui.page = (uint8_t)page_by_name("MIXER");
+    sm_input_poll();
+    oct_tap(B_OCTUP);
+    draw_full();
+    bad += check("PAGES: MIXER, T2 selected: OCT+ pages the longest track's (P2), the title MIXER . P2/4",
+                 sm_ui.bank == 1u && sm_npages() == 4u && lint_has("MIXER \x12 P2/4", 0, 0));
+    sm_ui.page = (uint8_t)page_by_name("AMP");
+    sm_input_poll();
+    bad += check("PAGES: back to AMP on T2: the first page", sm_ui.bank == 0u);
+    cpat()->kit.snd[0].len = 16u;
+    return bad;
+}
+
+/* the KIT's conditions (Tim, 31.10: they got mixed between lanes): each lane its own (its lock, else the trig's), the trig's
+ * no gate over a lane with its own; a lane taken off a step takes its locks with it */
+static int kit_lane_sounds(uint32_t L)
+{
+    uint32_t i;
+    for (i = 0; i < NVOICE; i++)
+        if (trk[3].v[i].active && trk[3].v[i].note == DR_KIT_NOTE + L)
+            return 1;
+    return 0;
+}
+static int test_kit_lane_cond(void)
+{
+    int bad = 0;
+    sm_step_t *st;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    sm_kit_lane = 0;
+    sm_step_toggle(3, 0);
+    sm_kit_lane = 1;
+    sm_step_toggle(3, 0);
+    st = stp(3, 0);
+    st->cond = SM_COND_FILL;                              /* the trig's: FILL (off: fails) */
+    sm_kit_lane = 0;
+    sm_lock_set(3, 0, SM_LC(0), 0);                       /* L1 its own: always */
+    trk_all_off(&trk[3]);
+    play_blocks(2);
+    sm_seq_fire(3, 0, 0, 256u * 64u, 0, 0);
+    play_blocks(1);
+    bad += check("LCOND: L1's own condition (always) plays though the trig's (FILL) fails; L2 (none of its own) follows the trig's",
+                 kit_lane_sounds(0) && !kit_lane_sounds(1));
+    sm_kit_lane = 0;
+    sm_step_toggle(3, 0);                                 /* L1 off (L2 stays) */
+    bad += check("LCOND: L1 taken off the step: its condition lock gone, L2's hit stays",
+                 lk_val(3, 0, SM_LC(0)) == LK_NONE && stp(3, 0)->n && !stp(3, 0)->note[0] && stp(3, 0)->note[1]);
+    sm_step_toggle(3, 0);                                 /* L1 back: fresh (the trig's condition) */
+    bad += check("LCOND: L1 placed again: no condition of its own", lk_val(3, 0, SM_LC(0)) == LK_NONE && stp(3, 0)->note[0]);
+    trk_all_off(&trk[3]);
+    stp(3, 0)->n = 0;
+    sm_lock_clear_step(3, 0);
+    play_blocks(200);
+    return bad;
+}
+
 static int test_preset_page(void)
 {
     int bad = 0;
@@ -9754,16 +9873,19 @@ static int test_kit_lane_mix(void)
     play_blocks(4);
     sm_kit_lane = 1;
     sm_ui.page = (uint8_t)page_by_name("AMP");
-    bad += check("LMIX: KIT, AMP: K1..K4 the lane's ATK DEC SUS REL, SELECT its LVL",
-                 sm_page_param(0) == SM_LE(1, 0) && sm_page_param(3) == SM_LE(1, 3) && sm_page_param(4) == SM_LM(1, 0));
+    bad += check("LMIX: KIT, AMP: K1..K4 the lane's ATK DEC SUS REL, SELECT the track's volume",
+                 sm_page_param(0) == SM_LE(1, 0) && sm_page_param(3) == SM_LE(1, 3) && sm_page_param(4) == P_LEVEL);
+    sm_ui.page = (uint8_t)page_by_name("MIX");
+    bad += check("LMIX: KIT, MIX: K1 the lane's LVL, SELECT the track's volume", sm_page_param(0) == SM_LM(1, 0) &&
+                 sm_page_param(4) == P_LEVEL);
     {
         int8_t l0 = cpat()->lmix[0][0], l2 = cpat()->lmix[2][0], t0 = ksnd(3)->p[P_LEVEL];
-        turn(EN_SELECT, -10);
+        turn(EN_K1, -10);
         sm_input_poll();
-        turn(EN_SELECT, -5);
+        turn(EN_K1, -5);
         sm_input_poll();
         play_blocks(2);
-        bad += check("LMIX: ... SELECT -15: L2's LVL alone down 15 (L1, L3, the track's LEVEL kept), on the core",
+        bad += check("LMIX: ... MIX K1 -15: L2's LVL alone down 15 (L1, L3, the track's LEVEL kept), on the core",
                      cpat()->lmix[1][0] == 112 - 15 && dr_lm[3][1][0] == 112 - 15 && cpat()->lmix[0][0] == l0 && cpat()->lmix[2][0] == l2 &&
                      ksnd(3)->p[P_LEVEL] == t0 && dr_lm[3][0][0] == l0);
     }
@@ -12180,6 +12302,9 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_kit_lane_cond();
+    bad += test_step_pages();
+    bad += test_amp_vol();
     bad += test_kit_lane_env();
     bad += test_fenv_adsr();
     bad += test_midi_clock_dup();

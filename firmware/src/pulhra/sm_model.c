@@ -372,7 +372,8 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
     s->p[P_VOICE] = (int8_t)(pr->mono ? V_LEGATO : V_POLY);
     for (i = 0; i < 4u; i++)
         s->p[P_DIST + i] = (int8_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
-    s->p[P_LEVEL] = (int8_t)clamp((int32_t)s->p[P_LEVEL] + sm_lvl_trim(sm_engine_of(machine), preset), 0, 127);
+    s->p[P_AVOL] = (int8_t)clamp(sm_lvl_trim(sm_engine_of(machine), preset), -64, 15);   /* (Tim: the factory sounds levelled
+                                                                                              by AMP VOL; LEVEL the track's) */
     sm_ens_semi(s);
 }
 

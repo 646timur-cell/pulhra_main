@@ -31,7 +31,7 @@ static const sm_page_t SM_PAGES[] = {
     {"EDIT 1", SMFAM_EDIT, {P_E0, P_E1, P_E2, P_E3}, P_E8},
     {"EDIT 2", SMFAM_EDIT, {P_E4, P_E5, P_E6, P_E7}, P_E8},
     {"AMP", SMFAM_GLO, {P_ATK, P_DEC, P_SUS, P_REL}, P_LEVEL},   /* SELECT: track volume (ESYNC removed) */
-    {"MIX", SMFAM_GLO, {P_LEVEL, P_PAN, P_DIST, P_REV}, SM_NOPARAM},
+    {"MIX", SMFAM_GLO, {P_AVOL, P_PAN, P_DIST, P_REV}, P_LEVEL},   /* K1: the machine's VOL (AMP VOL), SELECT: track volume */
     {"FILTER", SMFAM_ENV, {P_FRES, P_ED_FLT, P_LD_FLT, P_FLT}, P_FCUT},   /* SELECT: CUTOFF, K1 RES, K2 ENV>FLT, K3 LFO>FLT, K4 TYPE */
     {"F.ENV", SMFAM_ENV, {P_FATK, P_FDEC, P_FSUS, P_FREL}, SM_NOPARAM},   /* the ADSR (Tim); its amount: FILTER's ENV>FLT; HYB: SELECT its WIDTH */
     {"LFO", SMFAM_LFO, {P_LWAVE, P_LPHASE, P_LSYNC, P_LTRIG}, P_LRATE},   /* SELECT: RATE, K1 WAVE, K2 PHASE, K3 SYNC, K4 TRIG */
@@ -148,11 +148,13 @@ static uint32_t sm_page_param(uint32_t k)
         return two ? SM_LP(L, 8u) : P_E0 + L;
     }
     if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {
-        /* the KIT (Tim): each lane its own envelope, LVL and sends, the lane in edit's: AMP's K1..K4 its ATK DEC SUS REL, SELECT
-         * its LVL; the sends of FX / MIX its own (MIX's K1: the track's LEVEL, all the lanes) */
+        /* the KIT (Tim): each lane its own envelope, LVL and sends, the lane in edit's: AMP's K1..K4 its ATK DEC SUS REL, MIX's
+         * K1 its LVL (as a machine's VOL), the sends of FX / MIX its own; SELECT the track's volume (all the lanes) */
         uint32_t L = sm_kit_lane % 4u;
-        if (pg->id[0] == P_ATK)                           /* (Tim: K1..K4 the lane's ATK DEC SUS REL, SELECT its LVL; the sends: FX) */
-            return k < 4u ? SM_LE(L, k) : SM_LM(L, 0u);
+        if (pg->id[0] == P_ATK)                           /* (Tim: K1..K4 the lane's ATK DEC SUS REL; SELECT the track's volume) */
+            return k < 4u ? SM_LE(L, k) : P_LEVEL;
+        if (id == P_AVOL)                                 /* (MIX's K1: the lane's LVL, its VOL; the sends: FX) */
+            return SM_LM(L, 0u);
         if (id == P_CHOR)
             return SM_LM(L, 1u);
         if (id == P_DLY)
@@ -189,8 +191,25 @@ static uint32_t __attribute__((unused)) sm_arp_page(uint32_t second)
 
 static int sm_page_is_step(void) { return sm_cur_page()->fam == SMFAM_SEQ; }
 /* the selected track's pages of 16 steps (1 .. 4: 64 steps) */
-static uint32_t sm_npages(void) { return ((uint32_t)clamp(smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].len, 1, SM_NSTEP) + 15u) / 16u; }
 static uint32_t sm_page_home(void) { return sm_cur_page()->home; }   /* SMH_*: 0 not a HOME page */
+/* the pages of steps in view: the selected track's; MIXER (the four tracks at once): the longest one's */
+static uint32_t sm_npages(void)
+{
+    const sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t t, len = (uint32_t)clamp(pt->kit.snd[sm_ui.trk % SM_NTRK].len, 1, SM_NSTEP);
+    if (sm_page_home() == SMH_MIXER)
+        for (t = 0; t < SM_NTRK; t++)
+            len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP) > len ? (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP) : len;
+    return (len + 15u) / 16u;
+}
+/* the page of steps in view past the pages there are (another track, a page, a pattern, a length: Tim, 31.10): the first */
+static void sm_bank_fix(void)
+{
+    if (sm_ui.bank >= sm_npages()) {
+        sm_ui.bank = 0;
+        sm_dirty = 1;
+    }
+}
 
 /* the STEP page's FLAG list (the PRESETS knob, round): the flags byte of each place, its name */
 #define SM_NFLAG 12u

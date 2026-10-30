@@ -1054,11 +1054,20 @@ static int32_t send_c[CTL], send_d[CTL], send_r[CTL], wet[CTL], mix_l[CTL], mix_
  * perf_mute_sd) and passes DIST by (the spread of a distorted chord is its voices' clean difference). The sends
  * take b, mono, as before. SPRD 0, MONO or LEGATO: mix_part's own loop, bit for bit as before. The cost: a block's
  * clear and sum of spread_buf, the side and a wider mix loop, per part; per voice none (it picks its buffer) */
+/* a track's gain, Q12: its LEVEL, and (PULHRA) its machine's own VOL (AMP VOL, half dB steps around 0 dB) */
+static int32_t trk_lvl_q12(const track_t *t)
+{
+    int32_t l = LEVEL_Q12[t->p[P_LEVEL] & 127];
+#if FELUCCA_SWAMP
+    l = (l * (int32_t)LEVEL_Q12[112 + clamp(t->p[P_AVOL], -64, 15)]) >> 12;
+#endif
+    return l;
+}
 static __attribute__((noinline)) void mix_spread(track_t *t, int32_t *b, uint32_t n)
 {
     int32_t *d = spread_buf;
     uint32_t i;
-    int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127], pan = t->p[P_PAN], s = (t->p[P_SPRD] + 1) >> 1;
+    int32_t lvl = trk_lvl_q12(t), pan = t->p[P_PAN], s = (t->p[P_SPRD] + 1) >> 1;
     int32_t pa = clamp(pan - s, -64, 63), pb = clamp(pan + s, -64, 63);
     int32_t gla = 4096 - (pa > 0 ? pa * 64 : 0), gra = 4096 + (pa < 0 ? pa * 64 : 0);
     int32_t glb = 4096 - (pb > 0 ? pb * 64 : 0), grb = 4096 + (pb < 0 ? pb * 64 : 0);
@@ -1169,7 +1178,7 @@ static void mix_part(track_t *t, uint32_t n)
     }
     if (!spread_on) {                                   /* (the mix's values read after the calls: none is held over
                                                          * them, no spill in the loop: the ISR's cost as before 1.5) */
-        int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127], pan = t->p[P_PAN];
+        int32_t lvl = trk_lvl_q12(t), pan = t->p[P_PAN];
         int32_t gl = 4096 - (pan > 0 ? pan * 64 : 0), gr = 4096 + (pan < 0 ? pan * 64 : 0);
         int32_t c = t->p[P_CHOR] * 258, d = t->p[P_DLY] * 258, r = t->p[P_REV] * 258, pk = t->peak;
 #if FELUCCA_SWAMP
@@ -1200,7 +1209,7 @@ static void mix_part(track_t *t, uint32_t n)
     }
 #if FELUCCA_SWAMP
     if (t->engine == ENGI_DKIT) {                       /* the KIT's lanes' sends (eng_dr.c dkit_render) at the track's LEVEL */
-        int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127];
+        int32_t lvl = trk_lvl_q12(t);
         for (i = 0; i < n; i++) {
             send_c[i] += ((dr_ls[0][i] >> 2) * lvl) >> 10;
             send_d[i] += ((dr_ls[1][i] >> 2) * lvl) >> 10;

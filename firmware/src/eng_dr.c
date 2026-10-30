@@ -839,8 +839,9 @@ static const engine_t ENG_DRIM = {
 /* white noise (Tim: a shaker on white noise) through a state-variable filter at TONE (1.5 .. 12 kHz, RES), its band or its
  * high-pass (WIDE: narrow .. open); GRN: the noise cut into beads (0 a smooth hiss, up: fewer, harder grains); ATK the
  * swoosh in (0 .. 40 ms), DCAY its fall (10 .. 150 ms), BITE a click at the strike, DRIV; the ninth, DBL: the shake back,
- * a second stroke 75 ms later at DBL's level */
-#define DR_SHK_GAP 3307                                   /* (75 ms) */
+ * a second stroke DBL later (Tim, 31.10: the knob its time: OFF, 1 ms (a flam) .. ~680 ms, as the times of the envelopes) */
+static const char *const N_DR_DBL[2] = {"OFF", 0};
+static int32_t dr_dbl_gap(int32_t v) { return (int32_t)(TIME_MS_X10[clamp(v, 0, 127)] * 441u / 100u); }   /* samples */
 static void dshk_start(track_t *t, voice_t *v, const int16_t *e)
 {
     dr_slot_t *S;
@@ -863,9 +864,9 @@ static void dshk_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmo
                                                           ~4000 at 1 .. ~130 at 127; x 2^32 / fs) */
     tsvf_t c;
     tsvf_coef(&c, dr_cut((90 << 4) + clamp(e[0], 0, 127) * (37 << 4) / 127 + note), clamp(e[4], 0, 127) * 100 / 127);
-    if (dbl && !S->n && S->cnt >= DR_SHK_GAP) {           /* DBL: the shake back */
+    if (dbl && !S->n && S->cnt >= dr_dbl_gap(dbl)) {      /* DBL: the shake back */
         S->n = 1;
-        S->q[0] = (DR_Q30 >> 7) * dbl;
+        S->q[0] = DR_Q30 / 4 * 3;
         at = 0;
         v->s[2] = 0;
     }
@@ -929,7 +930,7 @@ static const engine_t ENG_DSHK = {
     .edit = {{"TONE", F_PCT, 0, 127, 70, 0, 0}, {"DCAY", F_PCT, 0, 127, 40, 0, 0}, {"ATK", F_PCT, 0, 127, 30, 0, 0},
              {"GRN", F_PCT, 0, 127, 20, 0, 0}, {"RES", F_PCT, 0, 127, 20, 0, 0}, {"WIDE", F_PCT, 0, 127, 60, 0, 0},
              {"BITE", F_PCT, 0, 127, 20, 0, 0}, {"DRIV", F_PCT, 0, 127, 0, 0, 0}},
-    .e8 = {"DBL", F_PCT, 0, 127, 0, 0, 0},
+    .e8 = {"DBL", F_TIME, 0, 90, 0, N_DR_DBL, 0},
     .xyd = {{XY_E(0), XY_E(3), 0}, {XY_E(1), XY_E(2), 0}},
     .xya = {{40, 40, 0}, {50, 40, 0}},
 };
@@ -1024,16 +1025,20 @@ static void dbels_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
 }
 
 /* ===================================================================== TAMB === */
-/* the tambourine (Tim, 26.10: its states and its sounds): the jingles, noise cut into beads (DENS) through two resonant
- * band-passes (TONE, RES; the ninth METL their metal: BRAS, STEL brighter, DARK, MINI a small one), and the skin (a sine
- * thump, SKIN). STAT how it is played (lockable: a pattern of them): HIT (struck: the skin, the jingles at once), SLAP (the
+/* the tambourine (Tim, 26.10: its states and its sounds; 27.10: it sounded a snare): the jingles, metal (five squares at a
+ * pair of zils' inharmonic modes, 2.4 .. 12.5 kHz, two of them ring-modulated: the clash) struck bead by bead (DENS), each
+ * bead a click of high noise and the metal, the metal ringing on under DCAY; two band-passes over it (TONE, RES; the ninth
+ * METL the zils: BRAS, STEL brighter, DARK, MINI a small one), and the skin (a short sine knock ~220 Hz, SKIN; no body). STAT how it is played (lockable: a pattern of them): HIT (struck: the skin, the jingles at once), SLAP (the
  * palm: more skin, a crack), SHAK (shaken: the jingles swoosh in and back, no skin), ROLL (the thumb roll: the jingles
- * re-struck RATE times a second for the decay), TAP (a light tap: the jingles alone, short). DCAY the jingles' ring, DRIV */
+ * re-struck RATE times a second for the decay: 4 .. 40; SHAK: RATE the back stroke's time, 250 .. 25 ms), TAP (a light tap: the jingles alone, short). DCAY the jingles' ring, DRIV */
 enum { DR_TS_HIT, DR_TS_SLAP, DR_TS_SHAK, DR_TS_ROLL, DR_TS_TAP, DR_TS_N };
 static const char *const N_DR_TSTAT[DR_TS_N] = {"HIT", "SLAP", "SHAK", "ROLL", "TAP"};
 enum { DR_TM_BRAS, DR_TM_STEL, DR_TM_DARK, DR_TM_MINI, DR_TM_N };
 static const char *const N_DR_TMETL[DR_TM_N] = {"BRAS", "STEL", "DARK", "MINI"};
-static const int16_t DR_TM_P16[DR_TM_N][2] = {{1792, 1880}, {1850, 1950}, {1720, 1800}, {1890, 1990}};   /* the bands, p16 */
+static const int16_t DR_TM_P16[DR_TM_N][2] = {{1712, 1580}, {1770, 1610}, {1640, 1530}, {1810, 1660}};   /* the band, the
+                                                             high-pass under the zils, p16 */
+static const uint32_t DR_TM_HZ[DR_TM_N][5] = {{2340, 3320, 4400, 5410, 6790}, {2700, 3830, 5190, 6330, 7970},
+                                              {1810, 2610, 3470, 4430, 5540}, {3230, 4610, 6080, 7650, 9380}};   /* the zils */
 static void dtamb_start(track_t *t, voice_t *v, const int16_t *e)
 {
     dr_slot_t *S;
@@ -1044,32 +1049,47 @@ static void dtamb_start(track_t *t, voice_t *v, const int16_t *e)
     S->e[1] = st == DR_TS_SHAK || st == DR_TS_TAP ? 0 : 32767;   /* (the skin) */
     S->ph[1] = 32767;                                     /* (the burst: struck) */
     S->ph[0] = 0x40000000u;
+    S->ph[3] = 0x12345678u;                               /* (the zils apart from the start) */
+    S->ph[4] = 0x9ABCDEF0u;
+    S->ph[5] = 0x2468ACE0u;
+    S->ph[6] = 0x13579BDFu;
+    S->ph[7] = 0xFEDCBA98u;
     v->s[2] = st == DR_TS_SHAK;                           /* (SHAK: alive till the back stroke) */
+}
+static int32_t dtamb_zils(const uint32_t *ph)          /* five squares, two pairs ring-modulated (the clash) */
+{
+    return ((int32_t)(ph[3] >> 31) ? 3000 : -3000) + ((int32_t)((ph[4] ^ ph[5]) >> 31) ? 3000 : -3000) +
+           ((int32_t)(ph[6] >> 31) ? 2400 : -2400) + ((int32_t)((ph[7] ^ ph[3]) >> 31) ? 2400 : -2400) +
+           ((int32_t)(ph[5] >> 31) ? 1800 : -1800);
 }
 static void dtamb_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
 {
     dr_slot_t *S = dr_slot(t, v);
     uint32_t st = (uint32_t)clamp(e[0], 0, DR_TS_N - 1), mt = (uint32_t)clamp(e[8], 0, DR_TM_N - 1), i;
     int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), tone = clamp(e[1], 0, 127) * 3 - 190 + note / 2;
-    int32_t skin = clamp(e[3], 0, 127) * (st == DR_TS_SLAP ? 400 : 258), dens = clamp(e[4], 0, 127);
-    int32_t per = (int32_t)FS / (6 + clamp(e[5], 0, 127) * 24 / 127), reso = clamp(e[6], 0, 127) * 100 / 127;
+    int32_t skin = clamp(e[3], 0, 127) * (st == DR_TS_SLAP ? 150 : 90), dens = clamp(e[4], 0, 127);
+    int32_t per = (int32_t)FS / (4 + clamp(e[5], 0, 127) * 36 / 127), reso = clamp(e[6], 0, 127) * 100 / 127;
     int32_t drv = clamp(e[7], 0, 127) + (st == DR_TS_SLAP ? 30 : 0), a, d, rise = S->e[0], sk = S->e[1];
     int32_t bu = (int32_t)S->ph[1], g = S->cnt, x1 = S->x1;
     uint32_t dlo = st == DR_TS_TAP ? 18u : st == DR_TS_ROLL ? 40u : 30u;
-    uint32_t kb = dv_kb(dr_tau(e[2], dlo, 40)), kg = dv_k(250u), ksk = dv_k(st == DR_TS_SLAP ? 25000u : 40000u);
-    uint32_t kbu = dv_k(st == DR_TS_SLAP ? 2500u : 6000u), inc = pitch_inc((uint32_t)clamp(50 * 16 + note, 0, 2047));
+    uint32_t kb = dv_kb(dr_tau(e[2], dlo, 40)), kg = dv_k(900u), ksk = dv_k(st == DR_TS_SLAP ? 9000u : 6000u);
+    uint32_t kbu = dv_k(st == DR_TS_SLAP ? 2500u : 6000u), inc = pitch_inc((uint32_t)clamp(57 * 16 + note, 0, 2047));
+    uint32_t zi[5], k, tmul = dv_exp2((uint32_t)clamp(4096 + tone * 4096 / 384, 0, 3 * 4096)) >> 9;   /* (TONE: the zils
+                                                             +-~half an octave; Q8, 256 = as listed) */
     uint32_t thr = (dv_exp2((uint32_t)(4096 * 9 + dens * 4096 * 4 / 127)) >> 16) * 97391u;   /* (beads ~500 .. 8000 a second) */
     tsvf_t c1, c2;
-    tsvf_coef(&c1, dr_cut(DR_TM_P16[mt][0] + tone), 40 + reso / 2);
-    tsvf_coef(&c2, dr_cut(DR_TM_P16[mt][1] + tone), 40 + reso / 2);
-    if (st == DR_TS_SHAK && !S->n && (int32_t)S->ph[2] >= 3087) {   /* SHAK: the back stroke, 70 ms on */
+    for (k = 0; k < 5u; k++)
+        zi[k] = (((DR_TM_HZ[mt][k] * 97392u) >> 8) * tmul) >> 8;
+    tsvf_coef(&c1, dr_cut(DR_TM_P16[mt][0] + tone), 20 + reso / 2);
+    tsvf_coef(&c2, dr_cut(DR_TM_P16[mt][1] + tone), 0);
+    if (st == DR_TS_SHAK && !S->n && (int32_t)S->ph[2] >= per) {   /* SHAK: the back stroke, RATE's period on (250 .. 25 ms) */
         S->n = 1;
         S->q[0] = DR_Q30 / 4 * 3;
         rise = 0;
         v->s[2] = 0;
     }
-    if (st == DR_TS_ROLL && (int32_t)S->ph[3] >= per) {   /* ROLL: struck again */
-        S->ph[3] = 0;
+    if (st == DR_TS_ROLL && (int32_t)S->ph[2] - S->q[1] >= per) {   /* ROLL: struck again */
+        S->q[1] = (int32_t)S->ph[2];
         bu = 22000 + (DR_NOISE(S) >> 3);
     }
     if (v->s[6]) {
@@ -1079,19 +1099,29 @@ static void dtamb_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
     }
     dv_slow(&S->q[0], kb, &a, &d);
     for (i = 0; i < n; i++) {
-        int32_t z = DR_NOISE(S), x, j, env;
+        int32_t z = DR_NOISE(S), x, j, env, mtl;
         if ((uint32_t)noise32(&S->rng) < thr)            /* a bead (a jingle against the next) */
             g = 32767;
-        x = (z * (6000 + ((g * 26767) >> 15))) >> 15;
+        mtl = dtamb_zils(S->ph);
+        for (k = 0; k < 5u; k++)
+            S->ph[3 + k] += zi[k];
+        x = ((mtl * (9000 + ((g * 23767) >> 15))) >> 13) + ((z * (g >> 2)) >> 15);   /* the metal ringing, each bead
+                                                             a click of it and of high noise */
         g = (g * (int32_t)kg) >> 15;
-        j = clamp(dv_bp(&c1, x, &S->f[0]), -150000, 150000) + clamp(dv_bp(&c2, x, &S->f[2]), -150000, 150000);
+        j = x + clamp(dv_bp(&c1, x, &S->f[0]), -150000, 150000);   /* the zils and their band (RES) */
         S->f[0] = clamp(S->f[0], -150000, 150000);
         S->f[1] = clamp(S->f[1], -150000, 150000);
-        S->f[2] = clamp(S->f[2], -150000, 150000);
-        S->f[3] = clamp(S->f[3], -150000, 150000);
+        {                                                 /* a high-pass under them (~1.7 .. 2.5 kHz): no body, no hum */
+            int32_t v3 = j - S->f[3];
+            int32_t v1 = (c2.a1 * S->f[2] + c2.a2 * v3) >> 13;
+            int32_t v2 = S->f[3] + ((c2.a2 * S->f[2] + c2.a3 * v3) >> 13);
+            S->f[2] = clamp(2 * v1 - S->f[2], -150000, 150000);
+            S->f[3] = clamp(2 * v2 - S->f[3], -150000, 150000);
+            j = j - v2 - v1;
+        }
         env = (((a >> 5) * rise) >> 15) + (st == DR_TS_ROLL ? (bu >> 1) : (bu >> 2));
-        x = (clamp(j >> 1, -65535, 65535) * clamp(env, 0, 32767)) >> 15;
-        if (sk > 64) {                                    /* the skin: a sine thump from ~150 Hz */
+        x = (clamp(j * 3, -65535, 65535) * clamp(env, 0, 32767)) >> 15;
+        if (sk > 64) {                                    /* the skin: a short knock ~220 Hz */
             x += (((sine_i(S->ph[0]) * sk) >> 15) * skin) >> 15;
             S->ph[0] += inc;
             sk = (sk * (int32_t)ksk) >> 15;
@@ -1106,7 +1136,6 @@ static void dtamb_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
     }
     S->ph[1] = (uint32_t)bu;
     S->ph[2] += n;
-    S->ph[3] += n;
     S->cnt = g;
     S->e[0] = rise;
     S->e[1] = sk;
@@ -1130,7 +1159,7 @@ static const preset_t DTAMB_PRESETS[] = {
     /* STAT TONE DCAY SKIN DENS RATE RES DRIV */
     {"TB HIT", {DR_TS_HIT, 64, 60, 50, 64, 50, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
     {"TB SLAP", {DR_TS_SLAP, 64, 50, 80, 64, 50, 40, 10}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
-    {"TB SHAKE", {DR_TS_SHAK, 70, 50, 0, 80, 50, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"TB SHAKE", {DR_TS_SHAK, 70, 50, 0, 80, 40, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
     {"TB ROLL", {DR_TS_ROLL, 64, 90, 0, 70, 60, 40, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 20)},
     {"TB TAP", {DR_TS_TAP, 80, 40, 0, 50, 50, 50, 0}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
 };

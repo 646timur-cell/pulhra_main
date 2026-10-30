@@ -107,7 +107,8 @@
 enum {
     F_INT, F_PCT, F_BIPCT, F_TIME, F_LFOHZ, F_CUTOFF, F_DB, F_SEMI, F_ENUM, F_BPM, F_NOTE,
     F_ONOFF, F_OCT, F_STEPS,
-    F_HPF, F_LPF                 /* STRANGE: the master filters (0: OFF; HPF v: CUTOFF_HZ[v], LPF v: CUTOFF_HZ[127 - v]) */
+    F_HPF, F_LPF,                /* STRANGE: the master filters (0: OFF; HPF v: CUTOFF_HZ[v], LPF v: CUTOFF_HZ[127 - v]) */
+    F_DBOFS                      /* PULHRA: a gain in half dB steps around 0 (AMP VOL: -32 .. +7.5 dB) */
 };
 
 typedef struct {
@@ -356,6 +357,8 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
 #define P_FDEC P_LN1             /* .. its decay (ENV_EXP) to the sustain */
 #define P_FSUS P_LN7             /* .. its sustain level (0: decays to 0, as before) */
 #define P_FREL P_FM4_ATK         /* .. its release (ENV_EXP; 0: DEC's rate, as before) */
+#define P_AVOL P_FM4_DEC         /* PULHRA: the machine's own volume (AMP VOL, Tim: the factory sounds levelled by it; the
+                                  * track's LEVEL apart): half dB steps, 0 = 0 dB (an older sound's 0: as it was) */
 #define P_DTYPE P_LN2            /* DIST's TYPE: SOFT (as before) HARD FOLD FUZZ */
 #define P_DTONE P_LN3            /* .. TONE, -64..63 (0: as before) */
 #define P_DLCUT P_LN4            /* .. LOW CUT, 0..127 (0: ~55 Hz as before) */

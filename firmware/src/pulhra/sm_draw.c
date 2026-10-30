@@ -275,6 +275,8 @@ static uint32_t smd_page_sig(void)
     const sm_sound_t *s = smd_snd();
     uint32_t h = smd_mix(smd_mix(smd_mix(2166136261u, sm_ui.page), s->machine), s->preset);
     h = smd_mix(h, (uint32_t)(uint16_t)song.g[G_CMKUP]);  /* (COMP's title: MKUP) */
+    if (sm_page_home() == SMH_MIXER)                      /* (MIXER's title: the page of steps, the pages) */
+        h = smd_mix(smd_mix(h, 0x300u + sm_ui.bank), sm_npages());
     if (sm_snd_kit(s))                                    /* (the KIT: the lane in edit, its machine and sound) */
         h = smd_mix(smd_mix(smd_mix(h, sm_kit_lane), (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u]),
                     (uint32_t)(uint8_t)s->p[P_E4 + sm_kit_lane % 4u]);
@@ -351,6 +353,13 @@ static void smd_page(void)
     } else if (sm_page_home() == SMH_EUCLID) {          /* EUCLID . OCT+ GEN (OCT+ generates the trigs) */
         n = 0;
         smd_cat(b, &n, "EUCLID \x12 OCT+ GEN");
+    } else if (sm_page_home() == SMH_MIXER && sm_npages() > 1u) {   /* MIXER . P2/4: the page of steps in view (Tim) */
+        n = 0;
+        smd_cat(b, &n, "MIXER \x12 P");
+        b[n++] = (char)('1' + sm_ui.bank % 4u);
+        b[n++] = '/';
+        b[n++] = (char)('0' + sm_npages());
+        b[n] = 0;
     } else if (sm_page_home()) {                        /* MIXER, CLOCK, MENU: the page alone (the sound is not what the knobs edit) */
         smd_upper(b, sm_cur_page()->name, 8u);
     } else if (sm_cur_page()->fam == SMFAM_DEEP) {      /* DLY . GLOBAL (the deep pages are the project's, no preset) */
@@ -1218,6 +1227,7 @@ static void smd_strip(void)
 static void sm_draw(void)
 {
     uint32_t sig[SMD_NZONE], z, pk;
+    sm_bank_fix();                                        /* (another track, a shorter one: its first page, not one past its end) */
     sm_draw_px = 0;
     smd_play = *(volatile uint8_t *)&sm_playing != 0;     /* the snapshot of the frame (the audio stream moves both) */
     smd_pos = *(volatile uint8_t *)&sm_pos[sm_ui.trk % SM_NTRK];

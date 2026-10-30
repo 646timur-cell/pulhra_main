@@ -165,6 +165,26 @@ static void sm_lock_clear_step(uint32_t t, uint32_t s)
         sm_lock_compact(p);
 }
 
+/* the main loop: the locks of KIT lane L on step s of track t gone (its condition, its values, mix, filter, envelope) */
+static void sm_lock_clear_lane(uint32_t t, uint32_t s, uint32_t L)
+{
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t i, n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock, ts = SM_TS(t, s), any = 0;
+    for (i = 0; i < n; i++) {
+        uint32_t q = p->lock[i].param;
+        if (p->lock[i].ts != ts || q == SM_LOCK_DEAD)
+            continue;
+        if ((sm_is_lp(q) && (q - SM_LP0) / 9u == L) || (sm_is_lm(q) && (q - SM_LM0) / 4u == L) ||
+            (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L) || (sm_is_le(q) && (q - SM_LE0) / 4u == L)) {
+            SM_LOCK_PREEMPT();
+            p->lock[i].param = SM_LOCK_DEAD;
+            any = 1;
+        }
+    }
+    if (any && !sm_playing)
+        sm_lock_compact(p);
+}
+
 /* the main loop: the lock of (t, s, id) turned by d detents from its value (none yet: from the base), clamped. A step
  * without a trig: 0 (REC), or, mk (the held-key gesture), a REST trig made for it: the lock first, then the step's
  * fields, a barrier, n (sm_step_toggle's order); the pool full: neither */
