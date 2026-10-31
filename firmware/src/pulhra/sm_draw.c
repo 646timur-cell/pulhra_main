@@ -564,37 +564,6 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         }
         return;
     }
-    if (sm_page_home() == SMH_BT) {                       /* K1 ROLE; K2 LINK, K3 BPM shown only (sm_midi.c) */
-        static const char *const RN[3] = {"OFF", "MASTR", "SLAVE"};
-        uint32_t kk = k & 3u, r = sm_bt_role(), i;
-        static const char *const LB[3] = {"ROLE", "LINK", "BPM"};
-        if (kk == 3u)
-            return;
-        o->on = 1;
-        for (i = 0; LB[kk][i]; i++)
-            o->lab[i] = LB[kk][i];
-        o->lab[i] = 0;
-        if (kk == 0u) {
-            smd_upper(o->val, RN[r], 5u);
-            o->v = (int32_t)r;
-            o->pos = r * 128u;
-        } else if (kk == 1u) {                            /* (MASTER: SEND; SLAVE: SYNC while the clock comes, else WAIT) */
-            smd_upper(o->val, r == 1u ? "SEND" : r == 2u ? (sm_ext_leads() ? "SYNC" : "WAIT") : "--", 5u);
-            o->v = r == 2u ? 3 + sm_ext_leads() : (int32_t)r;
-            o->pos = r == 1u || (r == 2u && sm_ext_leads()) ? 256u : 0u;
-            o->dim = (uint8_t)(r == 0u || (r == 2u && !sm_ext_leads()));
-        } else {
-            uint32_t b = sm_bpm_eff();
-            o->val[0] = (char)(b >= 1000u ? '0' + b / 1000u : ' ');
-            o->val[1] = (char)('0' + b / 100u % 10u);
-            o->val[2] = (char)('0' + b / 10u % 10u);
-            o->val[3] = 0;
-            o->v = (int32_t)b;
-            o->pos = (b - 300u) * 256u / 2700u;
-            o->dim = 1;
-        }
-        return;
-    }
     if (sm_page_home() == SMH_SETUP) {                    /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC (the notes' MIDI source) */
         static const char *const CLK_N[SM_CLK_COUNT] = {"AUTO", "INT", "USB", "JACK"};
         static const char *const PM_N[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
@@ -796,8 +765,7 @@ static uint32_t smd_sel_sig(void)
         h = smd_mix(h, (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u] * 4u + sm_kit_lane);
     if (sm_page_is_step())
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
-    if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP && sm_page_home() != SMH_PRESET &&
-        sm_page_home() != SMH_BT)   /* (the
+    if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP && sm_page_home() != SMH_PRESET)   /* (the
                                                              selected track's volume) */
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
     if (sm_page_home() == SMH_SETUP)
@@ -846,7 +814,7 @@ static void smd_select(void)
         if (sm_pr.arm)                                    /* (OCT+ at the right: what does it) */
             sm_px_text(240 - 4 - 12 * 4, 2, 2u, "OCT+", T_TEXT, 0);
     } else if (sm_page_is_step() || (sm_page_home() && sm_page_home() != SMH_EUCLID && sm_page_home() != SMH_MIDI &&
-                              sm_page_home() != SMH_SETUP && sm_page_home() != SMH_BT)) {   /* STEP and HOME (MIXER, CLOCK): the selected track's volume */
+                              sm_page_home() != SMH_SETUP)) {   /* STEP and HOME (MIXER, CLOCK): the selected track's volume */
         char val[12];
         const char *unit;
         int32_t x;
@@ -857,7 +825,7 @@ static void smd_select(void)
     } else if (sm_page_home() == SMH_SETUP) {              /* SETUP's SELECT: the clock's DIV (1:2 takes every second pulse) */
         int32_t x = sm_px_text(4, 2, 2u, "CLK DIV", T_TEXT, 0) + 4 + 12;
         sm_px_text(x, 2, 2u, sm_midi_div ? "1:2" : "1:1", T_TEXT, 1);
-    } else if (sm_page_home()) {                           /* (nothing on SELECT for EUCLID / MIDI / BT MIDI) */
+    } else if (sm_page_home()) {                           /* (nothing on SELECT for EUCLID / MIDI) */
     } else if (d) {
         char lab[8], val[12];
         const char *unit;
@@ -1196,7 +1164,7 @@ static uint32_t smd_strip1_sig(void)                     /* the selected track's
     return smd_mix(h, t * 2u + (b != 0));
 }
 /* the pages with no sequencer under them (Tim): MIDI and SETUP (OCT- + HOME): the strip's zone black */
-static int smd_nostrip(void) { return !sm_map_open() && (sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP || sm_page_home() == SMH_BT); }
+static int smd_nostrip(void) { return !sm_map_open() && (sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP); }
 static uint32_t smd_strip_sig(void) { return smd_nostrip() ? 0x5E7u : smd_panel() ? smd_strip4_sig() : smd_strip1_sig(); }
 /* the selected track's strip in ASCII (Tim's): a character per step in its 13 px cell, the ink on the strip's ground:
  *   . an empty step (dim)   bullet a trig   ^ an accent   degree a REST (a lock trig)   x a ratchet   * a slide (or PSLIDE)

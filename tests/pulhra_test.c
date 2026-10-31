@@ -157,15 +157,6 @@ static int midi_enqueue(uint32_t pkt, uint32_t source)
     mi_w++;
     return 1;
 }
-/* usb.c's MIDI out (the clock out's, sm_midi.c): the packets logged, with the audio block's sample count when sent */
-static uint32_t mo_log[4096], mo_at[4096], mo_n, mo_samples;
-static void midi_out_event(uint32_t pkt)
-{
-    if (mo_n < 4096u) {
-        mo_at[mo_n] = mo_samples;
-        mo_log[mo_n++] = pkt;
-    }
-}
 /* every note-on of the app code included below (the sequencer's) goes through the counter; the tests' own calls after
  * the #undef go to voice.c's directly */
 #define trk_note_on seq_note_on
@@ -10445,86 +10436,6 @@ static uint32_t lane_hit_peak(uint32_t L)                /* T4's KIT, lane L hit
     play_blocks(400);
     return pk;
 }
-/* CLK OUT (Tim, 31.10: two FM-1s in time over Bluetooth, WIDI Uhost on each): MIDI clock to USB at the panel's tempo, Start on PLAY
- * with the first pulse, Stop on STOP, quiet while an external clock leads; the MIDI page's SELECT; the project keeps it */
-static uint32_t mo_count(uint32_t from, uint32_t b)
-{
-    uint32_t i, n = 0;
-    for (i = from; i < mo_n; i++)
-        n += ((mo_log[i] >> 8) & 0xFFu) == b && (mo_log[i] & 0xFFu) == 0x0Fu;
-    return n;
-}
-static int test_clock_out(void)
-{
-    int bad = 0;
-    uint32_t b, nb = (uint32_t)FS / CTL, i0, f8;
-    sm_prec_t r;
-    uint16_t bpm0 = smp.bpm10;
-    in_reset();
-    host_ticks = 1000u;
-    seq_reset();
-    sm_ext_bpm10 = 0;
-    smp.bpm10 = 1200;
-    sm_midi_cko = 0;
-    mo_n = 0;
-    play_blocks(nb);
-    bad += check("CLKOUT: off: nothing sent", mo_n == 0u);
-    sm_ui.page = (uint8_t)page_by_name("BT MIDI");
-    turn(EN_K1, 1);
-    sm_input_poll();
-    draw_full();
-    bad += check("CLKOUT: BT MIDI page, K1 ROLE: MASTR (CLK OUT on), LINK SEND", sm_midi_cko == 1u && lint_has("MASTR", 0, 0) &&
-                 lint_has("SEND", 0, 0));
-    sm_prec_get(&r);
-    bad += check("CLKOUT: ... the project keeps it (mtrn bit 4)", (r.mtrn & 16u) != 0u);
-    play_blocks(8);
-    mo_n = 0;
-    play_blocks(nb);                                      /* a second at 120 BPM, stopped: 48 pulses */
-    f8 = mo_count(0, 0xF8u);
-    printf("  clock out: %u pulses in a second at 120 BPM (stopped)\n", f8);
-    bad += check("CLKOUT: stopped too: 48 pulses a second at 120 BPM (+-1), nothing else", f8 >= 47u && f8 <= 49u && f8 == mo_n);
-    mo_n = 0;
-    push(SMC_PLAY, 0, 0, 0, 0);
-    run_block();
-    bad += check("CLKOUT: PLAY: Start (FA) first, a pulse with it in the same block", mo_n >= 2u && ((mo_log[0] >> 8) & 0xFFu) == 0xFAu &&
-                 ((mo_log[1] >> 8) & 0xFFu) == 0xF8u);
-    i0 = mo_n;
-    for (b = 0; b < nb / 2u; b++)
-        run_block();
-    f8 = mo_count(i0, 0xF8u) + 1u;
-    bad += check("CLKOUT: ... half a second playing: 24 pulses (one beat), the steps' own tempo", f8 >= 23u && f8 <= 25u);
-    i0 = mo_n;
-    push(SMC_STOP, 0, 0, 0, 0);
-    run_block();
-    bad += check("CLKOUT: STOP: Stop (FC)", mo_count(i0, 0xFCu) == 1u);
-    sm_ext_bpm10 = 1200;                                  /* an external clock leads: quiet */
-    sm_ext_last_ms = fm1_ms;
-    mo_n = 0;
-    play_blocks(4);
-    bad += check("CLKOUT: an external clock leading: nothing sent (no loop)", mo_n == 0u);
-    sm_ext_bpm10 = 0;
-    sm_ui.page = (uint8_t)page_by_name("BT MIDI");
-    turn(EN_K1, 1);
-    sm_input_poll();
-    draw_full();
-    bad += check("CLKOUT: K1 on: SLAVE: CLK OUT off, the notes, clock and transport from USB; LINK WAIT (no clock yet)",
-                 !sm_midi_cko && sm_midi_src == 0u && sm_midi_clk == SM_CLK_USB && !sm_midi_trnoff && lint_has("SLAVE", 0, 0) &&
-                 lint_has("WAIT", 0, 0));
-    sm_ext_bpm10 = 1280;
-    sm_ext_last_ms = fm1_ms;
-    draw_full();
-    bad += check("CLKOUT: ... a clock coming: LINK SYNC, BPM 128", lint_has("SYNC", 0, 0) && lint_has("128", 0, 0));
-    turn(EN_K1, -2);
-    sm_input_poll();
-    bad += check("CLKOUT: K1 back to OFF: the clock the panel's again (AUTO), CLK OUT off", !sm_midi_cko && sm_midi_clk == SM_CLK_AUTO);
-    sm_ext_bpm10 = 0;
-    sm_midi_cko = 0;
-    sm_midi_src = 1;
-    smp.bpm10 = bpm0;
-    in_reset();
-    return bad;
-}
-
 /* SHIFT + A#3 / C#4 on the KIT (Tim, 31.10: it moved every lane): the lane in edit alone, its own locks with its hits */
 static int test_kit_lane_shift(void)
 {
@@ -13094,7 +13005,6 @@ int main(void)
     bad += test_fenv_adsr();
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
-    bad += test_clock_out();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

@@ -1304,13 +1304,6 @@ static void sm_input_poll(void)
                     sm_midi_release_req(i);               /* (a new channel or OFF: the drain lets the old channel's notes go) */
                 }
             }
-
-    } else if (sm_page_home() == SMH_BT) {                /* K1 ROLE OFF / MASTER / SLAVE (the others show only) */
-        if (k[0]) {
-            int32_t r = (int32_t)sm_bt_role() + k[0];
-            sm_bt_role_set((uint32_t)clamp(r, 0, 2));
-            sm_dirty = 1;
-        }
     } else if (sm_page_home() == SMH_SETUP) {             /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC, each round */
         uint8_t w;
         if (k[0]) {                                       /* (round over the choices SRC allows: sm_midi_clk_ok) */

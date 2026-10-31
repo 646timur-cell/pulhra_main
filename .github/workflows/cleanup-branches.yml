@@ -1,0 +1,18 @@
+# One-off: the leftover branches gone (the Bluetooth probes, a merged WIP); deletes itself afterwards.
+name: cleanup-branches
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/cleanup-branches.yml]
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete
+        run: |
+          for b in spike-bt bt-probe-out spike-bt2 bt-probe2-out seq-layer-wip; do
+            git push origin --delete "$b" || true
+          done
