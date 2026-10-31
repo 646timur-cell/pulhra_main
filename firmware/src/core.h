@@ -482,6 +482,9 @@ typedef struct {
 } chain_v9_t;
 _Static_assert(sizeof(chain_config_t) == 84u && sizeof(chain_v9_t) == 36u, "song chain layouts (FUN10 / FUN6..FUN9)");
 
+#if FELUCCA_SWAMP
+typedef struct { int32_t hp, x1, d1, d2, dc, lp1, lp2, rsv; } dist_st_t;   /* (32 B: track_t stays a multiple of 16) PULHRA's DIST (dist.c dist_run): a track's, a KIT lane's hit */
+#endif
 typedef struct track {
     int16_t p[P_COUNT];
     uint8_t engine, preset;      /* engine: what the audio ISR renders */
@@ -538,6 +541,9 @@ typedef struct track {
     /* mix runtime */
     int32_t peak;
     int32_t dist_hp, dist_lp1, dist_lp2;   /* DIST insert state (fx.c) */
+#if FELUCCA_SWAMP
+    dist_st_t dst;                         /* PULHRA's DIST (dist.c dist_run) */
+#endif
     uint8_t tail;                /* blocks to mix after the last voice (the DIST / INSERT tail) */
     uint8_t ins_run;             /* the INSERT still sounds (fx.c track_insert: its wet share above 0) */
     uint8_t rsv_sz[FELUCCA_MONOFM ? 7 : 15];   /* (sizeof(track_t) a multiple of 16: below; MONOFM: its 4 parameters more) */

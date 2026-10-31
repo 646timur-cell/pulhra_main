@@ -177,7 +177,7 @@ static void sm_clear_lane(uint32_t L)
             continue;
         if ((sm_is_lp(q) && (q - SM_LP0) / 9u == L) || (sm_is_lm(q) && (q - SM_LM0) / 4u == L) ||
             (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L) ||
-            (sm_is_le(q) && (q - SM_LE0) / 4u == L) || (sm_is_lv(q) && (q - SM_LV0) / 5u == L))
+            (sm_is_le(q) && (q - SM_LE0) / 4u == L) || (sm_is_lv(q) && (q - SM_LV0) / 5u == L) || q == SM_LD(L))
             p->lock[i].param = SM_LOCK_DEAD;
     }
     if (!sm_playing)
@@ -268,6 +268,7 @@ static void sm_copy_trk(uint32_t t)
     memcpy(sm_clip.lflt, p->lflt, sizeof sm_clip.lflt);
     memcpy(sm_clip.lenv, p->lenv, sizeof sm_clip.lenv);
     memcpy(sm_clip.lfenv, p->lfenv, sizeof sm_clip.lfenv);
+    memcpy(sm_clip.ldist, p->ldist, sizeof sm_clip.ldist);
     sm_clip_kind = SM_CLIP_TRK;
 }
 
@@ -287,6 +288,7 @@ static void sm_paste_trk(uint32_t t)
         memcpy(smp.pat[smp.cur % SM_NPAT].lflt, sm_clip.lflt, sizeof sm_clip.lflt);
         memcpy(smp.pat[smp.cur % SM_NPAT].lenv, sm_clip.lenv, sizeof sm_clip.lenv);
         memcpy(smp.pat[smp.cur % SM_NPAT].lfenv, sm_clip.lfenv, sizeof sm_clip.lfenv);
+        memcpy(smp.pat[smp.cur % SM_NPAT].ldist, sm_clip.ldist, sizeof sm_clip.ldist);
     }
     sm_acc_reset(1u << t);
 }
@@ -334,7 +336,7 @@ static int sm_lock_of_lane(uint32_t q, uint32_t L)
 {
     return (sm_is_lp(q) && (q - SM_LP0) / 9u == L) || (sm_is_lm(q) && (q - SM_LM0) / 4u == L) ||
            (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L) || (sm_is_le(q) && (q - SM_LE0) / 4u == L) ||
-           (sm_is_lv(q) && (q - SM_LV0) / 5u == L);
+           (sm_is_lv(q) && (q - SM_LV0) / 5u == L) || q == SM_LD(L);
 }
 
 /* SHIFT on the KIT (Tim: it moved every lane): lane L's hits and its own locks one step left (-1) or right (+1), wrapping at the

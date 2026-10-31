@@ -176,7 +176,7 @@ static void sm_lock_clear_lane(uint32_t t, uint32_t s, uint32_t L)
             continue;
         if ((sm_is_lp(q) && (q - SM_LP0) / 9u == L) || (sm_is_lm(q) && (q - SM_LM0) / 4u == L) ||
             (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L) || (sm_is_le(q) && (q - SM_LE0) / 4u == L) ||
-            (sm_is_lv(q) && (q - SM_LV0) / 5u == L)) {
+            (sm_is_lv(q) && (q - SM_LV0) / 5u == L) || q == SM_LD(L)) {
             SM_LOCK_PREEMPT();
             p->lock[i].param = SM_LOCK_DEAD;
             any = 1;

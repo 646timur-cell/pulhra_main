@@ -10257,6 +10257,94 @@ static int test_editor_slot(void)
     return bad;
 }
 
+/* DIST (Tim, 31.10: "the distortions sound doubtful"): a 1.76 kHz sine through each TYPE at drive 100: the aliases (energy off the
+ * harmonics) well down, no offset left, the TYPEs about as loud; a KIT lane's DIST its own (FX K1 the lane's drive): one lane
+ * driven, the other as it was, nothing on the sum */
+static uint32_t lane_hf(uint32_t L);
+static double dist_alias(uint32_t ty, int32_t d, double *dc, double *rms)
+{
+    enum { NN = 4096 };
+    static int32_t x[NN];
+    static double w[NN];
+    track_t t;
+    double bin = 164.0, f = bin * 44100.0 / NN, m = 0, e = 0, tot = 0, harm = 0;
+    uint32_t i, k, pass;
+    memset(&t, 0, sizeof t);
+    t.engine = ENGI_MSAW;
+    t.p[P_DIST] = (int16_t)d;
+    t.p[P_DTYPE] = (int16_t)ty;
+    for (pass = 0; pass < 3u; pass++) {
+        for (i = 0; i < NN; i++)
+            x[i] = (int32_t)(20000 * sin(2 * M_PI * f * i / 44100.0));
+        for (i = 0; i < NN; i += 32u)
+            track_dist(&t, x + i, 32);
+    }
+    for (i = 0; i < NN; i++) m += x[i];
+    m /= NN;
+    for (i = 0; i < NN; i++) {
+        w[i] = (x[i] - m) * (0.5 - 0.5 * cos(2 * M_PI * i / NN));
+        e += (x[i] - m) * (x[i] - m);
+    }
+    for (k = 1; k < NN / 2u; k++) {
+        double a = 0, b = 0, p, h, fr;
+        for (i = 0; i < NN; i++) {
+            a += w[i] * cos(2 * M_PI * k * i / NN);
+            b -= w[i] * sin(2 * M_PI * k * i / NN);
+        }
+        p = a * a + b * b;
+        tot += p;
+        h = k / bin;
+        fr = fabs(h - floor(h + 0.5)) * bin;
+        if (fr <= 2.0)
+            harm += p;
+    }
+    *dc = m;
+    *rms = sqrt(e / NN);
+    return 10 * log10((tot - harm) / harm + 1e-12);
+}
+static int test_dist_clean(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t ty;
+    double al[4], dc[4], rm[4], lo = 1e9, hi = 0;
+    for (ty = 0; ty < 4u; ty++) {
+        al[ty] = dist_alias(ty, 100, &dc[ty], &rm[ty]);
+        printf("  DIST %s, 1.76 kHz, drive 100: aliases %.1f dB, offset %.0f, rms %.0f\n", N_DTYPE[ty], al[ty], dc[ty], rm[ty]);
+        ok &= al[ty] < (ty == 2u ? -30.0 : -40.0) && fabs(dc[ty]) < 600.0;
+        lo = rm[ty] < lo ? rm[ty] : lo;
+        hi = rm[ty] > hi ? rm[ty] : hi;
+    }
+    bad += check("DISTQ: the aliases down (FOLD < -30 dB, the others < -40 dB), the clips' offset out (< 600)", ok);
+    bad += check("DISTQ: the TYPEs about as loud (within 6 dB)", hi < lo * 2.0);
+    {                                                     /* a KIT lane's DIST */
+        uint32_t p0, p1, q0, q1;
+        in_reset();
+        host_ticks = 1000u;
+        seq_reset();
+        sm_ui.trk = 3;
+        sm_sound_load(SM_KIT_MACH, 0);
+        sm_input_poll();
+        play_blocks(4);
+        kit_dry();
+        p0 = lane_hf(0);
+        q0 = lane_hf(1);
+        sm_kit_lane = 0;
+        sm_ui.page = (uint8_t)page_by_name("FX");
+        bad += check("DISTQ: KIT, FX K1: the lane's DIST", sm_page_param(0) == SM_LD(0));
+        turn(EN_K1, 110);
+        sm_input_poll();
+        play_blocks(2);
+        p1 = lane_hf(0);
+        q1 = lane_hf(1);
+        printf("  lane DIST: L1 highs %u -> %u, L2 %u -> %u\n", p0, p1, q0, q1);
+        bad += check("DISTQ: L1's DIST up: on the core (its own), L1 changed; L2 as it was; the track's DIST untouched",
+                     dr_ld[3][0] == cpat()->ldist[0] && cpat()->ldist[0] > 100 && !dr_ld[3][1] && (p1 * 10u > p0 * 12u || p1 * 12u < p0 * 10u) &&
+                     q1 * 100u >= q0 * 97u && q1 * 100u <= q0 * 103u && ksnd(3)->p[P_DIST] == 0);
+        in_reset();
+    }
+    return bad;
+}
+
 /* the three user slots in USR1's 80 KiB (Tim, 31.10): packed as the editor does (USR1's header the map: rsv2[0] / rsv2[1] where
  * USR2 / USR3 start); each slot its own zones; CLOUD and SAMP pick USR1..3; a slot left empty (USR1: its header only, the map)
  * the others still play; a header of before (no map): USR1 alone, all 80 KiB */
@@ -10741,8 +10829,8 @@ static int test_kit_lane_mix(void)
                      ksnd(3)->p[P_LEVEL] == t0 && dr_lm[3][0][0] == l0);
     }
     sm_ui.page = (uint8_t)page_by_name("FX");
-    bad += check("LMIX: ... FX: CHO DLY REV the lane's", sm_page_param(1) == SM_LM(1, 1) && sm_page_param(3) == SM_LM(1, 3) &&
-                 sm_page_param(0) == P_DIST);
+    bad += check("LMIX: ... FX: DIST CHO DLY REV the lane's", sm_page_param(1) == SM_LM(1, 1) && sm_page_param(3) == SM_LM(1, 3) &&
+                 sm_page_param(0) == SM_LD(1));
     turn(EN_K4, 20);
     sm_input_poll();
     play_blocks(2);
@@ -13228,6 +13316,7 @@ int main(void)
     bad += test_paste_into_pick();
     bad += test_kit_lane_fenv();
     bad += test_three_slots();
+    bad += test_dist_clean();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

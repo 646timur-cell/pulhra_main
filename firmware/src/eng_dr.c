@@ -204,6 +204,9 @@ typedef struct {
     int32_t le;                  /* KIT: the lane's envelope (dkit_env), Q24 */
     uint16_t lg;                 /* .. its gain at the last block's end, Q15 */
     uint8_t lst;                 /* .. its stage: 1 attack, 2 decay, 3 sustain, 4 release, 5 done (the hit ends) */
+#if FELUCCA_SWAMP
+    dist_st_t ds;                /* KIT: the lane's DIST, this hit's (dist.c; from rest at each hit) */
+#endif
 } dr_slot_t;
 ENG_MEM_FITS("DRUM machines", sizeof(dr_slot_t) * NVOICE);
 static dr_slot_t *dr_slot(track_t *t, voice_t *v)
@@ -1434,6 +1437,7 @@ static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
 static int8_t dr_le[NPART][4][4] = {[0 ... NPART - 1] = {[0 ... 3] = {0, 64, 127, 127}}};   /* ... each lane's envelope: ATK DEC SUS
                                                              REL (pulhra sm_pattern_t.lenv; these, the defaults: the hit as it is) */
+static int8_t dr_ld[NPART][4];                            /* ... each lane's DIST, its drive (pulhra sm_pattern_t.ldist) */
 static int8_t dr_lv[NPART][4][5] = {[0 ... NPART - 1] = {[0 ... 3] = {0, 64, 0, 0, 0}}};   /* ... each lane's filter envelope: ATK DEC
                                                              SUS REL and ENV>FLT (pulhra sm_pattern_t.lfenv; voice.c fenv_tick) */
 static int32_t dr_ls[3][CTL] __attribute__((section(".pool")));                             /* the KIT's lanes' sends this block (CHO DLY REV, at the lanes' LVL; fx.c
@@ -1497,6 +1501,7 @@ static void dkit_note_on(track_t *t, voice_t *v)
     dr_lane_choke = 0;
     {                                                     /* the lane's envelope: ATK 0 at full at once (the hit's own attack) */
         dr_slot_t *S = dr_slot(t, v);
+        memset(&S->ds, 0, sizeof S->ds);                  /* (the lane's DIST from rest) */
         const int8_t *le = dr_le[(uint32_t)(t - trk) % NPART][L];
         S->lst = le[0] ? 1u : 2u;
         S->le = le[0] ? 0 : 1 << 24;
@@ -1587,6 +1592,8 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dsmp_run(t, v, b, n, &km, e);
     else
         dcym_run(t, v, b, n, &km, e);
+    if (dr_ld[(uint32_t)(t - trk) % NPART][L])            /* the lane's DIST (Tim, 31.10: its own drive; TYPE TONE OUT LOW CUT the */
+        dist_run(&dr_slot(t, v)->ds, t->p, dr_ld[(uint32_t)(t - trk) % NPART][L], b, n);   /* track's; none on the sum, fx.c) */
     g1 = dkit_env(t, v, L);
     dr_slot(t, v)->lg = (uint16_t)g1;
     if (g0 != 32767u || g1 != 32767u) {                   /* the envelope, ramped across the block (no step on the block's edge) */

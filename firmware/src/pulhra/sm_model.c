@@ -89,7 +89,9 @@ static const param_desc_t *sm_desc_safe(uint32_t e, uint32_t id)
 #define SM_LV0 (SM_LE0 + 16u)                             /* the lanes' filter envelope (Tim, 31.10): lane L's ATK DEC SUS REL ENV>FLT,
                                                              SM_LV(L, j) */
 #define SM_LV(L, j) (SM_LV0 + (uint32_t)(L) * 5u + (uint32_t)(j))
-#define SM_NPID (SM_LV0 + 20u)                           /* every id a lock, a command, a push may carry */
+#define SM_LD0 (SM_LV0 + 20u)                             /* the lanes' DIST, its drive (Tim, 31.10): lane L's, SM_LD(L) */
+#define SM_LD(L) (SM_LD0 + (uint32_t)(L))
+#define SM_NPID (SM_LD0 + 4u)                            /* every id a lock, a command, a push may carry */
 #define SM_LF(L, j) (SM_LF0 + (uint32_t)(L) * 3u + (uint32_t)(j))
 #define SM_LP(L, k) (SM_LP0 + (uint32_t)(L) * 9u + (uint32_t)(k))
 #define SM_LM(L, j) (SM_LM0 + (uint32_t)(L) * 4u + (uint32_t)(j))
@@ -99,6 +101,7 @@ static int sm_is_lm(uint32_t id) { return id >= SM_LM0 && id < SM_LF0; }
 static int sm_is_lf(uint32_t id) { return id >= SM_LF0 && id < SM_LC0; }
 static int sm_is_le(uint32_t id) { return id >= SM_LE0 && id < SM_LE0 + 16u; }
 static int sm_is_lv(uint32_t id) { return id >= SM_LV0 && id < SM_LV0 + 20u; }
+static int sm_is_ld(uint32_t id) { return id >= SM_LD0 && id < SM_LD0 + 4u; }
 static const uint8_t SM_LV_ID[5] = {P_FATK, P_FDEC, P_FSUS, P_FREL, P_ED_FLT};   /* (a lane's F.ENV: the track's ids it stands for) */
 static const param_desc_t *sm_lv_desc(uint32_t j) { return &TP[SM_LV_ID[j % 5u]]; }
 static const char *const SM_LFN[5] = {"OFF", "LP", "BP", "HP", "NOTCH"};
@@ -126,6 +129,8 @@ static int32_t sm_pget(const sm_pattern_t *pt, uint32_t t, uint32_t id)
         return pt->lenv[(id - SM_LE0) / 4u][(id - SM_LE0) % 4u];
     if (sm_is_lv(id))
         return pt->lfenv[(id - SM_LV0) / 5u][(id - SM_LV0) % 5u];
+    if (sm_is_ld(id))
+        return pt->ldist[(id - SM_LD0) % 4u];
     return id < P_COUNT ? pt->kit.snd[t % SM_NTRK].p[id] : 0;
 }
 static void sm_pset(sm_pattern_t *pt, uint32_t t, uint32_t id, int32_t v)
@@ -140,6 +145,8 @@ static void sm_pset(sm_pattern_t *pt, uint32_t t, uint32_t id, int32_t v)
         pt->lenv[(id - SM_LE0) / 4u][(id - SM_LE0) % 4u] = (int8_t)v;
     else if (sm_is_lv(id))
         pt->lfenv[(id - SM_LV0) / 5u][(id - SM_LV0) % 5u] = (int8_t)v;
+    else if (sm_is_ld(id))
+        pt->ldist[(id - SM_LD0) % 4u] = (int8_t)v;
     else if (id < P_COUNT)
         pt->kit.snd[t % SM_NTRK].p[id] = (int8_t)v;
 }
@@ -157,6 +164,8 @@ static const param_desc_t *sm_desc_trk(const sm_sound_t *s, uint32_t id)
         return sm_snd_kit(s) ? &SM_LED[(id - SM_LE0) % 4u] : 0;
     if (sm_is_lv(id))
         return sm_snd_kit(s) ? sm_lv_desc((id - SM_LV0) % 5u) : 0;
+    if (sm_is_ld(id))
+        return sm_snd_kit(s) ? &TP[P_DIST] : 0;
     if (id >= P_IA && id <= P_IC)
         return ins_desc(s->p[P_ITYPE], id - P_IA);
     return sm_desc_safe(sm_engine_of(s->machine), id);
@@ -174,6 +183,8 @@ static const param_desc_t *sm_desc_core(uint32_t t, uint32_t id)
         return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? &SM_LED[(id - SM_LE0) % 4u] : 0;
     if (sm_is_lv(id))
         return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? sm_lv_desc((id - SM_LV0) % 5u) : 0;
+    if (sm_is_ld(id))
+        return trk[t % SM_NTRK].eng_req == ENGI_DKIT ? &TP[P_DIST] : 0;
     return sm_desc_safe(eng_idx(trk[t % SM_NTRK].eng_req), id);
 }
 
@@ -501,6 +512,12 @@ static void sm_lfenv_default(sm_pattern_t *p)            /* the lanes' filter en
         for (j = 0; j < 5u; j++)
             p->lfenv[L][j] = (int8_t)clamp(s->p[SM_LV_ID[j]], sm_lv_desc(j)->min, sm_lv_desc(j)->max);
 }
+static void sm_ldist_default(sm_pattern_t *p)            /* the lanes' DIST: the KIT sound's own */
+{
+    uint32_t L;
+    for (L = 0; L < 4u; L++)
+        p->ldist[L] = (int8_t)clamp(p->kit.snd[SM_KIT_TRK].p[P_DIST], 0, 127);
+}
 static void sm_lanes_default(sm_pattern_t *p)
 {
     const sm_sound_t *s = &p->kit.snd[SM_KIT_TRK];
@@ -514,6 +531,7 @@ static void sm_lanes_default(sm_pattern_t *p)
     sm_lflt_default(p);
     sm_lenv_default(p);
     sm_lfenv_default(p);
+    sm_ldist_default(p);
 }
 static void sm_pat_blank(sm_pattern_t *p, const sm_kit_t *k)
 {

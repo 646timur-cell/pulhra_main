@@ -155,6 +155,8 @@ static uint32_t sm_page_param(uint32_t k)
             return k < 4u ? SM_LE(L, k) : P_LEVEL;
         if (id == P_AVOL)                                 /* (MIX's K1: the lane's LVL, its VOL; the sends: FX) */
             return SM_LM(L, 0u);
+        if (id == P_DIST)                                 /* (FX's K1, MIX's K3, DIST's K2: the lane's drive, Tim 31.10) */
+            return SM_LD(L);
         if (id == P_CHOR)
             return SM_LM(L, 1u);
         if (id == P_DLY)

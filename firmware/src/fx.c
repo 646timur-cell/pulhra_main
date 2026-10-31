@@ -103,27 +103,15 @@ static struct {                          /* HALL's state (in the pool: no .bss) 
  * (a little bias = even harmonics) -> tone low-pass that closes with drive ->
  * make-up gain (straight into tanh over the full band, it would sound like a
  * broken digital fuzz). State per part (track_t dist_*). */
-#if FELUCCA_MONOFM
-/* MONOFM v4: DIST's own page (FX > DIST): TYPE SOFT (the clip above, as before) / HARD (flat at the rails) / FOLD (the
- * peaks folded back) / FUZZ (hard, lopsided: a strong bias, the gaps of a dying fuzz); TONE moves the low-pass (0: as
- * before), LOW CUT the high-pass in front (0: ~55 Hz as before, up to ~1.4 kHz), OUT the level after (0: as before) */
-static inline int32_t dist_shape(uint32_t ty, int32_t u)
-{
-    if (ty == 1u)
-        return clamp(u, -26000, 26000);
-    if (ty == 2u) {                                     /* fold: the triangle of period 4 L through 0 */
-        int32_t L = 24000, p = 4 * L, v = (u + L) % p;
-        v = v < 0 ? v + p : v;
-        return v < 2 * L ? v - L : 3 * L - v;
-    }
-    if (ty == 3u)
-        return clamp(u + 9000, -14000, 30000) - 8000;
-    return softclip(u);
-}
-#endif
+/* (MONOFM v4's TYPE, the shaper: dist.c) */
 static void track_dist(track_t *t, int32_t *b, uint32_t n)
 {
     int32_t d = t->p[P_DIST], i, g, k, mk, bias = 2400, b0;
+#if FELUCCA_SWAMP
+    if (t->engine != ENGI_DKIT)                         /* PULHRA: the shaper at twice the rate (dist.c); the KIT: each lane its */
+        dist_run(&t->dst, t->p, d, b, n);               /* own (eng_dr.c dkit_render), none on the sum */
+    return;
+#endif
 #if FELUCCA_MONOFM
     uint32_t ty = (uint32_t)clamp(t->p[P_DTYPE], 0, 3);
     int32_t hc = 256 + t->p[P_DLCUT] * t->p[P_DLCUT] / 2;   /* Q15: >> 7 (as before) .. ~>> 2 */
