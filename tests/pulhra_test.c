@@ -10469,11 +10469,12 @@ static int test_clock_out(void)
     mo_n = 0;
     play_blocks(nb);
     bad += check("CLKOUT: off: nothing sent", mo_n == 0u);
-    sm_ui.page = (uint8_t)page_by_name("MIDI");
-    turn(EN_SELECT, 1);
+    sm_ui.page = (uint8_t)page_by_name("BT MIDI");
+    turn(EN_K1, 1);
     sm_input_poll();
     draw_full();
-    bad += check("CLKOUT: MIDI page, SELECT: CLK OUT ON (the header says so)", sm_midi_cko == 1u && lint_has("CLK OUT", 0, 0) && lint_has("ON", 0, 0));
+    bad += check("CLKOUT: BT MIDI page, K1 ROLE: MASTR (CLK OUT on), LINK SEND", sm_midi_cko == 1u && lint_has("MASTR", 0, 0) &&
+                 lint_has("SEND", 0, 0));
     sm_prec_get(&r);
     bad += check("CLKOUT: ... the project keeps it (mtrn bit 4)", (r.mtrn & 16u) != 0u);
     play_blocks(8);
@@ -10502,7 +10503,23 @@ static int test_clock_out(void)
     play_blocks(4);
     bad += check("CLKOUT: an external clock leading: nothing sent (no loop)", mo_n == 0u);
     sm_ext_bpm10 = 0;
+    sm_ui.page = (uint8_t)page_by_name("BT MIDI");
+    turn(EN_K1, 1);
+    sm_input_poll();
+    draw_full();
+    bad += check("CLKOUT: K1 on: SLAVE: CLK OUT off, the notes, clock and transport from USB; LINK WAIT (no clock yet)",
+                 !sm_midi_cko && sm_midi_src == 0u && sm_midi_clk == SM_CLK_USB && !sm_midi_trnoff && lint_has("SLAVE", 0, 0) &&
+                 lint_has("WAIT", 0, 0));
+    sm_ext_bpm10 = 1280;
+    sm_ext_last_ms = fm1_ms;
+    draw_full();
+    bad += check("CLKOUT: ... a clock coming: LINK SYNC, BPM 128", lint_has("SYNC", 0, 0) && lint_has("128", 0, 0));
+    turn(EN_K1, -2);
+    sm_input_poll();
+    bad += check("CLKOUT: K1 back to OFF: the clock the panel's again (AUTO), CLK OUT off", !sm_midi_cko && sm_midi_clk == SM_CLK_AUTO);
+    sm_ext_bpm10 = 0;
     sm_midi_cko = 0;
+    sm_midi_src = 1;
     smp.bpm10 = bpm0;
     in_reset();
     return bad;

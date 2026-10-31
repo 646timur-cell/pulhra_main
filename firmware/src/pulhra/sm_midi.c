@@ -55,6 +55,19 @@ static void sm_cko_stop(void)
     if (sm_midi_cko && !sm_ext_leads())
         sm_cko_byte(0xFCu);
 }
+/* the BT MIDI page's ROLE: 0 OFF, 1 MASTER (CLK OUT on), 2 SLAVE (the clock from USB) */
+static uint32_t sm_bt_role(void) { return sm_midi_cko ? 1u : sm_midi_clk == SM_CLK_USB ? 2u : 0u; }
+static void sm_bt_role_set(uint32_t r)
+{
+    sm_midi_cko = (uint8_t)(r == 1u);
+    if (r == 2u) {                                        /* (SLAVE: the notes, the clock and the transport from USB) */
+        sm_midi_src = 0;
+        sm_midi_clk = SM_CLK_USB;
+        sm_midi_trnoff = 0;
+    } else if (sm_midi_clk == SM_CLK_USB) {
+        sm_midi_clk = SM_CLK_AUTO;                        /* (no longer led: the panel's tempo) */
+    }
+}
 static void sm_cko_block(uint32_t n)
 {
     uint32_t nq8 = n << 8, per;

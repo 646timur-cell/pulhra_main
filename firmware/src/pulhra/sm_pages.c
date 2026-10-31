@@ -16,7 +16,7 @@
  * EUCLID page, SHIFT + HOME the SETUP pages MIDI / SETUP; sm_layer.c) */
 enum { SMFAM_EDIT, SMFAM_GLO, SMFAM_ENV, SMFAM_LFO, SMFAM_SEQ, SMFAM_HOME, SMFAM_ARP, SMFAM_FX, SMFAM_SCL, SMFAM_VOICE, SMFAM_DEEP, SMFAM_EUCL, SMFAM_MENU,
        SMFAM_SETUP, SMFAM_PRESET, SMFAM_COUNT };
-enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU, SMH_MIDI, SMH_SETUP, SMH_PRESET };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
+enum { SMH_NONE, SMH_MIXER, SMH_CLOCK, SMH_EUCLID, SMH_MENU, SMH_MIDI, SMH_SETUP, SMH_PRESET, SMH_BT };   /* the kind of a page whose knobs are not the sound's (sm_page_t.home) */
 
 typedef struct {
     const char *name;
@@ -63,6 +63,10 @@ static const sm_page_t SM_PAGES[] = {
     {"MICRO", SMFAM_SCL, {P_FM4_LEVEL, P_MAMT, P_ROOT, SM_NOPARAM}, SM_NOPARAM},
     {"MIDI", SMFAM_SETUP, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_MIDI},
     {"SETUP", SMFAM_SETUP, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_SETUP},
+    /* BT MIDI (Tim, 31.10; SHIFT + HOME after SETUP): two FM-1s in time over Bluetooth (a USB host BLE MIDI adapter on each, WIDI
+     * Uhost): K1 ROLE OFF / MASTER (CLK OUT: the clock and the transport to USB) / SLAVE (the clock and the transport from USB: SRC,
+     * CLK USB, TRNS ON); K2 LINK (what it does now: SEND, SYNC, WAIT), K3 BPM (the tempo playing) show only (sm_midi.c) */
+    {"BT MIDI", SMFAM_SETUP, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_BT},
     /* PRESET (SAVE tapped, sm_upre.c): K1 the machine, K2 the category, K3 a sound to LOAD, K4 a user place to SAVE into, OCT+ does it */
     {"PRESET", SMFAM_PRESET, {SM_NOPARAM, SM_NOPARAM, SM_NOPARAM, SM_NOPARAM}, SM_NOPARAM, SMH_PRESET},
 };
