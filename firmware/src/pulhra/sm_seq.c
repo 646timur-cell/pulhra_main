@@ -114,8 +114,7 @@ static uint32_t sm_tempo_q8(void)
 {
     return (uint32_t)FS * 150u * 256u / sm_bpm_eff();
 }
-/* the grid's 1x step: the tempo's 1/16 in q8 samples (its tick an eighth: 300 BPM 275 samples, still more than a block) */
-static uint32_t sm_step_q8(void) { return sm_tempo_q8(); }
+/* the grid's tick: an eighth of the tempo's 1/16 in q8 samples (300 BPM 275 samples, still more than a block) */
 static uint32_t sm_tick_q8(void) { return sm_tempo_q8() / 8u; }
 /* track t's ticks a step (64 / m8: 1 .. 64) on pattern pt, and its step in q8 samples: at /8 (30 BPM) 64 x 5644800 / 8 = 45 M
  * q8, so two steps of pending time fit 32 bits and every product below (the gate x 1024 / 64, the nudge x 7, the swing x 25) too */

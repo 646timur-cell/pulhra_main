@@ -1054,6 +1054,7 @@ static void dtamb_start(track_t *t, voice_t *v, const int16_t *e)
     S->ph[5] = 0x2468ACE0u;
     S->ph[6] = 0x13579BDFu;
     S->ph[7] = 0xFEDCBA98u;
+    S->q[1] = 0;                                          /* (ROLL: the last strike's sample; dr_start leaves it full scale) */
     v->s[2] = st == DR_TS_SHAK;                           /* (SHAK: alive till the back stroke) */
 }
 static int32_t dtamb_zils(const uint32_t *ph)          /* five squares, two pairs ring-modulated (the clash) */

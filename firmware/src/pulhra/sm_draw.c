@@ -1061,10 +1061,6 @@ static uint32_t smd_mark(void)                            /* the bar over a step
     int32_t st = sm_page_is_step() ? sm_step_edit() : -1;
     return sm_ui.held_step < SM_NSTEP ? sm_ui.held_step : st >= 0 ? (uint32_t)st : 0xFFu;
 }
-static uint32_t smd_dots(const sm_step_t *st)             /* 0 empty, 1..4 a trig with that many dots, 5 a REST */
-{
-    return (st->flags & SMF_REST) ? 5u : st->n ? 1u + SMF_RAT(st->flags) : 0u;
-}
 static uint32_t smd_strip_len(void) { return (uint32_t)clamp(smd_snd()->len, 1, SM_NSTEP); }
 /* HOME > MIXER: the strip is the four tracks, a row of dots each (rows 0..2, 5..7, 10..12, 15..17): a trig a 3 x 3 dot (a
  * REST hollow, the stack of a ratchet left out: no room), an empty strong beat a dim 1 x 1, nothing past the track's

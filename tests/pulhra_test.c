@@ -10203,6 +10203,33 @@ static int test_preset_machine(void)
     return bad;
 }
 
+/* TAMB ROLL (31.10: the strikes again at RATE; the last strike's time started at full scale, no re-strike): a roll a second
+ * in is still struck, its level above a HIT's tail */
+static int test_tamb_roll(void)
+{
+    int bad = 0;
+    uint32_t b, roll = 0, hit = 0, k;
+    for (k = 0; k < 2u; k++) {
+        uint32_t i, pk = 0;
+        dr_load(ENGI_DTAMB);
+        for (i = 0; i < 8u; i++)
+            trk[0].p[P_E0 + i] = DTAMB_PRESETS[k ? 3 : 0].e[i];
+        trk[0].p[P_E2] = 90;                              /* (the same DCAY: the strikes make the difference) */
+        trk_note_on(&trk[0], 48, 120);
+        for (b = 0; b < 500u; b++) {
+            uint32_t a = block_peak(0, 0);
+            if (b > 300u)
+                pk = a > pk ? a : pk;
+        }
+        trk_all_off(&trk[0]);
+        play_blocks(600);
+        if (k) roll = pk; else hit = pk;
+    }
+    printf("pulhra: TAMB roll %u hit %u\n", roll, hit);
+    bad += check("TAMB: ROLL struck again and again (0.2 .. 0.35 s in: well above a HIT's tail)", roll > 300u && roll > hit * 3u);
+    return bad;
+}
+
 static int test_preset_page(void)
 {
     int bad = 0;
@@ -12813,6 +12840,7 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_tamb_roll();
     bad += test_preset_machine();
     bad += test_editor_slot();
     bad += test_editor_link();
