@@ -10705,9 +10705,9 @@ static int test_kit_lane_mix(void)
         uint32_t ph, pl, p2a, p2b;
         sm_kit_lane = 2;
         sm_ui.page = (uint8_t)page_by_name("FILTER");
-        bad += check("LMIX: KIT, FILTER: SELECT the lane's CUT, K1 RES, K4 FILT (ENV / LFO > FLT the track's)",
+        bad += check("LMIX: KIT, FILTER: SELECT the lane's CUT, K1 RES, K4 FILT, K2 its ENV>FLT (LFO > FLT the track's)",
                      sm_page_param(4) == SM_LF(2, 1) && sm_page_param(0) == SM_LF(2, 2) && sm_page_param(3) == SM_LF(2, 0) &&
-                     sm_page_param(1) == P_ED_FLT);
+                     sm_page_param(1) == SM_LV(2, 4) && sm_page_param(2) == P_LD_FLT);
         ph = lane_hit_peak(2);
         p2a = lane_hit_peak(1);
         turn(EN_K4, 1);                                   /* FILT: LP */
@@ -10922,6 +10922,74 @@ static int test_kit_lane_env(void)
             cpat()->lenv[L][0] = 0; cpat()->lenv[L][1] = 64; cpat()->lenv[L][2] = 127; cpat()->lenv[L][3] = 127;
         }
     }
+    return bad;
+}
+
+/* the KIT's lanes' filter envelopes (Tim, 31.10: one F.ENV for all the lanes): F.ENV's ATK DEC SUS REL and FILTER's ENV>FLT the
+ * lane in edit's; a lane's moves its own filter only; an older bank's lanes take the KIT sound's own (as it sounded) */
+static uint32_t lane_hf(uint32_t L)                       /* lane L hit alone: its highs (the first difference's sum) */
+{
+    static int32_t buf[30 * CTL];
+    uint32_t nl = 0, b, i, s = 0;
+    trk_note_on(&trk[3], DR_KIT_NOTE + L, 120);
+    for (b = 0; b < 30u; b++)
+        (void)block_peak(buf, &nl);
+    trk_all_off(&trk[3]);
+    play_blocks(300);
+    for (i = 1; i < nl; i++)
+        s += (uint32_t)abs(buf[i] - buf[i - 1]) >> 4;
+    return s;
+}
+static int test_kit_lane_fenv(void)
+{
+    int bad = 0;
+    uint32_t h0, h1, o0, o1, L;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    for (L = 0; L < 4u; L++) {                            /* every lane a low-pass, low */
+        cpat()->lflt[L][0] = 1;
+        cpat()->lflt[L][1] = 30;
+        sm_param_push(3, SM_LF(L, 0));
+        sm_param_push(3, SM_LF(L, 1));
+    }
+    sm_input_poll();
+    play_blocks(4);
+    sm_kit_lane = 2;
+    sm_ui.page = (uint8_t)page_by_name("F.ENV");
+    bad += check("LFENV: KIT, F.ENV: K1..K4 the lane in edit's ATK DEC SUS REL", sm_page_param(0) == SM_LV(2, 0) && sm_page_param(3) == SM_LV(2, 3));
+    h0 = lane_hf(2);
+    o0 = lane_hf(1);
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    turn(EN_K2, 60);                                      /* L3's ENV>FLT up */
+    sm_input_poll();
+    sm_ui.page = (uint8_t)page_by_name("F.ENV");
+    turn(EN_K2, -40);                                     /* L3's DEC short (a pluck of the filter) */
+    sm_input_poll();
+    play_blocks(2);
+    h1 = lane_hf(2);
+    o1 = lane_hf(1);
+    printf("  lane filter env: L3 highs %u -> %u, L2 %u -> %u\n", h0, h1, o0, o1);
+    bad += check("LFENV: L3's ENV>FLT up: on the core (its own), L3 brighter", dr_lv[3][2][4] == cpat()->lfenv[2][4] && cpat()->lfenv[2][4] > 30 &&
+                 dr_lv[3][2][1] == cpat()->lfenv[2][1] && h1 > h0 * 3u / 2u);
+    bad += check("LFENV: ... L2 as it was (its own F.ENV untouched)", dr_lv[3][1][4] == 0 && o1 * 100u >= o0 * 97u && o1 * 100u <= o0 * 103u);
+    {                                                     /* an older bank (version 6): the KIT sound's own F.ENV on every lane */
+        sm_pattern_t p;
+        memset(&p, 0, sizeof p);
+        p.kit.snd[SM_KIT_TRK].machine = SM_KIT_MACH;
+        p.kit.snd[SM_KIT_TRK].p[P_FATK] = 5;
+        p.kit.snd[SM_KIT_TRK].p[P_FDEC] = 40;
+        p.kit.snd[SM_KIT_TRK].p[P_ED_FLT] = 20;
+        sm_lfenv_default(&p);
+        bad += check("LFENV: an older bank's lanes: the KIT sound's own F.ENV and ENV>FLT (as it sounded)",
+                     p.lfenv[0][0] == 5 && p.lfenv[3][1] == 40 && p.lfenv[2][4] == 20);
+    }
+    in_reset();
     return bad;
 }
 
@@ -13061,6 +13129,7 @@ int main(void)
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
     bad += test_paste_into_pick();
+    bad += test_kit_lane_fenv();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

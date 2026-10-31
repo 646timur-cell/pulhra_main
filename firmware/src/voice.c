@@ -598,23 +598,33 @@ static int32_t env_tick(track_t *t, voice_t *v)
 static int32_t fenv_tick(const track_t *t, voice_t *v)
 {
     const int16_t *p = t->p;
-    int32_t sus = (int32_t)(p[P_FSUS] & 127) * 132104;         /* SUS 0..127 -> Q24 (127: ~full) */
-    if (!v->gate && v->fstage && v->fstage < 4u && (p[P_FSUS] || p[P_FREL]))
+    int32_t atk = p[P_FATK], dec = p[P_FDEC], fsus = p[P_FSUS], rel = p[P_FREL];
+#if FELUCCA_SWAMP
+    if (t->engine == ENGI_DKIT) {                           /* PULHRA's KIT: each lane its own F.ENV (Tim, 31.10; eng_dr.c dr_lv) */
+        const int8_t *lv = dr_lv[(uint32_t)(t - trk) % NPART][dr_lane(v->note)];
+        atk = lv[0];
+        dec = lv[1];
+        fsus = lv[2];
+        rel = lv[3];
+    }
+#endif
+    int32_t sus = (int32_t)(fsus & 127) * 132104;           /* SUS 0..127 -> Q24 (127: ~full) */
+    if (!v->gate && v->fstage && v->fstage < 4u && (fsus || rel))
         v->fstage = 4;                                      /* released (SUS and REL 0: the decay runs on, as before) */
     if (v->fstage == 1u) {
-        v->fenv += (int32_t)ENV_LIN[p[P_FATK] & 127];
+        v->fenv += (int32_t)ENV_LIN[atk & 127];
         if (v->fenv >= (1 << 24)) {
             v->fenv = 1 << 24;
             v->fstage = 2;
         }
     } else if (v->fstage == 2u) {
-        v->fenv -= mulq16(v->fenv - sus, ENV_EXP[p[P_FDEC] & 127]);
+        v->fenv -= mulq16(v->fenv - sus, ENV_EXP[dec & 127]);
         if (v->fenv - sus < (1 << 10)) {
             v->fenv = sus;
             v->fstage = sus ? 3u : 0u;                      /* 3: the sustain, held to the note's end */
         }
     } else if (v->fstage == 4u) {                           /* REL (0: DEC's rate) down to 0 */
-        v->fenv -= mulq16(v->fenv, ENV_EXP[(p[P_FREL] ? p[P_FREL] : p[P_FDEC]) & 127]);
+        v->fenv -= mulq16(v->fenv, ENV_EXP[(rel ? rel : dec) & 127]);
         if (v->fenv < (1 << 10)) {
             v->fenv = 0;
             v->fstage = 0;
@@ -825,7 +835,12 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         m.fine = fine;
         if (fine)                                       /* residual below 1/16 semitone */
             m.inc += (uint32_t)((int32_t)(m.inc >> 12) * fine);
+#if FELUCCA_SWAMP
+        m.cutoff = ((lfo * p[P_LD_FLT]) >> 7) +
+                   ((m.envq15 * (t->engine == ENGI_DKIT ? dr_lv[ti % NPART][dr_lane(v->note)][4] : p[P_ED_FLT])) >> 7);   /* (the KIT: */
+#else                                                                                                                   /* the lane's ENV>FLT) */
         m.cutoff = ((lfo * p[P_LD_FLT]) >> 7) + ((m.envq15 * p[P_ED_FLT]) >> 7);
+#endif
         if (v->vel > 110)                               /* accent opens the filter with the env */
             m.cutoff += (m.envq15 * 24) >> 7;
         m.shape = (64 << 8) + ((lfo * p[P_LD_SHP]) >> 7) + ((m.envq15 * p[P_ED_SHP]) >> 7);

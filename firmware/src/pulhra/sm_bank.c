@@ -40,8 +40,10 @@
 #define SM_BMAGIC 0x31425753u                             /* "SWB1" */
 #define SM_PMAGIC 0x31505753u                             /* "SWP1" */
 #define SM_STORE_VER 1u                                   /* version 1 of the project object (and of the banks) */
-#define SM_BANK_VER 6u                                    /* 6: the lanes' envelopes (sm_pattern_t.lenv) after the filters; 5, 4 and 3
-                                                             load widened (sm_bank_fill) */
+#define SM_BANK_VER 7u                                    /* 7: the lanes' filter envelopes (sm_pattern_t.lfenv) after the envelopes; 6, 5,
+                                                             4 and 3 load widened (sm_bank_fill) */
+#define SM_PAT6_BYTES 3868u
+#define SM_BANK_VER6 6u                                    /* 6: the lanes' envelopes (sm_pattern_t.lenv) after the filters */
 #define SM_PAT5_BYTES 3852u
 #define SM_BANK_VER5 5u                                    /* 5: the lanes' filters (sm_pattern_t.lflt) after the mix */
 #define SM_PAT4_BYTES 3840u
@@ -52,14 +54,15 @@
 #define SM_BANK_VER3 3u                                    /* the banks': 3 = 64 steps (a lock's place trk << 6 | step), the speed per
                                                              track, 183 locks and the KIT's lanes. Versions 1 and 2 (32 steps, other
                                                              places) are not loaded */
-_Static_assert(sizeof(sm_pattern_t) == SM_PAT5_BYTES + 16u && __builtin_offsetof(sm_pattern_t, lmix) == SM_PAT3_BYTES &&
+_Static_assert(sizeof(sm_pattern_t) == SM_PAT6_BYTES + 20u && __builtin_offsetof(sm_pattern_t, lfenv) == SM_PAT6_BYTES &&
+               SM_PAT5_BYTES + 16u == SM_PAT6_BYTES && SM_BANK_BYTES <= SM_FL_SPAN - SM_FL_DATA && __builtin_offsetof(sm_pattern_t, lmix) == SM_PAT3_BYTES &&
                __builtin_offsetof(sm_pattern_t, lflt) == SM_PAT4_BYTES && __builtin_offsetof(sm_pattern_t, lenv) == SM_PAT5_BYTES &&
                SM_PAT4_BYTES + 12u == SM_PAT5_BYTES,
                "a pattern's size is the banks' layout (6: 5's and the envelopes; 5: 4's and the lanes' filters; 4: 3's and the mix)");
 static uint32_t sm_pat_bytes(uint32_t ver)
 {
     return ver == SM_BANK_VER3 ? SM_PAT3_BYTES : ver == SM_BANK_VER4 ? SM_PAT4_BYTES : ver == SM_BANK_VER5 ? SM_PAT5_BYTES :
-           (uint32_t)sizeof(sm_pattern_t);
+           ver == SM_BANK_VER6 ? SM_PAT6_BYTES : (uint32_t)sizeof(sm_pattern_t);
 }
 #define SM_PROJ_VER 6u                                    /* 6: the compressor's makeup (a version 5 object: the first 7 of g4) */
 #define SM_PREC5_BYTES (SM_PREC3_BYTES + 2u * 7u)
@@ -396,6 +399,9 @@ static void sm_bank_clamp(uint32_t s0)
                 for (L = 0; L < 4u; L++)
                     for (k = 0; k < 4u; k++)
                         smp.pat[s0 + i].lenv[L][k] = (int8_t)clamp(smp.pat[s0 + i].lenv[L][k], SM_LED[k].min, SM_LED[k].max);
+                for (L = 0; L < 4u; L++)
+                    for (k = 0; k < 5u; k++)
+                        smp.pat[s0 + i].lfenv[L][k] = (int8_t)clamp(smp.pat[s0 + i].lfenv[L][k], sm_lv_desc(k)->min, sm_lv_desc(k)->max);
             }
             for (p = 0; p < P_COUNT; p++) {
                 const param_desc_t *d = sm_desc_safe(sm_engine_of(sd->machine), p);
@@ -428,7 +434,9 @@ static void sm_bank_fill(uint32_t h, uint32_t b)
                     sm_lmix_default(&smp.pat[s0 + i]);
                 if (pb < SM_PAT5_BYTES)
                     sm_lflt_default(&smp.pat[s0 + i]);
-                sm_lenv_default(&smp.pat[s0 + i]);
+                if (pb < SM_PAT6_BYTES)
+                    sm_lenv_default(&smp.pat[s0 + i]);
+                sm_lfenv_default(&smp.pat[s0 + i]);   /* (version 6 and older: the KIT sound's own F.ENV, as it sounded) */
             }
         if (!ok)
             sm_msg_show(SM_MSG_FLASH);
@@ -461,7 +469,7 @@ static void sm_store_boot(void)
     memset(sm_fp_ok, 0, sizeof sm_fp_ok);
     sm_up_boot();                                         /* (the user sounds' index: sm_upre.c) */
     for (i = 0; flash_ok && i < SM_FL_NSLOT; i++) {
-        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || (hd.version != SM_BANK_VER && hd.version != SM_BANK_VER5 && hd.version != SM_BANK_VER4 &&
+        if (st_read(sm_slot_addr(i), &hd, sizeof hd) || !sm_hdr_ok(&hd, SM_BMAGIC) || (hd.version != SM_BANK_VER && hd.version != SM_BANK_VER6 && hd.version != SM_BANK_VER5 && hd.version != SM_BANK_VER4 &&
              hd.version != SM_BANK_VER3) || hd.bank >= SM_NBANK ||
             hd.size != SM_BPAT * sm_pat_bytes(hd.version) || sm_flash_crc(sm_slot_addr(i) + SM_FL_DATA, hd.size) != hd.crc)
             continue;

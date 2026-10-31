@@ -1434,6 +1434,8 @@ static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
 static int8_t dr_le[NPART][4][4] = {[0 ... NPART - 1] = {[0 ... 3] = {0, 64, 127, 127}}};   /* ... each lane's envelope: ATK DEC SUS
                                                              REL (pulhra sm_pattern_t.lenv; these, the defaults: the hit as it is) */
+static int8_t dr_lv[NPART][4][5] = {[0 ... NPART - 1] = {[0 ... 3] = {0, 64, 0, 0, 0}}};   /* ... each lane's filter envelope: ATK DEC
+                                                             SUS REL and ENV>FLT (pulhra sm_pattern_t.lfenv; voice.c fenv_tick) */
 static int32_t dr_ls[3][CTL] __attribute__((section(".pool")));                             /* the KIT's lanes' sends this block (CHO DLY REV, at the lanes' LVL; fx.c
                                                              mix_part takes them at the track's LEVEL, the track's own sends off) */
 static int32_t dr_kbuf[CTL] __attribute__((section(".pool")));   /* (the pool: RAM keeps its 4 KiB headroom) */

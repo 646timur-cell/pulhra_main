@@ -43,6 +43,9 @@ static void sm_lanes_core(const sm_pattern_t *pt)
     for (L = 0; L < 4u; L++)
         for (k = 0; k < 4u; k++)
             dr_le[SM_KIT_TRK][L][k] = pt->lenv[L][k];
+    for (L = 0; L < 4u; L++)
+        for (k = 0; k < 5u; k++)
+            dr_lv[SM_KIT_TRK][L][k] = pt->lfenv[L][k];
 }
 
 /* power-on, before the audio starts (nothing runs concurrently): the four sounds onto the tracks, the engines

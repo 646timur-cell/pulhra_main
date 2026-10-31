@@ -159,6 +159,8 @@ static void sm_core_set(uint32_t t, uint32_t id, int32_t v)
         dr_lf[t % SM_NTRK][(id - SM_LF0) / 3u][(id - SM_LF0) % 3u] = (int16_t)v;
     else if (sm_is_le(id))
         dr_le[t % SM_NTRK][(id - SM_LE0) / 4u][(id - SM_LE0) % 4u] = (int8_t)v;
+    else if (sm_is_lv(id))
+        dr_lv[t % SM_NTRK][(id - SM_LV0) / 5u][(id - SM_LV0) % 5u] = (int8_t)v;
     else if (id < P_COUNT)
         trk[t % SM_NTRK].p[id] = (int16_t)v;
 }

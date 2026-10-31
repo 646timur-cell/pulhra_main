@@ -161,12 +161,16 @@ static uint32_t sm_page_param(uint32_t k)
             return SM_LM(L, 2u);
         if (id == P_REV)
             return SM_LM(L, 3u);
-        if (id == P_FLT)                                  /* (FILTER: the lane's own FILT CUT RES; ENV / LFO > FLT the track's) */
+        if (id == P_FLT)                                  /* (FILTER: the lane's own FILT CUT RES ENV>FLT; LFO > FLT the track's) */
             return SM_LF(L, 0u);
         if (id == P_FCUT)
             return SM_LF(L, 1u);
         if (id == P_FRES)
             return SM_LF(L, 2u);
+        if (id == P_ED_FLT)                               /* (FILTER's ENV>FLT and F.ENV's ADSR: the lane's own, Tim 31.10) */
+            return SM_LV(L, 4u);
+        if (pg->id[0] == P_FATK)
+            return k < 4u ? SM_LV(L, k) : SM_NOPARAM;
     }
     if (smp.pat[smp.cur % SM_NPAT].kit.snd[sm_ui.trk % SM_NTRK].p[P_FLT] == 5 && pg->fam == SMFAM_ENV) {
         if (id == P_FCUT)

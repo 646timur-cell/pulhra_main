@@ -95,6 +95,9 @@ typedef struct {
                                                              version 5; an older bank loads with them off) */
     int8_t lenv[4][4];                                    /* ... and each lane's amplitude envelope (Tim): ATK DEC SUS REL (bank version
                                                              6; an older bank loads with the defaults: the hit as it is) */
+    int8_t lfenv[4][5];                                   /* ... and each lane's filter envelope (Tim, 31.10): F.ENV's ATK DEC SUS REL and
+                                                             its amount, ENV>FLT (bank version 7; an older bank loads with the KIT
+                                                             sound's own: as it sounded) */
 } sm_pattern_t;
 
 /* the pattern change (smp.mode, the project's, as MONOFM's): SEQUENTIAL at the end of the pattern playing (its master length),
