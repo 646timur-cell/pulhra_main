@@ -770,6 +770,8 @@ static uint32_t smd_sel_sig(void)
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
     if (sm_page_home() == SMH_SETUP)
         return smd_mix(h, sm_midi_div);
+    if (sm_page_home() == SMH_MIDI)                       /* (CLK OUT) */
+        return smd_mix(h, 0x700u + sm_midi_cko);
     if (sm_page_home() == SMH_PRESET)                     /* (what the row names: the sound, the place, what OCT+ does) */
         return smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, sm_pr.mach), sm_pr.cat), sm_pr.item), sm_pr.place),
                        smd_mix(sm_pr.arm + 4u * sm_up.seq + 64u * sm_up.pend, sm_ui.trk * 256u + s->preset));   /* (SAVE's name: the
@@ -825,7 +827,10 @@ static void smd_select(void)
     } else if (sm_page_home() == SMH_SETUP) {              /* SETUP's SELECT: the clock's DIV (1:2 takes every second pulse) */
         int32_t x = sm_px_text(4, 2, 2u, "CLK DIV", T_TEXT, 0) + 4 + 12;
         sm_px_text(x, 2, 2u, sm_midi_div ? "1:2" : "1:1", T_TEXT, 1);
-    } else if (sm_page_home()) {                           /* (nothing on SELECT for EUCLID / MIDI) */
+    } else if (sm_page_home() == SMH_MIDI) {               /* MIDI's SELECT: CLK OUT (the clock and the transport to USB) */
+        int32_t x = sm_px_text(4, 2, 2u, "CLK OUT", T_TEXT, 0) + 4 + 12;
+        sm_px_text(x, 2, 2u, sm_midi_cko ? "ON" : "OFF", T_TEXT, 1);
+    } else if (sm_page_home()) {                           /* (nothing on SELECT for EUCLID) */
     } else if (d) {
         char lab[8], val[12];
         const char *unit;

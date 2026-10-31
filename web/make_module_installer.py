@@ -81,10 +81,12 @@ def pulhra(raw, version, out):
     lib = "\n".join(strip_module((HERE / f).read_text(encoding="utf-8")) for f in ("fm1pkg.js", "fm1ota.js"))
     data = "data:application/octet-stream;base64," + base64.b64encode(raw).decode()
     meta = json.dumps({"version": version, "product": product, "pkg": data, "commit": os.environ.get("GITHUB_SHA", "")[:7]})
-    for mark in ("/*LIB*/", "/*META*/"):
+    editor = (HERE / "pulhra_editor.html").read_text(encoding="utf-8")
+    editor = json.dumps(editor).replace("</", "<\\/")   # (inside a <script>: no "</script>" ends it)
+    for mark in ("/*LIB*/", "/*META*/", "/*EDITOR*/"):
         if html.count(mark) != 1:
             raise SystemExit(f"pulhra_installer.html must contain {mark} once")
-    html = html.replace("/*LIB*/", lib).replace("/*META*/", meta)
+    html = html.replace("/*LIB*/", lib).replace("/*META*/", meta).replace("/*EDITOR*/", editor)
     Path(out).write_text(html, encoding="utf-8")
     print(f"installer: {out} ({len(html)} B), package {len(raw)} B, {product}, version {version} (PULHRA)")
 

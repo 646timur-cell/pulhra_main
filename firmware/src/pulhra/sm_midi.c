@@ -35,6 +35,40 @@ static uint8_t sm_midi_src = 1;
  * 3's byte after the source: CLK in bits 0..1, TRNS OFF bit 2; 0 = AUTO, ON) */
 enum { SM_CLK_AUTO, SM_CLK_INT, SM_CLK_USB, SM_CLK_JACK, SM_CLK_COUNT };
 static uint8_t sm_midi_clk = SM_CLK_AUTO, sm_midi_trnoff;
+/* CLK OUT (Tim, 31.10: two FM-1s in time over Bluetooth, each on a USB host BLE MIDI adapter such as WIDI Uhost; a computer
+ * between them works the same): the MIDI page's SELECT. On: MIDI clock to USB, 24 pulses a beat at the panel's tempo, stopped
+ * too; Start (FA) on PLAY, the first pulse with it on step 1's sample; Stop (FC) on STOP. Quiet while an external clock leads
+ * (sm_ext_leads: no loop between two). The pulses on the audio blocks' grid (a block late at most, < 1 ms), the USB poll's
+ * 2 kHz after; the project saves it (sm_bank.c mtrn bit 4) */
+static uint8_t sm_midi_cko;
+static uint32_t sm_co_q8;                                 /* the next pulse, q8 samples from this block's start */
+static void sm_cko_byte(uint32_t b) { midi_out_event(0x0Fu | (b & 0xFFu) << 8); }   /* (USB-MIDI: cable 0, CIN F, one byte) */
+static void sm_cko_start(void)
+{
+    if (!sm_midi_cko || sm_ext_leads())
+        return;
+    sm_cko_byte(0xFAu);
+    sm_co_q8 = 0;
+}
+static void sm_cko_stop(void)
+{
+    if (sm_midi_cko && !sm_ext_leads())
+        sm_cko_byte(0xFCu);
+}
+static void sm_cko_block(uint32_t n)
+{
+    uint32_t nq8 = n << 8, per;
+    if (!sm_midi_cko || sm_ext_leads()) {
+        sm_co_q8 = 0;
+        return;
+    }
+    per = sm_tempo_q8() / 6u;                             /* (a 1/16: six pulses) */
+    while (sm_co_q8 < nq8) {
+        sm_cko_byte(0xF8u);
+        sm_co_q8 += per ? per : 1u;
+    }
+    sm_co_q8 -= nq8;
+}
 static uint8_t sm_midi_div, sm_ext_odd;                    /* SETUP's SELECT: the clock's every 2nd pulse only (Tim: KO II's THRU doubled it); the parity */
 /* the CLK choices SETUP offers (Tim: no external clock of a port not in use): AUTO, INT, and the port MIDI SRC is (USB, the
  * jack); SRC INT: AUTO and INT only */

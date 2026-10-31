@@ -109,6 +109,14 @@ static uint32_t sm_bpm_eff(void)
         return (uint32_t)clamp((int32_t)e, 300, 3000);
     return (uint32_t)clamp(smp.bpm10, 300, 3000);         /* 30.0 .. 300.0 BPM */
 }
+/* an external clock leads now (its pulses within SM_EXT_TIMEOUT_MS): the clock out is quiet (no loop) */
+static int sm_ext_leads(void)
+{
+    return *(volatile uint16_t *)&sm_ext_bpm10 && (uint32_t)(fm1_ms - *(volatile uint32_t *)&sm_ext_last_ms) < SM_EXT_TIMEOUT_MS;
+}
+static void sm_cko_start(void);                           /* sm_midi.c: the clock out's Start, Stop, pulses */
+static void sm_cko_stop(void);
+static void sm_cko_block(uint32_t n);
 /* a 1/16 at the tempo, in q8 samples (the arpeggiator's clock: the tempo's alone) */
 static uint32_t sm_tempo_q8(void)
 {
@@ -291,6 +299,7 @@ static void sm_seq_play(void)
             sm_pat_switch(s, SM_PM_START);
     }
     sm_arp_play();                                        /* (the arps start over with the grid) */
+    sm_cko_start();                                       /* (CLK OUT: Start, the pulses from step 1's time) */
     sm_playing = 1;
 }
 
@@ -313,6 +322,8 @@ static void sm_seq_stop(void)
     sm_rec_stop();
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
+    if (sm_playing)
+        sm_cko_stop();                                    /* (CLK OUT: Stop) */
     sm_playing = 0;
 }
 
@@ -819,6 +830,7 @@ static void events_block(uint32_t n)
     uint32_t t, pr;
     sm_rclk += n;                                         /* (live record's times: this block's) */
     sm_cmd_drain();
+    sm_cko_block(n);                                      /* (CLK OUT: this block's pulses, after a PLAY's Start) */
     sm_midi_drain();                                      /* (MIDI IN notes: sm_midi.c) */
     sm_pat_block(n << 8);                                 /* (a pattern change: its kit before engine_block, as SMC_LOAD) */
     pr = panic_req;                                       /* (the main loop sets bits; this interrupt is never preempted */

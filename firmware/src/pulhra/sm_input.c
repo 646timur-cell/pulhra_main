@@ -1304,6 +1304,10 @@ static void sm_input_poll(void)
                     sm_midi_release_req(i);               /* (a new channel or OFF: the drain lets the old channel's notes go) */
                 }
             }
+        if (sel && (sel & 1)) {                           /* SELECT: CLK OUT on / off (an odd turn flips; sm_midi.c) */
+            sm_midi_cko = (uint8_t)!sm_midi_cko;
+            sm_dirty = 1;
+        }
     } else if (sm_page_home() == SMH_SETUP) {             /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC, each round */
         uint8_t w;
         if (k[0]) {                                       /* (round over the choices SRC allows: sm_midi_clk_ok) */

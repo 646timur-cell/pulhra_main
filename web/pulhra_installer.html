@@ -83,7 +83,7 @@
   </ol>
   <button id="go" class="pri" disabled><span id="golab"></span></button>
   <div id="status" class="cur"></div>
-  <div class="links">// <a href="pulhra-editor.html">[ EDITOR ]</a> <span data-t="edLink"></span></div>
+  <div class="links">// <a href="pulhra-editor.html" id="edlink" target="_blank" rel="noopener">[ EDITOR ]</a> <span data-t="edLink"></span></div>
   <details>
     <summary data-t="more"></summary>
     <div class="more">
@@ -180,6 +180,17 @@ const glitch = glitchLogo($("logo"));
 applyLang();
 let image = null;
 const meta = /*META*/;
+const EDITOR_HTML = /*EDITOR*/;                     /* (the editor, inside: it opens from here wherever this page is) */
+$("edlink").addEventListener("click", (e) => {
+  if (!EDITOR_HTML) return;                           /* (no editor inside: the file next to this page) */
+  e.preventDefault();
+  const w = window.open("", "_blank");                /* (about:blank: this page's origin, a secure context as it is:
+                                                       Web MIDI works there; a blob: URL of a file:// page would not) */
+  if (!w) { location.href = "pulhra-editor.html"; return; }
+  w.document.open();
+  w.document.write(EDITOR_HTML);
+  w.document.close();
+});
 $("ver").textContent = `// fw ${meta.version}${meta.commit ? " :: " + meta.commit : ""} :: ${meta.product}`;
 
 let writing = false, stock = null, stockEpoch = 0;

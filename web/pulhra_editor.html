@@ -85,7 +85,7 @@ td input[type=text] { width: 11ch; text-transform: uppercase; }
 |  _  |  |  |  |  |  |  | __  |  _  |
 |   __|  |  |  |__|     |    -|     |
 |__|  |_____|_____|__|__|__|__|__|__|</pre>
-  <div class="id"><b>EDITOR</b> // presets :: samples :: banks :: <a href="fm1-pulhra-installer.html">[ INSTALLER ]</a></div>
+  <div class="id"><b>EDITOR</b> // presets :: samples :: banks :: <a href="fm1-pulhra-installer.html" id="instlink">[ INSTALLER ]</a></div>
 </header>
 <div class="conn">
   <button id="connect" class="pri">Connect FM-1</button>
@@ -968,6 +968,8 @@ $("connect").onclick = connect;
 drawPresets();
 refreshUpload();
 setBar("bkBar", 0, 1);
+if (location.protocol === "about:")                   /* (opened from the installer: back to it, its tab) */
+  $("instlink").onclick = (e) => { e.preventDefault(); try { if (window.opener) { window.opener.focus(); window.close(); return; } } catch (err) {} history.back(); };
 if (!navigator.requestMIDIAccess) status("needs Chrome / Edge (Web MIDI)", "bad");
 </script>
 </body>
