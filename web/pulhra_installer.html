@@ -63,7 +63,7 @@
 <div class="card">
   <div class="top">
     <h1 class="brand"><b>P</b>ULHRA</h1>
-    <div class="tools"><button id="lang"></button><button id="theme" title="theme">◐</button></div>
+    <div class="tools"><button id="theme" title="theme">◐</button></div>
   </div>
   <p class="sub"><span data-t="tag"></span> <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">Felucca</a> · M-VAVE FM-1</p>
   <p class="ver" id="ver"></p>
@@ -99,28 +99,6 @@
 /*LIB*/
 const $ = (id) => document.getElementById(id);
 const TEXT = {
-  ru: {
-    tag: "хардфорк", s1: "Подключи FM-1 к компьютеру USB-кабелем напрямую (без хабов).", s2: "Открой эту страницу в Chrome или Edge, закрой другие MIDI-программы.",
-    s3: "Нажми «Установить» и не отключай USB до конца.", install: "Установить", working: "Установка…", again: "Установить ещё раз",
-    more: "Подробнее", other: "EN",
-    warn: "Кастомная прошивка: ставишь на свой риск, авторы не отвечают за поломки и сбои. Сохранённые в PULHRA банки и пресеты остаются при обновлении.",
-    brick: "Если установка прервалась и FM-1 не запускается, восстановить её поможет",
-    editorTip: "Пресеты, сэмплы и бэкап банков — в pulhra-editor.html (рядом с этим файлом).",
-    stockTitle: "Вернуть официальную прошивку V15", stockText: "Скачай FM-1.fwsc V15 с сайта M-VAVE и выбери файл. Он проверяется здесь, в браузере. Банки PULHRA официальная прошивка не открывает — сначала сделай бэкап в редакторе.",
-    stockGo: "Вернуть V15", stockValid: "Официальная V15 проверена", stockError: "Файл не похож на официальный V15: ",
-    stockConfirm: "Бэкап в редакторе сделан? Продолжить и вернуть официальную V15?", stockDone: "Готово: на FM-1 официальная V15.",
-    fork: "PULHRA — хардфорк Felucca: своё приложение-грувбокс на звуковом ядре MONOFM.",
-    nowarranty: "без гарантий", tm: "M-VAVE и FM-1 — товарные знаки их владельцев.",
-    nomidi: "Этот браузер не умеет Web MIDI. Открой страницу в Chrome или Edge.", loadfail: "Не удалось загрузить: ",
-    start: "Начинаю", verify: "Проверка", loader: "Перевожу FM-1 в режим записи", write: "Запись", reboot: "Перезапуск",
-    done: "Готово! PULHRA установлена.", stopped: "Остановилось. Переподключи USB и нажми ещё раз.", error: "Ошибка: ",
-    denied: "Нет разрешения на MIDI (SysEx). Разреши MIDI в настройках сайта (значок слева от адреса) и нажми ещё раз.",
-    notfound: "FM-1 не найдена. Проверь кабель (нужен с передачей данных), закрой другие MIDI-программы и нажми ещё раз.",
-    model: "Подключено не FM-1.", lost: "USB-соединение пропало. Переподключи и нажми ещё раз.",
-    noloader: "FM-1 в режиме записи не найдена. Переподключи USB и нажми ещё раз (она ждёт в режиме записи).",
-    noreturn: "FM-1 не вернулась. Выключи и включи её.", mismatch: "Записано, но FM-1 сообщает другую версию: ",
-    badpkg: "Файл прошивки внутри страницы повреждён. Перезагрузи страницу.", leave: "Идёт запись. Не закрывай страницу.",
-  },
   en: {
     tag: "a hardfork of", s1: "Connect the FM-1 to the computer with a USB cable, directly (no hub).", s2: "Open this page in Chrome or Edge; close other MIDI apps.",
     s3: "Press Install and keep the USB cable in until it is done.", install: "Install", working: "Installing…", again: "Install again",
@@ -144,17 +122,15 @@ const TEXT = {
     badpkg: "The firmware inside this page is damaged. Reload the page.", leave: "Writing. Do not close the page.",
   },
 };
-let lang = (() => { try { const l = localStorage.getItem("pulhra-inst-lang"); if (l) return l; } catch (e) {} return (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en"; })();
-const t = (k) => TEXT[lang][k] ?? TEXT.en[k];
+const lang = "en";                                  /* (Tim: the installer in English only) */
+const t = (k) => TEXT.en[k];
 let lastKey = null, lastArg = "", lastCls = "", btnKey = "install";
 function applyLang() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-t]").forEach((e) => { e.textContent = t(e.dataset.t); });
-  $("lang").textContent = t("other");
   $("golab").textContent = t(btnKey);
   if (lastKey) setStatus(lastKey, lastArg, lastCls);
 }
-$("lang").addEventListener("click", () => { lang = lang === "ru" ? "en" : "ru"; try { localStorage.setItem("pulhra-inst-lang", lang); } catch (e) {} applyLang(); });
 $("theme").addEventListener("click", () => {
   const r = document.documentElement, dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   r.dataset.theme = dark ? "light" : "dark";
