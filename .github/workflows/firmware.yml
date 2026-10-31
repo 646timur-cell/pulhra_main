@@ -76,6 +76,7 @@ jobs:
           mkdir -p /tmp/out && cp build/pulhra-1.5.1.fwsc build-pulhra.log /tmp/out/
           python3 web/make_module_installer.py build/pulhra-1.5.1.fwsc 1.5.1 /tmp/out/fm1-pulhra-installer.html
           cp web/pulhra_editor.html /tmp/out/pulhra-editor.html
+          cp /tmp/out/fm1-pulhra-installer.html /tmp/out/index.html   # (the folder as a site: its root is the installer)
           (cd /tmp/out && sha256sum pulhra-1.5.1.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

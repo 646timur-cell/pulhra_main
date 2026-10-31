@@ -48,6 +48,7 @@
   #status { min-height: 1.5em; margin: 10px 0 0; color: var(--dim); overflow-wrap: anywhere; }
   #status::before { content: "> "; color: var(--dim); }
   #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+  .links { margin: 14px 0 0; color: var(--dim); }
   details { margin-top: 4px; }
   summary { cursor: pointer; list-style: none; white-space: nowrap; overflow: hidden; display: flex; color: var(--dim); margin: 18px 0 8px; }
   summary::-webkit-details-marker { display: none; }
@@ -82,6 +83,7 @@
   </ol>
   <button id="go" class="pri" disabled><span id="golab"></span></button>
   <div id="status" class="cur"></div>
+  <div class="links">// <a href="pulhra-editor.html">[ EDITOR ]</a> <span data-t="edLink"></span></div>
   <details>
     <summary data-t="more"></summary>
     <div class="more">
@@ -114,7 +116,8 @@ const TEXT = {
     more: "MORE", other: "RU",
     warn: "Custom firmware: use it at your own risk; the authors accept no responsibility for damage or faults. Banks and presets saved in PULHRA stay through an update.",
     brick: "If an install is interrupted and the FM-1 no longer starts, recover it with",
-    editorTip: "Presets, samples and bank backups: pulhra-editor.html (next to this file).",
+    editorTip: "The editor (presets, samples, bank backups) is pulhra-editor.html, next to this page: keep the two files in one folder.",
+    edLink: "presets :: samples :: bank backups",
     stockTitle: "Return to official firmware V15", stockText: "Download FM-1.fwsc V15 from M-VAVE and pick the file. It is checked here, in the browser. The official firmware cannot open PULHRA's banks: back them up in the editor first.",
     stockGo: "Return to V15", stockValid: "Official V15 verified", stockError: "Not the official V15 file: ",
     stockConfirm: "Did you back up in the editor? Continue and return to the official V15?", stockDone: "Done: the FM-1 runs the official V15.",
