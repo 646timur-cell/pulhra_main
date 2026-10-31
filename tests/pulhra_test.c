@@ -6215,6 +6215,61 @@ static int test_copy_paste_pattern(void)
     return bad;
 }
 
+/* SEQ held: ALGORITHM picks a pattern, SEQ + F#5 held pastes the pattern copied into it (Tim, 31.10: no going there first); the
+ * current one untouched; letting go of SEQ goes there. A pick in a bank not in RAM: brought in, then written */
+static int test_paste_into_pick(void)
+{
+    int bad = 0, ok = 1;
+    uint32_t t, s, g;
+    in_reset();
+    host_ticks = 1000u;
+    pat_kit(0);
+    for (t = 0; t < SM_NTRK; t++)
+        ed_track(t);
+    cpat()->mlen = 12;
+    ed_hold(B_SEQ, K_DS5);                                /* A01 copied */
+    layer_hold(B_SEQ);
+    turn(EN_ALGO, 2);                                     /* A03 picked */
+    sm_input_poll();
+    key_dn(K_FS5);
+    sm_input_poll();
+    ms(900);
+    sm_input_poll();
+    key_up(K_FS5);
+    sm_input_poll();
+    bad += check("PASTEPICK: SEQ, A03 picked, F#5 held: PTN PASTED, still on A01", sm_msg == SM_MSG_PTPASTE && smp.cur == 0u);
+    for (t = 0; t < SM_NTRK; t++)
+        for (s = 0; s < SM_NSTEP; s++)
+            ok &= !memcmp(&smp.pat[0].step[t][s], &smp.pat[2].step[t][s], sizeof(sm_step_t));
+    bad += check("PASTEPICK: ... A03 now A01's steps, kit and master length; A01 as it was", ok && smp.pat[2].mlen == 12u &&
+                 !memcmp(&smp.pat[0].kit, &smp.pat[2].kit, sizeof smp.pat[0].kit) && ed_trigs(&smp.pat[0], 0) == 4u &&
+                 sm_pat_used(2u));
+    layer_let_go(B_SEQ);
+    run_block();
+    sm_input_poll();
+    bad += check("PASTEPICK: SEQ let go: A03 playing / current", smp.cur == 2u && ed_trigs(cpat(), 0) == 4u);
+    g = 2u * SM_BPAT + 1u;                                /* C02: a bank not in RAM */
+    layer_hold(B_SEQ);
+    turn(EN_ALGO, (int)g - 2);
+    sm_input_poll();
+    bad += check("PASTEPICK: C02 picked", sm_lay_pick == g);
+    key_dn(K_FS5);
+    sm_input_poll();
+    ms(900);
+    sm_input_poll();
+    key_up(K_FS5);
+    sm_input_poll();
+    for (t = 0; t < 40u && sm_gop_kind; t++) {            /* (its bank brought in by the polls) */
+        run_block();
+        sm_input_poll();
+    }
+    bad += check("PASTEPICK: C02 (another bank): written once its bank is in RAM, PTN PASTED", !sm_gop_kind && sm_pat_used(g) &&
+                 sm_slot_of(g) < SM_NPAT && ed_trigs(&smp.pat[sm_slot_of(g)], 0) == 4u && sm_msg == SM_MSG_PTPASTE);
+    layer_let_go(B_SEQ);
+    in_reset();
+    return bad;
+}
+
 static int test_shift_trn(void)
 {
     int bad = 0;
@@ -13005,6 +13060,7 @@ int main(void)
     bad += test_fenv_adsr();
     bad += test_midi_clock_dup();
     bad += test_kit_lanes();
+    bad += test_paste_into_pick();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

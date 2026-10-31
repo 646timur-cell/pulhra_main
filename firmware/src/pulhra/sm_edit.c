@@ -306,6 +306,27 @@ static int sm_paste_pat(void)
     return 1;
 }
 
+/* PASTE the pattern copied into pattern id g (SEQ held: the one picked with ALGORITHM; Tim, 31.10: no need to go there first):
+ * none picked, or the current one: onto the current pattern (sm_paste_pat, with its UNDO); another: written into it (its bank
+ * brought into RAM first, waiting if need be: sm_bank.c), no UNDO (the current pattern is untouched). 0 nothing copied, 1 pasted
+ * (or on its way), 2 the flash failed */
+static int sm_paste_pat_into(uint32_t g)
+{
+    int r;
+    if (sm_clip_kind != SM_CLIP_PAT)
+        return 0;
+    if (g >= SM_NGPAT || g == sm_gid_of(smp.cur))
+        return sm_paste_pat();
+    sm_flash_hold = 0;
+    r = sm_pat_store(g, &sm_clip);
+    if (r == 1) {                                         /* (its bank waits for a free half) */
+        sm_gop_kind = 1;
+        sm_gop_g = (uint8_t)g;
+        sm_gop_src = &sm_clip;
+    }
+    return r == 2 ? 2 : 1;
+}
+
 /* lock param q is KIT lane L's own (its values, mix, filter, envelope, condition) */
 static int sm_lock_of_lane(uint32_t q, uint32_t L)
 {

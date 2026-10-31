@@ -131,7 +131,8 @@ static uint32_t sm_hhash[SM_NHALF];                       /* each half's hash wh
 static uint32_t sm_phash;                                 /* the project's when saved or loaded */
 static uint8_t sm_want = SM_PAT_NONE;                     /* a pattern id asked for whose bank is not in RAM yet */
 static uint8_t sm_chain_pend[SM_NCHAIN], sm_chain_npend;  /* a chain whose link 1's bank is not in RAM yet */
-static uint8_t sm_gop_kind, sm_gop_g;                     /* a GLO save into a bank not in RAM yet (1: waiting) */
+static uint8_t sm_gop_kind, sm_gop_g;                     /* a GLO save (or a pattern pasted, SEQ) into a bank not in RAM yet (1: waiting) */
+static const sm_pattern_t *sm_gop_src;                    /* ... what it copies: 0 the current pattern, else that (the clipboard) */
 static uint8_t sm_flash_hold;                             /* a write failed: no new try until an edit, a SAVE or a request */
 static uint8_t sm_save_pend;                              /* SAVE asked while playing: done at STOP */
 static uint32_t sm_as_sig, sm_as_t0, sm_as_look;          /* the autosave: the model's hash, since when, the last look */
@@ -648,9 +649,10 @@ static void sm_chain_ask(const uint8_t *c, uint32_t n)
     sm_dirty = 1;
 }
 
-/* the current pattern copied into pattern id g (kit and all; GLO): its bank in RAM (else it waits), the slot quiet while the
- * copy is written (no link resolves into its half, not asked for). 0 done, 1 waiting, 2 the flash failed (SM_MSG_FLASH shown) */
-static int sm_pat_store(uint32_t g)
+/* the current pattern (src 0; else src, the clipboard: SEQ + F#5 on a pattern picked) copied into pattern id g (kit and all; GLO):
+ * its bank in RAM (else it waits), the slot quiet while the copy is written (no link resolves into its half, not asked for).
+ * 0 done, 1 waiting, 2 the flash failed (SM_MSG_FLASH shown) */
+static int sm_pat_store(uint32_t g, const sm_pattern_t *src)
 {
     uint32_t s, h, b = g / SM_BPAT, r;
     if (g >= SM_NGPAT)
@@ -662,7 +664,7 @@ static int sm_pat_store(uint32_t g)
     if (r == SM_BR_WAIT || s >= SM_NPAT)
         return 1;
     if (s == smp.cur % SM_NPAT)
-        return 0;                                         /* (into itself: nothing) */
+        return 0;                                         /* (into itself: nothing; the clipboard onto the current one: sm_paste_pat) */
     h = s / SM_BPAT;
     smp.hbank[h] = SM_BANK_NONE;
     SM_BARRIER();
@@ -673,7 +675,7 @@ static int sm_pat_store(uint32_t g)
         smp.hbank[h] = (uint8_t)b;
         return 0;
     }
-    smp.pat[s] = smp.pat[smp.cur % SM_NPAT];
+    smp.pat[s] = src ? *src : smp.pat[smp.cur % SM_NPAT];
     sm_used[b] |= (uint8_t)(1u << (g % SM_BPAT));
     SM_BARRIER();
     smp.hbank[h] = (uint8_t)b;
@@ -723,11 +725,11 @@ static void sm_bank_poll(uint32_t now)
             (void)sm_bank_bring(smp.chain[c] / SM_BPAT);   /* (playing with the other half dirty: the switch waits) */
     }
     if (sm_gop_kind) {                                   /* the GLO save that waited for a free half: done, SAVED */
-        uint32_t g = sm_pat_store(sm_gop_g);
+        uint32_t g = sm_pat_store(sm_gop_g, sm_gop_src);
         if (g != 1u) {
             sm_gop_kind = 0;
             if (!g)
-                sm_msg_show(SM_MSG_SAVED);
+                sm_msg_show(sm_gop_src ? SM_MSG_PTPASTE : SM_MSG_SAVED);
         }
     }
     if (playing) {
@@ -779,10 +781,11 @@ static void sm_glo_tap(uint32_t place)
         sm_ask(g);
         return;
     }
-    r = sm_pat_store(g);
+    r = sm_pat_store(g, 0);
     if (r == 1u) {                                        /* (its bank waits for a free half) */
         sm_gop_kind = 1;
         sm_gop_g = (uint8_t)g;
+        sm_gop_src = 0;
     } else if (!r) {
         sm_msg_show(SM_MSG_SAVED);                        /* (2: the flash failed, its FLASH shown) */
     }
@@ -817,10 +820,11 @@ static void sm_glo_poll(uint32_t notes, uint32_t now)
         sm_glo_done = 1;
         sm_flash_hold = 0;
         if (g != sm_gid_of(smp.cur))
-            r = sm_pat_store(g);
+            r = sm_pat_store(g, 0);
         if (r == 1u) {                                      /* (its bank waits for a free half) */
             sm_gop_kind = 1;
             sm_gop_g = (uint8_t)g;
+            sm_gop_src = 0;
         } else if (!r) {
             sm_msg_show(SM_MSG_SAVED);                      /* (2: the flash failed, its FLASH shown) */
         }
@@ -836,8 +840,9 @@ static uint8_t sm_fsave_pat;
 static void sm_copy_trk(uint32_t t);
 static void sm_paste_trk(uint32_t t);
 static void sm_copy_pat(void);
-static int sm_paste_pat(void);
-static void sm_fsave_poll(uint32_t notes, uint32_t now, int pat)
+static int sm_paste_pat_into(uint32_t g);
+/* pat: 0 the track (SHIFT), 1 the pattern (SEQ held); pick: the pattern picked in SEQ (ALGORITHM; SM_PAT_NONE none): PASTE goes there */
+static void sm_fsave_poll(uint32_t notes, uint32_t now, int pat, uint32_t pick)
 {
     uint32_t k;
     for (k = SM_TCOPY_KEY; k <= SM_TPASTE_KEY; k += SM_TPASTE_KEY - SM_TCOPY_KEY)
@@ -862,7 +867,9 @@ static void sm_fsave_poll(uint32_t notes, uint32_t now, int pat)
                 sm_copy_pat();
                 sm_msg_show(SM_MSG_PTCOPY);
             } else {
-                sm_msg_show(sm_paste_pat() ? SM_MSG_PTPASTE : SM_MSG_PTEMPTY);
+                int r = sm_paste_pat_into(pick);          /* (Tim, 31.10: into the pattern picked, no switch first) */
+                if (r != 2)
+                    sm_msg_show(r ? SM_MSG_PTPASTE : SM_MSG_PTEMPTY);
             }
             sm_dirty = 1;
         } else if (sm_fsave_dn == SM_TCOPY_KEY) {

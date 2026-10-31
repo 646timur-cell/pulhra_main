@@ -1126,7 +1126,7 @@ static uint32_t sm_shift_held(void) { return !sm_ui.kbd && ((fm1_in.buttons >> p
 #define SM_SHK_TUP 13u
 static void sm_shift_keys(uint32_t notes)
 {
-    sm_fsave_poll(notes, fm1_ticks(), 0);
+    sm_fsave_poll(notes, fm1_ticks(), 0, SM_PAT_NONE);
     uint32_t t = sm_ui.trk % SM_NTRK, len = (uint32_t)clamp(sm_ui_sound()->len, 1, (int32_t)SM_NSTEP);
     int32_t d = 0;
     if (((notes >> SM_SHK_BACK) & 1u) || ((notes >> SM_SHK_FWD) & 1u)) {

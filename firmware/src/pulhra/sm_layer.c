@@ -415,7 +415,7 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         sm_dirty = 1;
     }
     if (sm_layer == SML_SEQ)
-        sm_fsave_poll(notes, fm1_ticks(), 1);             /* (D#5 / F#5 held 0.8 s: the pattern copied / pasted) */
+        sm_fsave_poll(notes, fm1_ticks(), 1, sm_lay_pick);   /* (D#5 / F#5 held 0.8 s: the pattern copied / pasted, into the one picked) */
     if (sm_layer == SML_GLO)
         sm_glo_poll(notes, fm1_ticks());                  /* (the bank / pattern grid) */
     if (sm_layer == SML_GLO) {                            /* solo: the white keys F3 .. B3 held */
