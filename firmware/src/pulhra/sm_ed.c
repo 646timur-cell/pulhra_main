@@ -15,7 +15,8 @@
  *   6 STATE                   -> rc, playing
  * rc: 0 done, 1 bad arguments, 2 busy (playing: ERASE / WRITE / RELOAD only while stopped: an erase stops the audio),
  * 3 the flash failed, 4 no flash. A READ works while playing (256-byte windows, the audio keeps up).
- * The regions: 0 PROJECT (both copies), 1 BANKS (the places), 2 PRESETS (the user sounds' two sectors), 3 SAMPLE (USR1) */
+ * The regions: 0 PROJECT (both copies), 1 BANKS (the places), 2 PRESETS (the user sounds' two sectors), 3 SAMPLE (USR1's
+ * 80 KiB: the three slots, packed: eng_sample.c smp_user_map) */
 
 #define SM_ED_H0 0x7Du
 #define SM_ED_H1 0x50u
@@ -162,7 +163,8 @@ static uint32_t sm_ed_handle(const uint8_t *p, uint32_t n)
             if (what & 2u)
                 sm_up_boot();                             /* (the user sounds: their index anew) */
             if (what & 4u)
-                smp_user_scan(0);                         /* (the slot: its zones anew; CLOUD, SAMP, the slices follow) */
+                for (i = 0; i < SMP_USER_SLOTS; i++)
+                    smp_user_scan(i);                     /* (the slots: their places and zones anew; CLOUD, SAMP, the slices follow) */
             if (what & 1u)
                 sm_ed_reboot = 1;                         /* (the banks, the project: as at power-on) */
             sm_dirty = 1;

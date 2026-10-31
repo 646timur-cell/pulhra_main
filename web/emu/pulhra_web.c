@@ -33,7 +33,7 @@
 
 static uint8_t nor[0x100000];            /* the SPI NOR (erased: 0xFF) */
 /* eng_sample.c needs SMP_USER_XIP to point into nor (not a hardware address) */
-#define SMP_USER_XIP(k) ((const uint8_t *)nor + SMP_USER_BASE + (k) * SMP_USER_SIZE)
+#define SMP_USER_XIP(k) ((const uint8_t *)nor + SMP_USER_BASE + SMP_SLOT_OFF(k))
 
 /* ------------------------------------------------------------ the clock --- */
 #define FM1_TICKS_PER_US 24u             /* TIMER4: 24 MHz */

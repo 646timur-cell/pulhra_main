@@ -47,16 +47,28 @@ static uint32_t pow2_q16(int32_t d16)
  * smp_zone_t layout (off relative to the slot's data at +512) + IMA ADPCM data. */
 #include "../hal/fm1_xip.h"   /* relative: hostsim includes this file too */
 #define SMP_USER_SLOTS 3
-#define SMP_USER_LIVE (FELUCCA_MONOFM ? 1u : SMP_USER_SLOTS)   /* MONOFM: USR1 only; USR2 / USR3's flash holds the scenes
-                                                            * (mf_pat.c, the project's copies): never scanned, never written */
+#define SMP_USER_LIVE (FELUCCA_MONOFM && !FELUCCA_SWAMP ? 1u : SMP_USER_SLOTS)   /* MONOFM: USR1 only; USR2 / USR3's flash holds
+                                                            * the scenes (mf_pat.c, the project's copies): never scanned, never written.
+                                                            * PULHRA: all three, inside USR1's flash (below) */
 #define SMP_USER_BASE 0xA0000u
 #define SMP_USER_SIZE 0x14000u
 #define SMP_USER_DATA 512u
-#if FELUCCA_STRANGE
+#if FELUCCA_SWAMP
+/* PULHRA (Tim, 31.10): USR2 / USR3's flash holds the project and the banks, so the three slots share USR1's 80 KiB, each as
+ * long as its samples (the web editor packs them): USR1 at the start, its header's rsv2[0] / rsv2[1] where USR2 / USR3 start
+ * (bytes from the start, whole sectors, 0: none), each slot to the next one's start (the last to the end). A header from
+ * before (rsv2 0): USR1 alone, the whole 80 KiB, as it was. Read again before USR1's scan (smp_user_map) */
+static uint32_t usr_off[SMP_USER_SLOTS], usr_size[SMP_USER_SLOTS] = {SMP_USER_SIZE, 0, 0};
+#define SMP_SLOT_OFF(k) usr_off[(k) % SMP_USER_SLOTS]
+#define SMP_SLOT_SIZE(k) usr_size[(k) % SMP_USER_SLOTS]
+#elif FELUCCA_STRANGE
 #define SMP_SLOT_SIZE(k) ((k) == 2u ? 72u * 1024u : SMP_USER_SIZE)   /* (STRANGE: USR3's last two sectors hold the scenes,
                                                                     * scene.c: its sample at most 73,216 bytes) */
 #else
 #define SMP_SLOT_SIZE(k) SMP_USER_SIZE
+#endif
+#ifndef SMP_SLOT_OFF
+#define SMP_SLOT_OFF(k) ((k) * SMP_USER_SIZE)
 #endif
 #define SMP_USER_MAGIC 0x504D5346u                  /* "FSMP" */
 #define SMP_NALL (SMP_NSETS + SMP_USER_SLOTS)
@@ -73,7 +85,7 @@ static uint8_t usr_nz[SMP_USER_SLOTS];
 static const char *const SMP_ALL_NAMES[SMP_NALL] = {SMP_SET_NAMES_INIT, "USR1", "USR2", "USR3"};
 
 #ifndef SMP_USER_XIP                                /* host tests: a RAM image of the slots */
-#define SMP_USER_XIP(k) fm1_xip_ptr(SMP_USER_BASE + (k) * SMP_USER_SIZE)
+#define SMP_USER_XIP(k) fm1_xip_ptr(SMP_USER_BASE + SMP_SLOT_OFF(k))
 #endif
 static const uint8_t *smp_user_xip(uint32_t k) { return SMP_USER_XIP(k); }
 #if FELUCCA_SLICE
@@ -86,15 +98,41 @@ static uint32_t smp_user_gen;                       /* + 1 per slot scan (GRAIN:
 /* (re)read slot k from flash: valid header -> zones usable; call after boot and after an upload
  * (main loop: SLICE scans the slot's audio here). The zones are checked in a copy: an unusable slot leaves
  * every zone of it empty (n 0: a voice still on it ends), never a half-checked one */
+#if FELUCCA_SWAMP
+/* PULHRA: where the three slots are, from USR1's header (above); a bad map: USR1 alone */
+static void smp_user_map(void)
+{
+    const smp_user_hdr_t *h;
+    uint32_t a, b;
+    usr_off[0] = 0;
+    h = (const smp_user_hdr_t *)smp_user_xip(0);
+    a = h->magic == SMP_USER_MAGIC && h->version == 1 ? h->rsv2[0] : 0u;
+    b = h->magic == SMP_USER_MAGIC && h->version == 1 ? h->rsv2[1] : 0u;
+    if ((a & 0xFFFu) || a >= SMP_USER_SIZE || (a && a < 0x1000u))
+        a = 0;
+    if ((b & 0xFFFu) || b >= SMP_USER_SIZE || (b && b < 0x1000u) || (b && a && b <= a))
+        b = 0;
+    usr_off[1] = a;
+    usr_off[2] = b;
+    usr_size[0] = a ? a : b ? b : SMP_USER_SIZE;
+    usr_size[1] = a ? (b ? b : SMP_USER_SIZE) - a : 0u;
+    usr_size[2] = b ? SMP_USER_SIZE - b : 0u;
+}
+#endif
 static void smp_user_scan(uint32_t k)
 {
-    const smp_user_hdr_t *h = (const smp_user_hdr_t *)smp_user_xip(k);
+    const smp_user_hdr_t *h;
     smp_zone_t zt[16];
     uint32_t i, base, nz = 0;
+#if FELUCCA_SWAMP
+    if (k == 0u)
+        smp_user_map();                             /* (the slots' places first: USR1's header holds them) */
+#endif
+    h = (const smp_user_hdr_t *)smp_user_xip(k);
     smp_user_gen++;
     usr_nz[k] = 0;
     slc_user_scan(k, 0);
-    if (k >= SMP_USER_LIVE)
+    if (k >= SMP_USER_LIVE || SMP_SLOT_SIZE(k) <= SMP_USER_DATA)
         return;
     if (h->magic == SMP_USER_MAGIC && h->version == 1 && h->nz && h->nz <= 16u &&
         h->data_len <= SMP_SLOT_SIZE(k) - SMP_USER_DATA) {

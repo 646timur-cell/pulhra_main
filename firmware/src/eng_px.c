@@ -130,13 +130,13 @@ typedef struct {
     uint32_t rs;                                         /* random numbers */
 } cl_part_t;
 ENG_MEM_FITS("CLOUD", sizeof(cl_part_t));
-enum { CL_GLASS, CL_THROAT, CL_METAL, CL_GLT, CL_RIT, CL_MEC, CL_BIO, CL_ERR, CL_USER, CL_NSRC };
-static const char *const N_CL_SRC[CL_NSRC] = {"GLASS", "THROAT", "METAL", "GLITCH", "RITUAL", "MECH", "BIO", "ERROR", "USER"};
+enum { CL_GLASS, CL_THROAT, CL_METAL, CL_GLT, CL_RIT, CL_MEC, CL_BIO, CL_ERR, CL_USER, CL_USER2, CL_USER3, CL_NSRC };
+static const char *const N_CL_SRC[CL_NSRC] = {"GLASS", "THROAT", "METAL", "GLITCH", "RITUAL", "MECH", "BIO", "ERROR", "USR1", "USR2", "USR3"};
 static cl_part_t *cl_part(track_t *t) { return (cl_part_t *)ENG_MEM(t - trk); }
 static const smp_zone_t *cl_zone(uint32_t src, uint32_t sl)
 {
-    static const uint8_t KIT[6] = {0, GL_RIT, GL_MEC, GL_BIO, GL_ERR, 1u};   /* (USER: the slot USR1, the web editor's) */
-    return src < CL_GLT ? &SMP_ZONES[src % 3u] : gl_zone(KIT[(src - CL_GLT) % 6u], sl & 15u);
+    static const uint8_t KIT[8] = {0, GL_RIT, GL_MEC, GL_BIO, GL_ERR, 1u, 2u, 3u};   /* (USR1..3: the slots, the web editor's) */
+    return src < CL_GLT ? &SMP_ZONES[src % 3u] : gl_zone(KIT[(src - CL_GLT) % 8u], sl & 15u);
 }
 static uint32_t cl_rnd(cl_part_t *P) { P->rs = P->rs * 1664525u + 1013904223u; return P->rs >> 8; }   /* 24 bits */
 /* the block hook: the source asked for into the buffer, 1024 samples a block */
@@ -148,7 +148,7 @@ static void cloud_block(track_t *t)
     if (t < &trk[0] || t >= &trk[NLIVE])
         return;
     z = cl_zone(src, sl);
-    if (!P->have || P->src != src || P->sl != (src < CL_GLT ? 0u : sl) || (src == CL_USER && P->gen != smp_user_gen)) {
+    if (!P->have || P->src != src || P->sl != (src < CL_GLT ? 0u : sl) || (src >= CL_USER && P->gen != smp_user_gen)) {
         P->have = 1;
         P->gen = smp_user_gen;
         P->src = (uint8_t)src;

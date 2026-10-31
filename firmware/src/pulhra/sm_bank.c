@@ -90,7 +90,7 @@ _Static_assert(SM_FL_DATA + SM_BANK_BYTES <= SM_FL_SPAN, "a bank fits its place 
 _Static_assert(SM_FL_PROJ == SM_FL_LO && SM_FL_PROJ + 2u * SM_FL_SEC <= SM_FL_SLOT0, "the project's two sectors, then the banks");
 _Static_assert(SM_FL_SLOT0 + SM_FL_NSLOT * SM_FL_SPAN <= SM_FL_HI, "the bank places stay below SM_FL_HI");
 _Static_assert(SM_FL_NSLOT >= SM_NBANK + 1u, "a save always has a place holding no bank's newest copy");
-_Static_assert(SMP_USER_BASE + SMP_USER_LIVE * SMP_USER_SIZE <= SM_FL_LO, "the live user sample slots stay below PULHRA's flash");
+_Static_assert(SMP_USER_BASE + SMP_USER_SIZE <= SM_FL_LO, "the user sample slots (all three in USR1's flash) stay below PULHRA's flash");
 _Static_assert(SM_FL_LO >= 0xB4000u && SM_FL_HI <= 0xE0000u && (SM_FL_SLOT0 & 0xFFFu) == 0u && (SM_FL_SPAN & 0xFFFu) == 0u,
                "PULHRA's flash: 0xB4000..0xE0000 (the OTA staging), whole sectors");
 

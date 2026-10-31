@@ -10257,6 +10257,103 @@ static int test_editor_slot(void)
     return bad;
 }
 
+/* the three user slots in USR1's 80 KiB (Tim, 31.10): packed as the editor does (USR1's header the map: rsv2[0] / rsv2[1] where
+ * USR2 / USR3 start); each slot its own zones; CLOUD and SAMP pick USR1..3; a slot left empty (USR1: its header only, the map)
+ * the others still play; a header of before (no map): USR1 alone, all 80 KiB */
+static uint32_t slot_put(uint8_t *img, uint32_t at, uint32_t zi, uint32_t nz, uint32_t a, uint32_t b)   /* -> its bytes */
+{
+    smp_user_hdr_t *h = (smp_user_hdr_t *)(img + at);
+    uint32_t i, len = 0;
+    memset(h, 0, SMP_USER_DATA);
+    for (i = 0; i < nz; i++) {
+        smp_zone_t z = GLT_ZONES[(zi + i) % GLT_NZ];
+        uint32_t nb = (z.n + 1u) / 2u;
+        memcpy(img + at + SMP_USER_DATA + len, &SMP_DATA[z.off], nb);
+        z.off = len;
+        z.ls = 0, z.le = z.n - 1u, z.pred = 0, z.idx = 0, z.looped = 0, z.lo = 0, z.hi = 127;
+        h->zone[i] = z;
+        len += nb;
+    }
+    h->magic = SMP_USER_MAGIC;
+    h->version = 1;
+    h->nz = (uint8_t)nz;
+    h->data_len = len;
+    h->crc = st_crc32(img + at + SMP_USER_DATA, len);
+    h->rsv2[0] = a;
+    h->rsv2[1] = b;
+    return SMP_USER_DATA + len;
+}
+static int test_three_slots(void)
+{
+    int bad = 0;
+    uint8_t *img = nor + SMP_USER_BASE;
+    uint32_t a, b, n1, k, pk, bl;
+    memset(img, 0xFF, SMP_USER_SIZE);
+    n1 = slot_put(img, 0, 0, 1, 0, 0);
+    a = (n1 + 0xFFFu) & ~0xFFFu;
+    b = a + ((slot_put(img, a, 3, 2, 0, 0) + 0xFFFu) & ~0xFFFu);
+    (void)slot_put(img, b, 5, 3, 0, 0);
+    (void)slot_put(img, 0, 0, 1, a, b);                   /* (USR1's header last: the map) */
+    for (k = 0; k < SMP_USER_SLOTS; k++)
+        smp_user_scan(k);
+    printf("  slots: USR2 at %u, USR3 at %u; zones %u %u %u\n", a, b, usr_nz[0], usr_nz[1], usr_nz[2]);
+    bad += check("SLOTS3: USR1 1 zone, USR2 2, USR3 3, each its own (the map in USR1's header)", usr_nz[0] == 1u && usr_nz[1] == 2u &&
+                 usr_nz[2] == 3u && usr_zone[1][1].n == GLT_ZONES[4].n && usr_zone[2][0].n == GLT_ZONES[5].n &&
+                 SMP_SLOT_SIZE(0) == a && SMP_SLOT_SIZE(2) == SMP_USER_SIZE - b);
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    sm_ui.trk = 0;
+    sm_sound_load(eng_rank(ENGI_CLOUD), 0);
+    sm_input_poll();
+    kit_dry();
+    ksnd(0)->p[P_E0] = CL_USER3;
+    ksnd(0)->p[P_E1] = 2;
+    sm_param_push(0, P_E0);
+    sm_param_push(0, P_E1);
+    sm_input_poll();
+    for (bl = 0; bl < 20u; bl++)
+        run_block();
+    trk_note_on(&trk[0], 48, 100);
+    for (bl = 0, pk = 0; bl < 300u; bl++) {
+        uint32_t x = block_peak(0, 0);
+        pk = x > pk ? x : pk;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(600);
+    bad += check("SLOTS3: CLOUD, SRC USR3 (its zone 3): sounds, the zone USR3's", pk > 1500u && cl_part(&trk[0])->len == GLT_ZONES[7].n);
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    ksnd(3)->p[P_E0] = DR_KM_SMP;
+    sm_param_push(3, P_E0);
+    sm_kit_lane = 0;
+    sm_lane_machine(0);
+    sm_input_poll();
+    cpat()->lane[0][0] = DR_SK_USER2;
+    sm_param_push(3, SM_LP(0, 0));
+    sm_input_poll();
+    play_blocks(2);
+    bad += check("SLOTS3: SAMP, KIT USR2: its hit sounds", lane_hit_peak(0) > 1500u);
+    (void)slot_put(img, 0, 0, 0, a, b);                   /* USR1 emptied: its header the map only */
+    for (k = 0; k < SMP_USER_SLOTS; k++)
+        smp_user_scan(k);
+    bad += check("SLOTS3: USR1 empty (a header with the map, no zone): USR2 and USR3 still there", !usr_nz[0] && usr_nz[1] == 2u && usr_nz[2] == 3u);
+    (void)slot_put(img, 0, 0, 2, 0, 0);                   /* a header of before: no map */
+    for (k = 0; k < SMP_USER_SLOTS; k++)
+        smp_user_scan(k);
+    bad += check("SLOTS3: a header of before (no map): USR1 alone, all 80 KiB", usr_nz[0] == 2u && !usr_nz[1] && !usr_nz[2] &&
+                 SMP_SLOT_SIZE(0) == SMP_USER_SIZE);
+    (void)slot_put(img, 0, 0, 1, 0x1001u, 0);             /* a bad map (not a sector's start): USR1 alone */
+    smp_user_scan(0);
+    bad += check("SLOTS3: a bad map: ignored, USR1 alone", SMP_SLOT_SIZE(0) == SMP_USER_SIZE && !SMP_SLOT_SIZE(1));
+    memset(img, 0xFF, SMP_USER_SIZE);
+    for (k = 0; k < SMP_USER_SLOTS; k++)
+        smp_user_scan(k);
+    in_reset();
+    return bad;
+}
+
 /* a SAVE keeps the sound's machine (Tim, 31.10: a sound saved, then not under its machine: the name's 0 fell on it); a record of
  * before, its machine 0, is found under the machine its name says */
 static int test_preset_machine(void)
@@ -13130,6 +13227,7 @@ int main(void)
     bad += test_kit_lanes();
     bad += test_paste_into_pick();
     bad += test_kit_lane_fenv();
+    bad += test_three_slots();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }
