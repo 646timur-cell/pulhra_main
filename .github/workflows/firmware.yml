@@ -75,6 +75,7 @@ jobs:
           sha=$(git rev-parse --short HEAD)
           mkdir -p /tmp/out && cp build/pulhra-1.5.1.fwsc build-pulhra.log /tmp/out/
           python3 web/make_module_installer.py build/pulhra-1.5.1.fwsc 1.5.1 /tmp/out/fm1-pulhra-installer.html
+          cp web/pulhra_editor.html /tmp/out/pulhra-editor.html
           (cd /tmp/out && sha256sum pulhra-1.5.1.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -90,7 +91,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 web/make_module_installer.py build/pulhra-1.5.1.fwsc 1.5.1 build/fm1-pulhra-installer.html
-          set -- build/pulhra-1.5.1.fwsc build/fm1-pulhra-installer.html
+          cp web/pulhra_editor.html build/pulhra-editor.html
+          set -- build/pulhra-1.5.1.fwsc build/fm1-pulhra-installer.html build/pulhra-editor.html
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$@" --clobber
           else

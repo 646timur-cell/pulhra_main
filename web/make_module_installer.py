@@ -43,6 +43,8 @@ def main(pkg, version, out):
     elif "pulhra" in version or "pulhra" in Path(pkg).name:   # PULHRA (firmware/src/pulhra.c)
         TITLE, CREDIT = PULHRA_TITLE, PULHRA_CREDIT
     raw = Path(pkg).read_bytes()
+    if TITLE == PULHRA_TITLE:                           # PULHRA: its own page (web/pulhra_installer.html)
+        return pulhra(raw, version, out)
     product = product_of(raw)
     if not re.fullmatch(r"FM-1_9\d\d", product):
         raise SystemExit(f"{pkg}: identity {product!r} is not a Felucca package (FM-1_9xx)")
@@ -65,6 +67,26 @@ def main(pkg, version, out):
     html = re.sub(r'href="\.\./\.\./firmware/[^"]*"', 'href="https://github.com/hugelton/Felucca/tree/main/LICENSES"', html)
     Path(out).write_text(html, encoding="utf-8")
     print(f"installer: {out} ({len(html)} B), package {len(raw)} B, {product}, version {version}")
+
+
+def pulhra(raw, version, out):
+    """PULHRA's installer: web/pulhra_installer.html, the same update code (fm1pkg.js, fm1ota.js), the package inside"""
+    import os
+    product = product_of(raw)
+    if not re.fullmatch(r"FM-1_9\d\d", product):
+        raise SystemExit(f"identity {product!r} is not a Felucca package (FM-1_9xx)")
+    if b"FELUCCA-LOADER-1" not in raw:
+        raise SystemExit("no Felucca loader in the package")
+    html = (HERE / "pulhra_installer.html").read_text(encoding="utf-8")
+    lib = "\n".join(strip_module((HERE / f).read_text(encoding="utf-8")) for f in ("fm1pkg.js", "fm1ota.js"))
+    data = "data:application/octet-stream;base64," + base64.b64encode(raw).decode()
+    meta = json.dumps({"version": version, "product": product, "pkg": data, "commit": os.environ.get("GITHUB_SHA", "")[:7]})
+    for mark in ("/*LIB*/", "/*META*/"):
+        if html.count(mark) != 1:
+            raise SystemExit(f"pulhra_installer.html must contain {mark} once")
+    html = html.replace("/*LIB*/", lib).replace("/*META*/", meta)
+    Path(out).write_text(html, encoding="utf-8")
+    print(f"installer: {out} ({len(html)} B), package {len(raw)} B, {product}, version {version} (PULHRA)")
 
 
 if __name__ == "__main__":

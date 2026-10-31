@@ -1,0 +1,265 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only
+     PULHRA, a hardfork of Felucca (Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments).
+     The installer logic (fm1ota.js, fm1pkg.js) is Felucca's; this page is PULHRA's. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PULHRA Installer</title>
+<style>
+  :root { --bg:#0e0f11; --card:#17191c; --line:#2a2d32; --fg:#ece9e3; --dim:#8a8e95; --acc:#e8a33d; --ok:#62c27b; --bad:#e46a6a; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg:#f3f1ec; --card:#ffffff; --line:#dedad2; --fg:#1b1b1d; --dim:#6c6c72; --acc:#b46c00; --ok:#2e8b49; --bad:#bf3939; }
+  }
+  :root[data-theme="light"] { --bg:#f3f1ec; --card:#ffffff; --line:#dedad2; --fg:#1b1b1d; --dim:#6c6c72; --acc:#b46c00; --ok:#2e8b49; --bad:#bf3939; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); display: grid; place-items: center; padding: 16px;
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; }
+  .card { width: 100%; max-width: 440px; background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+          padding: 28px 28px 20px; position: relative; }
+  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .brand { font: 700 30px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .18em; margin: 0; }
+  .brand b { color: var(--acc); font-weight: 700; }
+  .tools { display: flex; gap: 6px; }
+  .tools button { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 8px; padding: 3px 8px;
+                  font: 12px ui-monospace, Menlo, monospace; cursor: pointer; }
+  .tools button:hover { color: var(--fg); border-color: var(--dim); }
+  .sub { color: var(--dim); font-size: 13px; margin: 8px 0 22px; }
+  .sub a { color: var(--fg); }
+  .ver { font: 12px ui-monospace, Menlo, monospace; color: var(--dim); margin: 0 0 18px; }
+  ol.steps { list-style: none; padding: 0; margin: 0 0 20px; counter-reset: s; }
+  ol.steps li { counter-increment: s; display: flex; gap: 10px; margin: 0 0 8px; font-size: 14px; }
+  ol.steps li::before { content: counter(s); flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);
+                        color: var(--dim); font: 11px/18px ui-monospace, monospace; text-align: center; margin-top: 1px; }
+  #go { width: 100%; height: 46px; border: 0; border-radius: 10px; background: var(--acc); color: #141414; font: 600 15px/1 inherit;
+        letter-spacing: .04em; cursor: pointer; position: relative; overflow: hidden; }
+  #go:disabled { cursor: default; opacity: .9; }
+  #go .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(0,0,0,.18); transition: width .25s; }
+  #go .lab { position: relative; }
+  #status { min-height: 21px; margin: 12px 0 0; font-size: 13px; color: var(--dim); }
+  #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+  details { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  summary { cursor: pointer; color: var(--dim); font-size: 13px; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "+ "; } details[open] > summary::before { content: "− "; }
+  details .more { max-height: 34vh; overflow: auto; padding-right: 4px; }   /* (the card keeps its size: the rest scrolls) */
+  details p { font-size: 13px; color: var(--dim); margin: 8px 0; }
+  details a { color: var(--fg); }
+  #log { max-height: 110px; overflow: auto; font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--dim); white-space: pre-wrap; margin: 8px 0 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .row button { background: none; border: 1px solid var(--line); color: var(--fg); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  .row button:disabled { opacity: .4; cursor: default; }
+  input[type=file] { font-size: 12px; color: var(--dim); max-width: 100%; }
+  footer { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; color: var(--dim); line-height: 1.6; }
+  footer a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--line); }
+  footer a:hover { border-color: var(--acc); }
+  footer .who { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 420px) { .card { padding: 22px 18px 16px; } .brand { font-size: 26px; } }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top">
+    <h1 class="brand"><b>P</b>ULHRA</h1>
+    <div class="tools"><button id="lang"></button><button id="theme" title="theme">◐</button></div>
+  </div>
+  <p class="sub"><span data-t="tag"></span> <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">Felucca</a> · M-VAVE FM-1</p>
+  <p class="ver" id="ver"></p>
+  <ol class="steps">
+    <li data-t="s1"></li>
+    <li data-t="s2"></li>
+    <li data-t="s3"></li>
+  </ol>
+  <button id="go" disabled><span class="fill" id="fill"></span><span class="lab" id="golab"></span></button>
+  <p id="status"></p>
+  <details>
+    <summary data-t="more"></summary>
+    <div class="more">
+    <p data-t="warn"></p>
+    <p><span data-t="brick"></span> <a href="https://github.com/kurogedelic/FM-1-transporter" target="_blank" rel="noopener">FM-1-transporter</a></p>
+    <p data-t="editorTip"></p>
+    <p><b data-t="stockTitle"></b><br><span data-t="stockText"></span> <a href="https://www.m-vave.com/download" target="_blank" rel="noopener">M-VAVE</a></p>
+    <div class="row"><input id="stock-file" type="file" accept=".fwsc"><button id="stock-go" disabled data-t="stockGo"></button></div>
+    <pre id="log"></pre>
+    </div>
+  </details>
+  <footer>
+    <div data-t="fork"></div>
+    <div>Felucca — Leo Kuroshita (<a href="https://github.com/kurogedelic" target="_blank" rel="noopener">@kurogedelic</a>),
+      <a href="https://hugelton.com" target="_blank" rel="noopener">Hügelton Instruments</a> ·
+      <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">github.com/hugelton/Felucca</a></div>
+    <div class="who"><span>PULHRA — Tim · <a href="https://www.instagram.com/otres.muzak/" target="_blank" rel="noopener">@otres.muzak</a></span>
+      <span><a href="https://github.com/hugelton/Felucca/tree/main/LICENSES" target="_blank" rel="noopener">GPL-3.0</a>, <span data-t="nowarranty"></span></span></div>
+    <div data-t="tm"></div>
+  </footer>
+</div>
+<script type="module">
+/*LIB*/
+const $ = (id) => document.getElementById(id);
+const TEXT = {
+  ru: {
+    tag: "хардфорк", s1: "Подключи FM-1 к компьютеру USB-кабелем напрямую (без хабов).", s2: "Открой эту страницу в Chrome или Edge, закрой другие MIDI-программы.",
+    s3: "Нажми «Установить» и не отключай USB до конца.", install: "Установить", working: "Установка…", again: "Установить ещё раз",
+    more: "Подробнее", other: "EN",
+    warn: "Кастомная прошивка: ставишь на свой риск, авторы не отвечают за поломки и сбои. Сохранённые в PULHRA банки и пресеты остаются при обновлении.",
+    brick: "Если установка прервалась и FM-1 не запускается, восстановить её поможет",
+    editorTip: "Пресеты, сэмплы и бэкап банков — в pulhra-editor.html (рядом с этим файлом).",
+    stockTitle: "Вернуть официальную прошивку V15", stockText: "Скачай FM-1.fwsc V15 с сайта M-VAVE и выбери файл. Он проверяется здесь, в браузере. Банки PULHRA официальная прошивка не открывает — сначала сделай бэкап в редакторе.",
+    stockGo: "Вернуть V15", stockValid: "Официальная V15 проверена", stockError: "Файл не похож на официальный V15: ",
+    stockConfirm: "Бэкап в редакторе сделан? Продолжить и вернуть официальную V15?", stockDone: "Готово: на FM-1 официальная V15.",
+    fork: "PULHRA — хардфорк Felucca: своё приложение-грувбокс на звуковом ядре MONOFM.",
+    nowarranty: "без гарантий", tm: "M-VAVE и FM-1 — товарные знаки их владельцев.",
+    nomidi: "Этот браузер не умеет Web MIDI. Открой страницу в Chrome или Edge.", loadfail: "Не удалось загрузить: ",
+    start: "Начинаю", verify: "Проверка", loader: "Перевожу FM-1 в режим записи", write: "Запись", reboot: "Перезапуск",
+    done: "Готово! PULHRA установлена.", stopped: "Остановилось. Переподключи USB и нажми ещё раз.", error: "Ошибка: ",
+    denied: "Нет разрешения на MIDI (SysEx). Разреши MIDI в настройках сайта (значок слева от адреса) и нажми ещё раз.",
+    notfound: "FM-1 не найдена. Проверь кабель (нужен с передачей данных), закрой другие MIDI-программы и нажми ещё раз.",
+    model: "Подключено не FM-1.", lost: "USB-соединение пропало. Переподключи и нажми ещё раз.",
+    noloader: "FM-1 в режиме записи не найдена. Переподключи USB и нажми ещё раз (она ждёт в режиме записи).",
+    noreturn: "FM-1 не вернулась. Выключи и включи её.", mismatch: "Записано, но FM-1 сообщает другую версию: ",
+    badpkg: "Файл прошивки внутри страницы повреждён. Перезагрузи страницу.", leave: "Идёт запись. Не закрывай страницу.",
+  },
+  en: {
+    tag: "a hardfork of", s1: "Connect the FM-1 to the computer with a USB cable, directly (no hub).", s2: "Open this page in Chrome or Edge; close other MIDI apps.",
+    s3: "Press Install and keep the USB cable in until it is done.", install: "Install", working: "Installing…", again: "Install again",
+    more: "More", other: "RU",
+    warn: "Custom firmware: use it at your own risk; the authors accept no responsibility for damage or faults. Banks and presets saved in PULHRA stay through an update.",
+    brick: "If an install is interrupted and the FM-1 no longer starts, recover it with",
+    editorTip: "Presets, samples and bank backups: pulhra-editor.html (next to this file).",
+    stockTitle: "Return to official firmware V15", stockText: "Download FM-1.fwsc V15 from M-VAVE and pick the file. It is checked here, in the browser. The official firmware cannot open PULHRA's banks: back them up in the editor first.",
+    stockGo: "Return to V15", stockValid: "Official V15 verified", stockError: "Not the official V15 file: ",
+    stockConfirm: "Did you back up in the editor? Continue and return to the official V15?", stockDone: "Done: the FM-1 runs the official V15.",
+    fork: "PULHRA is a hardfork of Felucca: its own groovebox app on the MONOFM sound core.",
+    nowarranty: "no warranty", tm: "M-VAVE and FM-1 are trademarks of their respective owners.",
+    nomidi: "This browser has no Web MIDI. Open the page in Chrome or Edge.", loadfail: "Could not load: ",
+    start: "Starting", verify: "Verifying", loader: "Switching the FM-1 to update mode", write: "Writing", reboot: "Restarting",
+    done: "Done! PULHRA is installed.", stopped: "Stopped. Replug the USB cable and press again.", error: "Error: ",
+    denied: "MIDI (SysEx) access was not allowed. Allow MIDI in the site settings (left of the address) and press again.",
+    notfound: "FM-1 not found. Check the cable (a data cable), close other MIDI apps and press again.",
+    model: "The connected device is not an FM-1.", lost: "The USB connection was lost. Replug and press again.",
+    noloader: "The FM-1 in update mode was not found. Replug and press again (it waits in update mode).",
+    noreturn: "The FM-1 did not come back. Power-cycle it.", mismatch: "Written, but the FM-1 reports another version: ",
+    badpkg: "The firmware inside this page is damaged. Reload the page.", leave: "Writing. Do not close the page.",
+  },
+};
+let lang = (() => { try { const l = localStorage.getItem("pulhra-inst-lang"); if (l) return l; } catch (e) {} return (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en"; })();
+const t = (k) => TEXT[lang][k] ?? TEXT.en[k];
+let lastKey = null, lastArg = "", lastCls = "", btnKey = "install";
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach((e) => { e.textContent = t(e.dataset.t); });
+  $("lang").textContent = t("other");
+  $("golab").textContent = t(btnKey);
+  if (lastKey) setStatus(lastKey, lastArg, lastCls);
+}
+$("lang").addEventListener("click", () => { lang = lang === "ru" ? "en" : "ru"; try { localStorage.setItem("pulhra-inst-lang", lang); } catch (e) {} applyLang(); });
+$("theme").addEventListener("click", () => {
+  const r = document.documentElement, dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  r.dataset.theme = dark ? "light" : "dark";
+});
+function setStatus(k, arg = "", cls = "") { lastKey = k; lastArg = arg; lastCls = cls; const s = $("status"); s.textContent = t(k) + arg; s.className = cls; }
+const sayK = (k, arg = "") => setStatus(k, arg, k === "done" || k === "stockDone" || k === "stockValid" ? "ok" : ["error", "stopped", "denied", "notfound", "model", "lost", "noloader", "noreturn", "mismatch", "badpkg", "nomidi", "loadfail", "stockError"].includes(k) ? "bad" : "");
+const say = (txt) => { lastKey = null; $("status").textContent = txt; $("status").className = ""; };
+const log = (s) => { const l = $("log"); l.textContent += s + "\n"; l.scrollTop = l.scrollHeight; };
+const progress = (p) => { $("fill").style.width = Math.max(0, Math.min(100, p)) + "%"; };
+const label = (k) => { btnKey = k; $("golab").textContent = t(k); };
+applyLang();
+let image = null;
+const meta = /*META*/;
+$("ver").textContent = `PULHRA ${meta.version}${meta.commit ? " · " + meta.commit : ""} · ${meta.product}`;
+
+let writing = false, stock = null, stockEpoch = 0;
+const lock = (on) => { writing = on; $("go").disabled = on || !image; $("stock-go").disabled = on || !stock; $("stock-file").disabled = on; };
+window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = t("leave"); } });
+
+(async () => {
+  if (!navigator.requestMIDIAccess) { sayK("nomidi"); return; }
+  try {
+    const r = await fetch(meta.pkg);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const pkg = new Uint8Array(await r.arrayBuffer());
+    if (productOf(pkg) !== meta.product) { sayK("badpkg"); return; }
+    image = logicalImage(pkg);
+    $("go").disabled = false;
+  } catch (e) { sayK("loadfail", e.message); }
+})();
+
+$("go").addEventListener("click", async () => {
+  if (writing) return;
+  lock(true);
+  label("working");
+  progress(0);
+  let midi;
+  try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
+  catch (e) { sayK("denied"); label("install"); lock(false); return; }
+  try {
+    const up = new Updater(midi, log);
+    const total = 74 + 1167;
+    const step = (k, a) => {
+      log(`${k} ${a ?? ""}`);
+      if (k === "start") sayK("start");
+      if (k === "verify") { sayK("verify"); progress((a / total) * 100); }
+      if (k === "loader") sayK("loader");
+      if (k === "write") { setStatus("write", ` ${Math.round(((74 + a) / total) * 100)} %`); progress(((74 + a) / total) * 100); }
+      if (k === "reboot") sayK("reboot");
+      if (k === "done") { progress(100); sayK("done"); }
+    };
+    const ota = await up.find((id) => /^ota-/i.test(id.model));
+    if (ota) {
+      ota.link.close();
+      sayK((await up.resume(image, step, meta.product)) ? "done" : "stopped");
+    } else {
+      await up.install(image, meta.product, step);
+    }
+  } catch (e) {
+    if (e && e.code && TEXT.en[e.code]) sayK(e.code, e.detail || "");
+    else sayK("error", e && e.message);
+    log(String(e && e.stack || e));
+  }
+  label("again");
+  lock(false);
+});
+
+$("stock-file").addEventListener("change", async () => {
+  const epoch = ++stockEpoch, file = $("stock-file").files[0];
+  stock = null;
+  lock(false);
+  if (!file) return;
+  try {
+    if (file.size !== STOCK_V15_SIZE) throw new Error("FM-1 V15 / FM-1.fwsc");
+    const v = await validateStockPackage(new Uint8Array(await file.arrayBuffer()));
+    if (epoch !== stockEpoch) return;
+    stock = v;
+    sayK("stockValid");
+    lock(false);
+  } catch (e) { if (epoch === stockEpoch) sayK("stockError", e.message); }
+});
+$("stock-go").addEventListener("click", async () => {
+  if (!stock || writing || !confirm(t("stockConfirm"))) return;
+  lock(true);
+  progress(0);
+  try {
+    const midi = await navigator.requestMIDIAccess({ sysex: true });
+    const up = new Updater(midi, log);
+    const step = (k, n) => {
+      log(`${k} ${n ?? ""}`);
+      if (["start", "verify", "loader", "write", "reboot"].includes(k)) sayK(k);
+      if (k === "done") { progress(100); sayK("stockDone"); }
+    };
+    const loader = await up.find((id) => id.model === "ota-FM-1");
+    if (loader) {
+      loader.link.close();
+      sayK((await up.resume(stock.image, step, stock.product)) ? "stockDone" : "stopped");
+    } else {
+      await up.install(stock.image, stock.product, step);
+    }
+  } catch (e) {
+    if (e && e.code && TEXT.en[e.code]) sayK(e.code, e.detail || ""); else sayK("error", e && e.message);
+    log(String(e && e.stack || e));
+  } finally { lock(false); }
+});
+</script>
+</body>
+</html>
