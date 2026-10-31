@@ -10326,22 +10326,73 @@ static int test_dist_clean(void)
         sm_input_poll();
         play_blocks(4);
         kit_dry();
-        p0 = lane_hf(0);
-        q0 = lane_hf(1);
-        sm_kit_lane = 0;
+        p0 = lane_hf(1);
+        q0 = lane_hf(0);
+        sm_kit_lane = 1;
         sm_ui.page = (uint8_t)page_by_name("FX");
-        bad += check("DISTQ: KIT, FX K1: the lane's DIST", sm_page_param(0) == SM_LD(0));
+        bad += check("DISTQ: KIT, FX K1: the lane's DIST", sm_page_param(0) == SM_LD(1));
         turn(EN_K1, 110);
         sm_input_poll();
         play_blocks(2);
-        p1 = lane_hf(0);
-        q1 = lane_hf(1);
-        printf("  lane DIST: L1 highs %u -> %u, L2 %u -> %u\n", p0, p1, q0, q1);
-        bad += check("DISTQ: L1's DIST up: on the core (its own), L1 changed; L2 as it was; the track's DIST untouched",
-                     dr_ld[3][0] == cpat()->ldist[0] && cpat()->ldist[0] > 100 && !dr_ld[3][1] && (p1 * 10u > p0 * 12u || p1 * 12u < p0 * 10u) &&
-                     q1 * 100u >= q0 * 97u && q1 * 100u <= q0 * 103u && ksnd(3)->p[P_DIST] == 0);
+        p1 = lane_hf(1);
+        q1 = lane_hf(0);
+        printf("  lane DIST: L2 highs %u -> %u, L1 (the kick) %u -> %u\n", p0, p1, q0, q1);
+        bad += check("DISTQ: L2's DIST up: on the core (its own), L2 changed; L1 (the kick) as it was; the track's DIST untouched",
+                     dr_ld[3][1] == cpat()->ldist[1] && cpat()->ldist[1] > 100 && !dr_ld[3][0] && (p1 * 10u > p0 * 12u || p1 * 12u < p0 * 10u) &&
+                     q1 * 100u >= q0 * 95u && q1 * 100u <= q0 * 105u && ksnd(3)->p[P_DIST] == 0);   /* (its NOISE burst: a little apart) */
         in_reset();
     }
+    return bad;
+}
+
+/* KICK (Tim, 31.10: "limp kicks"): BD ANALOG on a KIT lane: its pitch still well above the base 10 ms in (the fall a 909's),
+ * a fifth of its energy or more in the punch, 80..200 Hz (it was 6 %) */
+static int test_kick_punch(void)
+{
+    enum { NN = 8192 };
+    static int32_t L[CTL * 300];
+    static double x[NN];
+    uint32_t nl = 0, b, i, c = 0, first = 0, last = 0;
+    double lo = 0, mid = 0, f10;
+    int bad = 0, k;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    trk_note_on(&trk[3], DR_KIT_NOTE, 120);
+    for (b = 0; b < 300u; b++)
+        (void)block_peak(L, &nl);
+    trk_all_off(&trk[3]);
+    for (i = 301; i < 900u; i++)                          /* (7 .. 20 ms: the zero crossings) */
+        if ((L[i - 1] < 0) != (L[i] < 0)) {
+            if (!c)
+                first = i;
+            last = i;
+            c++;
+        }
+    f10 = c > 1u ? 44100.0 * (c - 1u) / 2.0 / (last - first) : 0;
+    for (i = 0; i < NN; i++)
+        x[i] = L[i];
+    for (k = 1; k < 200 * NN / 44100; k++) {
+        double a = 0, bb = 0;
+        for (i = 0; i < NN; i++) {
+            a += x[i] * cos(2 * M_PI * k * i / NN);
+            bb -= x[i] * sin(2 * M_PI * k * i / NN);
+        }
+        if (k < 80 * NN / 44100)
+            lo += a * a + bb * bb;
+        else
+            mid += a * a + bb * bb;
+    }
+    printf("  KICK BD ANALOG: %.0f Hz 7..20 ms in, 80..200 Hz %.0f %% of the energy below 200\n", f10, 100 * mid / (lo + mid));
+    bad += check("KICK: the pitch still falling 7..20 ms in (above 75 Hz; the base ~50), the punch 80..200 Hz >= 20 %",
+                 f10 > 75.0 && mid / (lo + mid) >= 0.20);
+    play_blocks(400);
+    in_reset();
     return bad;
 }
 
@@ -10768,12 +10819,18 @@ static int test_drum_filter(void)
     perf_dflt = 0;
     play_blocks(150);
     bad += check("DFLT: back to 0: the filter off (nothing runs)", !perf_dflt_on());
+    play_blocks(2000);                                    /* (the master's compressor and limiter at rest after the kicks) */
+    sm_ui.trk = 0;                                        /* T1 a SINE (no random phases: two notes alike) */
+    sm_sound_load(eng_rank(ENGI_MSINE), 0);
+    sm_input_poll();
+    play_blocks(40);
+    kit_dry();
     trk_note_on(&trk[0], 60, 100);                        /* T1 (no drum): untouched by it */
     for (b = 0, t0 = 0; b < 20u; b++) { uint32_t a = block_peak(0, 0); t0 = a > t0 ? a : t0; }
     trk_all_off(&trk[0]);
     play_blocks(600);
     perf_dflt = -100;
-    play_blocks(150);
+    play_blocks(2000);
     trk_note_on(&trk[0], 60, 100);
     for (b = 0, t1 = 0; b < 20u; b++) { uint32_t a = block_peak(0, 0); t1 = a > t1 ? a : t1; }
     trk_all_off(&trk[0]);
@@ -13317,6 +13374,7 @@ int main(void)
     bad += test_kit_lane_fenv();
     bad += test_three_slots();
     bad += test_dist_clean();
+    bad += test_kick_punch();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

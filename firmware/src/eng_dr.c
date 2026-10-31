@@ -20,7 +20,11 @@ enum { DR_KTY_SINE, DR_KTY_TRI, DR_KTY_ROUND, DR_KTY_SQR, DR_KTY_FM, DR_KTY_FOLD
 static const char *const N_DR_KTYPE[DR_KTY_N] = {"SINE", "TRI", "ROUND", "SQR", "FM", "FOLD"};
 
 #define DR_Q30 (1 << 30)
+#if FELUCCA_SWAMP
+#define DR_CLICK_N 128u                                   /* the click: 128 samples (2.9 ms; PULHRA, Tim 31.10: the 1.45 ms one went unheard) */
+#else
 #define DR_CLICK_N 64u                                    /* the click: 64 samples (1.45 ms) */
+#endif
 #define DR_CHOKE_US 2000u                                 /* a choked hit's time constant */
 
 /* a choke: the track's other hits of this engine let go fast (a new hit replaces them: the drum is one voice) */
@@ -88,10 +92,21 @@ static void dkick_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
     int32_t base = 23 * 16 + clamp(e[0], 0, 127) * 28 * 16 / 127 + note;   /* TUNE: 26 .. 130 Hz at C3 */
     uint32_t inc0 = pitch_inc((uint32_t)clamp(base, 0, 2047));
     uint32_t top = pitch_inc((uint32_t)clamp(base + clamp(e[1], 0, 127) * 6, 0, 2047));   /* SWEEP: up to 48 st */
+#if FELUCCA_SWAMP
+    /* PULHRA (Tim, 31.10: "limp kicks"; measured: the pitch at its base 10 ms in, 87..95 % of the energy below 80 Hz, 4..11 %
+     * in 80..200 Hz, none above 1 kHz): STIME 7 .. 120 ms (40: ~16 ms, a 909's fall), the body driven while the sweep is up
+     * (its harmonics 100..300 Hz, the punch, gone with the sweep), the click twice as long and lower (~2.3 kHz) */
+    uint32_t span = ((top - inc0) >> 15) * (uint32_t)(64 + v->vel / 2) / 127u, ks = dv_k(TIME_MS_X10[26 + clamp(e[2], 0, 127) * 40 / 127] * 100u);
+#else
     uint32_t span = ((top - inc0) >> 15) * (uint32_t)(64 + v->vel / 2) / 127u, ks = dv_k(TIME_MS_X10[clamp(e[2], 0, 127) >> 1] * 100u);   /* STIME: 1 .. 96 ms */
+#endif
     uint32_t kb = dv_kb(TIME_MS_X10[36 + clamp(e[3], 0, 127) * 60 / 127] * 100u);   /* DECAY: 14 ms .. 1.06 s */
     uint32_t kn = dv_k(4000u), ph = v->ph[0], cph = v->ph[1], wph = v->ph[2];
+#if FELUCCA_SWAMP
+    uint32_t cinc = pitch_inc(98 * 16), winc = 0xFFFFFFFFu / DR_CLICK_N;    /* (D7 ~ 2.35 kHz; the window's one cycle) */
+#else
     uint32_t cinc = pitch_inc(107 * 16), winc = 0xFFFFFFFFu / DR_CLICK_N;   /* (B7 ~ 3.95 kHz; the window's one cycle) */
+#endif
     int32_t vel = v->vel, drv = clamp(e[5], 0, 127), click = clamp(e[6], 0, 127) * 2 * vel, nlev = clamp(e[7], 0, 127) * 200 * vel / 127;
     /* (velocity: the click and the noise with it, the sweep half its depth at 0: a harder hit snaps more, as the circuit) */
     int32_t type = clamp(e[8], 0, DR_KTY_N - 1), g = 4096 + drv * 228, comp = 32767 - drv * 110;
@@ -128,6 +143,9 @@ static void dkick_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vm
             break;
         default: b = sine_i(ph); break;
         }
+#if FELUCCA_SWAMP
+        b = softclip((b * (4096 + (sw >> 2))) >> 12);     /* (the punch: up to x3 into the clip while the sweep is up, clean after) */
+#endif
         x = (b * (a >> 5)) >> 15;                         /* (a: Q20 -> Q15) */
         a += d;
         if (cn > 0) {                                     /* the click: a windowed burst, mean 0 */
