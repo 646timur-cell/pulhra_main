@@ -1324,15 +1324,15 @@ static const engine_t ENG_DTOM = {
 
 /* ===================================================================== SAMP === */
 /* a slice as a hit (Tim, 31.10: the SLICE machines' kits on a KIT lane): KIT (GLITCH RITUAL MECH BIO ERROR, BBOX's drums),
- * SLCE its slice, PTCH semitones (the note too), DCAY its fall (127: the slice whole), TONE a low-pass (127 open), CRSH bits
+ * or USER, the sample slot the web editor fills; SLCE its slice, PTCH semitones (the note too), DCAY its fall (127: the slice whole), TONE a low-pass (127 open), CRSH bits
  * and rate thrown away, DRIV; the ninth, GAIN (64: as the slice is). Read from the flash as it plays (one ADPCM decode a source sample, forward). ph[0] the read
  * position's fraction (Q16), cnt the next source sample, e[0] e[1] the two around it, f[0] the low-pass, f[2] f[3] the
  * decoder's state, n the hold's countdown, x1 the sample held */
-enum { DR_SK_GLT, DR_SK_RIT, DR_SK_MEC, DR_SK_BIO, DR_SK_ERR, DR_SK_BBX, DR_SK_N };
-static const char *const N_DR_SKIT[DR_SK_N] = {"GLITCH", "RITUAL", "MECH", "BIO", "ERROR", "BBOX"};
+enum { DR_SK_GLT, DR_SK_RIT, DR_SK_MEC, DR_SK_BIO, DR_SK_ERR, DR_SK_BBX, DR_SK_USER, DR_SK_N };
+static const char *const N_DR_SKIT[DR_SK_N] = {"GLITCH", "RITUAL", "MECH", "BIO", "ERROR", "BBOX", "USER"};
 static const smp_zone_t *dsmp_zone(const int16_t *e)
 {
-    static const uint8_t SC[DR_SK_N] = {0, GL_RIT, GL_MEC, GL_BIO, GL_ERR, GL_BBX};
+    static const uint8_t SC[DR_SK_N] = {0, GL_RIT, GL_MEC, GL_BIO, GL_ERR, GL_BBX, 1u};   /* (USER: the slot USR1) */
     return gl_zone(SC[clamp(e[0], 0, DR_SK_N - 1)], (uint32_t)clamp(e[1], 0, 15));
 }
 static void dsmp_start(track_t *t, voice_t *v, const int16_t *e)

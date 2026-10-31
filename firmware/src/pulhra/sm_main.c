@@ -211,6 +211,24 @@ static void fm1_main(void)
                 fm1_enter_uboot();
             }
         }
+        {                                               /* the web editor's frames (sm_ed.c), before M-UPGRADE's */
+            const uint8_t *fp;
+            uint32_t fn, rn;
+            if (ota_frame_get(&fp, &fn) && fn >= 3u && fp[0] == SM_ED_H0 && fp[1] == SM_ED_H1 && fp[2] == SM_ED_H2) {
+                rn = sm_ed_handle(fp, fn);
+                ota_frame_done();
+                if (rn)
+                    ota_wire_send(sm_ed_out, rn);
+                if (sm_ed_reboot) {                     /* (RELOAD the banks: as at power-on, once the reply is out) */
+                    fm1_delay_ms(50);
+                    fm1_audio_stop();
+                    usb_detach();
+                    fm1_delay_ms(30);
+                    bootguard.pending = 0;
+                    fm1_reboot();
+                }
+            }
+        }
         ota_service();                                  /* M-UPGRADE handshake */
         if (usb.ota_req) {                              /* M-UPGRADE upgrade command */
             usb.ota_req = 0;

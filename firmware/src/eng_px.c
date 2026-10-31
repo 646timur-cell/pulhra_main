@@ -105,7 +105,7 @@ static const engine_t ENG_MACID = {
 /* ==================================================================== CLOUD === */
 /* a granular cloud (Tim, 31.10: textures, pads, drones for the shows) over the built-in material: SRC a source (GLASS, THROAT,
  * METAL: the bowed glass, the throat drone, the struck plate) or a slice (SLCE) of a SLICE machine's kit (GLITCH RITUAL MECH
- * BIO ERROR). The slice is decoded whole into the part's engine memory (a block's share at a time, the block hook), then
+ * BIO ERROR) or USER, the sample slot the web editor fills (SLCE its zone). The slice is decoded whole into the part's engine memory (a block's share at a time, the block hook), then
  * grains read it anywhere, either way: POS the centre (the ninth, SCAN, moves it on by itself, either way), SIZE a grain's
  * length (10 .. 400 ms), DENS how many a second (1 .. 100), SPRD the random spread around POS (0: frozen) and of the
  * starts, RAND a random detune (up to +-1 octave) and the share of grains reversed (up to half), PTCH the pitch
@@ -126,16 +126,17 @@ typedef struct {
     uint32_t n, len, rate;                               /* decoded so far, the slice's length, its rate (Q16 of 44.1 kHz) */
     int32_t pred, idx, root16;                           /* the decoder's state; the slice's root (1/16 semitone) */
     uint8_t src, sl, have;                               /* what the buffer holds (have: 1) */
+    uint32_t gen;                                        /* the slot's scan it holds (USER: an upload decodes anew) */
     uint32_t rs;                                         /* random numbers */
 } cl_part_t;
 ENG_MEM_FITS("CLOUD", sizeof(cl_part_t));
-enum { CL_GLASS, CL_THROAT, CL_METAL, CL_GLT, CL_RIT, CL_MEC, CL_BIO, CL_ERR, CL_NSRC };
-static const char *const N_CL_SRC[CL_NSRC] = {"GLASS", "THROAT", "METAL", "GLITCH", "RITUAL", "MECH", "BIO", "ERROR"};
+enum { CL_GLASS, CL_THROAT, CL_METAL, CL_GLT, CL_RIT, CL_MEC, CL_BIO, CL_ERR, CL_USER, CL_NSRC };
+static const char *const N_CL_SRC[CL_NSRC] = {"GLASS", "THROAT", "METAL", "GLITCH", "RITUAL", "MECH", "BIO", "ERROR", "USER"};
 static cl_part_t *cl_part(track_t *t) { return (cl_part_t *)ENG_MEM(t - trk); }
 static const smp_zone_t *cl_zone(uint32_t src, uint32_t sl)
 {
-    static const uint8_t KIT[5] = {0, GL_RIT, GL_MEC, GL_BIO, GL_ERR};
-    return src < CL_GLT ? &SMP_ZONES[src % 3u] : gl_zone(KIT[(src - CL_GLT) % 5u], sl & 15u);
+    static const uint8_t KIT[6] = {0, GL_RIT, GL_MEC, GL_BIO, GL_ERR, 1u};   /* (USER: the slot USR1, the web editor's) */
+    return src < CL_GLT ? &SMP_ZONES[src % 3u] : gl_zone(KIT[(src - CL_GLT) % 6u], sl & 15u);
 }
 static uint32_t cl_rnd(cl_part_t *P) { P->rs = P->rs * 1664525u + 1013904223u; return P->rs >> 8; }   /* 24 bits */
 /* the block hook: the source asked for into the buffer, 1024 samples a block */
@@ -147,8 +148,9 @@ static void cloud_block(track_t *t)
     if (t < &trk[0] || t >= &trk[NLIVE])
         return;
     z = cl_zone(src, sl);
-    if (!P->have || P->src != src || P->sl != (src < CL_GLT ? 0u : sl)) {
+    if (!P->have || P->src != src || P->sl != (src < CL_GLT ? 0u : sl) || (src == CL_USER && P->gen != smp_user_gen)) {
         P->have = 1;
+        P->gen = smp_user_gen;
         P->src = (uint8_t)src;
         P->sl = (uint8_t)(src < CL_GLT ? 0u : sl);
         P->n = 0;

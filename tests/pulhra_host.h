@@ -20,6 +20,8 @@
 #undef memcmp
 static struct { volatile uint32_t notes, buttons, frames; uint32_t enc_dfr[8]; } fm1_in;
 #include "../firmware/src/core.h"
+static const uint8_t *host_xip(uint32_t off);          /* (pulhra_test.c: the simulated flash, the user slot read as XIP) */
+#define SMP_USER_XIP(k) host_xip(SMP_USER_BASE + (k) * SMP_USER_SIZE)
 #include "../firmware/src/engines.c"
 #include "../firmware/src/params.c"
 #include "../firmware/src/mod.c"

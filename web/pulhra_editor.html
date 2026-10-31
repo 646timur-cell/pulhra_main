@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PULHRA Editor</title>
+<style>
+:root { --bg:#111214; --panel:#1b1d21; --line:#2c3036; --text:#e8e6e1; --dim:#8b8f96; --acc:#e8a33d; --ok:#5fbf77; --bad:#e06464; --sel:#2a2f37; }
+:root[data-theme="light"] { --bg:#f4f2ee; --panel:#ffffff; --line:#d9d5ce; --text:#1d1d1f; --dim:#6b6b70; --acc:#b86f00; --ok:#2f8f4a; --bad:#c03b3b; --sel:#ece7de; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+h1 { font-size:16px; letter-spacing:.12em; margin:0 12px 0 0; }
+h1 b { color:var(--acc); }
+button, select, input[type=text] { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
+button { cursor:pointer; }
+button:hover:not(:disabled) { border-color:var(--acc); }
+button.pri { background:var(--acc); color:#111; border-color:var(--acc); font-weight:600; }
+button:disabled { opacity:.45; cursor:default; }
+#status { color:var(--dim); }
+#status.ok { color:var(--ok); } #status.bad { color:var(--bad); }
+nav { display:flex; gap:4px; padding:10px 16px 0; border-bottom:1px solid var(--line); }
+nav button { border-radius:6px 6px 0 0; border-bottom:none; background:transparent; }
+nav button.on { background:var(--panel); border-color:var(--line); color:var(--acc); }
+main { padding:16px; max-width:1100px; }
+section { display:none; } section.on { display:block; }
+.row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 12px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; margin:0 0 14px; }
+.card h2 { font-size:13px; margin:0 0 10px; color:var(--dim); letter-spacing:.08em; text-transform:uppercase; font-weight:600; }
+table { border-collapse:collapse; width:100%; }
+td, th { border-bottom:1px solid var(--line); padding:5px 6px; text-align:left; white-space:nowrap; }
+th { color:var(--dim); font-weight:normal; }
+tr.empty td { color:var(--dim); }
+td input[type=text] { width:12ch; padding:3px 6px; }
+.bar { height:10px; background:var(--sel); border-radius:5px; overflow:hidden; flex:1; min-width:120px; }
+.bar i { display:block; height:100%; background:var(--acc); width:0; }
+.bar.over i { background:var(--bad); }
+#drop { border:2px dashed var(--line); border-radius:8px; padding:22px; text-align:center; color:var(--dim); }
+#drop.hot { border-color:var(--acc); color:var(--text); }
+.grid { overflow-x:auto; }
+.grid .trk { display:flex; align-items:center; gap:6px; margin:2px 0; }
+.grid .lab { width:13ch; color:var(--dim); overflow:hidden; text-overflow:ellipsis; }
+.grid .st { display:grid; grid-template-columns:repeat(64, 11px); gap:1px; }
+.grid .st i { height:14px; background:var(--sel); border-radius:2px; }
+.grid .st i.on { background:var(--acc); } .grid .st i.out { opacity:.25; } .grid .st i.q:not(.on) { outline:1px solid var(--line); }
+.pats { display:flex; flex-wrap:wrap; gap:4px; }
+.pats button.on { border-color:var(--acc); color:var(--acc); }
+.pats button.unused { color:var(--dim); }
+#log { white-space:pre-wrap; color:var(--dim); font-size:12px; max-height:160px; overflow:auto; border-top:1px solid var(--line); padding:8px 16px; }
+.dim { color:var(--dim); } .warn { color:var(--bad); }
+@media (max-width:600px) { header, main, nav { padding-left:16px; padding-right:16px; } .grid .lab { width:8ch; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><b>PULHRA</b> EDITOR</h1>
+  <button id="connect" class="pri">Подключить FM-1</button>
+  <select id="ports" hidden></select>
+  <span id="status">не подключено</span>
+  <span style="flex:1"></span>
+  <button id="theme" title="тема">◐</button>
+</header>
+<nav>
+  <button data-tab="presets" class="on">ПРЕСЕТЫ</button>
+  <button data-tab="samples">СЭМПЛЫ</button>
+  <button data-tab="banks">БАНКИ</button>
+</nav>
+<main>
+<section id="presets" class="on">
+  <div class="card">
+    <h2>24 места U01…U24</h2>
+    <div class="row">
+      <button id="upRead" disabled>Прочитать с FM-1</button>
+      <button id="upWrite" disabled>Записать в FM-1</button>
+      <span style="flex:1"></span>
+      <button id="upSave">Сохранить файлом</button>
+      <label><button id="upLoadBtn">Открыть файл…</button><input id="upLoad" type="file" accept=".json,.phpre" hidden></label>
+    </div>
+    <div id="upInfo" class="dim">Сначала прочитай с FM-1 или открой файл. Изменения уходят в FM-1 только по «Записать».</div>
+    <table id="upTable"></table>
+  </div>
+</section>
+<section id="samples">
+  <div class="card">
+    <h2>Слот USR1 сейчас</h2>
+    <div class="row"><button id="smRead" disabled>Прочитать</button><button id="smClear" disabled>Очистить слот</button><span id="smNow" class="dim">—</span></div>
+  </div>
+  <div class="card">
+    <h2>Новый слот</h2>
+    <div id="drop">Перетащи сюда WAV (до 16 файлов) или <label style="color:var(--acc);cursor:pointer">выбери<input id="smFiles" type="file" accept=".wav,audio/wav" multiple hidden></label></div>
+    <div class="row" style="margin-top:12px">
+      <label>Имя <input id="smName" type="text" maxlength="8" value="USER" style="width:10ch"></label>
+      <label>Резка <select id="smSlice"><option value="off">файл = зона</option><option value="tr">по атакам</option><option value="8">8 равных</option><option value="16">16 равных</option></select></label>
+      <label>Частота <select id="smRate"></select></label>
+      <label>Биты <select id="smBits"></select></label>
+    </div>
+    <div class="row"><div class="bar" id="smBar"><i></i></div><span id="smSize" class="dim">0 / 0 КБ</span></div>
+    <table id="smTable"></table>
+    <div class="row" style="margin-top:12px"><button id="smUpload" class="pri" disabled>Загрузить в FM-1</button><span class="dim">FM-1 должна стоять (STOP). Звучит в CLOUD (SRC USER), SAMP (KIT USER) и слайс-машинах (KIT USR1).</span></div>
+  </div>
+</section>
+<section id="banks">
+  <div class="card">
+    <h2>Бэкап</h2>
+    <div class="row">
+      <button id="bkSave" disabled>Сохранить всё в файл</button>
+      <label><button id="bkLoadBtn" disabled>Восстановить из файла…</button><input id="bkLoad" type="file" accept=".phbk" hidden></label>
+      <div class="bar" id="bkBar"><i></i></div><span id="bkPct" class="dim"></span>
+    </div>
+    <div class="dim">Файл: проект, 4 банка, 24 пресета, сэмпл-слот. Восстановление перезаписывает всё это и перезапускает FM-1.</div>
+  </div>
+  <div class="card">
+    <h2>Паттерны</h2>
+    <div class="row"><button id="bnRead" disabled>Прочитать банки</button><span class="dim">или открой бэкап: сетка покажется из файла</span></div>
+    <div class="row pats" id="bnBanks"></div>
+    <div class="row pats" id="bnPats"></div>
+    <div class="grid" id="bnGrid"></div>
+  </div>
+</section>
+</main>
+<div id="log"></div>
+<script>
+"use strict";
+/* generated from the firmware (tools: the layout, the machines' and the factory sounds' names, the categories) */
+const LAY = {sound: 123, pattern: 3868, step: 10, kit: 492, stepOff: 492, nstep: 64, ntrk: 4, bpat: 8, nbank: 4, flSpan: 32768, flData: 64, flNslot: 5, bmagic: 0x31425753, pmagic: 0x31505753, bankVer: 6, pat5: 3852, pat4: 3840, pat3: 3824, urec: 144, upN: 24, upMagic: 0x5055, upName: 10, sndMachine: 0, sndPreset: 1, sndLen: 2, sndP: 8, kitMach: 32, nlockOff: 3052, lockOff: 3056, nlock: 183, laneOff: 3788, pE0: 107, pLevel: 0, pAvol: 77, fhdr: 32};
+const MACH = ["SAW", "PULSE", "ENS", "SID", "WAVE", "DDRAW", "BBOX", "FM-ST", "FM-PAR", "FM-DYN", "VO-6", "SINE", "NOISE", "STRING", "MODAL", "BLOW", "RESO", "JUNK", "LYRA", "CHAOS", "DRIFT", "PLANT", "GLITCH", "ERROR", "RITUAL", "MECH", "BIO", "KICK", "SNARE", "CLAP", "HAT", "CYM", "DRUM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB", "ACID", "ZAP", "CLOUD", "WEST", "ORGAN", "TOM", "SAMP"];
+const PRESETS = [["SUPER SAW", "SAW LEAD", "HOOVER", "WIDE PAD", "SUB SAW", "OLD SYNTH", "SYNC LEAD"], ["PULSE BASS", "PWM LEAD", "SPIKE", "PWM STRINGS", "SQUARE SUB", "CLAV SWEEP"], ["MINOR CHORD", "MAJOR JUST", "STAB 7TH", "FIFTH LEAD", "OCTAVE PAD", "SUS4 SPIKES"], ["SID BASS", "C64 LEAD", "RING TONE", "NOISE HIT", "SYNC SCREAM", "GRIT BASS"], ["RAW DIGI", "VOX MORPH", "ORGAN 12BIT", "WAVE SCAN", "SYNC BASS", "LOFI FM"], ["DOUBLE PAD", "OCT LEAD", "BELL ORGAN", "CHAOS DRONE"], ["BEAT BOX", "12 BIT KIT", "LOW KIT", "ROLLS", "TRASH KIT", "REVERSE KIT"], ["FM PIANO", "FM BASS", "FM BELL", "FB LEAD"], ["FM ORGAN", "GLASS", "FM PAD", "METALLIC"], ["FM KICK", "WOBBLE BASS", "SCREAM", "LASER"], ["TALKING", "ROBOT YES", "CHOIR OOH", "WHISPER"], ["SINE", "SUB SINE", "FOLD PAD"], ["WHITE", "DIGI NOISE", "DARK WIND"], ["CELLO BOW", "VIOLIN BOW", "PONTICELLO", "NYLON", "SITAR", "DULCIMER", "DRONE BOW", "PIANO WIRE", "BOWED HAZE", "DRONE CELLOS", "GHOST HARP", "SITAR MIST"], ["MARIMBA", "GLOCKEN", "CHURCH BELL", "SINGING BOWL", "BOWED CYMBAL", "TABLA", "BLOWN GLASS", "STEEL TONGUE", "BOWL FIELD", "WIND CHIMES", "GLASS BREATH", "IRON RAIN"], ["CLARINET", "FLUTE", "TENOR SAX", "HORN", "SHAKUHACHI", "REED DRONE", "OVERBLOWN", "AIR COLUMN", "THROAT DRONE", "FOG HORN"], ["WET GLASS", "BOUNCING TIN", "BOLT BOX", "TESLA GONG", "CABLE SCRAPE", "DOOR CREAK", "RAIN ON TIN", "SINKING GONG", "SPRING WIRE", "ARC FIELD"], ["SPRING TANK", "SLINKY", "JUNK DRAWER", "SHAKEN BOX", "LASER BOING", "RUSTY COIL", "SCRAP METAL", "TANK DRONE", "CHAIN RAIN", "BROKEN AMP"], ["ORGANISM", "FIFTH SWARM", "WARM BEAT", "SQUARE LEAD", "HYPER FM", "DRONE OCT", "FEEDBACK", "DUST VEIL", "GLASS CHOIR", "SWARM CLOUD", "SLOW TIDE", "RUST ORGAN"], ["ENNER LEAD", "DUFF BASS", "BIFURCATE", "TERRA PAD", "VALVE LEAD", "ROAR", "LOGIC BASS", "STATIC FIELD", "LUNG", "TERRA DRONE", "FERAL SWARM"], ["COSMOS", "WORN TAPE", "MEMORY DUST", "PLUCK ECHOES", "SEASICK", "FOREVER", "FLUTTER", "GHOST CHOIR", "DECAYING SAW", "STAR FIELD"], ["SEEDLING", "FERN PAD", "MOSS", "THORN LEAD", "ROOT BASS", "BLOSSOM BELL", "VINE", "SPORE CLOUD", "NIGHT GARDEN", "OVERGROWN"], ["GLASS & AIR", "SHORTWAVE", "GLASS RAIN", "ARC WELD", "REVERSE ETHER", "MORSE CUTS", "NEON DRONE", "DEGAUSS BASS"], ["BROKEN KIT", "BUFFER SKIP", "BIT ROT", "LOST PACKETS", "MODEM SCAN", "REWIND", "GRAIN STORM", "DEAD PIXEL"], ["CRYPT KIT", "LOW TOLL", "BELL CASCADE", "CHAIN DRAG", "BOWL DRONE", "BONE RITE", "CAVE ECHO", "THROAT CHANT"], ["WORKSHOP", "CLOCKWORK", "TYPE POOL", "REEL TO REEL", "TAPE DEATH", "FORGE", "SERVO SWARM", "MUSIC BOX RUIN"], ["BODY KIT", "HEART LOOP", "BREATHING", "NIGHT FOREST", "CRUNCH", "WET LAB", "DAWN BIRDS", "PURR DRONE"], ["BD ANALOG", "BD PUNCH", "BD LONG", "BD HARD"], ["SD ANALOG", "SD TIGHT", "SD FAT", "SD NOISE"], ["CP ANALOG", "CP TIGHT", "CP ROOM"], ["HH CLOSED", "HH OPEN", "HH NOISE", "HH METAL"], ["CY CRASH", "CY RIDE", "CY CHINA"], ["KIT 808", "KIT PUNCH", "KIT DEEP", "KIT HARD"], ["CG OPEN", "CG SLAP", "BG HI", "BG MUTE", "TOM LO", "TOM HI"], ["CB 808", "CB SHORT", "CB LOW", "CB AGOGO"], ["RS 808", "RS CLICK", "RS WOOD", "RS NOISE"], ["SH SHAKER", "SH CABASA", "SH MARACA", "SH EGG"], ["BL TRIANGLE", "BL GLOCK", "BL CHIME", "BL HANDBELL", "BL AGOGO", "BL CLAVE"], ["TB HIT", "TB SLAP", "TB SHAKE", "TB ROLL", "TB TAP"], ["ACID 303", "SQUELCH", "SQR ACID", "DEEP ACID", "RUBBER", "ACID LEAD", "DIST ACID", "BLIP"], ["ZP LASER", "ZP BLIP", "ZP FM PERC", "ZP METAL", "ZP ZAP KICK", "ZP NOISE HIT"], ["GLASS PAD", "THROAT CHOIR", "METAL DRONE", "FROZEN", "SHIMMER", "RITUAL FOG", "BIO SWARM", "ERROR DUST"], ["WEST BONGO", "FOLD BASS", "BUCHLA BELL", "WOOD PLUCK", "FOLD LEAD", "ZING LEAD", "DRONE FOLD", "METAL PING"], ["FULL ORGAN", "JAZZ 888", "GOSPEL", "SOFT FLUTE", "DUB CHORD", "REED", "CHURCH", "PERC ORGAN"], ["TM LOW TOM", "TM MID TOM", "TM HI TOM", "TM FLOOR", "TM SIMMONS", "TM 909 TOM"], ["SP GLASS TAP", "SP RELAY", "SP BELL", "SP CLOCK", "SP DRIP", "SP BIT HIT", "SP BBOX KICK"]];
+const CATS = ["-", "BASS", "LEAD", "PAD", "PLUCK", "KEYS", "DRUM", "FX", "OTHER"];
+
+/* ---- from web/editor.html (Felucca's): the sample slot's builder ---- */
+const SMP = { SLOT_SIZE: 0x14000, DATA_OFF: 512, RATE: 22050, HDR_LEN: 32 + 16 * 28, MAX_ZONES: 16 };
+SMP.MAX_DATA = SMP.SLOT_SIZE - SMP.DATA_OFF;
+
+/* groups of up to 7 bytes, each preceded by their top bits */
+function pack7(b) {
+  const out = [];
+  for (let i = 0; i < b.length; i += 7) {
+    const g = Array.from(b.slice(i, i + 7));
+    out.push(g.reduce((m, x, j) => m | (((x >> 7) & 1) << j), 0));
+    for (const x of g) out.push(x & 0x7F);
+  }
+  return out;
+}
+function unpack7(a) {
+  const out = [];
+  for (let i = 0; i < a.length; i += 8) {
+    const top = a[i];
+    for (let j = 0; j < 7 && i + 1 + j < a.length; j++) out.push(a[i + 1 + j] | (((top >> j) & 1) << 7));
+  }
+  return Uint8Array.from(out);
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+
+const IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88,
+  97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
+  724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660,
+  4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818,
+  18500, 20350, 22385, 24623, 27086, 29794, 32767];
+const IMA_IDX = [-1, -1, -1, -1, 2, 4, 6, 8];
+/* IMA ADPCM, 4 bit, low nibble first, from predictor 0 / index 0 -> {data, pred, idx} (state at loopStart) */
+function imaEncode(s, loopStart = 0) {
+  let pred = 0, idx = 0, atLoop = [0, 0];
+  const nib = new Uint8Array(s.length + (s.length & 1));
+  for (let n = 0; n < s.length; n++) {
+    if (n === loopStart) atLoop = [pred, idx];
+    const step = IMA_STEP[idx];
+    let diff = s[n] - pred, code = 0;
+    if (diff < 0) { code = 8; diff = -diff; }
+    let vd = step >> 3;
+    if (diff >= step) { code |= 4; diff -= step; vd += step; }
+    if (diff >= step >> 1) { code |= 2; diff -= step >> 1; vd += step >> 1; }
+    if (diff >= step >> 2) { code |= 1; vd += step >> 2; }
+    pred = Math.max(-32768, Math.min(32767, code & 8 ? pred - vd : pred + vd));
+    idx = Math.max(0, Math.min(88, idx + IMA_IDX[code & 7]));
+    nib[n] = code;
+  }
+  const out = new Uint8Array(nib.length >> 1);
+  for (let k = 0; k < nib.length; k += 2) out[k >> 1] = nib[k] | (nib[k + 1] << 4);
+  return { data: out, pred: atLoop[0], idx: atLoop[1] };
+}
+
+/* WAV: PCM 8/16/24/32 or float, any channel count, mixed to mono -> {sr, x} (gen_samples.read_any_wav) */
+function parseWav(buf) {
+  const d = new Uint8Array(buf), v = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const id = (i) => String.fromCharCode(d[i], d[i + 1], d[i + 2], d[i + 3]);
+  if (d.length < 12 || id(0) !== "RIFF" || id(8) !== "WAVE") throw new Error("not a WAV file");
+  let i = 12, fmt = null, data = null;
+  while (i + 8 <= d.length) {
+    const cid = id(i), n = v.getUint32(i + 4, true);
+    if (cid === "fmt ") {
+      let tag = v.getUint16(i + 8, true);
+      const ch = v.getUint16(i + 10, true), sr = v.getUint32(i + 12, true), bits = v.getUint16(i + 22, true);
+      if (tag === 0xFFFE) tag = v.getUint16(i + 32, true);
+      fmt = { tag, ch, sr, bits };
+    } else if (cid === "data") {
+      data = [i + 8, Math.min(d.length, i + 8 + n)];
+      break;
+    }
+    i += 8 + n + (n & 1);
+  }
+  if (!fmt || !data) throw new Error("WAV without fmt/data");
+  const { tag, ch, sr, bits } = fmt, bps = bits >> 3, frame = bps * ch;
+  if (!(tag === 1 || tag === 3) || !bps || !ch) throw new Error("unsupported WAV format");
+  const nfr = Math.floor((data[1] - data[0]) / frame), x = new Float64Array(nfr);
+  for (let f = 0; f < nfr; f++) {
+    let acc = 0;
+    for (let c = 0; c < ch; c++) {
+      const o = data[0] + f * frame + c * bps;
+      let s;
+      if (tag === 3) s = bps === 4 ? v.getFloat32(o, true) : v.getFloat64(o, true);
+      else if (bps === 2) s = v.getInt16(o, true) / 32768;
+      else if (bps === 3) s = (((d[o] | (d[o + 1] << 8) | (d[o + 2] << 16)) << 8) >> 8) / 8388608;
+      else if (bps === 4) s = v.getInt32(o, true) / 2147483648;
+      else s = (d[o] - 128) / 128;
+      acc += s;
+    }
+    x[f] = acc / ch;
+  }
+  return { sr, x };
+}
+
+/* gen_samples.resample: moving average over the ratio, then linear interpolation */
+function resample(x, sr, to) {
+  if (sr === to) return Array.from(x);
+  if (sr > to) {
+    const k = Math.max(1, pyRound(sr / to));
+    if (k > 1) {
+      const y = new Array(x.length);
+      for (let i = 0; i < x.length; i++) { let s = 0; for (let j = i; j < Math.min(x.length, i + k); j++) s += x[j]; y[i] = s / k; }
+      x = y;
+    }
+  }
+  const step = sr / to, out = [];
+  let p = 0;
+  while (p < x.length - 1) { const i = Math.floor(p), f = p - i; out.push(x[i] * (1 - f) + x[i + 1] * f); p += step; }
+  return out;
+}
+function pyRound(v) { const f = Math.floor(v), r = v - f; return r > 0.5 ? f + 1 : r < 0.5 ? f : (f % 2 ? f + 1 : f); }
+
+/* mono float -> int16, peak normalised to 30000 */
+function normalize(x) {
+  let pk = 1e-9;
+  for (const v of x) pk = Math.max(pk, Math.abs(v));
+  return Int16Array.from(x, (v) => Math.max(-32768, Math.min(32767, Math.trunc(v / pk * 30000))));
+}
+
+/* a trimmed sample: raw (mono float at SMP.RATE) from a to b, a fade of FADE samples at both cut ends
+ * (no click where the sound was cut; none at the file's own start and end), normalised */
+const FADE = 44;                                     /* 2 ms at 22050 Hz */
+function takeSample(raw, a, b) {
+  a = Math.max(0, Math.min(raw.length - 1, a | 0));
+  b = Math.max(a + 1, Math.min(raw.length, b | 0));
+  const x = Float64Array.from(raw.subarray ? raw.subarray(a, b) : raw.slice(a, b));
+  const n = Math.min(FADE, x.length >> 1);
+  for (let i = 0; i < n; i++) {
+    const g = i / n;
+    if (a > 0) x[i] *= g;
+    if (b < raw.length) x[x.length - 1 - i] *= g;
+  }
+  return normalize(x);
+}
+
+/* a trimming view [v0, v1) of n samples: zoomed by factor (< 1 in) around the fraction at of the
+ * view, then moved by pan views; at least 256 samples (~12 ms), inside [0, n) */
+function zoomView(n, v0, v1, at, factor, pan) {
+  const min = Math.min(n, 256);
+  let span = Math.round(Math.max(min, Math.min(n, (v1 - v0) * factor)));
+  let c = v0 + at * (v1 - v0) + pan * span;         /* the sample under the pointer stays under it */
+  let a = Math.round(c - at * span);
+  a = Math.max(0, Math.min(n - span, a));
+  return [a, a + span];
+}
+
+/* where the sound is: the first and last sample above rel x the peak, with a 5 ms pre-roll and a
+ * 20 ms tail; [0, length] for silence */
+function autoTrim(raw, rel = 0.02) {
+  let pk = 0;
+  for (const v of raw) pk = Math.max(pk, Math.abs(v));
+  if (!pk) return [0, raw.length];
+  const th = pk * rel;
+  let a = 0, b = raw.length - 1;
+  while (a < raw.length && Math.abs(raw[a]) < th) a++;
+  while (b > a && Math.abs(raw[b]) < th) b--;
+  return [Math.max(0, a - Math.round(SMP.RATE * 0.005)), Math.min(raw.length, b + 1 + Math.round(SMP.RATE * 0.02))];
+}
+
+/* root from a file name like "piano_C4" or "F#3" (C4 = 60), else 60 (sampleio.note_from_name) */
+function rootFromName(name) {
+  const m = /(?<![A-Za-z])([A-G])([#b]?)(-?\d)(?!\d)/.exec(name);
+  if (!m) return 60;
+  const n = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0) + (parseInt(m[3], 10) + 1) * 12;
+  return Math.max(0, Math.min(127, n));
+}
+
+/* zones: [{s: Int16Array (22050 Hz), root, lo?, hi?}] -> {hdr (480 B), data, zones} (sampleio.user_slot) */
+function buildSlot(name, zonesIn) {
+  const zones = [], parts = [];
+  let len = 0;
+  for (const z of zonesIn) {
+    const e = imaEncode(z.s, 0);
+    zones.push({ off: len, n: z.s.length, ls: 0, le: z.s.length - 1, root: z.root, lo: z.lo ?? null, hi: z.hi ?? null, pred: e.pred, idx: e.idx,
+                 rate: z.rate || SMP.RATE });
+    parts.push(e.data);
+    len += e.data.length;
+  }
+  const data = new Uint8Array(len);
+  let o = 0;
+  for (const p of parts) { data.set(p, o); o += p.length; }
+  if (len > SMP.MAX_DATA) throw new Error(`too long: ${len} B (max ${SMP.MAX_DATA} B)`);
+  if (!zones.length || zones.length > SMP.MAX_ZONES) throw new Error("1..16 files per slot");
+  zones.sort((a, b) => a.root - b.root);
+  zones.forEach((z, j) => {
+    if (z.lo == null) {
+      z.lo = j === 0 ? 0 : Math.floor((zones[j - 1].root + z.root) / 2) + 1;
+      z.hi = j === zones.length - 1 ? 127 : Math.floor((z.root + zones[j + 1].root) / 2);
+    }
+  });
+  const hdr = new Uint8Array(SMP.HDR_LEN), v = new DataView(hdr.buffer);
+  v.setUint32(0, 0x504D5346, true);
+  v.setUint16(4, 1, true);
+  hdr[6] = zones.length;
+  const nm = String(name).toUpperCase().replace(/[^\x20-\x7E]/g, "").slice(0, 8);
+  for (let i = 0; i < nm.length; i++) hdr[8 + i] = nm.charCodeAt(i);
+  v.setUint32(16, len, true);
+  v.setUint32(20, crc32(data), true);
+  zones.forEach((z, j) => {
+    const b = 32 + j * 28, rate = pyRound(z.rate / 44100 * 65536);   /* (each zone its own rate: the downsampler) */
+    [z.off, z.n, z.ls, z.le, rate].forEach((x, k) => v.setUint32(b + k * 4, x >>> 0, true));
+    v.setInt16(b + 20, z.root * 16, true);
+    v.setInt16(b + 22, z.pred, true);
+    hdr[b + 24] = z.idx; hdr[b + 25] = z.lo; hdr[b + 26] = z.hi; hdr[b + 27] = 0;
+  });
+  return { hdr, data, zones };
+}
+
+/* the downsampler: a slot's files as uploaded, at its RATE (22050 .. 4000 Hz: the player takes each zone's rate,
+ * so a lower one holds longer in the slot and sounds grittier), ALIAS (no smoothing before the decimation: the
+ * folded highs left in) and BITS (16 .. 3: the samples quantised before the ADPCM) */
+const SMP_RATES = [22050, 16000, 11025, 8000, 5512, 4000];
+const SMP_BITS = [16, 12, 8, 6, 4, 3];
+function crushed(d, f) {
+  if (d.rate === SMP.RATE && d.bits >= 16) return f.s;
+  if (f._ck === `${d.rate}/${d.alias}/${d.bits}/${f.a}/${f.b}/${f.s.length}`) return f._cs;
+  let x;
+  if (d.rate === SMP.RATE) x = Array.from(f.s);
+  else if (d.alias) {                                /* sample and hold: every step-th sample, nothing smoothed */
+    const step = SMP.RATE / d.rate;
+    x = [];
+    for (let p = 0; p < f.s.length; p += step) x.push(f.s[Math.floor(p)]);
+  } else x = resample(Array.from(f.s), SMP.RATE, d.rate);
+  const q = d.bits >= 16 ? 1 : 1 << (16 - d.bits);
+  const out = Int16Array.from(x, (v) => Math.max(-32768, Math.min(32767, q > 1 ? Math.round(v / q) * q : Math.round(v))));
+  f._ck = `${d.rate}/${d.alias}/${d.bits}/${f.a}/${f.b}/${f.s.length}`;
+  f._cs = out;
+  return out;
+}
+
+/* the slicer: one file in a slot cut into zones, a key each from C3 (GLITCH plays a zone a key: STRANGE's KIT; GRAIN,
+ * SAMPLE a zone a key too). SLICE "tr": at its hits (the rise of the high-passed energy in 128-sample hops over its
+ * recent mean, above mean + k x deviation by SENS 0..2, the strongest first, 40 ms apart, at most 16 slices), each cut
+ * on the hit's first sample over 3 x the level before it, moved back to the zero crossing before (at most 3 ms); "8" / "16": equal parts. -> the cuts, 0 first,
+ * in samples of s (SMP.RATE) */
+const SLICE_MODES = ["off", "tr", "8", "16"];
+function transients(s, sens = 1, max = 16) {
+  const hop = 128, nf = Math.floor(s.length / hop), R = SMP.RATE;
+  if (nf < 8) return [0];
+  const e = new Float64Array(nf), od = new Float64Array(nf);
+  for (let f = 0; f < nf; f++) {
+    let a = 0;
+    for (let i = f * hop + 1; i < (f + 1) * hop; i++) { const d = s[i] - s[i - 1]; a += d * d; }
+    e[f] = Math.log(1 + a / hop);
+  }
+  for (let f = 1; f < nf; f++) {
+    let m = 0, k = 0;
+    for (let j = Math.max(0, f - 8); j < f; j++) { m += e[j]; k++; }
+    od[f] = Math.max(0, e[f] - m / k);
+  }
+  let mean = 0, sd = 0;
+  for (const v of od) mean += v / nf;
+  for (const v of od) sd += (v - mean) ** 2 / nf;
+  const th = mean + [2.2, 1.3, 0.6][Math.max(0, Math.min(2, sens))] * Math.sqrt(sd);
+  const gap = Math.ceil(0.04 * R / hop), peaks = [];
+  for (let f = 1; f < nf - 1; f++)
+    if (od[f] > th && od[f] >= od[f - 1] && od[f] > od[f + 1] && f * hop >= 0.04 * R && s.length - f * hop >= 0.04 * R) peaks.push(f);
+  peaks.sort((a, b) => od[b] - od[a]);
+  const keep = [];
+  for (const f of peaks) {
+    if (keep.length >= max - 1) break;
+    if (keep.every((q) => Math.abs(q - f) >= gap)) keep.push(f);
+  }
+  keep.sort((a, b) => a - b);
+  const cuts = [0];
+  let pk = 1;
+  for (const v of s) pk = Math.max(pk, Math.abs(v));
+  for (const f of keep) {                            /* the hit's first loud sample, then back to the zero crossing */
+    const p0 = Math.max(0, (f - 2) * hop);
+    let rms = 0;
+    for (let i = p0; i < p0 + hop; i++) rms += s[i] * s[i] / hop;
+    const thr = Math.max(3 * Math.sqrt(rms), 0.02 * pk);
+    let c = (f - 1) * hop;
+    while (c < (f + 1) * hop && Math.abs(s[c]) < thr) c++;
+    const lo = Math.max(cuts[cuts.length - 1] + 1, c - 64);
+    while (c > lo && !(s[c - 1] <= 0 && s[c] >= 0) && !(s[c - 1] >= 0 && s[c] <= 0)) c--;
+    cuts.push(c);
+  }
+  return cuts;
+}
+/* a draft's slices: the cuts of its one file (in s, SMP.RATE), cached by what they follow; [0] = not sliced */
+function sliceCuts(d, f) {
+  if (!d.slice || d.slice === "off" || d.files.length !== 1) return [0];
+  const key = `${d.slice}/${d.sens}/${f.a}/${f.b}/${f.s.length}`;
+  if (f._sk === key) return f._sc;
+  const n = f.s.length;
+  f._sc = d.slice === "tr" ? transients(f.s, d.sens ?? 1) : Array.from({ length: +d.slice }, (_, i) => Math.round(i * n / +d.slice));
+  f._sk = key;
+  return f._sc;
+}
+/* the zones buildSlot takes for a draft: its files, or its one file's slices (cut at d's rate) on C3 up, a key each */
+function draftZones(d) {
+  if (d.files.length === 1 && d.slice && d.slice !== "off") {
+    const f = d.files[0], cs = crushed(d, f), cuts = sliceCuts(d, f), r = d.rate / SMP.RATE, nz = cuts.length;
+    if (nz > 1)
+      return cuts.map((c, i) => {
+        const a = Math.round(c * r), b = i + 1 < nz ? Math.round(cuts[i + 1] * r) : cs.length;
+        return { s: cs.subarray(a, Math.max(a + 2, b)), root: 48 + i, lo: i ? 48 + i : 0, hi: i + 1 < nz ? 48 + i : 127, rate: d.rate };
+      });
+  }
+  return d.files.map((f) => ({ s: crushed(d, f), root: f.root, rate: d.rate }));
+}
+
+
+/* ================================================================ the link === */
+/* web/pulhra_editor.html <-> firmware/src/pulhra/sm_ed.c: F0 7D 50 48 cmd .. F7, numbers u21 (3 x 7 bit, low first), data pack7 */
+const ED = { INFO: 1, READ: 2, ERASE: 3, WRITE: 4, RELOAD: 5, STATE: 6 };
+const RC = ["ok", "плохие аргументы", "FM-1 играет: нажми STOP", "ошибка флеша", "нет флеша"];
+const REG = { PROJECT: 0, BANKS: 1, PRESETS: 2, SAMPLE: 3 };
+const SEC = 4096;
+let access = null, out = null, inp = null, waiter = null, chain = Promise.resolve(), info = null;
+const $ = (id) => document.getElementById(id);
+const log = (s) => { const l = $("log"); l.textContent += s + "\n"; l.scrollTop = l.scrollHeight; };
+const u21 = (v) => [v & 127, (v >> 7) & 127, (v >> 14) & 127];
+const ru21 = (a, i) => a[i] | (a[i + 1] << 7) | (a[i + 2] << 14);
+function status(s, cls) { const e = $("status"); e.textContent = s; e.className = cls || ""; }
+
+function onMsg(ev) {
+  const d = ev.data;
+  if (d.length < 7 || d[0] !== 0xF0 || d[1] !== 0x7D || d[2] !== 0x50 || d[3] !== 0x48 || !waiter) return;
+  if (d[4] !== waiter.cmd) return;
+  const w = waiter;
+  waiter = null;
+  clearTimeout(w.t);
+  w.ok(Array.from(d.slice(5, d.length - 1)));
+}
+/* one request, its reply's bytes after cmd (rc first); one at a time */
+function req(cmd, args = [], ms = 4000) {
+  const run = () => new Promise((ok, no) => {
+    if (!out) return no(new Error("не подключено"));
+    waiter = { cmd, ok, t: setTimeout(() => { waiter = null; no(new Error("FM-1 не отвечает")); }, ms) };
+    out.send([0xF0, 0x7D, 0x50, 0x48, cmd, ...args, 0xF7]);
+  });
+  const p = chain.then(run, run);
+  chain = p.catch(() => {});
+  return p;
+}
+async function reqOk(cmd, args, ms) {
+  const r = await req(cmd, args, ms);
+  if (r[0]) throw new Error(RC[r[0]] || "ошибка " + r[0]);
+  return r;
+}
+
+async function connect() {
+  if (!navigator.requestMIDIAccess) { status("этот браузер без Web MIDI: открой в Chrome", "bad"); return; }
+  try { access = access || await navigator.requestMIDIAccess({ sysex: true }); }
+  catch (e) { status("нет доступа к MIDI (SysEx): " + e.message, "bad"); return; }
+  const outs = [...access.outputs.values()], ins = [...access.inputs.values()];
+  const sel = $("ports");
+  sel.innerHTML = outs.map((o, i) => `<option value="${i}">${o.name}</option>`).join("");
+  sel.hidden = outs.length < 2;
+  let pick = outs.findIndex((o) => /fm-?1|felucca|pulhra|m-?vave/i.test(o.name));
+  if (pick < 0) pick = 0;
+  sel.value = String(pick);
+  await usePort(outs, ins, pick);
+  sel.onchange = () => usePort(outs, ins, +sel.value);
+}
+async function usePort(outs, ins, i) {
+  if (inp) inp.onmidimessage = null;
+  out = outs[i] || null;
+  inp = ins.find((x) => out && x.name === out.name) || ins[i] || null;
+  if (!out || !inp) { status("FM-1 не найдена: подключи по USB", "bad"); return; }
+  inp.onmidimessage = onMsg;
+  try {
+    const r = await reqOk(ED.INFO, [], 2000);
+    const n = r[2], regs = [];
+    let k = 3;
+    for (let j = 0; j < n; j++, k += 7) regs.push({ id: r[k], base: ru21(r, k + 1), size: ru21(r, k + 4) });
+    let name = "";
+    while (k < r.length && r[k]) name += String.fromCharCode(r[k++]);
+    info = { ver: r[1], regs, name };
+    status(`${name} · ${out.name}`, "ok");
+    log(`подключено: ${name}, протокол ${info.ver}`);
+    for (const id of ["upRead", "upWrite", "smRead", "smClear", "bkSave", "bkLoadBtn", "bnRead"]) $(id).disabled = false;
+    refreshUpload();
+  } catch (e) {
+    info = null;
+    status("нет ответа: нужна прошивка PULHRA с редактором (31.10 и новее)", "bad");
+  }
+}
+const regSize = (id) => info.regs.find((r) => r.id === id).size;
+async function stopped() {
+  const r = await reqOk(ED.STATE);
+  if (r[1]) throw new Error(RC[2]);
+}
+async function readRegion(id, size, prog) {
+  const buf = new Uint8Array(size);
+  for (let off = 0; off < size; off += 256) {
+    const len = Math.min(256, size - off);
+    const r = await reqOk(ED.READ, [id, ...u21(off), len & 127, len >> 7]);
+    buf.set(unpack7(r.slice(7)).subarray(0, len), off);
+    if (prog) prog(off + len, size);
+  }
+  return buf;
+}
+/* bytes at off of region id: its sectors erased, then written (chunks of all 0xFF skipped: erased is 0xFF) */
+async function writeRegion(id, off, bytes, prog) {
+  const end = off + bytes.length, s0 = Math.floor(off / SEC) * SEC, total = (end - s0) + bytes.length;
+  let done = 0;
+  for (let s = s0; s < end; s += SEC) {
+    await reqOk(ED.ERASE, [id, ...u21(s)], 8000);
+    done += SEC;
+    if (prog) prog(Math.min(done, total), total);
+  }
+  for (let o = 0; o < bytes.length; o += 256) {
+    const c = bytes.subarray(o, Math.min(bytes.length, o + 256));
+    if (c.some((b) => b !== 0xFF)) await reqOk(ED.WRITE, [id, ...u21(off + o), ...pack7(c)], 6000);
+    if (prog) prog(Math.min(total, end - s0 + o + c.length), total);
+  }
+}
+const reload = (what) => reqOk(ED.RELOAD, [what]);
+function setBar(id, a, b, label) {
+  const bar = $(id);
+  bar.querySelector("i").style.width = (b ? Math.min(100, 100 * a / b) : 0) + "%";
+  if (label !== undefined) { const t = $(label); if (t) t.textContent = b ? Math.round(100 * a / b) + " %" : ""; }
+}
+function download(name, bytes, type = "application/octet-stream") {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([bytes], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const today = () => new Date().toISOString().slice(0, 10).replace(/-/g, "");
+async function guard(btn, f) {
+  btn.disabled = true;
+  try { await f(); } catch (e) { log("ошибка: " + e.message); alert(e.message); }
+  finally { btn.disabled = !info; }
+}
+
+/* ============================================================ user sounds === */
+/* firmware/src/pulhra/sm_upre.c: two sectors, 144-byte records {magic u16 0x5055, place u8, cat u8, seq u32, name[10],
+ * sm_sound_t, (pad), crc u16: the low 16 bits of the CRC-32 of the 142 bytes before it}; each place's newest (ties: the
+ * sector holding the newest record) */
+const UP = { REC: LAY.urec, N: LAY.upN, NAME: LAY.upName, SND: 18, CRC: LAY.urec - 2, PER: Math.floor(SEC / LAY.urec) };
+let places = new Array(UP.N).fill(null);              /* each: {rec: Uint8Array(144)} */
+function recCrc(r) { return crc32(r.subarray(0, UP.CRC)) & 0xFFFF; }
+function recOk(r) { return (r[0] | r[1] << 8) === LAY.upMagic && r[2] < UP.N && (r[UP.CRC] | r[UP.CRC + 1] << 8) === recCrc(r); }
+const recSeq = (r) => (r[4] | r[5] << 8 | r[6] << 16 | r[7] << 24) >>> 0;
+function parsePresets(img) {
+  const all = [];
+  for (let s = 0; s < 2; s++)
+    for (let o = 0; o + UP.REC <= SEC; o += UP.REC) {
+      const r = img.slice(s * SEC + o, s * SEC + o + UP.REC);
+      if (recOk(r)) all.push({ s, r });
+    }
+  let act = 0, top = -1;
+  for (const x of all) if (recSeq(x.r) > top) { top = recSeq(x.r); act = x.s; }
+  const pl = new Array(UP.N).fill(null);
+  for (const pass of [act ^ 1, act])
+    for (const x of all) {
+      if (x.s !== pass) continue;
+      const k = x.r[2], cur = pl[k];
+      if (!cur || recSeq(x.r) >= recSeq(cur.rec)) pl[k] = { rec: x.r };
+    }
+  return pl;
+}
+const recName = (r) => String.fromCharCode(...r.subarray(8, 8 + UP.NAME)).replace(/\0.*$/, "");
+/* a record of before 31.10: the name's 0 fell on the machine (0: SAW); the machine whose first four letters the name has */
+function recMach(r) {
+  const m = r[UP.SND + LAY.sndMachine];
+  if (m) return m;
+  const pre = String.fromCharCode(...r.subarray(8, 12));
+  const hits = MACH.map((n, i) => ((n + "    ").slice(0, 4).toUpperCase() === pre ? i : -1)).filter((i) => i >= 0);
+  return hits.length === 1 ? hits[0] : m;
+}
+function setRecName(r, s) {
+  const t = s.toUpperCase().replace(/[^\x20-\x5F]/g, "").slice(0, UP.NAME);
+  for (let i = 0; i < UP.NAME; i++) r[8 + i] = i < t.length ? t.charCodeAt(i) : 0;
+}
+function drawPresets() {
+  const t = $("upTable");
+  let h = "<tr><th>место</th><th>имя</th><th>машина</th><th>звук</th><th>категория</th><th></th></tr>";
+  for (let k = 0; k < UP.N; k++) {
+    const p = places[k], u = "U" + String(k + 1).padStart(2, "0");
+    if (!p) { h += `<tr class="empty"><td>${u}</td><td colspan="4">—</td><td><button data-mv="${k}">↥</button></td></tr>`; continue; }
+    const m = recMach(p.rec), pr = p.rec[UP.SND + LAY.sndPreset];
+    h += `<tr><td>${u}</td><td><input type="text" maxlength="${UP.NAME}" data-nm="${k}" value="${recName(p.rec)}"></td>` +
+         `<td>${MACH[m] || "?"}</td><td class="dim">${(PRESETS[m] || [])[pr] || ""}</td><td>${CATS[p.rec[3]] || "-"}</td>` +
+         `<td><button data-up="${k}" title="выше">▲</button> <button data-dn="${k}" title="ниже">▼</button> <button data-del="${k}" title="удалить">✕</button></td></tr>`;
+  }
+  t.innerHTML = h;
+  const used = places.filter(Boolean).length;
+  $("upInfo").textContent = `${used} из ${UP.N} мест занято.`;
+}
+function swap(a, b) {
+  if (b < 0 || b >= UP.N) return;
+  [places[a], places[b]] = [places[b], places[a]];
+  for (const k of [a, b]) if (places[k]) places[k].rec[2] = k;
+  drawPresets();
+}
+$("upTable").addEventListener("click", (e) => {
+  const d = e.target.dataset;
+  if (d.up) swap(+d.up, +d.up - 1);
+  else if (d.dn) swap(+d.dn, +d.dn + 1);
+  else if (d.del && confirm("Удалить звук с места U" + String(+d.del + 1).padStart(2, "0") + "? (в FM-1 — после «Записать»)")) { places[+d.del] = null; drawPresets(); }
+});
+$("upTable").addEventListener("change", (e) => {
+  const k = e.target.dataset.nm;
+  if (k !== undefined && places[+k]) { setRecName(places[+k].rec, e.target.value); e.target.value = recName(places[+k].rec); }
+});
+/* both sectors new: the records in a row from the first, numbered 1.. (the device's index the same after RELOAD 2) */
+function presetImage() {
+  const img = new Uint8Array(2 * SEC).fill(0xFF);
+  let o = 0, seq = 1;
+  for (let k = 0; k < UP.N; k++) {
+    const p = places[k];
+    if (!p) continue;
+    const r = p.rec.slice();
+    r[0] = LAY.upMagic & 255; r[1] = LAY.upMagic >> 8; r[2] = k;
+    r[UP.SND + LAY.sndMachine] = recMach(r);              /* (a record of before: its machine written back) */
+    r[4] = seq & 255; r[5] = (seq >> 8) & 255; r[6] = (seq >> 16) & 255; r[7] = seq >>> 24;
+    seq++;
+    const c = recCrc(r);
+    r[UP.CRC] = c & 255; r[UP.CRC + 1] = c >> 8;
+    img.set(r, o);
+    o += UP.REC;
+  }
+  return img;
+}
+$("upRead").onclick = (e) => guard(e.target, async () => {
+  const img = await readRegion(REG.PRESETS, regSize(REG.PRESETS));
+  places = parsePresets(img);
+  drawPresets();
+  log("пресеты прочитаны");
+});
+$("upWrite").onclick = (e) => guard(e.target, async () => {
+  if (!confirm("Записать все 24 места в FM-1? То, что там сейчас, заменится этим списком.")) return;
+  await stopped();
+  await writeRegion(REG.PRESETS, 0, presetImage());
+  await reload(2);
+  log("пресеты записаны");
+});
+$("upSave").onclick = () => {
+  const lib = { format: "pulhra-presets", version: 1, exported: new Date().toISOString(), firmware: info ? info.name : "",
+                places: places.map((p) => p ? btoa(String.fromCharCode(...p.rec)) : null) };
+  download(`pulhra-presets-${today()}.json`, JSON.stringify(lib, null, 1), "application/json");
+};
+$("upLoadBtn").onclick = () => $("upLoad").click();
+$("upLoad").onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (j.format !== "pulhra-presets" || !Array.isArray(j.places)) throw new Error("это не файл пресетов PULHRA");
+    const pl = j.places.map((b) => b ? { rec: Uint8Array.from(atob(b), (c) => c.charCodeAt(0)) } : null);
+    if (pl.some((p) => p && (p.rec.length !== UP.REC || !recOk(p.rec)))) throw new Error("файл повреждён");
+    const merge = places.some(Boolean) && confirm("Добавить к текущему списку в свободные места? (Отмена — заменить список)");
+    if (merge) {
+      for (const p of pl) {
+        if (!p) continue;
+        const k = places.findIndex((x) => !x);
+        if (k < 0) { alert("свободных мест не хватило"); break; }
+        places[k] = { rec: p.rec.slice() };
+        places[k].rec[2] = k;
+      }
+    } else {
+      places = new Array(UP.N).fill(null);
+      pl.slice(0, UP.N).forEach((p, k) => { if (p) { places[k] = p; p.rec[2] = k; } });
+    }
+    drawPresets();
+    log(`открыт ${f.name}`);
+  } catch (err) { alert(err.message); }
+};
+
+/* ================================================================ samples === */
+/* firmware/src/eng_sample.c: the slot USR1, flash 0xA0000, 80 KiB: a header (magic FSMP, version 1, zones, name, data_len,
+ * crc, 16 zones), the IMA ADPCM data at +512. The page builds it (buildSlot, from Felucca's editor) and writes it whole */
+const draft = { files: [], slice: "off", sens: 1, rate: 22050, alias: false, bits: 16 };
+$("smRate").innerHTML = SMP_RATES.map((r) => `<option value="${r}">${r} Гц</option>`).join("");
+$("smBits").innerHTML = SMP_BITS.map((b) => `<option value="${b}">${b}</option>`).join("");
+function slotNow(h) {
+  const v = new DataView(h.buffer, h.byteOffset, h.byteLength);
+  if (v.getUint32(0, true) !== 0x504D5346 || v.getUint16(4, true) !== 1 || !h[6]) return "пусто";
+  const nm = String.fromCharCode(...h.subarray(8, 16)).replace(/\0.*$/, ""), len = v.getUint32(16, true);
+  let sec = 0;
+  for (let i = 0; i < h[6]; i++) sec += v.getUint32(32 + i * 28 + 4, true) / (v.getUint32(32 + i * 28 + 16, true) / 65536 * 44100);
+  return `${nm}: ${h[6]} зон, ${(len / 1024).toFixed(1)} КБ, ${sec.toFixed(1)} с`;
+}
+$("smRead").onclick = (e) => guard(e.target, async () => {
+  $("smNow").textContent = slotNow(await readRegion(REG.SAMPLE, 512));
+});
+$("smClear").onclick = (e) => guard(e.target, async () => {
+  if (!confirm("Стереть сэмпл-слот USR1?")) return;
+  await stopped();
+  await reqOk(ED.ERASE, [REG.SAMPLE, 0, 0, 0], 8000);
+  await reload(4);
+  $("smNow").textContent = "пусто";
+  log("слот очищен");
+});
+async function addFiles(list) {
+  for (const f of [...list].slice(0, 16 - draft.files.length)) {
+    try {
+      const w = parseWav(await f.arrayBuffer());
+      const raw = Float64Array.from(resample(w.x, w.sr, SMP.RATE));
+      const [a, b] = autoTrim(raw);
+      draft.files.push({ name: f.name, root: rootFromName(f.name), a, b, s: takeSample(raw, a, b) });
+    } catch (err) { log(`${f.name}: ${err.message}`); }
+  }
+  if (draft.files.length && $("smName").value === "USER") $("smName").value = draft.files[0].name.replace(/\.[^.]*$/, "").slice(0, 8).toUpperCase();
+  refreshUpload();
+}
+let built = null;
+function refreshUpload() {
+  draft.slice = $("smSlice").value;
+  draft.rate = +$("smRate").value;
+  draft.bits = +$("smBits").value;
+  built = null;
+  let err = "";
+  try { if (draft.files.length) built = buildSlot($("smName").value || "USER", draftZones(draft)); }
+  catch (e) { err = e.message; }
+  let len = 0;
+  if (built) len = built.data.length;
+  else if (draft.files.length) {
+    for (const z of draftZones(draft)) len += (z.s.length + 1) >> 1;
+  }
+  $("smBar").classList.toggle("over", len > SMP.MAX_DATA);
+  setBar("smBar", len, SMP.MAX_DATA);
+  $("smSize").textContent = `${(len / 1024).toFixed(1)} / ${(SMP.MAX_DATA / 1024).toFixed(0)} КБ` + (err ? ` — ${err}` : "");
+  const zs = draft.files.length ? draftZones(draft) : [];
+  $("smTable").innerHTML = zs.length ? "<tr><th>зона</th><th>клавиши</th><th>длина</th><th></th></tr>" + zs.map((z, i) =>
+    `<tr><td>${i + 1}${draft.files.length > 1 ? " · " + draft.files[i].name : ""}</td><td>${z.lo ?? "авто"}${z.hi != null ? "–" + z.hi : ""}</td>` +
+    `<td>${(z.s.length / z.rate).toFixed(2)} с</td><td><button data-play="${i}">▶</button>${draft.files.length > 1 ? ` <button data-rm="${i}">✕</button>` : ""}</td></tr>`).join("") : "";
+  $("smUpload").disabled = !info || !built;
+}
+$("smTable").addEventListener("click", (e) => {
+  const d = e.target.dataset;
+  if (d.rm !== undefined) { draft.files.splice(+d.rm, 1); refreshUpload(); }
+  if (d.play !== undefined) {
+    const z = draftZones(draft)[+d.play], ctx = new AudioContext(), b = ctx.createBuffer(1, z.s.length, z.rate), ch = b.getChannelData(0);
+    for (let i = 0; i < z.s.length; i++) ch[i] = z.s[i] / 32768;
+    const src = ctx.createBufferSource();
+    src.buffer = b; src.connect(ctx.destination); src.start();
+    src.onended = () => ctx.close();
+  }
+});
+for (const id of ["smSlice", "smRate", "smBits"]) $(id).onchange = refreshUpload;
+$("smName").oninput = refreshUpload;
+$("smFiles").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+const drop = $("drop");
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("hot"); };
+drop.ondragleave = () => drop.classList.remove("hot");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("hot"); addFiles(e.dataTransfer.files); };
+$("smUpload").onclick = (e) => guard(e.target, async () => {
+  if (!built) return;
+  await stopped();
+  const img = new Uint8Array(SMP.DATA_OFF + built.data.length).fill(0xFF);
+  img.fill(0, 0, SMP.DATA_OFF);
+  img.set(built.hdr, 0);
+  img.set(built.data, SMP.DATA_OFF);
+  await writeRegion(REG.SAMPLE, 0, img, (a, b) => { setBar("smBar", a, b); $("smSize").textContent = `загрузка ${Math.round(100 * a / b)} %`; });
+  const back = await readRegion(REG.SAMPLE, img.length);
+  if (back.some((x, i) => x !== img[i])) throw new Error("проверка не прошла: прочитанное отличается");
+  await reload(4);
+  $("smNow").textContent = slotNow(img.subarray(0, 512));
+  log(`слот загружен: ${built.zones.length} зон, ${(built.data.length / 1024).toFixed(1)} КБ`);
+  refreshUpload();
+});
+
+/* ============================================================= the banks === */
+/* a backup file: "PHBK", version 1, the regions: count, then each {id u8, size u32 LE, bytes} */
+let bankImg = null;
+const REGS_ALL = [REG.PROJECT, REG.BANKS, REG.PRESETS, REG.SAMPLE];
+$("bkSave").onclick = (e) => guard(e.target, async () => {
+  const parts = [], total = REGS_ALL.reduce((s, id) => s + regSize(id), 0);
+  let done = 0;
+  for (const id of REGS_ALL) {
+    const sz = regSize(id);
+    parts.push({ id, data: await readRegion(id, sz, (a) => setBar("bkBar", done + a, total, "bkPct")) });
+    done += sz;
+  }
+  const n = 6 + parts.reduce((s, p) => s + 5 + p.data.length, 0), f = new Uint8Array(n), v = new DataView(f.buffer);
+  f.set([0x50, 0x48, 0x42, 0x4B, 1, parts.length]);
+  let o = 6;
+  for (const p of parts) { f[o] = p.id; v.setUint32(o + 1, p.data.length, true); f.set(p.data, o + 5); o += 5 + p.data.length; }
+  download(`pulhra-backup-${today()}.phbk`, f);
+  bankImg = parts.find((p) => p.id === REG.BANKS).data;
+  drawBanks();
+  log("бэкап сохранён");
+});
+function parseBackup(buf) {
+  const f = new Uint8Array(buf), v = new DataView(f.buffer);
+  if (f.length < 6 || String.fromCharCode(f[0], f[1], f[2], f[3]) !== "PHBK" || f[4] !== 1) throw new Error("это не бэкап PULHRA");
+  const parts = [];
+  let o = 6;
+  for (let i = 0; i < f[5]; i++) {
+    const id = f[o], sz = v.getUint32(o + 1, true);
+    if (o + 5 + sz > f.length) throw new Error("файл обрезан");
+    parts.push({ id, data: f.slice(o + 5, o + 5 + sz) });
+    o += 5 + sz;
+  }
+  return parts;
+}
+$("bkLoadBtn").onclick = () => $("bkLoad").click();
+$("bkLoad").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  let parts;
+  try { parts = parseBackup(await file.arrayBuffer()); } catch (err) { alert(err.message); return; }
+  const b = parts.find((p) => p.id === REG.BANKS);
+  if (b) { bankImg = b.data; drawBanks(); }
+  if (!info) return;
+  if (!confirm(`Восстановить ${file.name} в FM-1? Проект, банки, пресеты и сэмпл-слот заменятся, FM-1 перезапустится.`)) return;
+  const btn = $("bkLoadBtn");
+  await guard(btn, async () => {
+    await stopped();
+    const total = parts.reduce((s, p) => s + 2 * p.data.length, 0);
+    let done = 0;
+    for (const p of parts) {
+      const reg = info.regs.find((r) => r.id === p.id);
+      if (!reg || p.data.length !== reg.size) throw new Error("размеры в файле не совпадают с этой прошивкой");
+      await writeRegion(p.id, 0, p.data, (a) => setBar("bkBar", done + a, total, "bkPct"));
+      done += 2 * p.data.length;
+    }
+    log("восстановлено, FM-1 перезапускается");
+    await reload(1 | 2 | 4).catch(() => {});
+  });
+};
+$("bnRead").onclick = (e) => guard(e.target, async () => {
+  bankImg = await readRegion(REG.BANKS, regSize(REG.BANKS), (a, b) => setBar("bkBar", a, b, "bkPct"));
+  drawBanks();
+});
+/* sm_bank.c: 5 places of 32 KiB: a 32-byte header {magic SWB1, version u16, bank u8, used u8, seq u32, size u32, crc u32, ..},
+ * the bank's 8 patterns at +64; each bank its newest valid place */
+let bnSel = { bank: 0, pat: 0 };
+function banksOf(img) {
+  const best = [];
+  for (let i = 0; i < LAY.flNslot; i++) {
+    const o = i * LAY.flSpan, v = new DataView(img.buffer, img.byteOffset + o, 64);
+    if (v.getUint32(0, true) !== LAY.bmagic) continue;
+    const ver = v.getUint16(4, true), bank = img[o + 6], used = img[o + 7], seq = v.getUint32(8, true), size = v.getUint32(12, true);
+    const pb = ver === 3 ? LAY.pat3 : ver === 4 ? LAY.pat4 : ver === 5 ? LAY.pat5 : ver === LAY.bankVer ? LAY.pattern : 0;
+    if (!pb || bank >= LAY.nbank || size !== LAY.bpat * pb || size + LAY.flData > LAY.flSpan) continue;
+    if (crc32(img.subarray(o + LAY.flData, o + LAY.flData + size)) !== v.getUint32(16, true)) continue;
+    if (!best[bank] || ((seq - best[bank].seq) | 0) > 0) best[bank] = { o, ver, used, seq, pb };
+  }
+  return best;
+}
+function drawBanks() {
+  if (!bankImg) return;
+  const bk = banksOf(bankImg);
+  $("bnBanks").innerHTML = ["A", "B", "C", "D"].map((n, i) => `<button data-bk="${i}" class="${bnSel.bank === i ? "on" : ""} ${bk[i] ? "" : "unused"}">${n}</button>`).join("");
+  const b = bk[bnSel.bank];
+  $("bnPats").innerHTML = Array.from({ length: LAY.bpat }, (_, j) =>
+    `<button data-pt="${j}" class="${bnSel.pat === j ? "on" : ""} ${b && (b.used >> j) & 1 ? "" : "unused"}">${"ABCD"[bnSel.bank]}${String(j + 1).padStart(2, "0")}</button>`).join("");
+  if (!b) { $("bnGrid").innerHTML = `<div class="dim">банк ${"ABCD"[bnSel.bank]} не сохранён</div>`; return; }
+  const p = b.o + LAY.flData + bnSel.pat * b.pb;
+  let h = "";
+  for (let t = 0; t < LAY.ntrk; t++) {
+    const s = p + t * LAY.sound, m = bankImg[s + LAY.sndMachine], len = bankImg[s + LAY.sndLen] || 16;
+    const kit = m === LAY.kitMach, rows = kit ? 4 : 1;
+    for (let L = 0; L < rows; L++) {
+      let cells = "";
+      for (let st = 0; st < LAY.nstep; st++) {
+        const q = p + LAY.stepOff + (t * LAY.nstep + st) * LAY.step, n = bankImg[q + 4];
+        const on = n && (kit ? bankImg[q + L] : true);
+        cells += `<i class="${on ? "on" : ""} ${st >= len ? "out" : ""} ${st % 4 ? "" : "q"}"></i>`;
+      }
+      const lab = kit ? `T${t + 1} L${L + 1}` : `T${t + 1} ${MACH[m] || "?"}`;
+      h += `<div class="trk"><span class="lab">${lab}</span><span class="st">${cells}</span><span class="dim">${len}</span></div>`;
+    }
+  }
+  $("bnGrid").innerHTML = h;
+}
+$("bnBanks").onclick = (e) => { if (e.target.dataset.bk) { bnSel.bank = +e.target.dataset.bk; drawBanks(); } };
+$("bnPats").onclick = (e) => { if (e.target.dataset.pt) { bnSel.pat = +e.target.dataset.pt; drawBanks(); } };
+
+/* ================================================================== page === */
+for (const b of document.querySelectorAll("nav button"))
+  b.onclick = () => {
+    for (const x of document.querySelectorAll("nav button")) x.classList.toggle("on", x === b);
+    for (const s of document.querySelectorAll("section")) s.classList.toggle("on", s.id === b.dataset.tab);
+  };
+$("connect").onclick = connect;
+$("theme").onclick = () => {
+  const r = document.documentElement, t = r.dataset.theme === "light" ? "dark" : "light";
+  r.dataset.theme = t;
+  try { localStorage.setItem("pulhra-ed-theme", t); } catch (e) {}
+};
+try { const t = localStorage.getItem("pulhra-ed-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+drawPresets();
+refreshUpload();
+if (!navigator.requestMIDIAccess) status("нужен Chrome / Edge (Web MIDI)", "bad");
+</script>
+</body>
+</html>

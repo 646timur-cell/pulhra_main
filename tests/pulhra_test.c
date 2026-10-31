@@ -64,6 +64,7 @@ static void fm1_led_key(unsigned k, int on) { (void)k; (void)on; }
 static void settings_save(void) {}
 #include "../firmware/src/settings_persist.c"
 static uint8_t nor[0x100000], flash_ok = 1;
+static const uint8_t *host_xip(uint32_t off) { return nor + (off & 0xFFFFFu); }
 /* the power cut (the banks test): the flash takes nor_budget more bytes (an erase counts 1) and then nothing; -1 no cut.
  * nor_writes counts every erase and program (nothing is written while playing) */
 static int32_t nor_budget = -1;
@@ -9887,7 +9888,7 @@ static int test_cloud(void)
         run_block();
     P = cl_part(&trk[0]);
     bad += check("CLOUD: its source decoded whole (GLASS: 8820 samples)", P->have && P->n == P->len && P->len == 8820u);
-    for (src = 0; src < CL_NSRC; src++) {
+    for (src = 0; src < CL_USER; src++) {             /* (USER: the slot, empty here: EDSLOT's) */
         trk[0].p[P_E0] = (int16_t)src;
         trk[0].p[P_E1] = (int16_t)(src * 2u);
         for (b = 0; b < 20u; b++)
@@ -9981,6 +9982,224 @@ static int test_organ(void)
     trk_all_off(&trk[0]);
     play_blocks(400);
     bad += check("ORGAN: a chord sounds, ROTR's tremolo moves it", hi > 3000u && lo * 10u < hi * 9u);
+    return bad;
+}
+
+/* the web editor's link (sm_ed.c): INFO lists the regions; a sector erased, 256 bytes written and read back through the frames;
+ * a write refused while playing; RELOAD 2 indexes the user sounds anew (a record written raw shows up); bad arguments */
+static uint32_t ed_frame(const uint8_t *body, uint32_t n)  /* body: cmd and args -> the reply's length (sm_ed_out) */
+{
+    uint8_t f[600];
+    f[0] = SM_ED_H0;
+    f[1] = SM_ED_H1;
+    f[2] = SM_ED_H2;
+    memcpy(f + 3, body, n);
+    return sm_ed_handle(f, n + 3u);
+}
+static uint32_t ed_pack7(const uint8_t *d, uint32_t n, uint8_t *o)
+{
+    uint32_t i, j, k = 0;
+    for (i = 0; i < n; i += 7u) {
+        uint32_t top = 0, m = n - i < 7u ? n - i : 7u;
+        for (j = 0; j < m; j++)
+            top |= (uint32_t)(d[i + j] >> 7) << j;
+        o[k++] = (uint8_t)top;
+        for (j = 0; j < m; j++)
+            o[k++] = d[i + j] & 0x7Fu;
+    }
+    return k;
+}
+static int test_editor_link(void)
+{
+    int bad = 0;
+    uint8_t q[600], data[256], back[256];
+    uint32_t i, n, off = SM_FL_SEC;                       /* (the presets' second sector) */
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    st_erase(SM_UP_SEC0);
+    st_erase(SM_UP_SEC0 + SM_FL_SEC);
+    sm_up_boot();
+    q[0] = SM_ED_INFO;
+    n = ed_frame(q, 1);
+    bad += check("EDLINK: INFO: ok, version 1, 4 regions (the presets' at 0xDE000, 8 KiB)", n > 20u && sm_ed_out[5] == 0 &&
+                 sm_ed_out[6] == 1 && sm_ed_out[7] == 4 && sm_ed_ru21(sm_ed_out + 8 + 2 * 7 + 1) == SM_UP_SEC0 &&
+                 sm_ed_ru21(sm_ed_out + 8 + 2 * 7 + 4) == 2u * SM_FL_SEC);
+    q[0] = SM_ED_ERASE; q[1] = 2; q[2] = (uint8_t)(off & 127u); q[3] = (uint8_t)((off >> 7) & 127u); q[4] = (uint8_t)(off >> 14);
+    n = ed_frame(q, 5);
+    bad += check("EDLINK: ERASE a sector of the presets: ok", n && sm_ed_out[5] == SM_ED_OK);
+    for (i = 0; i < 256u; i++)
+        data[i] = (uint8_t)(i * 7u + 3u);
+    q[0] = SM_ED_WRITE;
+    n = ed_frame(q, 5u + ed_pack7(data, 256, q + 5));
+    bad += check("EDLINK: WRITE 256 bytes: ok (read back by the device)", n && sm_ed_out[5] == SM_ED_OK);
+    q[0] = SM_ED_READ; q[5] = 0; q[6] = 2;               /* (len 256: 0 + 2 x 128) */
+    n = ed_frame(q, 7);
+    sm_ed_unpack7(sm_ed_out + 12, n - 13u, back, sizeof back);
+    bad += check("EDLINK: READ 256 bytes: the same", n && sm_ed_out[5] == SM_ED_OK && !memcmp(back, data, 256));
+    sm_playing = 1;
+    q[0] = SM_ED_WRITE;
+    n = ed_frame(q, 5u + ed_pack7(data, 16, q + 5));
+    bad += check("EDLINK: WRITE while playing: busy", n && sm_ed_out[5] == SM_ED_BUSY);
+    sm_playing = 0;
+    q[0] = SM_ED_READ; q[1] = 9;
+    n = ed_frame(q, 7);
+    bad += check("EDLINK: a region past the list: bad argument", n && sm_ed_out[5] == SM_ED_BADARG);
+    {                                                     /* a record written raw, RELOAD 2: the place is there */
+        sm_urec_t r;
+        memset(&r, 0, sizeof r);
+        r.magic = SM_UP_MAGIC;
+        r.place = 5;
+        r.cat = 2;
+        r.seq = 77;
+        sm_sound_from_preset(&r.snd, 0, 1);
+        memcpy(r.name, "EDIT TEST", 9);
+        r.crc = sm_up_crc(&r);
+        q[0] = SM_ED_ERASE; q[1] = 2; q[2] = q[3] = q[4] = 0;
+        ed_frame(q, 5);
+        q[0] = SM_ED_WRITE;
+        ed_frame(q, 5u + ed_pack7((const uint8_t *)&r, sizeof r, q + 5));
+        q[0] = SM_ED_RELOAD; q[1] = 2;
+        n = ed_frame(q, 2);
+        bad += check("EDLINK: a record written, RELOAD 2: place U06 used", n && sm_ed_out[5] == SM_ED_OK && sm_up_used(5) &&
+                     !sm_up_used(4));
+    }
+    q[0] = 2; q[1] = 0;                                   /* (not ours: another header) */
+    {
+        uint8_t g[4] = {0x7D, 0x46, 0x4C, 1};
+        bad += check("EDLINK: another header (Felucca's editor): not ours", sm_ed_handle(g, 4) == 0u);
+    }
+    st_erase(SM_UP_SEC0);
+    st_erase(SM_UP_SEC0 + SM_FL_SEC);
+    sm_up_boot();
+    return bad;
+}
+
+/* the slot through the link (Tim, 31.10: samples without a new firmware): a slot of two GLITCH slices written as the page
+ * does (ERASE the slot's sectors, WRITE 256 bytes at a time, RELOAD 4): USR1 has them; CLOUD (SRC USER) and SAMP (KIT USER)
+ * play them */
+static int test_editor_slot(void)
+{
+    int bad = 0;
+    static uint8_t img[SMP_USER_SIZE];
+    smp_user_hdr_t *h = (smp_user_hdr_t *)img;
+    uint8_t q[600];
+    uint32_t i, len = 0, off, tot, b, pk;
+    static const uint32_t ZS[2] = {0, 3};
+    memset(img, 0xFF, sizeof img);
+    memset(h, 0, SMP_USER_DATA);
+    for (i = 0; i < 2u; i++) {
+        smp_zone_t z = GLT_ZONES[ZS[i]];
+        uint32_t nb = (z.n + 1u) / 2u;
+        memcpy(img + SMP_USER_DATA + len, &SMP_DATA[z.off], nb);
+        z.off = len;
+        z.ls = 0, z.le = z.n - 1u, z.pred = 0, z.idx = 0, z.looped = 0;
+        z.lo = (uint8_t)(i ? 49u : 0u), z.hi = (uint8_t)(i ? 127u : 48u);
+        h->zone[i] = z;
+        len += nb;
+    }
+    h->magic = SMP_USER_MAGIC;
+    h->version = 1;
+    h->nz = 2;
+    memcpy(h->name, "EDTEST", 6);
+    h->data_len = len;
+    h->crc = st_crc32(img + SMP_USER_DATA, len);
+    tot = SMP_USER_DATA + len;
+    for (off = 0; off < SMP_USER_SIZE; off += SM_FL_SEC) {
+        q[0] = SM_ED_ERASE; q[1] = 3; q[2] = (uint8_t)(off & 127u); q[3] = (uint8_t)((off >> 7) & 127u); q[4] = (uint8_t)(off >> 14);
+        ed_frame(q, 5);
+    }
+    for (off = 0; off < tot; off += 256u) {
+        uint32_t k = tot - off < 256u ? tot - off : 256u;
+        q[0] = SM_ED_WRITE; q[1] = 3; q[2] = (uint8_t)(off & 127u); q[3] = (uint8_t)((off >> 7) & 127u); q[4] = (uint8_t)(off >> 14);
+        ed_frame(q, 5u + ed_pack7(img + off, k, q + 5));
+        if (sm_ed_out[5] != SM_ED_OK)
+            break;
+    }
+    q[0] = SM_ED_RELOAD; q[1] = 4;
+    ed_frame(q, 2);
+    bad += check("EDSLOT: the slot written through the link, RELOAD 4: USR1 has its 2 zones", sm_ed_out[5] == SM_ED_OK &&
+                 usr_nz[0] == 2u && usr_zone[0][1].n == GLT_ZONES[3].n);
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 0;
+    sm_sound_load(eng_rank(ENGI_CLOUD), 0);
+    sm_input_poll();
+    kit_dry();
+    ksnd(0)->p[P_E0] = CL_USER;
+    ksnd(0)->p[P_E1] = 1;
+    sm_param_push(0, P_E0);
+    sm_param_push(0, P_E1);
+    sm_input_poll();
+    for (b = 0; b < 20u; b++)
+        run_block();
+    trk_note_on(&trk[0], 48, 100);
+    for (b = 0, pk = 0; b < 300u; b++) {
+        uint32_t a = block_peak(0, 0);
+        pk = a > pk ? a : pk;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(600);
+    bad += check("EDSLOT: CLOUD, SRC USER (its zone 2): sounds", pk > 1500u && cl_part(&trk[0])->len == GLT_ZONES[3].n);
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    ksnd(3)->p[P_E0] = DR_KM_SMP;
+    sm_param_push(3, P_E0);
+    sm_kit_lane = 0;
+    sm_lane_machine(0);
+    sm_input_poll();
+    cpat()->lane[0][0] = DR_SK_USER;
+    sm_param_push(3, SM_LP(0, 0));
+    sm_input_poll();
+    play_blocks(2);
+    pk = lane_hit_peak(0);
+    bad += check("EDSLOT: SAMP, KIT USER: its hit sounds", pk > 1500u);
+    memset(nor + SMP_USER_BASE, 0xFF, SMP_USER_SIZE);
+    smp_user_scan(0);
+    return bad;
+}
+
+/* a SAVE keeps the sound's machine (Tim, 31.10: a sound saved, then not under its machine: the name's 0 fell on it); a record of
+ * before, its machine 0, is found under the machine its name says */
+static int test_preset_machine(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_STRING), i, kk, found = 0;
+    sm_urec_t r;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    st_erase(SM_UP_SEC0);
+    st_erase(SM_UP_SEC0 + SM_FL_SEC);
+    sm_up_boot();
+    sm_ui.trk = 1;
+    sm_sound_load(m, 2);
+    sm_input_poll();
+    sm_pr_open();
+    turn(EN_K4, 1);
+    sm_input_poll();
+    sm_pr_confirm();
+    st_read(sm_up_addr(sm_up_rat(1)), &r, sizeof r);
+    bad += check("UPMACH: STRING saved into U02: the record's machine STRING, its name STRI..", sm_up_used(1) && r.snd.machine == m &&
+                 !memcmp(r.name, "STRI", 4) && sm_up.mach[1] == m);
+    r.snd.machine = 0;                                    /* (as before 31.10) */
+    r.place = 5;
+    r.seq = sm_up.seq + 1u;
+    r.crc = sm_up_crc(&r);
+    sm_flash_put(sm_up_addr((uint32_t)sm_up.act << 15 | sm_up.next), &r, sizeof r);
+    sm_up_boot();
+    sm_pr.mach = (uint8_t)m;
+    sm_pr.cat = SM_PR_ALL;
+    for (i = 0; sm_pr_item(i, &kk) >= 0; i++)
+        found |= sm_pr_item(i, &kk) == 1 && kk == 5u;
+    bad += check("UPMACH: a record of before (machine 0, name STRI..): under STRING after a power-on", sm_up.mach[5] == m && found);
+    st_erase(SM_UP_SEC0);
+    st_erase(SM_UP_SEC0 + SM_FL_SEC);
+    sm_up_boot();
     return bad;
 }
 
@@ -12594,6 +12813,9 @@ int main(void)
     bad += test_mono_rev2();
     bad += test_soma_rev3();
     bad += test_preset_page();
+    bad += test_preset_machine();
+    bad += test_editor_slot();
+    bad += test_editor_link();
     bad += test_organ();
     bad += test_west();
     bad += test_cloud();

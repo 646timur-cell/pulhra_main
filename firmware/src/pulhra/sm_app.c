@@ -21,6 +21,7 @@ static volatile uint8_t panic_req;
 #include "sm_bank.c"                                      /* the banks A..E: two in RAM, the flash (2 copies, autosave) */
 #include "sm_input.c"                                     /* sm_input_poll: the knobs and keys into the model */
 #include "sm_upre.c"                                      /* the PRESET page (SAVE tapped) and the user sounds in the flash */
+#include "sm_ed.c"                                         /* the web editor's link: SysEx, the flash regions */
 #include "sm_edit.c"                                      /* CLEAR, COPY / PASTE, SHIFT, TRN, UNDO: tracks and patterns rewritten */
 #include "sm_layer.c"                                     /* the button holds: tap or hold, the EDIT, GLO and SEQ layers */
 

@@ -46,6 +46,7 @@ static struct {
     sm_urec_t rec;
 } sm_up __attribute__((section(".pool")));
 
+static uint32_t sm_up_mach_of(const sm_urec_t *r);      /* (below: a record's machine, one of before 31.10's too) */
 static uint32_t sm_up_addr(uint32_t at) { return SM_UP_SEC0 + (at >> 15) * SM_FL_SEC + (at & 0x7FFFu); }   /* (at: no + 1) */
 static uint32_t sm_up_rat(uint32_t k) { return (uint32_t)sm_up.at[k] - 1u; }   /* place k's record (used) */
 static uint16_t sm_up_crc(const sm_urec_t *r) { return (uint16_t)st_crc32(r, __builtin_offsetof(sm_urec_t, crc)); }
@@ -83,7 +84,7 @@ static void sm_up_boot(void)
                     continue;
             }
             sm_up.at[r.place] = (uint16_t)(at + 1u);
-            sm_up.mach[r.place] = r.snd.machine;
+            sm_up.mach[r.place] = (uint8_t)sm_up_mach_of(&r);
             sm_up.cat[r.place] = r.cat;
         }
     }
@@ -155,7 +156,7 @@ static int sm_up_write(sm_urec_t *rec)
     if (sm_flash_put(sm_up_addr(at), rec, sizeof *rec) || st_read(sm_up_addr(at), &r, sizeof r) || memcmp(&r, rec, sizeof r))
         return 5;
     sm_up.at[rec->place] = (uint16_t)(at + 1u);
-    sm_up.mach[rec->place] = rec->snd.machine;
+    sm_up.mach[rec->place] = (uint8_t)sm_up_mach_of(rec);
     sm_up.cat[rec->place] = rec->cat;
     sm_up.seq = rec->seq;
     return 0;
@@ -289,6 +290,25 @@ static void sm_pr_autoname(char *b, uint32_t mach, uint32_t cat, uint32_t place)
     for (i = 0; b[i]; i++)
         b[i] = b[i] >= 'a' && b[i] <= 'z' ? (char)(b[i] - 32) : b[i];
 }
+/* a record of before 31.10: the autoname's 0 fell on the sound's machine (0: SAW), the name the machine's first four letters
+ * kept it: the machine those name (alone), else the record's */
+static uint32_t sm_up_mach_of(const sm_urec_t *r)
+{
+    uint32_t m, hit = SM_NMACHINE, n = 0;
+    char b[SM_UP_NAME + 1];
+    if (r->snd.machine != 0u)
+        return r->snd.machine % SM_NMACHINE;
+    for (m = 0; m < SM_NMACHINE; m++) {
+        if (!sm_pr_mach_ok(m))
+            continue;
+        sm_pr_autoname(b, m, 0, 0);
+        if (!memcmp(b, r->name, 4)) {
+            hit = m;
+            n++;
+        }
+    }
+    return n == 1u ? hit : r->snd.machine;
+}
 /* the category a SAVE gives the selected track's sound: K2's, or (ALL) its factory sound's */
 static uint32_t sm_pr_save_cat(const sm_sound_t *s)
 {
@@ -320,6 +340,7 @@ static void sm_pr_confirm(void)
                 return;
             }
             n = r.snd;
+            n.machine = (uint8_t)sm_up_mach_of(&r);       /* (a record of before 31.10: its machine back) */
             n.len = sd->len;                              /* (the sequencer's, as a factory sound's load: sm_sound_load) */
             n.dnote = sd->dnote;
             n.dvel = sd->dvel;
@@ -342,7 +363,11 @@ static void sm_pr_confirm(void)
         r->place = sm_pr.place % SM_UP_N;
         r->cat = (uint8_t)sm_pr_save_cat(sd);
         r->snd = *sd;
-        sm_pr_autoname(r->name, sd->machine, r->cat, r->place);
+        {
+            char nm[SM_UP_NAME + 1];                      /* (the name's 0 past its ten: never into the sound after it) */
+            sm_pr_autoname(nm, sd->machine, r->cat, r->place);
+            memcpy(r->name, nm, SM_UP_NAME);
+        }
         sm_pr.arm = 0;
         sm_pr.mach = sd->machine;                         /* (the list shows it: the machine saved, its category) */
         sm_pr.cat = r->cat;
