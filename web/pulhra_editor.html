@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -54,64 +54,64 @@ td input[type=text] { width:12ch; padding:3px 6px; }
 <body>
 <header>
   <h1><b>PULHRA</b> EDITOR</h1>
-  <button id="connect" class="pri">Подключить FM-1</button>
+  <button id="connect" class="pri">Connect FM-1</button>
   <select id="ports" hidden></select>
-  <span id="status">не подключено</span>
+  <span id="status">not connected</span>
   <span style="flex:1"></span>
-  <button id="theme" title="тема">◐</button>
+  <button id="theme" title="theme">◐</button>
 </header>
 <nav>
-  <button data-tab="presets" class="on">ПРЕСЕТЫ</button>
-  <button data-tab="samples">СЭМПЛЫ</button>
-  <button data-tab="banks">БАНКИ</button>
+  <button data-tab="presets" class="on">PRESETS</button>
+  <button data-tab="samples">SAMPLES</button>
+  <button data-tab="banks">BANKS</button>
 </nav>
 <main>
 <section id="presets" class="on">
   <div class="card">
-    <h2>24 места U01…U24</h2>
+    <h2>24 places U01…U24</h2>
     <div class="row">
-      <button id="upRead" disabled>Прочитать с FM-1</button>
-      <button id="upWrite" disabled>Записать в FM-1</button>
+      <button id="upRead" disabled>Read from FM-1</button>
+      <button id="upWrite" disabled>Write to FM-1</button>
       <span style="flex:1"></span>
-      <button id="upSave">Сохранить файлом</button>
-      <label><button id="upLoadBtn">Открыть файл…</button><input id="upLoad" type="file" accept=".json,.phpre" hidden></label>
+      <button id="upSave">Save to file</button>
+      <label><button id="upLoadBtn">Open file…</button><input id="upLoad" type="file" accept=".json,.phpre" hidden></label>
     </div>
-    <div id="upInfo" class="dim">Сначала прочитай с FM-1 или открой файл. Изменения уходят в FM-1 только по «Записать».</div>
+    <div id="upInfo" class="dim">Read from the FM-1 or open a file first. Changes reach the FM-1 only with “Write to FM-1”.</div>
     <table id="upTable"></table>
   </div>
 </section>
 <section id="samples">
   <div class="card">
-    <h2>Слот USR1 сейчас</h2>
-    <div class="row"><button id="smRead" disabled>Прочитать</button><button id="smClear" disabled>Очистить слот</button><span id="smNow" class="dim">—</span></div>
+    <h2>Slot USR1 now</h2>
+    <div class="row"><button id="smRead" disabled>Read</button><button id="smClear" disabled>Clear slot</button><span id="smNow" class="dim">—</span></div>
   </div>
   <div class="card">
-    <h2>Новый слот</h2>
-    <div id="drop">Перетащи сюда WAV (до 16 файлов) или <label style="color:var(--acc);cursor:pointer">выбери<input id="smFiles" type="file" accept=".wav,audio/wav" multiple hidden></label></div>
+    <h2>New slot</h2>
+    <div id="drop">Drop WAV files here (up to 16) or <label style="color:var(--acc);cursor:pointer">choose<input id="smFiles" type="file" accept=".wav,audio/wav" multiple hidden></label></div>
     <div class="row" style="margin-top:12px">
-      <label>Имя <input id="smName" type="text" maxlength="8" value="USER" style="width:10ch"></label>
-      <label>Резка <select id="smSlice"><option value="off">файл = зона</option><option value="tr">по атакам</option><option value="8">8 равных</option><option value="16">16 равных</option></select></label>
-      <label>Частота <select id="smRate"></select></label>
-      <label>Биты <select id="smBits"></select></label>
+      <label>Name <input id="smName" type="text" maxlength="8" value="USER" style="width:10ch"></label>
+      <label>Slicing <select id="smSlice"><option value="off">file = zone</option><option value="tr">at transients</option><option value="8">8 equal</option><option value="16">16 equal</option></select></label>
+      <label>Rate <select id="smRate"></select></label>
+      <label>Bits <select id="smBits"></select></label>
     </div>
-    <div class="row"><div class="bar" id="smBar"><i></i></div><span id="smSize" class="dim">0 / 0 КБ</span></div>
+    <div class="row"><div class="bar" id="smBar"><i></i></div><span id="smSize" class="dim">0 / 0 KB</span></div>
     <table id="smTable"></table>
-    <div class="row" style="margin-top:12px"><button id="smUpload" class="pri" disabled>Загрузить в FM-1</button><span class="dim">FM-1 должна стоять (STOP). Звучит в CLOUD (SRC USER), SAMP (KIT USER) и слайс-машинах (KIT USR1).</span></div>
+    <div class="row" style="margin-top:12px"><button id="smUpload" class="pri" disabled>Upload to FM-1</button><span class="dim">The FM-1 must be stopped. Plays in CLOUD (SRC USER), SAMP (KIT USER) and the slice machines (KIT USR1).</span></div>
   </div>
 </section>
 <section id="banks">
   <div class="card">
-    <h2>Бэкап</h2>
+    <h2>Backup</h2>
     <div class="row">
-      <button id="bkSave" disabled>Сохранить всё в файл</button>
-      <label><button id="bkLoadBtn" disabled>Восстановить из файла…</button><input id="bkLoad" type="file" accept=".phbk" hidden></label>
+      <button id="bkSave" disabled>Save everything to a file</button>
+      <label><button id="bkLoadBtn" disabled>Restore from a file…</button><input id="bkLoad" type="file" accept=".phbk" hidden></label>
       <div class="bar" id="bkBar"><i></i></div><span id="bkPct" class="dim"></span>
     </div>
-    <div class="dim">Файл: проект, 4 банка, 24 пресета, сэмпл-слот. Восстановление перезаписывает всё это и перезапускает FM-1.</div>
+    <div class="dim">The file holds the project, 4 banks, 24 presets and the sample slot. A restore overwrites all of them and restarts the FM-1.</div>
   </div>
   <div class="card">
-    <h2>Паттерны</h2>
-    <div class="row"><button id="bnRead" disabled>Прочитать банки</button><span class="dim">или открой бэкап: сетка покажется из файла</span></div>
+    <h2>Patterns</h2>
+    <div class="row"><button id="bnRead" disabled>Read banks</button><span class="dim">or open a backup: the grid shows from the file</span></div>
     <div class="row pats" id="bnBanks"></div>
     <div class="row pats" id="bnPats"></div>
     <div class="grid" id="bnGrid"></div>
@@ -438,7 +438,7 @@ function draftZones(d) {
 /* ================================================================ the link === */
 /* web/pulhra_editor.html <-> firmware/src/pulhra/sm_ed.c: F0 7D 50 48 cmd .. F7, numbers u21 (3 x 7 bit, low first), data pack7 */
 const ED = { INFO: 1, READ: 2, ERASE: 3, WRITE: 4, RELOAD: 5, STATE: 6 };
-const RC = ["ok", "плохие аргументы", "FM-1 играет: нажми STOP", "ошибка флеша", "нет флеша"];
+const RC = ["ok", "bad arguments", "the FM-1 is playing: press STOP", "flash error", "no flash"];
 const REG = { PROJECT: 0, BANKS: 1, PRESETS: 2, SAMPLE: 3 };
 const SEC = 4096;
 let access = null, out = null, inp = null, waiter = null, chain = Promise.resolve(), info = null;
@@ -460,8 +460,8 @@ function onMsg(ev) {
 /* one request, its reply's bytes after cmd (rc first); one at a time */
 function req(cmd, args = [], ms = 4000) {
   const run = () => new Promise((ok, no) => {
-    if (!out) return no(new Error("не подключено"));
-    waiter = { cmd, ok, t: setTimeout(() => { waiter = null; no(new Error("FM-1 не отвечает")); }, ms) };
+    if (!out) return no(new Error("not connected"));
+    waiter = { cmd, ok, t: setTimeout(() => { waiter = null; no(new Error("the FM-1 does not answer")); }, ms) };
     out.send([0xF0, 0x7D, 0x50, 0x48, cmd, ...args, 0xF7]);
   });
   const p = chain.then(run, run);
@@ -470,14 +470,14 @@ function req(cmd, args = [], ms = 4000) {
 }
 async function reqOk(cmd, args, ms) {
   const r = await req(cmd, args, ms);
-  if (r[0]) throw new Error(RC[r[0]] || "ошибка " + r[0]);
+  if (r[0]) throw new Error(RC[r[0]] || "error " + r[0]);
   return r;
 }
 
 async function connect() {
-  if (!navigator.requestMIDIAccess) { status("этот браузер без Web MIDI: открой в Chrome", "bad"); return; }
+  if (!navigator.requestMIDIAccess) { status("this browser has no Web MIDI: open the page in Chrome", "bad"); return; }
   try { access = access || await navigator.requestMIDIAccess({ sysex: true }); }
-  catch (e) { status("нет доступа к MIDI (SysEx): " + e.message, "bad"); return; }
+  catch (e) { status("no MIDI (SysEx) access: " + e.message, "bad"); return; }
   const outs = [...access.outputs.values()], ins = [...access.inputs.values()];
   const sel = $("ports");
   sel.innerHTML = outs.map((o, i) => `<option value="${i}">${o.name}</option>`).join("");
@@ -492,7 +492,7 @@ async function usePort(outs, ins, i) {
   if (inp) inp.onmidimessage = null;
   out = outs[i] || null;
   inp = ins.find((x) => out && x.name === out.name) || ins[i] || null;
-  if (!out || !inp) { status("FM-1 не найдена: подключи по USB", "bad"); return; }
+  if (!out || !inp) { status("FM-1 not found: connect it by USB", "bad"); return; }
   inp.onmidimessage = onMsg;
   try {
     const r = await reqOk(ED.INFO, [], 2000);
@@ -503,12 +503,12 @@ async function usePort(outs, ins, i) {
     while (k < r.length && r[k]) name += String.fromCharCode(r[k++]);
     info = { ver: r[1], regs, name };
     status(`${name} · ${out.name}`, "ok");
-    log(`подключено: ${name}, протокол ${info.ver}`);
+    log(`connected: ${name}, protocol ${info.ver}`);
     for (const id of ["upRead", "upWrite", "smRead", "smClear", "bkSave", "bkLoadBtn", "bnRead"]) $(id).disabled = false;
     refreshUpload();
   } catch (e) {
     info = null;
-    status("нет ответа: нужна прошивка PULHRA с редактором (31.10 и новее)", "bad");
+    status("no answer: install PULHRA with the editor link (31.10 or later)", "bad");
   }
 }
 const regSize = (id) => info.regs.find((r) => r.id === id).size;
@@ -557,7 +557,7 @@ function download(name, bytes, type = "application/octet-stream") {
 const today = () => new Date().toISOString().slice(0, 10).replace(/-/g, "");
 async function guard(btn, f) {
   btn.disabled = true;
-  try { await f(); } catch (e) { log("ошибка: " + e.message); alert(e.message); }
+  try { await f(); } catch (e) { log("error: " + e.message); alert(e.message); }
   finally { btn.disabled = !info; }
 }
 
@@ -603,18 +603,18 @@ function setRecName(r, s) {
 }
 function drawPresets() {
   const t = $("upTable");
-  let h = "<tr><th>место</th><th>имя</th><th>машина</th><th>звук</th><th>категория</th><th></th></tr>";
+  let h = "<tr><th>place</th><th>name</th><th>machine</th><th>sound</th><th>category</th><th></th></tr>";
   for (let k = 0; k < UP.N; k++) {
     const p = places[k], u = "U" + String(k + 1).padStart(2, "0");
     if (!p) { h += `<tr class="empty"><td>${u}</td><td colspan="4">—</td><td><button data-mv="${k}">↥</button></td></tr>`; continue; }
     const m = recMach(p.rec), pr = p.rec[UP.SND + LAY.sndPreset];
     h += `<tr><td>${u}</td><td><input type="text" maxlength="${UP.NAME}" data-nm="${k}" value="${recName(p.rec)}"></td>` +
          `<td>${MACH[m] || "?"}</td><td class="dim">${(PRESETS[m] || [])[pr] || ""}</td><td>${CATS[p.rec[3]] || "-"}</td>` +
-         `<td><button data-up="${k}" title="выше">▲</button> <button data-dn="${k}" title="ниже">▼</button> <button data-del="${k}" title="удалить">✕</button></td></tr>`;
+         `<td><button data-up="${k}" title="up">▲</button> <button data-dn="${k}" title="down">▼</button> <button data-del="${k}" title="delete">✕</button></td></tr>`;
   }
   t.innerHTML = h;
   const used = places.filter(Boolean).length;
-  $("upInfo").textContent = `${used} из ${UP.N} мест занято.`;
+  $("upInfo").textContent = `${used} of ${UP.N} places used.`;
 }
 function swap(a, b) {
   if (b < 0 || b >= UP.N) return;
@@ -626,7 +626,7 @@ $("upTable").addEventListener("click", (e) => {
   const d = e.target.dataset;
   if (d.up) swap(+d.up, +d.up - 1);
   else if (d.dn) swap(+d.dn, +d.dn + 1);
-  else if (d.del && confirm("Удалить звук с места U" + String(+d.del + 1).padStart(2, "0") + "? (в FM-1 — после «Записать»)")) { places[+d.del] = null; drawPresets(); }
+  else if (d.del && confirm("Delete the sound in U" + String(+d.del + 1).padStart(2, "0") + "? (on the FM-1 after “Write to FM-1”)")) { places[+d.del] = null; drawPresets(); }
 });
 $("upTable").addEventListener("change", (e) => {
   const k = e.target.dataset.nm;
@@ -655,14 +655,14 @@ $("upRead").onclick = (e) => guard(e.target, async () => {
   const img = await readRegion(REG.PRESETS, regSize(REG.PRESETS));
   places = parsePresets(img);
   drawPresets();
-  log("пресеты прочитаны");
+  log("presets read");
 });
 $("upWrite").onclick = (e) => guard(e.target, async () => {
-  if (!confirm("Записать все 24 места в FM-1? То, что там сейчас, заменится этим списком.")) return;
+  if (!confirm("Write all 24 places to the FM-1? What it holds now is replaced by this list.")) return;
   await stopped();
   await writeRegion(REG.PRESETS, 0, presetImage());
   await reload(2);
-  log("пресеты записаны");
+  log("presets written");
 });
 $("upSave").onclick = () => {
   const lib = { format: "pulhra-presets", version: 1, exported: new Date().toISOString(), firmware: info ? info.name : "",
@@ -676,15 +676,15 @@ $("upLoad").onchange = async (e) => {
   if (!f) return;
   try {
     const j = JSON.parse(await f.text());
-    if (j.format !== "pulhra-presets" || !Array.isArray(j.places)) throw new Error("это не файл пресетов PULHRA");
+    if (j.format !== "pulhra-presets" || !Array.isArray(j.places)) throw new Error("not a PULHRA presets file");
     const pl = j.places.map((b) => b ? { rec: Uint8Array.from(atob(b), (c) => c.charCodeAt(0)) } : null);
-    if (pl.some((p) => p && (p.rec.length !== UP.REC || !recOk(p.rec)))) throw new Error("файл повреждён");
-    const merge = places.some(Boolean) && confirm("Добавить к текущему списку в свободные места? (Отмена — заменить список)");
+    if (pl.some((p) => p && (p.rec.length !== UP.REC || !recOk(p.rec)))) throw new Error("the file is damaged");
+    const merge = places.some(Boolean) && confirm("Add to the current list in the free places? (Cancel: replace the list)");
     if (merge) {
       for (const p of pl) {
         if (!p) continue;
         const k = places.findIndex((x) => !x);
-        if (k < 0) { alert("свободных мест не хватило"); break; }
+        if (k < 0) { alert("not enough free places"); break; }
         places[k] = { rec: p.rec.slice() };
         places[k].rec[2] = k;
       }
@@ -693,7 +693,7 @@ $("upLoad").onchange = async (e) => {
       pl.slice(0, UP.N).forEach((p, k) => { if (p) { places[k] = p; p.rec[2] = k; } });
     }
     drawPresets();
-    log(`открыт ${f.name}`);
+    log(`opened ${f.name}`);
   } catch (err) { alert(err.message); }
 };
 
@@ -701,26 +701,26 @@ $("upLoad").onchange = async (e) => {
 /* firmware/src/eng_sample.c: the slot USR1, flash 0xA0000, 80 KiB: a header (magic FSMP, version 1, zones, name, data_len,
  * crc, 16 zones), the IMA ADPCM data at +512. The page builds it (buildSlot, from Felucca's editor) and writes it whole */
 const draft = { files: [], slice: "off", sens: 1, rate: 22050, alias: false, bits: 16 };
-$("smRate").innerHTML = SMP_RATES.map((r) => `<option value="${r}">${r} Гц</option>`).join("");
+$("smRate").innerHTML = SMP_RATES.map((r) => `<option value="${r}">${r} Hz</option>`).join("");
 $("smBits").innerHTML = SMP_BITS.map((b) => `<option value="${b}">${b}</option>`).join("");
 function slotNow(h) {
   const v = new DataView(h.buffer, h.byteOffset, h.byteLength);
-  if (v.getUint32(0, true) !== 0x504D5346 || v.getUint16(4, true) !== 1 || !h[6]) return "пусто";
+  if (v.getUint32(0, true) !== 0x504D5346 || v.getUint16(4, true) !== 1 || !h[6]) return "empty";
   const nm = String.fromCharCode(...h.subarray(8, 16)).replace(/\0.*$/, ""), len = v.getUint32(16, true);
   let sec = 0;
   for (let i = 0; i < h[6]; i++) sec += v.getUint32(32 + i * 28 + 4, true) / (v.getUint32(32 + i * 28 + 16, true) / 65536 * 44100);
-  return `${nm}: ${h[6]} зон, ${(len / 1024).toFixed(1)} КБ, ${sec.toFixed(1)} с`;
+  return `${nm}: ${h[6]} zones, ${(len / 1024).toFixed(1)} KB, ${sec.toFixed(1)} s`;
 }
 $("smRead").onclick = (e) => guard(e.target, async () => {
   $("smNow").textContent = slotNow(await readRegion(REG.SAMPLE, 512));
 });
 $("smClear").onclick = (e) => guard(e.target, async () => {
-  if (!confirm("Стереть сэмпл-слот USR1?")) return;
+  if (!confirm("Erase the sample slot USR1?")) return;
   await stopped();
   await reqOk(ED.ERASE, [REG.SAMPLE, 0, 0, 0], 8000);
   await reload(4);
-  $("smNow").textContent = "пусто";
-  log("слот очищен");
+  $("smNow").textContent = "empty";
+  log("slot cleared");
 });
 async function addFiles(list) {
   for (const f of [...list].slice(0, 16 - draft.files.length)) {
@@ -750,11 +750,11 @@ function refreshUpload() {
   }
   $("smBar").classList.toggle("over", len > SMP.MAX_DATA);
   setBar("smBar", len, SMP.MAX_DATA);
-  $("smSize").textContent = `${(len / 1024).toFixed(1)} / ${(SMP.MAX_DATA / 1024).toFixed(0)} КБ` + (err ? ` — ${err}` : "");
+  $("smSize").textContent = `${(len / 1024).toFixed(1)} / ${(SMP.MAX_DATA / 1024).toFixed(0)} KB` + (err ? ` — ${err}` : "");
   const zs = draft.files.length ? draftZones(draft) : [];
-  $("smTable").innerHTML = zs.length ? "<tr><th>зона</th><th>клавиши</th><th>длина</th><th></th></tr>" + zs.map((z, i) =>
-    `<tr><td>${i + 1}${draft.files.length > 1 ? " · " + draft.files[i].name : ""}</td><td>${z.lo ?? "авто"}${z.hi != null ? "–" + z.hi : ""}</td>` +
-    `<td>${(z.s.length / z.rate).toFixed(2)} с</td><td><button data-play="${i}">▶</button>${draft.files.length > 1 ? ` <button data-rm="${i}">✕</button>` : ""}</td></tr>`).join("") : "";
+  $("smTable").innerHTML = zs.length ? "<tr><th>zone</th><th>keys</th><th>length</th><th></th></tr>" + zs.map((z, i) =>
+    `<tr><td>${i + 1}${draft.files.length > 1 ? " · " + draft.files[i].name : ""}</td><td>${z.lo ?? "auto"}${z.hi != null ? "–" + z.hi : ""}</td>` +
+    `<td>${(z.s.length / z.rate).toFixed(2)} s</td><td><button data-play="${i}">▶</button>${draft.files.length > 1 ? ` <button data-rm="${i}">✕</button>` : ""}</td></tr>`).join("") : "";
   $("smUpload").disabled = !info || !built;
 }
 $("smTable").addEventListener("click", (e) => {
@@ -782,12 +782,12 @@ $("smUpload").onclick = (e) => guard(e.target, async () => {
   img.fill(0, 0, SMP.DATA_OFF);
   img.set(built.hdr, 0);
   img.set(built.data, SMP.DATA_OFF);
-  await writeRegion(REG.SAMPLE, 0, img, (a, b) => { setBar("smBar", a, b); $("smSize").textContent = `загрузка ${Math.round(100 * a / b)} %`; });
+  await writeRegion(REG.SAMPLE, 0, img, (a, b) => { setBar("smBar", a, b); $("smSize").textContent = `uploading ${Math.round(100 * a / b)} %`; });
   const back = await readRegion(REG.SAMPLE, img.length);
-  if (back.some((x, i) => x !== img[i])) throw new Error("проверка не прошла: прочитанное отличается");
+  if (back.some((x, i) => x !== img[i])) throw new Error("verify failed: the data read back differs");
   await reload(4);
   $("smNow").textContent = slotNow(img.subarray(0, 512));
-  log(`слот загружен: ${built.zones.length} зон, ${(built.data.length / 1024).toFixed(1)} КБ`);
+  log(`slot uploaded: ${built.zones.length} zones, ${(built.data.length / 1024).toFixed(1)} KB`);
   refreshUpload();
 });
 
@@ -810,16 +810,16 @@ $("bkSave").onclick = (e) => guard(e.target, async () => {
   download(`pulhra-backup-${today()}.phbk`, f);
   bankImg = parts.find((p) => p.id === REG.BANKS).data;
   drawBanks();
-  log("бэкап сохранён");
+  log("backup saved");
 });
 function parseBackup(buf) {
   const f = new Uint8Array(buf), v = new DataView(f.buffer);
-  if (f.length < 6 || String.fromCharCode(f[0], f[1], f[2], f[3]) !== "PHBK" || f[4] !== 1) throw new Error("это не бэкап PULHRA");
+  if (f.length < 6 || String.fromCharCode(f[0], f[1], f[2], f[3]) !== "PHBK" || f[4] !== 1) throw new Error("not a PULHRA backup");
   const parts = [];
   let o = 6;
   for (let i = 0; i < f[5]; i++) {
     const id = f[o], sz = v.getUint32(o + 1, true);
-    if (o + 5 + sz > f.length) throw new Error("файл обрезан");
+    if (o + 5 + sz > f.length) throw new Error("the file is truncated");
     parts.push({ id, data: f.slice(o + 5, o + 5 + sz) });
     o += 5 + sz;
   }
@@ -835,7 +835,7 @@ $("bkLoad").onchange = async (e) => {
   const b = parts.find((p) => p.id === REG.BANKS);
   if (b) { bankImg = b.data; drawBanks(); }
   if (!info) return;
-  if (!confirm(`Восстановить ${file.name} в FM-1? Проект, банки, пресеты и сэмпл-слот заменятся, FM-1 перезапустится.`)) return;
+  if (!confirm(`Restore ${file.name} to the FM-1? The project, banks, presets and sample slot are replaced; the FM-1 restarts.`)) return;
   const btn = $("bkLoadBtn");
   await guard(btn, async () => {
     await stopped();
@@ -843,11 +843,11 @@ $("bkLoad").onchange = async (e) => {
     let done = 0;
     for (const p of parts) {
       const reg = info.regs.find((r) => r.id === p.id);
-      if (!reg || p.data.length !== reg.size) throw new Error("размеры в файле не совпадают с этой прошивкой");
+      if (!reg || p.data.length !== reg.size) throw new Error("the file's sizes do not match this firmware");
       await writeRegion(p.id, 0, p.data, (a) => setBar("bkBar", done + a, total, "bkPct"));
       done += 2 * p.data.length;
     }
-    log("восстановлено, FM-1 перезапускается");
+    log("restored, the FM-1 restarts");
     await reload(1 | 2 | 4).catch(() => {});
   });
 };
@@ -878,7 +878,7 @@ function drawBanks() {
   const b = bk[bnSel.bank];
   $("bnPats").innerHTML = Array.from({ length: LAY.bpat }, (_, j) =>
     `<button data-pt="${j}" class="${bnSel.pat === j ? "on" : ""} ${b && (b.used >> j) & 1 ? "" : "unused"}">${"ABCD"[bnSel.bank]}${String(j + 1).padStart(2, "0")}</button>`).join("");
-  if (!b) { $("bnGrid").innerHTML = `<div class="dim">банк ${"ABCD"[bnSel.bank]} не сохранён</div>`; return; }
+  if (!b) { $("bnGrid").innerHTML = `<div class="dim">bank ${"ABCD"[bnSel.bank]} is not saved</div>`; return; }
   const p = b.o + LAY.flData + bnSel.pat * b.pb;
   let h = "";
   for (let t = 0; t < LAY.ntrk; t++) {
@@ -915,7 +915,7 @@ $("theme").onclick = () => {
 try { const t = localStorage.getItem("pulhra-ed-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 drawPresets();
 refreshUpload();
-if (!navigator.requestMIDIAccess) status("нужен Chrome / Edge (Web MIDI)", "bad");
+if (!navigator.requestMIDIAccess) status("needs Chrome / Edge (Web MIDI)", "bad");
 </script>
 </body>
 </html>
