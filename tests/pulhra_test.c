@@ -5881,6 +5881,32 @@ static void lay_key(uint32_t key)
     key_up(key);
     sm_input_poll();
 }
+/* key held 0.9 s with SHIFT (OCT- held: the track's COPY / PASTE on D#5 / F#5) or with SEQ held (the pattern's), then let go */
+#define K_DS5 22u
+#define K_FS5 25u
+static void ed_hold(uint32_t btn, uint32_t key)
+{
+    if (btn == B_SEQ)
+        layer_hold(B_SEQ);
+    else {
+        btn_down(B_OCTDN);
+        sm_input_poll();
+    }
+    key_dn(key);
+    sm_input_poll();
+    ms(900);
+    sm_input_poll();
+    key_up(key);
+    sm_input_poll();
+    if (btn == B_SEQ)
+        layer_let_go(B_SEQ);
+    else {
+        btn_up(B_OCTDN);
+        sm_input_poll();
+        ms(200);
+        sm_input_poll();
+    }
+}
 /* the live locks of track t in pattern p, by step and parameter (LK_NONE none) */
 static int32_t ed_lock(const sm_pattern_t *p, uint32_t t, uint32_t s, uint32_t prm)
 {
@@ -6117,16 +6143,12 @@ static int test_copy_paste_track(void)
     ed_track(2);
     sm_lock_set(2, 0, P_PAN, 5);
     t1 = *ksnd(0);
-    layer_hold(B_SEQ);
-    lay_key(WHITE[4]);                                    /* C4: COPY the track (T1) */
-    layer_let_go(B_SEQ);
-    bad += check("EDIT/COPY: C4 copies, changes nothing", !memcmp(&t1, ksnd(0), sizeof t1) && sm_msg == SM_MSG_NONE);
+    ed_hold(B_OCTDN, K_DS5);                              /* SHIFT + D#5 held: COPY the track (T1) */
+    bad += check("EDIT/COPY: SHIFT + D#5 held copies, changes nothing", !memcmp(&t1, ksnd(0), sizeof t1) && sm_msg == SM_MSG_TCOPY);
     turn(EN_ALGO, 2);                                     /* T3 */
     sm_input_poll();
-    layer_hold(B_SEQ);
-    lay_key(WHITE[5]);                                    /* D4: PASTE the track */
-    layer_let_go(B_SEQ);
-    bad += check("EDIT/PASTE: D4 on T3: T1's sound (machine, preset, values, length)", !memcmp(&t1, ksnd(2), sizeof t1));
+    ed_hold(B_OCTDN, K_FS5);                              /* SHIFT + F#5 held: PASTE the track */
+    bad += check("EDIT/PASTE: SHIFT + F#5 on T3: T1's sound (machine, preset, values, length)", !memcmp(&t1, ksnd(2), sizeof t1));
     for (s = 0; s < SM_NSTEP; s++)
         ok &= !memcmp(stp(0, s), stp(2, s), sizeof(sm_step_t));
     bad += check("EDIT/PASTE: ... T1's steps", ok);
@@ -6155,19 +6177,20 @@ static int test_copy_paste_pattern(void)
     for (t = 0; t < SM_NTRK; t++)
         ed_track(t);
     cpat()->mlen = 12;
+    ed_hold(B_SEQ, K_FS5);                                /* SEQ + F#5 held, PASTE the pattern with nothing copied: nothing */
+    bad += check("EDIT/PASTE: nothing copied: PASTE does nothing, NO PTN COPIED", ed_trigs(cpat(), 0) == 4u && !sm_undo_ok &&
+                 sm_msg == SM_MSG_PTEMPTY);
+    ed_hold(B_SEQ, K_DS5);                                /* SEQ + D#5 held: COPY the pattern */
+    bad += check("EDIT/COPY: SEQ + D#5 held: PTN COPIED", sm_msg == SM_MSG_PTCOPY);
     layer_hold(B_SEQ);
-    lay_key(WHITE[5]);                                    /* D4 PASTE track with nothing copied: nothing */
-    bad += check("EDIT/PASTE: nothing copied: PASTE does nothing", ed_trigs(cpat(), 0) == 4u && !sm_undo_ok);
-    lay_key(WHITE[1]);                                    /* G3: COPY the pattern */
     turn(EN_ALGO, 4);                                     /* A05 picked */
     sm_input_poll();
     layer_let_go(B_SEQ);
     run_block();
     sm_input_poll();
     bad += check("EDIT/PASTE: A05 now (empty)", smp.cur == 4u && !ed_trigs(cpat(), 0));
-    layer_hold(B_SEQ);
-    lay_key(WHITE[2]);                                    /* A3: PASTE the pattern */
-    layer_let_go(B_SEQ);
+    ed_hold(B_SEQ, K_FS5);                                /* SEQ + F#5 held: PASTE the pattern */
+    bad += check("EDIT/PASTE: ... PTN PASTED", sm_msg == SM_MSG_PTPASTE);
     for (t = 0; t < SM_NTRK; t++) {
         ok &= !memcmp(&smp.pat[0].kit.snd[t], &smp.pat[4].kit.snd[t], sizeof(sm_sound_t));
         for (s = 0; s < SM_NSTEP; s++)
@@ -6175,7 +6198,7 @@ static int test_copy_paste_pattern(void)
                   ed_lock(&smp.pat[0], t, s, P_FCUT) == ed_lock(&smp.pat[4], t, s, P_FCUT) &&
                   ed_lock(&smp.pat[0], t, s, P_FRES) == ed_lock(&smp.pat[4], t, s, P_FRES);
     }
-    bad += check("EDIT/PASTE: A3 on A05: A01's kit, steps, locks, master length", ok && smp.pat[4].mlen == 12u &&
+    bad += check("EDIT/PASTE: SEQ + F#5 on A05: A01's kit, steps, locks, master length", ok && smp.pat[4].mlen == 12u &&
                  ed_live(&smp.pat[4], 4) == 8u);
     run_block();
     run_block();
@@ -6186,10 +6209,8 @@ static int test_copy_paste_pattern(void)
     layer_let_go(B_SEQ);
     run_block();
     sm_input_poll();
-    layer_hold(B_SEQ);
-    lay_key(WHITE[5]);                                    /* PASTE track with a pattern copied: that track of it */
-    layer_let_go(B_SEQ);
-    bad += check("EDIT/PASTE: a pattern copied, D4 on A06's T1: A01's T1", smp.cur == 5u && ed_trigs(cpat(), 0) == 4u &&
+    ed_hold(B_OCTDN, K_FS5);                              /* PASTE track with a pattern copied: that track of it */
+    bad += check("EDIT/PASTE: a pattern copied, SHIFT + F#5 on A06's T1: A01's T1", smp.cur == 5u && ed_trigs(cpat(), 0) == 4u &&
                  ed_lock(cpat(), 0, 4, P_FCUT) == 20 && !ed_trigs(cpat(), 1));
     return bad;
 }
@@ -6207,8 +6228,7 @@ static int test_shift_trn(void)
     stp(0, 3)->note[1] = 127;
     sm_lock_set(0, 3, P_FCUT, 11);
     sm_step_toggle(1, 5);
-    sm_shift_trk(0, -1);                                  /* (SEQ's E4 / F4 gone, Tim: the track's shift is SHIFT + D#4 / F#4) */
-    layer_hold(B_SEQ);
+    sm_shift_trk(0, -1);                                  /* (the track's shift: SHIFT + A#3 / C#4, sm_input.c) */
     bad += check("EDIT/SHIFT: back one: T1's trigs one step left, wrapping (0 -> 15, 3 -> 2), the lock with its trig",
                  stp(0, 15)->n && stp(0, 15)->note[0] == 48 && stp(0, 2)->n == 2u && !stp(0, 0)->n && !stp(0, 3)->n &&
                  ed_lock(cpat(), 0, 2, P_FCUT) == 11 && ed_live(cpat(), 0) == 1u && stp(1, 5)->n);
@@ -6216,14 +6236,19 @@ static int test_shift_trn(void)
     sm_shift_trk(0, 1);
     bad += check("EDIT/SHIFT: forward x2: one step right of where they were (1, 4)", stp(0, 1)->n && stp(0, 4)->n == 2u &&
                  ed_lock(cpat(), 0, 4, P_FCUT) == 11 && !stp(0, 15)->n);
-    lay_key(WHITE[10]);                                   /* B4: TRN - */
-    bad += check("EDIT/TRN: B4: the notes a semitone down (47; 49, the chord's 126)", stp(0, 1)->note[0] == 47 &&
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    lay_key(10);                                          /* SHIFT + D#4: TRN - */
+    bad += check("EDIT/TRN: SHIFT + D#4: the notes a semitone down (47; 49, the chord's 126)", stp(0, 1)->note[0] == 47 &&
                  stp(0, 4)->note[0] == 49 && stp(0, 4)->note[1] == 126);
-    lay_key(WHITE[11]);                                   /* C5: TRN + twice */
-    lay_key(WHITE[11]);
-    bad += check("EDIT/TRN: C5 x2: up two (49; 51, 127 stays at the top)", stp(0, 1)->note[0] == 49 && stp(0, 4)->note[0] == 51 &&
+    lay_key(13);                                          /* SHIFT + F#4: TRN + twice */
+    lay_key(13);
+    bad += check("EDIT/TRN: SHIFT + F#4 x2: up two (49; 51, 127 stays at the top)", stp(0, 1)->note[0] == 49 && stp(0, 4)->note[0] == 51 &&
                  stp(0, 4)->note[1] == 127);
-    layer_let_go(B_SEQ);
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    ms(200);
+    sm_input_poll();
     save_hold();
     bad += check("EDIT/TRN: UNDO: the last edit undone (one up)", stp(0, 1)->note[0] == 48 && stp(0, 4)->note[0] == 50 &&
                  stp(0, 4)->note[1] == 127);
@@ -9005,7 +9030,7 @@ static int test_msg_age(void)
     return bad;
 }
 
-/* SEQ held + D#5 held 0.8 s: the track copied; F#5 held: pasted (Tim). A tap: the hint, nothing done */
+/* SHIFT (OCT- held) + D#5 held 0.8 s: the track copied; F#5 held: pasted (Tim, 31.10: SEQ's before). A tap: the hint, nothing done */
 static int test_seq_track_copy(void)
 {
     int bad = 0;
@@ -9013,19 +9038,24 @@ static int test_seq_track_copy(void)
     host_ticks = 1000u;
     sm_step_toggle(0, 3);
     stp(0, 3)->vel = 77;
-    layer_hold(B_SEQ);
+    btn_down(B_OCTDN);
+    sm_input_poll();
     key_dn(22);
     sm_input_poll();
-    bad += check("TRKCOPY: D#5 down: HOLD: COPY TRACK", sm_msg == SM_MSG_TCOPYP);
+    bad += check("TRKCOPY: SHIFT + D#5 down: HOLD: COPY TRACK", sm_msg == SM_MSG_TCOPYP);
     ms(900);
     sm_input_poll();
     key_up(22);
     sm_input_poll();
     bad += check("TRKCOPY: ... held 0.9 s: TRACK COPIED", sm_msg == SM_MSG_TCOPY);
-    layer_let_go(B_SEQ);
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    ms(200);
+    sm_input_poll();
     turn(EN_ALGO, 1);
     sm_input_poll();
-    layer_hold(B_SEQ);
+    btn_down(B_OCTDN);
+    sm_input_poll();
     key_dn(25);
     sm_input_poll();
     ms(200);
@@ -9039,9 +9069,19 @@ static int test_seq_track_copy(void)
     sm_input_poll();
     key_up(25);
     sm_input_poll();
-    layer_let_go(B_SEQ);
     bad += check("TRKCOPY: F#5 held on T2: T1's track pasted (step 4, VEL 77), TRACK PASTED",
                  stp(1, 3)->n && stp(1, 3)->vel == 77u && sm_msg == SM_MSG_TPASTE);
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    ms(200);
+    sm_input_poll();
+    layer_hold(B_SEQ);
+    key_dn(22);
+    sm_input_poll();
+    bad += check("TRKCOPY: SEQ + D#5 down: the pattern's hint, HOLD: COPY PTN", sm_msg == SM_MSG_PTCOPYP);
+    key_up(22);
+    sm_input_poll();
+    layer_let_go(B_SEQ);
     return bad;
 }
 
@@ -10396,6 +10436,127 @@ static uint32_t lane_hit_peak(uint32_t L)                /* T4's KIT, lane L hit
     play_blocks(400);
     return pk;
 }
+/* SHIFT + A#3 / C#4 on the KIT (Tim, 31.10: it moved every lane): the lane in edit alone, its own locks with its hits */
+static int test_kit_lane_shift(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    ksnd(3)->len = 16u;
+    sm_kit_lane = 0;
+    sm_step_toggle(3, 0);
+    sm_step_toggle(3, 4);
+    sm_kit_lane = 1;
+    sm_step_toggle(3, 0);
+    sm_step_toggle(3, 8);
+    sm_lock_set(3, 4, SM_LC(0), 3);                       /* L1's own condition on its step 5 */
+    sm_lock_set(3, 8, SM_LC(1), 5);                       /* L2's on its step 9 */
+    sm_kit_lane = 0;
+    btn_down(B_OCTDN);
+    sm_input_poll();
+    lay_key(8);                                           /* SHIFT + C#4: L1 forward */
+    bad += check("LSHIFT: SHIFT + C#4 on the KIT: L1's hits one forward (0, 4 -> 1, 5), L2's stay (0, 8)",
+                 stp(3, 1)->n && stp(3, 1)->note[0] && stp(3, 5)->n && stp(3, 5)->note[0] && stp(3, 0)->n && !stp(3, 0)->note[0] &&
+                 stp(3, 0)->note[1] && stp(3, 8)->note[1] && !stp(3, 4)->n);
+    bad += check("LSHIFT: ... L1's condition with its hit (5 -> 6), L2's where it was", lk_val(3, 5, SM_LC(0)) == 3 &&
+                 lk_val(3, 4, SM_LC(0)) == LK_NONE && lk_val(3, 8, SM_LC(1)) == 5);
+    lay_key(5);                                           /* SHIFT + A#3 twice: back two */
+    lay_key(5);
+    bad += check("LSHIFT: SHIFT + A#3 twice: L1 at 15 and 3 (wrapping), L2 untouched", stp(3, 15)->note[0] && stp(3, 3)->note[0] &&
+                 !stp(3, 1)->n && stp(3, 0)->note[1] && !stp(3, 0)->note[0] && lk_val(3, 3, SM_LC(0)) == 3);
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    ms(200);
+    sm_input_poll();
+    save_hold();
+    bad += check("LSHIFT: UNDO: the last shift back (L1 at 0 and 4)", stp(3, 0)->note[0] && stp(3, 4)->note[0] && !stp(3, 15)->n);
+    return bad;
+}
+
+/* FX held + K4 (Tim, 31.10): the drums' filter, T4's alone: right a HPF (the kick thins), left a LPF (the hats dull); the other
+ * tracks as they were; back to 0 when FX is let go. SELECT: the effects' DEPTH, kept after FX */
+static uint32_t hf_of(uint32_t L, uint32_t *pk)            /* lane L hit: its first difference's sum (the highs), its peak */
+{
+    int32_t buf[40 * CTL];
+    uint32_t nl = 0, i, b, s = 0, p = 0;
+    trk_note_on(&trk[3], DR_KIT_NOTE + L, 120);
+    for (b = 0; b < 40u; b++) {
+        uint32_t a = block_peak(buf, &nl);
+        p = a > p ? a : p;
+    }
+    for (i = 1; i < nl; i++)
+        s += (uint32_t)abs(buf[i] - buf[i - 1]) >> 4;
+    for (i = 0, p = 0; i < nl; i++)                       /* (*pk: the lows, the sum of |x|) */
+        p += (uint32_t)abs(buf[i]) >> 8;
+    trk_all_off(&trk[3]);
+    play_blocks(400);
+    *pk = p;
+    return s;
+}
+static int test_drum_filter(void)
+{
+    int bad = 0;
+    uint32_t k0, k1, h0, h1, pk, t0, t1, b;
+    (void)pk;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    perf_dflt = 0;
+    play_blocks(100);
+    (void)hf_of(0, &k0);
+    h0 = hf_of(2, &pk);
+    perf_dflt = 100;                                      /* (the glide: ~65 blocks to the top) */
+    play_blocks(100);
+    (void)hf_of(0, &k1);
+    printf("  drums' filter: kick's body %u -> %u (HP 100)\n", k0, k1);
+    bad += check("DFLT: K4 right (HP): T4's kick much thinner (its body less than a half)", k1 * 2u < k0);
+    perf_dflt = -100;
+    play_blocks(150);
+    h1 = hf_of(2, &pk);
+    (void)hf_of(0, &k1);
+    printf("  drums' filter: lane 3's highs %u -> %u, the kick's body %u -> %u (LP 100)\n", h0, h1, k0, k1);
+    bad += check("DFLT: K4 left (LP): lane 3 duller (its highs well down), the kick's body still there", h1 * 2u < h0 && k1 * 3u > k0);
+    perf_dflt = 0;
+    play_blocks(150);
+    bad += check("DFLT: back to 0: the filter off (nothing runs)", !perf_dflt_on());
+    trk_note_on(&trk[0], 60, 100);                        /* T1 (no drum): untouched by it */
+    for (b = 0, t0 = 0; b < 20u; b++) { uint32_t a = block_peak(0, 0); t0 = a > t0 ? a : t0; }
+    trk_all_off(&trk[0]);
+    play_blocks(600);
+    perf_dflt = -100;
+    play_blocks(150);
+    trk_note_on(&trk[0], 60, 100);
+    for (b = 0, t1 = 0; b < 20u; b++) { uint32_t a = block_peak(0, 0); t1 = a > t1 ? a : t1; }
+    trk_all_off(&trk[0]);
+    perf_dflt = 0;
+    play_blocks(600);
+    printf("  T1 peak %u / %u\n", t0, t1);
+    bad += check("DFLT: ... T1 (a synth) the same with K4 left", t1 * 100u >= t0 * 97u && t1 * 100u <= t0 * 103u);
+    /* the panel: FX held, K4 and SELECT */
+    perf_k[3] = 0;
+    layer_hold(B_FX);
+    turn(EN_K4, 5);
+    sm_input_poll();
+    bad += check("DFLT: FX held + K4 5 detents: the drums' filter HP 20", sm_layer == SML_FX && perf_dflt == 20);
+    turn(EN_SELECT, -3);
+    sm_input_poll();
+    bad += check("DFLT: ... SELECT 3 down: DEPTH 94 (perf_k[3] 6)", perf_k[3] == 6);
+    draw_full();
+    bad += check("DFLT: ... the title shows D94, the map's K4 cell HP20", lint_has("FX \x12 MASTER D94", 0, 0) && lint_has("HP20", 0, 0));
+    layer_let_go(B_FX);
+    bad += check("DFLT: FX let go: the filter back to 0, DEPTH kept", perf_dflt == 0 && perf_k[3] == 6);
+    perf_k[3] = 0;
+    return bad;
+}
 static int test_kit_lane_mix(void)
 {
     int bad = 0;
@@ -11622,7 +11783,7 @@ static int test_euclid(void)
     return bad;
 }
 
-/* SHIFT + D#4 / F#4 shifts the track, D#5 / F#5 transposes it; the net in the header for a second */
+/* SHIFT + A#3 / C#4 shifts the track, D#4 / F#4 transposes it (Tim, 31.10: SEQ's keys); the net in the header for a second */
 static int test_shift_keys(void)
 {
     int bad = 0;
@@ -11633,25 +11794,25 @@ static int test_shift_keys(void)
     sm_step_toggle(0, 4);
     stp(0, 0)->note[0] = 60;
     stp(0, 4)->note[0] = 64;
-    key_tap_p(13);
-    bad += check("SHIFT keys: F#4 without SHIFT: nothing", stp(0, 0)->n == 1u && stp(0, 4)->n == 1u && !sm_msg);
+    key_tap_p(8);
+    bad += check("SHIFT keys: C#4 without SHIFT: nothing", stp(0, 0)->n == 1u && stp(0, 4)->n == 1u && !sm_msg);
     shift_dn();
-    key_tap_p(13);
-    bad += check("SHIFT keys: SHIFT + F#4: the trigs one step forward (0, 4 -> 1, 5), the notes with them",
+    key_tap_p(8);
+    bad += check("SHIFT keys: SHIFT + C#4: the trigs one step forward (0, 4 -> 1, 5), the notes with them",
                  !stp(0, 0)->n && stp(0, 1)->n == 1u && stp(0, 5)->n == 1u && stp(0, 1)->note[0] == 60 && stp(0, 5)->note[0] == 64);
     bad += check("SHIFT keys: ... the header says SHIFT +1", sm_msg == SM_MSG_SHIFT && sm_msg_val == 1);
     draw_full();
     bad += check("SHIFT keys: ... on the screen: T1 SHT+1", lint_has("T1 SHT+1", 0, 0));
-    key_tap_p(10);
-    key_tap_p(10);
-    bad += check("SHIFT keys: SHIFT + D#4 twice: two back (15, 3), SHIFT -1 net, wrapping at the length",
+    key_tap_p(5);
+    key_tap_p(5);
+    bad += check("SHIFT keys: SHIFT + A#3 twice: two back (15, 3), SHIFT -1 net, wrapping at the length",
                  stp(0, 15)->n == 1u && stp(0, 3)->n == 1u && !stp(0, 1)->n && sm_msg == SM_MSG_SHIFT && sm_msg_val == -1);
-    key_tap_p(25);
-    bad += check("SHIFT keys: SHIFT + F#5: the notes +1 semitone (60 -> 61, 64 -> 65), TRN +1 in the header",
+    key_tap_p(13);
+    bad += check("SHIFT keys: SHIFT + F#4: the notes +1 semitone (60 -> 61, 64 -> 65), TRN +1 in the header",
                  stp(0, 15)->note[0] == 61 && stp(0, 3)->note[0] == 65 && sm_msg == SM_MSG_TRN && sm_msg_val == 1);
-    key_tap_p(22);
-    key_tap_p(22);
-    bad += check("SHIFT keys: SHIFT + D#5 twice: 59 and 63, TRN -1", stp(0, 15)->note[0] == 59 && stp(0, 3)->note[0] == 63 && sm_msg_val == -1);
+    key_tap_p(10);
+    key_tap_p(10);
+    bad += check("SHIFT keys: SHIFT + D#4 twice: 59 and 63, TRN -1", stp(0, 15)->note[0] == 59 && stp(0, 3)->note[0] == 63 && sm_msg_val == -1);
     draw_full();
     bad += check("SHIFT keys: ... the screen says T1 TR-1", lint_has("T1 TR-1", 0, 0));
     ms(1100);
@@ -11662,7 +11823,7 @@ static int test_shift_keys(void)
     sm_ui.trk = 1;
     sm_step_toggle(1, 2);
     shift_dn();
-    key_tap_p(13);
+    key_tap_p(8);
     bad += check("SHIFT keys: T2 selected: T2's trig moves (2 -> 3), T1's stay, SHIFT +1 (its own net)",
                  stp(1, 3)->n == 1u && !stp(1, 2)->n && stp(0, 15)->n == 1u && sm_msg_val == 1);
     shift_up();
@@ -12227,32 +12388,17 @@ static int test_seq_all_tracks(void)
     memset(fm1_led, 0xAA, sizeof fm1_led);
     sm_leds();
     bad += check("SEQALL: SEQ held: the trigs stay lit on the white keys (step 5)", sm_layer == SML_SEQ && wl(4) == 1 && wl(3) == 0);
-    seq_key(8);                                           /* C#4: forward */
-    seq_key(8);
-    {
-        int ok = 1;
-        for (t = 0; t < SM_NTRK; t++)
-            ok &= t == 0u ? stp(t, 6)->n == 1u && !stp(t, 4)->n : stp(t, 4)->n == 1u && !stp(t, 6)->n;
-        bad += check("SEQALL: SEQ + C#4 twice: the selected track's (T1) trig two steps forward, the others stay (Tim)", ok);
-    }
-    bad += check("SEQALL: ... the net SHT+2 (no header message)", sm_sh_acc[0] == 2 && sm_msg == SM_MSG_NONE);
-    seq_key(5);                                           /* A#3: back */
-    seq_key(5);
-    bad += check("SEQALL: SEQ + A#3 twice: back where they were, SHT+0", stp(0, 4)->n == 1u && stp(3, 4)->n == 1u && sm_sh_acc[0] == 0);
+    seq_key(8);                                           /* C#4, F#4: nothing now (Tim, 31.10: SHIFT + them, SEQ not held) */
+    seq_key(13);
+    bad += check("SEQALL: SEQ + C#4 / F#4: nothing (SHIFT's now)", stp(0, 4)->n == 1u && stp(0, 4)->note[0] == 60u && !sm_sh_acc[0] && !sm_trn_acc[0]);
+    turn(EN_K3, 2);                                       /* K3: the track's shift, K4 its transpose (kept) */
+    sm_input_poll();
+    turn(EN_K4, -1);
+    sm_input_poll();
     sm_ux_mk1();
     draw_full();
-    bad += check("SEQALL: ... the map's row under K3 / K4: SHT+0 TR+0", smd_has_cells("SHT+0", "TR+0"));
-    seq_key(13);                                          /* F#4: up */
-    {
-        int ok = 1;
-        for (t = 0; t < SM_NTRK; t++)
-            ok &= stp(t, 4)->note[0] == (t == 0u ? 61u : 60u + t);
-        bad += check("SEQALL: SEQ + F#4: the selected track's notes a semitone up (the others not), TR+1", ok && sm_trn_acc[0] == 1);
-    }
-    seq_key(10);                                          /* D#4: down */
-    seq_key(10);
-    draw_full();
-    bad += check("SEQALL: SEQ + D#4 twice: a semitone below the start, TR-1 drawn under K4", stp(0, 4)->note[0] == 59u && stp(2, 4)->note[0] == 62u && smd_has_cells("SHT+0", "TR-1"));
+    bad += check("SEQALL: SEQ + K3 / K4: T1 two forward, a semitone down, SHT+2 TR-1 drawn", stp(0, 6)->n == 1u && stp(0, 6)->note[0] == 59u &&
+                 stp(1, 4)->n == 1u && smd_has_cells("SHT+2", "TR-1"));
     layer_let_go(B_SEQ);
     ms(1200);
     sm_input_poll();
@@ -12834,6 +12980,8 @@ int main(void)
     bad += test_chord_entry();
     bad += test_master_dyn();
     bad += test_kit_lane_mix();
+    bad += test_drum_filter();
+    bad += test_kit_lane_shift();
     bad += test_redraw();
     bad += test_page_copy();
     bad += test_slice_rev();

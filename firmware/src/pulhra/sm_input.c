@@ -117,7 +117,7 @@ static void sm_input_init(void)
 }
 
 static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used);
-static void sm_fx_poll(uint32_t notes, const int32_t *k);   /* sm_layer.c (after this file) */
+static void sm_fx_poll(uint32_t notes, const int32_t *k, int32_t sel);   /* sm_layer.c (after this file) */
 static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, int32_t alg, int32_t sel);
 static void sm_layer_end(void);
 static uint32_t sm_hold_btn(void);                        /* sm_layer.c: HOME / ARP / FX held (no layer) */
@@ -1116,14 +1116,17 @@ static void sm_fill_poll(void)
 /* SHIFT: OCT- held outside the keyboard mode (sm_shift is this, minus a layer open: sm_oct_poll) */
 static uint32_t sm_shift_held(void) { return !sm_ui.kbd && ((fm1_in.buttons >> panel.btn[B_OCTDN]) & 1u); }
 
-/* SHIFT + a black key (outside the keyboard mode and the layers; the white keys are SHIFT's trig copy): D#4 / F#4 (keys 10, 13) the
- * track's steps one back / forward, D#5 / F#5 (keys 22, 25) its notes a semitone down / up; the net shown in the header for a second */
-#define SM_SHK_BACK 10u
-#define SM_SHK_FWD 13u
-#define SM_SHK_TDN 22u
-#define SM_SHK_TUP 25u
+/* SHIFT + a black key (outside the keyboard mode and the layers; the white keys are SHIFT's trig copy; Tim, 31.10: the keys SEQ's
+ * were, SEQ no longer needed): A#3 / C#4 (keys 5, 8) the track's steps one back / forward (the KIT: the lane in edit's), D#4 / F#4
+ * (keys 10, 13) its notes a semitone down / up; the net shown in the header for a second. D#5 / F#5 held 0.8 s: the track
+ * copied / pasted (sm_fsave_poll; SEQ held + the same: the pattern) */
+#define SM_SHK_BACK 5u
+#define SM_SHK_FWD 8u
+#define SM_SHK_TDN 10u
+#define SM_SHK_TUP 13u
 static void sm_shift_keys(uint32_t notes)
 {
+    sm_fsave_poll(notes, fm1_ticks(), 0);
     uint32_t t = sm_ui.trk % SM_NTRK, len = (uint32_t)clamp(sm_ui_sound()->len, 1, (int32_t)SM_NSTEP);
     int32_t d = 0;
     if (((notes >> SM_SHK_BACK) & 1u) || ((notes >> SM_SHK_FWD) & 1u)) {
@@ -1210,7 +1213,7 @@ static void sm_input_poll(void)
     /* the family buttons (EDIT GLO SEQ: a tap is the page, a hold the layer; ENV: the page): a key or a knob used while one is
      * down is a layer too; in an open layer the keys and the four knobs and SELECT are the layer's, not the page's */
     sm_layer_begin(pressed, now, notes || sel || alg || pre || k[0] || k[1] || k[2] || k[3]);
-    sm_fx_poll(notes, k);                                 /* (FX held: the punch-in effects; a key let go ends its effect, FX held or not) */
+    sm_fx_poll(notes, k, sm_layer == SML_FX ? sel : 0);                                 /* (FX held: the punch-in effects; a key let go ends its effect, FX held or not) */
     if (sm_layer) {
         sm_layer_keys(pressed, notes, k, alg, sel);
         if (sm_layer == SML_SEQ)
@@ -1266,7 +1269,7 @@ static void sm_input_poll(void)
         sm_shift_keys(notes);
     else
         sm_lane_keys(notes);
-    sm_fill_poll();                             /* (SHIFT + D#4 F#4 D#5 F#5) */
+    sm_fill_poll();
     sm_arp_poll();
     sm_kbd_poll(sm_ui.kbd ? notes : 0);
     if (!sm_ui.kbd)                                       /* (the keyboard mode: the keys play, they are no trigs) */

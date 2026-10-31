@@ -8,89 +8,98 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PULHRA Installer</title>
 <style>
-  :root { --bg:#0e0f11; --card:#17191c; --line:#2a2d32; --fg:#ece9e3; --dim:#8a8e95; --acc:#e8a33d; --ok:#62c27b; --bad:#e46a6a; }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) { --bg:#f3f1ec; --card:#ffffff; --line:#dedad2; --fg:#1b1b1d; --dim:#6c6c72; --acc:#b46c00; --ok:#2e8b49; --bad:#bf3939; }
-  }
-  :root[data-theme="light"] { --bg:#f3f1ec; --card:#ffffff; --line:#dedad2; --fg:#1b1b1d; --dim:#6c6c72; --acc:#b46c00; --ok:#2e8b49; --bad:#bf3939; }
+  :root { --bg:#000; --fg:#d9d9d9; --hi:#fff; --dim:#6e6e6e; --line:#333; --bad:#ff3b2f; --ok:#fff; }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--fg); display: grid; place-items: center; padding: 16px;
-         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; }
-  .card { width: 100%; max-width: 440px; background: var(--card); border: 1px solid var(--line); border-radius: 16px;
-          padding: 28px 28px 20px; position: relative; }
-  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-  .brand { font: 700 30px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .18em; margin: 0; }
-  .brand b { color: var(--acc); font-weight: 700; }
-  .tools { display: flex; gap: 6px; }
-  .tools button { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 8px; padding: 3px 8px;
-                  font: 12px ui-monospace, Menlo, monospace; cursor: pointer; }
-  .tools button:hover { color: var(--fg); border-color: var(--dim); }
-  .sub { color: var(--dim); font-size: 13px; margin: 8px 0 22px; }
-  .sub a { color: var(--fg); }
-  .ver { font: 12px ui-monospace, Menlo, monospace; color: var(--dim); margin: 0 0 18px; }
-  ol.steps { list-style: none; padding: 0; margin: 0 0 20px; counter-reset: s; }
-  ol.steps li { counter-increment: s; display: flex; gap: 10px; margin: 0 0 8px; font-size: 14px; }
-  ol.steps li::before { content: counter(s); flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);
-                        color: var(--dim); font: 11px/18px ui-monospace, monospace; text-align: center; margin-top: 1px; }
-  #go { width: 100%; height: 46px; border: 0; border-radius: 10px; background: var(--acc); color: #141414; font: 600 15px/1 inherit;
-        letter-spacing: .04em; cursor: pointer; position: relative; overflow: hidden; }
-  #go:disabled { cursor: default; opacity: .9; }
-  #go .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(0,0,0,.18); transition: width .25s; }
-  #go .lab { position: relative; }
-  #status { min-height: 21px; margin: 12px 0 0; font-size: 13px; color: var(--dim); }
+  html { background: var(--bg); }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; }
+  ::selection { background: var(--fg); color: var(--bg); }
+  a { color: var(--hi); text-decoration: none; }
+  a:hover { background: var(--fg); color: var(--bg); }
+  pre { margin: 0; font: inherit; }
+  .logo { color: var(--hi); line-height: 1.15; white-space: pre; overflow: hidden; }
+  .logo.g { text-shadow: 2px 0 #ff2a2a, -2px 0 #2affff; }
+  .hd { display: flex; color: var(--dim); white-space: nowrap; overflow: hidden; margin: 18px 0 8px; }
+  .hd::before { content: "+--\00a0"; }
+  .hd::after { content: "\00a0----------------------------------------------------------------------------------------------------------------------------------------"; flex: 1; min-width: 0; overflow: hidden; }
+  .hd b { color: var(--hi); font-weight: normal; }
+  button { font: inherit; color: var(--fg); background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
+  button::before { content: "["; padding-right: .6ch; } button::after { content: "]"; padding-left: .6ch; }
+  button.ic::before, button.ic::after { padding: 0; }
+  button:hover:not(:disabled), button:focus-visible { background: var(--fg); color: var(--bg); outline: 0; }
+  button:disabled { color: var(--dim); cursor: default; }
+  button.pri { background: var(--hi); color: var(--bg); }
+  button.pri:disabled { background: var(--line); color: var(--dim); }
+  select, input[type=text] { font: inherit; color: var(--hi); background: var(--bg); border: 0; border-bottom: 1px dashed var(--dim); border-radius: 0; padding: 0 2px; }
+  select { cursor: pointer; } select:focus, input[type=text]:focus { outline: 0; border-bottom: 1px solid var(--hi); }
+  .dim { color: var(--dim); } .bad, .warn { color: var(--bad); } .ok { color: var(--ok); }
+  .cur::after { content: "_"; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cur::after { animation: none; } }
+  body { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  .box { width: 100%; max-width: 460px; min-width: 0; border: 1px solid var(--line); padding: 20px 20px 14px; }
+  .tag { color: var(--dim); margin: 10px 0 0; }
+  .ver { color: var(--dim); margin: 2px 0 0; }
+  ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+  ol.steps li { counter-increment: s; display: flex; gap: 1.5ch; margin: 0 0 4px; }
+  ol.steps li::before { content: counter(s, decimal-leading-zero); color: var(--dim); flex: none; }
+  #go { display: block; width: 100%; margin: 18px 0 0; padding: 9px 0; text-align: center; letter-spacing: .12em; }
+  #go::before, #go::after { content: none; }
+  #go.run, #go.run:hover { background: none; color: var(--hi); outline: 1px solid var(--line); }
+  #status { min-height: 1.5em; margin: 10px 0 0; color: var(--dim); overflow-wrap: anywhere; }
+  #status::before { content: "> "; color: var(--dim); }
   #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
-  details { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
-  summary { cursor: pointer; color: var(--dim); font-size: 13px; list-style: none; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; list-style: none; white-space: nowrap; overflow: hidden; display: flex; color: var(--dim); margin: 18px 0 8px; }
   summary::-webkit-details-marker { display: none; }
-  summary::before { content: "+ "; } details[open] > summary::before { content: "− "; }
-  details .more { max-height: 34vh; overflow: auto; padding-right: 4px; }   /* (the card keeps its size: the rest scrolls) */
-  details p { font-size: 13px; color: var(--dim); margin: 8px 0; }
-  details a { color: var(--fg); }
-  #log { max-height: 110px; overflow: auto; font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--dim); white-space: pre-wrap; margin: 8px 0 0; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
-  .row button { background: none; border: 1px solid var(--line); color: var(--fg); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; }
-  .row button:disabled { opacity: .4; cursor: default; }
-  input[type=file] { font-size: 12px; color: var(--dim); max-width: 100%; }
-  footer { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; color: var(--dim); line-height: 1.6; }
-  footer a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--line); }
-  footer a:hover { border-color: var(--acc); }
-  footer .who { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-  @media (max-width: 420px) { .card { padding: 22px 18px 16px; } .brand { font-size: 26px; } }
+  summary::before { content: "+--\00a0[+]\00a0"; } details[open] > summary::before { content: "+--\00a0[-]\00a0"; }
+  summary::after { content: "\00a0----------------------------------------------------------------------------------------------------------------------------------------"; flex: 1; min-width: 0; overflow: hidden; }
+  summary:hover { color: var(--hi); }
+  details .more { max-height: 34vh; overflow: auto; padding-right: 4px; }
+  details p { color: var(--dim); margin: 0 0 10px; }
+  #log { max-height: 110px; overflow: auto; font-size: 11px; line-height: 1.4; color: var(--dim); white-space: pre-wrap; margin: 8px 0 0; border-left: 1px solid var(--line); padding-left: 1ch; }
+  #log:empty { display: none; }
+  .row { display: flex; gap: 2ch; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  input[type=file] { font: inherit; font-size: 12px; color: var(--dim); max-width: 100%; }
+  input[type=file]::file-selector-button { font: inherit; color: var(--fg); background: none; border: 1px solid var(--dim); border-radius: 0; padding: 0 1ch; margin-right: 1ch; cursor: pointer; }
+  footer { color: var(--dim); font-size: 12px; line-height: 1.6; }
+  footer .who { display: flex; justify-content: space-between; gap: 1ch; flex-wrap: wrap; }
+  @media (max-width: 420px) { .box { padding: 16px 12px 12px; } .logo { font-size: 11px; } }
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="top">
-    <h1 class="brand"><b>P</b>ULHRA</h1>
-    <div class="tools"><button id="theme" title="theme">◐</button></div>
-  </div>
-  <p class="sub"><span data-t="tag"></span> <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">Felucca</a> · M-VAVE FM-1</p>
-  <p class="ver" id="ver"></p>
+<div class="box">
+  <pre class="logo" id="logo" aria-label="PULHRA"> _____ _____ __    _____ _____ _____
+|  _  |  |  |  |  |  |  | __  |  _  |
+|   __|  |  |  |__|     |    -|     |
+|__|  |_____|_____|__|__|__|__|__|__|</pre>
+  <div class="tag">// <span data-t="tag"></span> <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">Felucca</a> :: M-VAVE FM-1</div>
+  <div class="ver" id="ver"></div>
+  <div class="hd"><b>SETUP</b></div>
   <ol class="steps">
     <li data-t="s1"></li>
     <li data-t="s2"></li>
     <li data-t="s3"></li>
   </ol>
-  <button id="go" disabled><span class="fill" id="fill"></span><span class="lab" id="golab"></span></button>
-  <p id="status"></p>
+  <button id="go" class="pri" disabled><span id="golab"></span></button>
+  <div id="status" class="cur"></div>
   <details>
     <summary data-t="more"></summary>
     <div class="more">
     <p data-t="warn"></p>
     <p><span data-t="brick"></span> <a href="https://github.com/kurogedelic/FM-1-transporter" target="_blank" rel="noopener">FM-1-transporter</a></p>
     <p data-t="editorTip"></p>
-    <p><b data-t="stockTitle"></b><br><span data-t="stockText"></span> <a href="https://www.m-vave.com/download" target="_blank" rel="noopener">M-VAVE</a></p>
+    <p><span style="color:var(--hi)" data-t="stockTitle"></span><br><span data-t="stockText"></span> <a href="https://www.m-vave.com/download" target="_blank" rel="noopener">M-VAVE</a></p>
     <div class="row"><input id="stock-file" type="file" accept=".fwsc"><button id="stock-go" disabled data-t="stockGo"></button></div>
     <pre id="log"></pre>
     </div>
   </details>
+  <div class="hd"><b>CREDITS</b></div>
   <footer>
     <div data-t="fork"></div>
-    <div>Felucca — Leo Kuroshita (<a href="https://github.com/kurogedelic" target="_blank" rel="noopener">@kurogedelic</a>),
-      <a href="https://hugelton.com" target="_blank" rel="noopener">Hügelton Instruments</a> ·
+    <div>Felucca :: Leo Kuroshita (<a href="https://github.com/kurogedelic" target="_blank" rel="noopener">@kurogedelic</a>),
+      <a href="https://hugelton.com" target="_blank" rel="noopener">Hügelton Instruments</a> ::
       <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">github.com/hugelton/Felucca</a></div>
-    <div class="who"><span>PULHRA — Tim · <a href="https://www.instagram.com/otres.muzak/" target="_blank" rel="noopener">@otres.muzak</a></span>
+    <div class="who"><span>PULHRA :: Tim (<a href="https://www.instagram.com/otres.muzak/" target="_blank" rel="noopener">@otres.muzak</a>)</span>
       <span><a href="https://github.com/hugelton/Felucca/tree/main/LICENSES" target="_blank" rel="noopener">GPL-3.0</a>, <span data-t="nowarranty"></span></span></div>
     <div data-t="tm"></div>
   </footer>
@@ -101,8 +110,8 @@ const $ = (id) => document.getElementById(id);
 const TEXT = {
   en: {
     tag: "a hardfork of", s1: "Connect the FM-1 to the computer with a USB cable, directly (no hub).", s2: "Open this page in Chrome or Edge; close other MIDI apps.",
-    s3: "Press Install and keep the USB cable in until it is done.", install: "Install", working: "Installing…", again: "Install again",
-    more: "More", other: "RU",
+    s3: "Press Install and keep the USB cable in until it is done.", install: "[ INSTALL ]", working: "WRITING", again: "[ INSTALL AGAIN ]",
+    more: "MORE", other: "RU",
     warn: "Custom firmware: use it at your own risk; the authors accept no responsibility for damage or faults. Banks and presets saved in PULHRA stay through an update.",
     brick: "If an install is interrupted and the FM-1 no longer starts, recover it with",
     editorTip: "Presets, samples and bank backups: pulhra-editor.html (next to this file).",
@@ -128,23 +137,47 @@ let lastKey = null, lastArg = "", lastCls = "", btnKey = "install";
 function applyLang() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-t]").forEach((e) => { e.textContent = t(e.dataset.t); });
-  $("golab").textContent = t(btnKey);
+  $("golab").textContent = btnKey === "working" ? asciiBar(pct) : t(btnKey);
   if (lastKey) setStatus(lastKey, lastArg, lastCls);
 }
-$("theme").addEventListener("click", () => {
-  const r = document.documentElement, dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-  r.dataset.theme = dark ? "light" : "dark";
-});
-function setStatus(k, arg = "", cls = "") { lastKey = k; lastArg = arg; lastCls = cls; const s = $("status"); s.textContent = t(k) + arg; s.className = cls; }
+function setStatus(k, arg = "", cls = "") { lastKey = k; lastArg = arg; lastCls = cls; const s = $("status"); s.textContent = t(k) + arg; s.className = "cur " + cls; if (cls && typeof glitch === "function") glitch(cls === "bad" ? 6 : 3); }
 const sayK = (k, arg = "") => setStatus(k, arg, k === "done" || k === "stockDone" || k === "stockValid" ? "ok" : ["error", "stopped", "denied", "notfound", "model", "lost", "noloader", "noreturn", "mismatch", "badpkg", "nomidi", "loadfail", "stockError"].includes(k) ? "bad" : "");
-const say = (txt) => { lastKey = null; $("status").textContent = txt; $("status").className = ""; };
+const say = (txt) => { lastKey = null; $("status").textContent = txt; $("status").className = "cur"; };
 const log = (s) => { const l = $("log"); l.textContent += s + "\n"; l.scrollTop = l.scrollHeight; };
-const progress = (p) => { $("fill").style.width = Math.max(0, Math.min(100, p)) + "%"; };
-const label = (k) => { btnKey = k; $("golab").textContent = t(k); };
+const BARW = 24;
+let pct = 0;
+const asciiBar = (p) => { const n = Math.round((p / 100) * BARW); return "[" + "#".repeat(n) + ".".repeat(BARW - n) + "] " + String(Math.round(p)).padStart(3) + "%"; };
+const progress = (p) => { pct = Math.max(0, Math.min(100, p)); if (btnKey === "working") $("golab").textContent = asciiBar(pct); };
+const label = (k) => { btnKey = k; $("go").classList.toggle("run", k === "working"); $("golab").textContent = k === "working" ? asciiBar(pct) : t(k); };
+/* the logo's glitch: now and then a few characters broken and a line torn sideways, for a few frames */
+function glitchLogo(el) {
+  if (!el || matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};
+  const src = el.textContent, junk = "#%&@$/\\|_-=+*<>!?:;01";
+  let busy = false;
+  const hit = (frames) => {
+    if (busy) return;
+    busy = true;
+    let f = 0;
+    const tick = () => {
+      if (f++ >= frames) { el.textContent = src; el.classList.remove("g"); busy = false; return; }
+      const lines = src.split("\n").map((l) => [...l].map((c) => (c !== " " && Math.random() < 0.06 ? junk[(Math.random() * junk.length) | 0] : c)).join(""));
+      const k = (Math.random() * lines.length) | 0, d = 1 + ((Math.random() * 3) | 0);
+      lines[k] = Math.random() < 0.5 ? " ".repeat(d) + lines[k] : lines[k].slice(d);
+      el.textContent = lines.join("\n");
+      el.classList.toggle("g", Math.random() < 0.7);
+      setTimeout(tick, 40 + Math.random() * 50);
+    };
+    tick();
+  };
+  const loop = () => { hit(2 + ((Math.random() * 4) | 0)); setTimeout(loop, 2500 + Math.random() * 5000); };
+  setTimeout(loop, 900);
+  return hit;
+}
+const glitch = glitchLogo($("logo"));
 applyLang();
 let image = null;
 const meta = /*META*/;
-$("ver").textContent = `PULHRA ${meta.version}${meta.commit ? " · " + meta.commit : ""} · ${meta.product}`;
+$("ver").textContent = `// fw ${meta.version}${meta.commit ? " :: " + meta.commit : ""} :: ${meta.product}`;
 
 let writing = false, stock = null, stockEpoch = 0;
 const lock = (on) => { writing = on; $("go").disabled = on || !image; $("stock-go").disabled = on || !stock; $("stock-file").disabled = on; };

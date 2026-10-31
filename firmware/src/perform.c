@@ -652,6 +652,59 @@ static inline int32_t pf_svf(int32_t x, int32_t *z, const int16_t *c, int hp)
 }
 
 static __attribute__((noinline)) void perf_switch(uint32_t a) { perf_buf_select(perf_pick(a)); }
+#if FELUCCA_SWAMP
+/* PULHRA (Tim, 31.10): FX held, KNOB 4: the drums' filter, a tool for the transitions. T4's drums alone (the KIT's lanes, a drum
+ * machine), -100..100: left a LPF closing (as KNOB 1's, down to PF_LOW), right a HPF opening; 0 open, nothing runs. Back to 0
+ * when FX is let go, as the other macros (sm_layer.c). The cutoffs glide a block (~45 ms over the range), the shares
+ * (pd.la / pd.ha) a sample, across the block from its start value to its end one: the same for any track that calls */
+static volatile int8_t perf_dflt;
+static struct {
+    int32_t lc, hc, la0, la1, ha0, ha1, lz[2], hz[2];
+    int16_t lk[3], hk[3];
+} pd = {.lc = PF_TOP};
+static void perf_dflt_block(uint32_t n)
+{
+    int32_t m = perf_dflt, lt = m < 0 ? PF_TOP + m * (PF_TOP - PF_LOW) / 100 : PF_TOP, ht = m > 0 ? m * (PF_TOP - PF_LOW) / 100 : 0;
+    int32_t s = SL_SLOPE * (int32_t)n;
+    uint32_t k;
+    pd.lc += clamp(lt - pd.lc, -192, 192);
+    pd.hc += clamp(ht - pd.hc, -192, 192);
+    pd.la0 = pd.la1;
+    pd.ha0 = pd.ha1;
+    pd.la1 += clamp((m < 0 || pd.lc < PF_TOP ? 32768 : 0) - pd.la1, -s, s);
+    pd.ha1 += clamp((m > 0 || pd.hc > 0 ? 32768 : 0) - pd.ha1, -s, s);
+    if (!(pd.la0 | pd.la1))
+        pd.lz[0] = pd.lz[1] = 0;
+    if (!(pd.ha0 | pd.ha1))
+        pd.hz[0] = pd.hz[1] = 0;
+    for (k = 0; k < 3u; k++) {
+        int32_t i = pd.lc >> 8, f = pd.lc & 255, j = pd.hc >> 8, g = pd.hc & 255;
+        pd.lk[k] = (int16_t)(PF_SVF[i][k] + (((PF_SVF[i < 63 ? i + 1 : 63][k] - PF_SVF[i][k]) * f) >> 8));
+        pd.hk[k] = (int16_t)(PF_SVF[j][k] + (((PF_SVF[j < 63 ? j + 1 : 63][k] - PF_SVF[j][k]) * g) >> 8));
+    }
+}
+static int perf_dflt_on(void) { return (pd.la0 | pd.la1 | pd.ha0 | pd.ha1) != 0; }
+/* the drums' block b (mono, before DIST and the level), n samples */
+static __attribute__((noinline)) void perf_dflt_track(int32_t *b, uint32_t n)
+{
+    uint32_t i;
+    int32_t la = pd.la0, ha = pd.ha0, dla = (pd.la1 - pd.la0) / (int32_t)(n ? n : 1u), dha = (pd.ha1 - pd.ha0) / (int32_t)(n ? n : 1u);
+    for (i = 0; i < n; i++) {
+        int32_t x = b[i];
+        if (la) {
+            int32_t y = pf_svf(clamp(x >> 2, -32767, 32767), pd.lz, pd.lk, 0) << 2;
+            x = pf_mix(x, y, la);
+        }
+        if (ha) {
+            int32_t y = pf_svf(clamp(x >> 2, -32767, 32767), pd.hz, pd.hk, 1) << 2;
+            x = pf_mix(x, y, ha);
+        }
+        b[i] = x;
+        la += dla;
+        ha += dha;
+    }
+}
+#endif
 
 /* the UI: OCT UP / DN is the buffer effect playing (KNOB 4 is its shimmer, the card says so) */
 static int perf_harm_on(void) { return (PF_HARM >> perf_pick(perf_act)) & 1u; }

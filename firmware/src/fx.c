@@ -1165,6 +1165,8 @@ static void mix_part(track_t *t, uint32_t n)
 #if FELUCCA_SWAMP
     if ((dk_g0 != 32767 || dk_g1 != 32767) && t != &trk[3])
         duck_apply(b, n);                               /* PULHRA: the kick's ducking, every track but the drums' */
+    if (t == &trk[3] && ENGINES[t->engine]->oneshot && perf_dflt_on())
+        perf_dflt_track(b, n);                          /* PULHRA: FX held + KNOB 4, the drums' filter (perform.c) */
 #endif
     if (spread_on)
         mix_spread(t, b, n);
@@ -1362,6 +1364,9 @@ static void mix_block(int32_t *out, uint32_t n)
     events_block(n);
 #if FELUCCA_SWAMP
     comp_prep();
+#endif
+#if FELUCCA_SWAMP
+    perf_dflt_block(n);                                 /* (the drums' filter: its glides run every block) */
 #endif
     perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
 #if FELUCCA_MONOFM

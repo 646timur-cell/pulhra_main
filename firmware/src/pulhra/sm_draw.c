@@ -289,6 +289,8 @@ static uint32_t smd_page_sig(void)
         h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
     if (sm_map_open())                                    /* (the title of the layer: its page of machines, the track's length) */
         h = smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank), perf_trk);
+    if (sm_layer == SML_FX)                               /* (FX's title: SELECT's DEPTH, the shimmer's) */
+        h = smd_mix(smd_mix(h, 0x400u + (uint32_t)(uint8_t)perf_k[3]), (uint32_t)perf_harm_on());
     return h;
 }
 static void smd_cat(char *d, uint32_t *n, const char *s)   /* s appended (upper case) at d[*n] */
@@ -312,6 +314,20 @@ static void smd_page(void)
             static const char *const TG[SM_NTRK + 1u] = {"MASTER", "T1", "T2", "T3", "T4"};
             smd_cat(b, &n, "FX \x12 ");
             smd_cat(b, &n, TG[perf_trk % (SM_NTRK + 1u)]);
+            if (perf_k[3]) {                              /* SELECT's DEPTH, below full: D70 (the shimmer playing: SH30) */
+                char d[6];
+                uint32_t v = perf_harm_on() ? (uint32_t)perf_k[3] : 100u - (uint32_t)perf_k[3], j = 0;
+                v = v > 99u ? 99u : v;
+                d[j++] = ' ';
+                d[j++] = perf_harm_on() ? 'S' : 'D';
+                if (perf_harm_on())
+                    d[j++] = 'H';
+                if (v >= 10u)
+                    d[j++] = (char)('0' + v / 10u % 10u);
+                d[j++] = (char)('0' + v % 10u);
+                d[j] = 0;
+                smd_cat(b, &n, d);
+            }
         } else if (sm_layer == SML_GLO) {                 /* BANK A MUTE SOLO (the bank in view) */
             char bn[2] = {(char)('A' + sm_glo_bank % SM_NBANK), 0};
             smd_cat(b, &n, "BANK ");
@@ -903,17 +919,17 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
                 o->dim |= (uint8_t)((e >= PF_N || !((ok >> e) & 1u)) ? 1u << c : 0u);
             }
         } else {
-            static const char *const KN[4] = {"FLT", "CRSH", "THRW", "DPTH"};
+            static const char *const KN[4] = {"FLT", "CRSH", "THRW", "DRUM"};
             for (c = 0; c < 4u; c++) {
-                int32_t v = perf_k[c];
+                int32_t v = c < 3u ? perf_k[c] : perf_dflt;   /* (K4: the drums' filter, LP / HP as K1) */
                 char cb[6];
                 if (!v) {
                     smd_cell(o, c, KN[c], 0);
                     o->dim |= (uint8_t)(1u << c);
                     continue;
                 }
-                cb[0] = c == 0u ? (v < 0 ? 'L' : 'H') : KN[c][0];
-                cb[1] = c == 0u ? 'P' : KN[c][1];
+                cb[0] = c == 0u || c == 3u ? (v < 0 ? 'L' : 'H') : KN[c][0];
+                cb[1] = c == 0u || c == 3u ? 'P' : KN[c][1];
                 v = v < 0 ? -v : v;
                 v = v > 99 ? 99 : v;
                 cb[2] = (char)('0' + v / 10);

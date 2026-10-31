@@ -5,61 +5,93 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PULHRA Editor</title>
 <style>
-:root { --bg:#111214; --panel:#1b1d21; --line:#2c3036; --text:#e8e6e1; --dim:#8b8f96; --acc:#e8a33d; --ok:#5fbf77; --bad:#e06464; --sel:#2a2f37; }
-:root[data-theme="light"] { --bg:#f4f2ee; --panel:#ffffff; --line:#d9d5ce; --text:#1d1d1f; --dim:#6b6b70; --acc:#b86f00; --ok:#2f8f4a; --bad:#c03b3b; --sel:#ece7de; }
-* { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
-h1 { font-size:16px; letter-spacing:.12em; margin:0 12px 0 0; }
-h1 b { color:var(--acc); }
-button, select, input[type=text] { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
-button { cursor:pointer; }
-button:hover:not(:disabled) { border-color:var(--acc); }
-button.pri { background:var(--acc); color:#111; border-color:var(--acc); font-weight:600; }
-button:disabled { opacity:.45; cursor:default; }
-#status { color:var(--dim); }
-#status.ok { color:var(--ok); } #status.bad { color:var(--bad); }
-nav { display:flex; gap:4px; padding:10px 16px 0; border-bottom:1px solid var(--line); }
-nav button { border-radius:6px 6px 0 0; border-bottom:none; background:transparent; }
-nav button.on { background:var(--panel); border-color:var(--line); color:var(--acc); }
-main { padding:16px; max-width:1100px; }
-section { display:none; } section.on { display:block; }
-.row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 12px; }
-.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; margin:0 0 14px; }
-.card h2 { font-size:13px; margin:0 0 10px; color:var(--dim); letter-spacing:.08em; text-transform:uppercase; font-weight:600; }
-table { border-collapse:collapse; width:100%; }
-td, th { border-bottom:1px solid var(--line); padding:5px 6px; text-align:left; white-space:nowrap; }
-th { color:var(--dim); font-weight:normal; }
-tr.empty td { color:var(--dim); }
-td input[type=text] { width:12ch; padding:3px 6px; }
-.bar { height:10px; background:var(--sel); border-radius:5px; overflow:hidden; flex:1; min-width:120px; }
-.bar i { display:block; height:100%; background:var(--acc); width:0; }
-.bar.over i { background:var(--bad); }
-#drop { border:2px dashed var(--line); border-radius:8px; padding:22px; text-align:center; color:var(--dim); }
-#drop.hot { border-color:var(--acc); color:var(--text); }
-.grid { overflow-x:auto; }
-.grid .trk { display:flex; align-items:center; gap:6px; margin:2px 0; }
-.grid .lab { width:13ch; color:var(--dim); overflow:hidden; text-overflow:ellipsis; }
-.grid .st { display:grid; grid-template-columns:repeat(64, 11px); gap:1px; }
-.grid .st i { height:14px; background:var(--sel); border-radius:2px; }
-.grid .st i.on { background:var(--acc); } .grid .st i.out { opacity:.25; } .grid .st i.q:not(.on) { outline:1px solid var(--line); }
-.pats { display:flex; flex-wrap:wrap; gap:4px; }
-.pats button.on { border-color:var(--acc); color:var(--acc); }
-.pats button.unused { color:var(--dim); }
-#log { white-space:pre-wrap; color:var(--dim); font-size:12px; max-height:160px; overflow:auto; border-top:1px solid var(--line); padding:8px 16px; }
-.dim { color:var(--dim); } .warn { color:var(--bad); }
-@media (max-width:600px) { header, main, nav { padding-left:16px; padding-right:16px; } .grid .lab { width:8ch; } }
+  :root { --bg:#000; --fg:#d9d9d9; --hi:#fff; --dim:#6e6e6e; --line:#333; --bad:#ff3b2f; --ok:#fff; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; }
+  ::selection { background: var(--fg); color: var(--bg); }
+  a { color: var(--hi); text-decoration: none; }
+  a:hover { background: var(--fg); color: var(--bg); }
+  pre { margin: 0; font: inherit; }
+  .logo { color: var(--hi); line-height: 1.15; white-space: pre; overflow: hidden; }
+  .logo.g { text-shadow: 2px 0 #ff2a2a, -2px 0 #2affff; }
+  .hd { display: flex; color: var(--dim); white-space: nowrap; overflow: hidden; margin: 18px 0 8px; }
+  .hd::before { content: "+--\00a0"; }
+  .hd::after { content: "\00a0----------------------------------------------------------------------------------------------------------------------------------------"; flex: 1; min-width: 0; overflow: hidden; }
+  .hd b { color: var(--hi); font-weight: normal; }
+  button { font: inherit; color: var(--fg); background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-transform: uppercase; white-space: nowrap; }
+  button::before { content: "["; padding-right: .6ch; } button::after { content: "]"; padding-left: .6ch; }
+  button.ic::before, button.ic::after { padding: 0; }
+  button:hover:not(:disabled), button:focus-visible { background: var(--fg); color: var(--bg); outline: 0; }
+  button:disabled { color: var(--dim); cursor: default; }
+  button.pri { background: var(--hi); color: var(--bg); }
+  button.pri:disabled { background: var(--line); color: var(--dim); }
+  select, input[type=text] { font: inherit; color: var(--hi); background: var(--bg); border: 0; border-bottom: 1px dashed var(--dim); border-radius: 0; padding: 0 2px; }
+  select { cursor: pointer; } select:focus, input[type=text]:focus { outline: 0; border-bottom: 1px solid var(--hi); }
+  .dim { color: var(--dim); } .bad, .warn { color: var(--bad); } .ok { color: var(--ok); }
+  .cur::after { content: "_"; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cur::after { animation: none; } }
+header { display: flex; flex-wrap: wrap; gap: 8px 3ch; align-items: flex-end; padding: 16px 16px 0; }
+header .logo { font-size: 11px; }
+header .id { color: var(--dim); }
+header .id b { color: var(--hi); font-weight: normal; }
+.conn { display: flex; flex-wrap: wrap; gap: 1ch 2ch; align-items: center; padding: 10px 16px 0; }
+#status { color: var(--dim); } #status::before { content: "> "; }
+#status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+nav { display: flex; gap: 2ch; padding: 14px 16px 0; }
+nav button { color: var(--dim); }
+nav button.on { background: var(--hi); color: var(--bg); }
+main { padding: 0 16px 16px; max-width: 1100px; }
+section { display: none; } section.on { display: block; }
+.row { display: flex; flex-wrap: wrap; gap: 1ch 2ch; align-items: center; margin: 0 0 10px; }
+.card { margin: 0 0 6px; }
+.card h2 { display: flex; white-space: nowrap; overflow: hidden; font: inherit; color: var(--dim); margin: 18px 0 10px; }
+.card h2::before { content: "+--\00a0"; }
+.card h2::after { content: "\00a0----------------------------------------------------------------------------------------------------------------------------------------------------------"; flex: 1; min-width: 0; overflow: hidden; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 2px 2ch 2px 0; text-align: left; white-space: nowrap; }
+th { color: var(--dim); font-weight: normal; border-bottom: 1px dashed var(--line); }
+th::before { content: ""; }
+tr:hover td { background: #111; }
+tr.empty td { color: var(--dim); }
+td input[type=text] { width: 11ch; text-transform: uppercase; }
+.bar { font-variant-ligatures: none; white-space: pre; color: var(--hi); }
+.bar.over { color: var(--bad); }
+#drop { border: 1px dashed var(--dim); padding: 22px 12px; text-align: center; color: var(--dim); }
+#drop.hot { border-style: solid; border-color: var(--hi); color: var(--hi); background: #0d0d0d; }
+#drop label { color: var(--hi); cursor: pointer; text-decoration: underline; }
+.grid { overflow-x: auto; padding-bottom: 6px; }
+.grid .trk { display: flex; align-items: center; gap: 2ch; white-space: nowrap; line-height: 1.35; }
+.grid .lab { width: 12ch; flex: none; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.grid .st { display: flex; }
+.grid .st i { font-style: normal; width: 1ch; text-align: center; color: var(--line); }
+.grid .st i::before { content: "."; }
+.grid .st i.q::before { content: ":"; }
+.grid .st i.on { color: var(--hi); } .grid .st i.on::before { content: "#"; }
+.grid .st i.out { opacity: .3; } .grid .st i.out::before { content: " "; }
+.pats { gap: 1ch 1.5ch; }
+.pats button.on { background: var(--hi); color: var(--bg); }
+.pats button.unused { color: var(--dim); }
+#log { white-space: pre-wrap; color: var(--dim); font-size: 12px; max-height: 160px; overflow: auto; padding: 8px 16px; border-top: 1px dashed var(--line); }
+#log:empty { display: none; }
+#log::before { content: "LOG\A"; color: var(--line); }
+@media (max-width: 600px) { header .logo { font-size: 9px; } .grid .lab { width: 8ch; } }
 </style>
 </head>
 <body>
 <header>
-  <h1><b>PULHRA</b> EDITOR</h1>
+  <pre class="logo" id="logo" aria-label="PULHRA"> _____ _____ __    _____ _____ _____
+|  _  |  |  |  |  |  |  | __  |  _  |
+|   __|  |  |  |__|     |    -|     |
+|__|  |_____|_____|__|__|__|__|__|__|</pre>
+  <div class="id"><b>EDITOR</b> // presets :: samples :: banks</div>
+</header>
+<div class="conn">
   <button id="connect" class="pri">Connect FM-1</button>
   <select id="ports" hidden></select>
-  <span id="status">not connected</span>
-  <span style="flex:1"></span>
-  <button id="theme" title="theme">◐</button>
-</header>
+  <span id="status" class="cur">not connected</span>
+</div>
 <nav>
   <button data-tab="presets" class="on">PRESETS</button>
   <button data-tab="samples">SAMPLES</button>
@@ -68,7 +100,7 @@ td input[type=text] { width:12ch; padding:3px 6px; }
 <main>
 <section id="presets" class="on">
   <div class="card">
-    <h2>24 places U01…U24</h2>
+    <h2>USER SOUNDS U01..U24</h2>
     <div class="row">
       <button id="upRead" disabled>Read from FM-1</button>
       <button id="upWrite" disabled>Write to FM-1</button>
@@ -82,11 +114,11 @@ td input[type=text] { width:12ch; padding:3px 6px; }
 </section>
 <section id="samples">
   <div class="card">
-    <h2>Slot USR1 now</h2>
-    <div class="row"><button id="smRead" disabled>Read</button><button id="smClear" disabled>Clear slot</button><span id="smNow" class="dim">—</span></div>
+    <h2>SLOT USR1</h2>
+    <div class="row"><button id="smRead" disabled>Read</button><button id="smClear" disabled>Clear slot</button><span id="smNow" class="dim">--</span></div>
   </div>
   <div class="card">
-    <h2>New slot</h2>
+    <h2>NEW SLOT</h2>
     <div id="drop">Drop WAV files here (up to 16) or <label style="color:var(--acc);cursor:pointer">choose<input id="smFiles" type="file" accept=".wav,audio/wav" multiple hidden></label></div>
     <div class="row" style="margin-top:12px">
       <label>Name <input id="smName" type="text" maxlength="8" value="USER" style="width:10ch"></label>
@@ -94,23 +126,23 @@ td input[type=text] { width:12ch; padding:3px 6px; }
       <label>Rate <select id="smRate"></select></label>
       <label>Bits <select id="smBits"></select></label>
     </div>
-    <div class="row"><div class="bar" id="smBar"><i></i></div><span id="smSize" class="dim">0 / 0 KB</span></div>
+    <div class="row"><span class="bar" id="smBar"></span><span id="smSize" class="dim">0 / 0 KB</span></div>
     <table id="smTable"></table>
     <div class="row" style="margin-top:12px"><button id="smUpload" class="pri" disabled>Upload to FM-1</button><span class="dim">The FM-1 must be stopped. Plays in CLOUD (SRC USER), SAMP (KIT USER) and the slice machines (KIT USR1).</span></div>
   </div>
 </section>
 <section id="banks">
   <div class="card">
-    <h2>Backup</h2>
+    <h2>BACKUP</h2>
     <div class="row">
       <button id="bkSave" disabled>Save everything to a file</button>
       <label><button id="bkLoadBtn" disabled>Restore from a file…</button><input id="bkLoad" type="file" accept=".phbk" hidden></label>
-      <div class="bar" id="bkBar"><i></i></div><span id="bkPct" class="dim"></span>
+      <span class="bar" id="bkBar"></span><span id="bkPct" class="dim"></span>
     </div>
     <div class="dim">The file holds the project, 4 banks, 24 presets and the sample slot. A restore overwrites all of them and restarts the FM-1.</div>
   </div>
   <div class="card">
-    <h2>Patterns</h2>
+    <h2>PATTERNS</h2>
     <div class="row"><button id="bnRead" disabled>Read banks</button><span class="dim">or open a backup: the grid shows from the file</span></div>
     <div class="row pats" id="bnBanks"></div>
     <div class="row pats" id="bnPats"></div>
@@ -446,7 +478,32 @@ const $ = (id) => document.getElementById(id);
 const log = (s) => { const l = $("log"); l.textContent += s + "\n"; l.scrollTop = l.scrollHeight; };
 const u21 = (v) => [v & 127, (v >> 7) & 127, (v >> 14) & 127];
 const ru21 = (a, i) => a[i] | (a[i + 1] << 7) | (a[i + 2] << 14);
-function status(s, cls) { const e = $("status"); e.textContent = s; e.className = cls || ""; }
+function status(s, cls) { const e = $("status"); e.textContent = s; e.className = "cur " + (cls || ""); if (cls) glitch(cls === "bad" ? 6 : 3); }
+/* the logo's glitch: now and then a few characters broken and a line torn sideways, for a few frames */
+function glitchLogo(el) {
+  if (!el || matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};
+  const src = el.textContent, junk = "#%&@$/\\|_-=+*<>!?:;01";
+  let busy = false;
+  const hit = (frames) => {
+    if (busy) return;
+    busy = true;
+    let f = 0;
+    const tick = () => {
+      if (f++ >= frames) { el.textContent = src; el.classList.remove("g"); busy = false; return; }
+      const lines = src.split("\n").map((l) => [...l].map((c) => (c !== " " && Math.random() < 0.06 ? junk[(Math.random() * junk.length) | 0] : c)).join(""));
+      const k = (Math.random() * lines.length) | 0, d = 1 + ((Math.random() * 3) | 0);
+      lines[k] = Math.random() < 0.5 ? " ".repeat(d) + lines[k] : lines[k].slice(d);
+      el.textContent = lines.join("\n");
+      el.classList.toggle("g", Math.random() < 0.7);
+      setTimeout(tick, 40 + Math.random() * 50);
+    };
+    tick();
+  };
+  const loop = () => { hit(2 + ((Math.random() * 4) | 0)); setTimeout(loop, 2500 + Math.random() * 5000); };
+  setTimeout(loop, 900);
+  return hit;
+}
+const glitch = glitchLogo($("logo"));
 
 function onMsg(ev) {
   const d = ev.data;
@@ -544,7 +601,8 @@ async function writeRegion(id, off, bytes, prog) {
 const reload = (what) => reqOk(ED.RELOAD, [what]);
 function setBar(id, a, b, label) {
   const bar = $(id);
-  bar.querySelector("i").style.width = (b ? Math.min(100, 100 * a / b) : 0) + "%";
+  const w = 32, n = b ? Math.round(Math.min(1, a / b) * w) : 0;
+  bar.textContent = "[" + "#".repeat(n) + ".".repeat(w - n) + "]";
   if (label !== undefined) { const t = $(label); if (t) t.textContent = b ? Math.round(100 * a / b) + " %" : ""; }
 }
 function download(name, bytes, type = "application/octet-stream") {
@@ -606,11 +664,11 @@ function drawPresets() {
   let h = "<tr><th>place</th><th>name</th><th>machine</th><th>sound</th><th>category</th><th></th></tr>";
   for (let k = 0; k < UP.N; k++) {
     const p = places[k], u = "U" + String(k + 1).padStart(2, "0");
-    if (!p) { h += `<tr class="empty"><td>${u}</td><td colspan="4">—</td><td><button data-mv="${k}">↥</button></td></tr>`; continue; }
+    if (!p) { h += `<tr class="empty"><td>${u}</td><td colspan="4">-- empty --</td><td><button class="ic" data-mv="${k}" title="move the next sound up here">^^</button></td></tr>`; continue; }
     const m = recMach(p.rec), pr = p.rec[UP.SND + LAY.sndPreset];
     h += `<tr><td>${u}</td><td><input type="text" maxlength="${UP.NAME}" data-nm="${k}" value="${recName(p.rec)}"></td>` +
          `<td>${MACH[m] || "?"}</td><td class="dim">${(PRESETS[m] || [])[pr] || ""}</td><td>${CATS[p.rec[3]] || "-"}</td>` +
-         `<td><button data-up="${k}" title="up">▲</button> <button data-dn="${k}" title="down">▼</button> <button data-del="${k}" title="delete">✕</button></td></tr>`;
+         `<td><button class="ic" data-up="${k}" title="up">^</button> <button class="ic" data-dn="${k}" title="down">v</button> <button class="ic" data-del="${k}" title="delete">x</button></td></tr>`;
   }
   t.innerHTML = h;
   const used = places.filter(Boolean).length;
@@ -754,7 +812,7 @@ function refreshUpload() {
   const zs = draft.files.length ? draftZones(draft) : [];
   $("smTable").innerHTML = zs.length ? "<tr><th>zone</th><th>keys</th><th>length</th><th></th></tr>" + zs.map((z, i) =>
     `<tr><td>${i + 1}${draft.files.length > 1 ? " · " + draft.files[i].name : ""}</td><td>${z.lo ?? "auto"}${z.hi != null ? "–" + z.hi : ""}</td>` +
-    `<td>${(z.s.length / z.rate).toFixed(2)} s</td><td><button data-play="${i}">▶</button>${draft.files.length > 1 ? ` <button data-rm="${i}">✕</button>` : ""}</td></tr>`).join("") : "";
+    `<td>${(z.s.length / z.rate).toFixed(2)} s</td><td><button class="ic" data-play="${i}" title="play">&gt;</button>${draft.files.length > 1 ? ` <button class="ic" data-rm="${i}" title="remove">x</button>` : ""}</td></tr>`).join("") : "";
   $("smUpload").disabled = !info || !built;
 }
 $("smTable").addEventListener("click", (e) => {
@@ -907,14 +965,9 @@ for (const b of document.querySelectorAll("nav button"))
     for (const s of document.querySelectorAll("section")) s.classList.toggle("on", s.id === b.dataset.tab);
   };
 $("connect").onclick = connect;
-$("theme").onclick = () => {
-  const r = document.documentElement, t = r.dataset.theme === "light" ? "dark" : "light";
-  r.dataset.theme = t;
-  try { localStorage.setItem("pulhra-ed-theme", t); } catch (e) {}
-};
-try { const t = localStorage.getItem("pulhra-ed-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 drawPresets();
 refreshUpload();
+setBar("bkBar", 0, 1);
 if (!navigator.requestMIDIAccess) status("needs Chrome / Edge (Web MIDI)", "bad");
 </script>
 </body>

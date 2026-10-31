@@ -290,11 +290,11 @@ static void sm_paste_trk(uint32_t t)
 }
 
 /* PASTE the pattern copied onto the current one: the kit, the steps, the locks, the master length */
-static void sm_paste_pat(void)
+static int sm_paste_pat(void)
 {
     uint32_t t;
     if (sm_clip_kind != SM_CLIP_PAT)
-        return;
+        return 0;
     sm_undo_snap();
     sm_put_begin((1u << SM_NTRK) - 1u);
     for (t = 0; t < SM_NTRK; t++)
@@ -303,11 +303,78 @@ static void sm_paste_pat(void)
     smp.pat[smp.cur % SM_NPAT].speed = sm_clip.speed;
     smp.pat[smp.cur % SM_NPAT].swing = sm_clip.swing;
     sm_acc_reset(0xFu);
+    return 1;
 }
 
-/* SHIFT: track t's steps (and their locks) one step left (-1) or right (+1), wrapping at its length */
+/* lock param q is KIT lane L's own (its values, mix, filter, envelope, condition) */
+static int sm_lock_of_lane(uint32_t q, uint32_t L)
+{
+    return (sm_is_lp(q) && (q - SM_LP0) / 9u == L) || (sm_is_lm(q) && (q - SM_LM0) / 4u == L) ||
+           (sm_is_lf(q) && (q - SM_LF0) / 3u == L) || q == SM_LC(L) || (sm_is_le(q) && (q - SM_LE0) / 4u == L);
+}
+
+/* SHIFT on the KIT (Tim: it moved every lane): lane L's hits and its own locks one step left (-1) or right (+1), wrapping at the
+ * track's length; the other lanes, and the steps' shared fields, stay. A step L leaves that no lane hits any more: no trig (its
+ * other locks gone); a step L comes to without a trig: a fresh one. The UNDO snapshot first */
+static void sm_shift_lane(uint32_t L, int32_t dir)
+{
+    sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
+    uint32_t t = SM_KIT_TRK, len = (uint32_t)clamp(p->kit.snd[t].len, 1, (int32_t)SM_NSTEP), s, i, n;
+    uint8_t v[SM_NSTEP];
+    L %= 4u;
+    sm_undo_snap();
+    for (s = 0; s < len; s++)
+        v[s] = p->step[t][s].n ? p->step[t][s].note[L] : 0u;
+    n = p->nlock > SM_NLOCK ? SM_NLOCK : p->nlock;
+    for (s = 0; s < len; s++) {
+        sm_step_t *x = &p->step[t][s];
+        uint32_t w = v[(s + len - (uint32_t)(dir < 0 ? len - 1u : 1u)) % len], other;
+        other = x->n ? (x->note[(L + 1u) & 3u] | x->note[(L + 2u) & 3u] | x->note[(L + 3u) & 3u]) : 0u;
+        if (w && !x->n) {
+            for (i = 0; i < n; i++)                       /* (a stale lock of an empty step: gone; L's own move below) */
+                if (p->lock[i].ts == SM_TS(t, s) && p->lock[i].param != SM_LOCK_DEAD && !sm_lock_of_lane(p->lock[i].param, L))
+                    p->lock[i].param = SM_LOCK_DEAD;
+            sm_step_fresh(t, s, 0);
+            x->note[0] = 0;
+            x->note[L] = (uint8_t)w;
+            SM_BARRIER();
+            x->n = 1;
+        } else if (w) {
+            x->note[L] = (uint8_t)w;
+            x->flags &= (uint8_t)~SMF_REST;
+        } else if (x->n && x->note[L]) {
+            if (!other && !(x->flags & SMF_REST)) {
+                x->n = 0;                                 /* (one byte: the audio stream sees the trig or nothing) */
+                SM_BARRIER();
+                for (i = 0; i < n; i++)
+                    if (p->lock[i].ts == SM_TS(t, s) && p->lock[i].param != SM_LOCK_DEAD && !sm_lock_of_lane(p->lock[i].param, L)) {
+                        SM_LOCK_PREEMPT();
+                        p->lock[i].param = SM_LOCK_DEAD;
+                    }
+            }
+            x->note[L] = 0;
+        }
+    }
+    for (i = 0; i < n; i++) {                             /* L's own locks with its hits */
+        uint32_t st = SM_TS_S(p->lock[i].ts);
+        if (p->lock[i].param == SM_LOCK_DEAD || SM_TS_T(p->lock[i].ts) != t || st >= len || !sm_lock_of_lane(p->lock[i].param, L))
+            continue;
+        SM_LOCK_PREEMPT();
+        p->lock[i].ts = (uint8_t)SM_TS(t, (st + len + (uint32_t)(dir < 0 ? len - 1u : 1u)) % len);
+    }
+    if (!sm_playing)
+        sm_lock_compact(p);
+    sm_dirty = 1;
+}
+
+/* SHIFT: track t's steps (and their locks) one step left (-1) or right (+1), wrapping at its length; the KIT: the lane in edit
+ * alone (sm_shift_lane) */
 static void sm_shift_trk(uint32_t t, int32_t dir)
 {
+    if (sm_trk_kit(t % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {
+        sm_shift_lane(sm_kit_lane, dir);
+        return;
+    }
     sm_undo_snap();
     sm_put_begin(1u << (t % SM_NTRK));
     sm_put_track(t, &sm_undo_buf, t, dir < 0 ? -1 : 1, 0);   /* (the snapshot is the track as it was) */

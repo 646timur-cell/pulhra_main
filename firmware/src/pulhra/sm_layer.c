@@ -14,10 +14,9 @@
  *              bank A..E in view, the white C4 D4 E4 F4 G4 A4 B4 C5 are its patterns 1..8: a tap on a used one asks for it (as
  *              SEQ + ALGORITHM), on an empty one saves the current pattern into it (kit and all), a hold (0.8 s) saves the
  *              current pattern into it again (no switch)
- *   SEQ        K1 the selected track's length 1..32, K2 the pattern's master length (AUTO, 1..128); the white keys (MONOFM's
- *              tools, sm_edit.c): F3 CLEAR the track's trigs and locks (held 0.8 s: all four tracks; the kit stays), G3 COPY
- *              the pattern, A3 COPY the track (its sound, steps, locks), B3 PASTE the track, D4 PASTE the pattern, E4 / F4
- *              SHIFT the track's steps < >, B4 / C5 TRN its notes - +; F#3 the pattern change's mode round (SEQUENTIAL, DIRECT START, DIRECT JUMP); ALGORITHM picks a
+ *   SEQ        SELECT the selected track's length, K1 its speed, K2 the change mode, K3 / K4 its SHIFT / TRN; F3 CLEAR the
+ *              track's trigs and locks (the KIT: the lane in edit), F5 held 0.8 s the pattern's; D#5 / F#5 held 0.8 s COPY /
+ *              PASTE the pattern (Tim, 31.10; SHIFT + the same: the track, sm_input.c); F#3 the pattern change's mode round (SEQUENTIAL, DIRECT START, DIRECT JUMP); ALGORITHM picks a
  *              pattern of all 40 (from the one playing), and letting go of SEQ asks for it (sm_bank.c sm_ask: its bank into RAM,
  *              then smp.next: sm_seq.c switches); F#5 held 0.8 s SAVE (sm_bank.c: at STOP while playing);
  *              OCT+ adds the picked pattern (none picked: the one playing) to the chain being built (up to 16, repeats too),
@@ -29,7 +28,8 @@
  *              the master or one track: the 16 white keys hold their effect while down (perf_map, Felucca's default: REPEAT 1/8 1/16
  *              1/32, REVERSE, LPF, HPF, TAPE STOP, FREEZE, OCT UP, OCT DN, FLANGER, PHASER, REV THROW, ECHO THROW, SLCR, -), even
  *              after FX is let go, until the key is; the black F#3 G#3 A#3 C#4 mute T1..T4 while held; D#4 steps the target
- *              MASTER T1 .. T4 (perf_trk); K1..K4 the macros FILTER CRUSH THROW DEPTH (perf_k, back to 0 when FX is let go).
+ *              MASTER T1 .. T4 (perf_trk); K1..K3 the macros FILTER CRUSH THROW (perf_k, back to 0 when FX is let go), K4
+ *              the drums' filter (T4's drums: - LPF, + HPF, perf_dflt, back to 0 too), SELECT the effects' DEPTH (kept).
  *              Nothing is recorded, nothing saved (sm_fx_poll)
  *   ARP        tap: the family's next page (ARP, ARP 2). A hold has no layer (as HOME's)
  *   HOME held  white keys F3 .. B3: the selected track T1 .. T4 (sm_hold_keys); ARP held: F3 the selected track's note LATCH
@@ -55,15 +55,11 @@ static const struct { uint8_t btn, layer, fam; } SM_LBTN[SM_NLBTN] = {
 };
 #define SM_LAY_MODE_KEY 1u                                /* SEQ: F#3 (key 1), the change mode (MONOFM's) */
 #define SM_LAY_CHOFF_KEY 3u                               /* SEQ: G#3 (key 3), the chain off */
-#define SM_LAY_SHL_KEY 5u                                 /* SEQ: A#3 (key 5), every track's trigs a step back */
-#define SM_LAY_SHR_KEY 8u                                 /* SEQ: C#4 (key 8), ... a step forward */
-#define SM_LAY_TDN_KEY 10u                                /* SEQ: D#4 (key 10), every track's trigs a semitone down */
-#define SM_LAY_TUP_KEY 13u                                /* SEQ: F#4 (key 13), ... up */
 #define SM_LAY_F3_KEY 0u                                  /* SEQ: F3 (key 0), CLEAR the track */
 #define SM_LAY_PCLR_KEY 24u                               /* SEQ: F5 (key 24) held SM_CLEAR_ALL_US: PTN CLEAR (every track) */
 #define SM_LAY_FILL_KEY 26u                               /* GLO: G5 (key 26), FILL while held */
-enum { SM_W_CLEAR = 0, SM_W_COPY_PAT = 1, SM_W_COPY_TRK = 4, SM_W_PASTE_TRK = 5, SM_W_PASTE_PAT = 2, SM_W_SHL = 6, SM_W_SHR = 7,
-       SM_W_TRN_DN = 10, SM_W_TRN_UP = 11 };             /* SEQ: the white keys of the tools (F3 = 0); C4=4 copy, D4=5 paste */
+enum { SM_W_CLEAR = 0 };                                 /* SEQ: the white keys' tools (F3 = 0): CLEAR alone (Tim, 31.10: COPY / PASTE
+                                                           * are D#5 / F#5 held, SHIFT and TRN SHIFT + the black keys, sm_input.c) */
 #define SM_NEPAGE 4u                                      /* MONO SOMA SLICE DRUM (engines.c MF_PAGE) */
 
 static void sm_layer_init(void)
@@ -176,8 +172,11 @@ static void sm_layer_close(void)
 {
     if (sm_layer == SML_SEQ)
         sm_seq_commit();
-    if (sm_layer == SML_FX)                               /* (the macros are FX held's alone; a key still down keeps its effect) */
-        perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
+    if (sm_layer == SML_FX) {                             /* (the macros are FX held's alone; a key still down keeps its effect;
+                                                           * SELECT's DEPTH stays, Tim) */
+        perf_k[0] = perf_k[1] = perf_k[2] = 0;
+        perf_dflt = 0;
+    }
     sm_lay_pick = SM_PAT_NONE;
     sm_lay_nch = 0;
     sm_layer = SML_NONE;
@@ -251,7 +250,7 @@ static uint32_t sm_fx_effect(uint32_t key)               /* the effect of key (w
         n += (SM_BLACK_KEYS >> b) & 1u;
     return n < SM_NTRK ? PF_M1 + n : PF_N;
 }
-static void sm_fx_poll(uint32_t notes, const int32_t *k)
+static void sm_fx_poll(uint32_t notes, const int32_t *k, int32_t sel)
 {
     uint32_t key, held = fm1_in.notes;
     for (key = 0; key < SM_NKEYS; key++) {                /* the keys let go: their effects off (FX held or not) */
@@ -280,14 +279,21 @@ static void sm_fx_poll(uint32_t notes, const int32_t *k)
         perf_press(e, 1);
         sm_dirty = 1;
     }
-    for (key = 0; key < 4u; key++)                        /* the macros: FILTER -100..100 (- LPF, + HPF), CRUSH, THROW, DEPTH 0..100 */
+    for (key = 0; key < 3u; key++)                        /* the macros: FILTER -100..100 (- LPF, + HPF), CRUSH, THROW */
         if (k[key]) {
-            int32_t s = k[key];
-            if (key == 3u && !perf_harm_on())
-                s = -s;                                   /* (DEPTH: 100 - perf_k[3], rises to the right, as Felucca's) */
-            perf_k[key] = (int8_t)clamp(perf_k[key] + s * (key ? 2 : 4), key ? 0 : -100, 100);
+            perf_k[key] = (int8_t)clamp(perf_k[key] + k[key] * (key ? 2 : 4), key ? 0 : -100, 100);
             sm_dirty = 1;
         }
+    if (k[3]) {                                           /* K4 (Tim): the drums' filter, -100..100 (- LPF, + HPF; perform.c) */
+        perf_dflt = (int8_t)clamp(perf_dflt + k[3] * 4, -100, 100);
+        sm_dirty = 1;
+    }
+    if (sel) {                                            /* SELECT (Tim): the white keys' effects' DEPTH (100 - perf_k[3], rises to the
+                                                           * right; OCT+ / OCT- playing: their shimmer, as Felucca's KNOB 4). Kept when
+                                                           * FX is let go */
+        perf_k[3] = (int8_t)clamp(perf_k[3] + (perf_harm_on() ? sel : -sel) * 2, 0, 100);
+        sm_dirty = 1;
+    }
 }
 
 static void sm_layer_begin(uint32_t pressed, uint32_t now, uint32_t used)
@@ -348,12 +354,6 @@ static void sm_seq_tool(uint32_t w, uint32_t t)
             sm_edit_clear(1u << t, 1);
         sm_lay_cleared = 1;
         break;
-    case SM_W_COPY_PAT: sm_copy_pat(); break;
-    case SM_W_COPY_TRK: sm_copy_trk(t); break;
-    case SM_W_PASTE_TRK: sm_paste_trk(t); break;
-    case SM_W_PASTE_PAT: sm_paste_pat(); break;
-    case SM_W_TRN_DN: sm_trn(t, -1); break;
-    case SM_W_TRN_UP: sm_trn(t, 1); break;
     default: return;
     }
     sm_dirty = 1;
@@ -415,7 +415,7 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         sm_dirty = 1;
     }
     if (sm_layer == SML_SEQ)
-        sm_fsave_poll(notes, fm1_ticks());                /* (D#5 / F#5 held 0.8 s: the track copied / pasted) */
+        sm_fsave_poll(notes, fm1_ticks(), 1);             /* (D#5 / F#5 held 0.8 s: the pattern copied / pasted) */
     if (sm_layer == SML_GLO)
         sm_glo_poll(notes, fm1_ticks());                  /* (the bank / pattern grid) */
     if (sm_layer == SML_GLO) {                            /* solo: the white keys F3 .. B3 held */
@@ -489,10 +489,6 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         } else if (sm_layer == SML_SEQ && key == SM_LAY_PCLR_KEY) {   /* (held: the pattern cleared, above) */
             sm_lay_clr = 1;
             sm_lay_clr_t0 = fm1_ticks();
-        } else if (sm_layer == SML_SEQ && (key == SM_LAY_SHL_KEY || key == SM_LAY_SHR_KEY)) {
-            sm_shift_all(key == SM_LAY_SHR_KEY ? 1 : -1);
-        } else if (sm_layer == SML_SEQ && (key == SM_LAY_TDN_KEY || key == SM_LAY_TUP_KEY)) {
-            sm_trn_all(key == SM_LAY_TUP_KEY ? 1 : -1);
         } else if (sm_layer == SML_SEQ && w >= 0) {
             sm_seq_tool((uint32_t)w, t);
         }
