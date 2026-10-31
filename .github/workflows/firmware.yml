@@ -83,6 +83,7 @@ jobs:
           git checkout --orphan firmware-builds
           git rm -rfq . && git clean -fdxq
           cp /tmp/out/* .
+          touch .nojekyll                                   # (GitHub Pages from this branch: the pages served as they are)
           git add -A && git commit -qm "Firmware build of $sha"
           git push -f origin firmware-builds
 
