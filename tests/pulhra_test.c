@@ -13145,6 +13145,63 @@ static int test_midi_clock_in(void)
     return bad;
 }
 
+/* a long session on a clock the tempo's 0.1 BPM cannot hold (Tim, 1.11: an MPC's clock drifted away after a while): 123.47 BPM
+ * (a pulse every 20.2479 ms), each pulse up to 8 ms late (a USB clock: the polls, the bursts), five minutes; at the end the steps still start on
+ * their pulses (the phase lock catches a lead as well as a lag) */
+static int test_midi_clock_drift(void)
+{
+    int bad = 0;
+    uint32_t ms, k, base_ms, c0, np = 0, pn = 0, maxdev = 0, ons = 0, rnd = 12345u, jit = 0;
+    static uint32_t pat[64];
+    const uint64_t per_ns = 20247969u;                    /* 60e9 / (123.47 x 24) */
+    const uint32_t total = 300000u, tail = 4000u;
+    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    midi_reset();
+    sm_midi_src = 2u;
+    for (k = 0; k < 16u; k++)
+        if (!pt->step[0][k].n)
+            sm_step_toggle(0, k);
+    base_ms = fm1_ms;
+    c0 = seq_clock;
+    midi_enqueue(0xFu | 0xFAu << 8, 2u);
+    for (ms = 0; ms < total; ms++) {
+        fm1_ms = base_ms + ms;
+        if (ms == total - tail)
+            seq_nev = 0;                                  /* (the log: the last seconds) */
+        while ((uint64_t)np * per_ns / 1000000u + jit <= ms) {
+            midi_enqueue(0xFu | 0xF8u << 8, 2u);
+            if (np % 6u == 0u && ms >= total - tail && pn < 64u)   /* (a step's pulse: when it was sent, the master's grid) */
+                pat[pn++] = c0 + (uint32_t)((uint64_t)np * per_ns * FS / 1000000000u);
+            np++;
+            jit = ((rnd = rnd * 1103515245u + 12345u) >> 16) % 9u;   /* (the next one's lateness, 0 .. 8 ms) */
+        }
+        while (seq_clock < c0 + (uint32_t)(((uint64_t)(ms + 1u) * FS) / 1000u)) {
+            events_block(CTL);
+            seq_clock += CTL;
+        }
+    }
+    for (k = 0; k < seq_nev; k++) {
+        const seq_ev_t *e = &seq_ev[k];
+        uint32_t j, best = 0xFFFFFFFFu;
+        if (!e->on || e->t != 0u || e->at < pat[0] || e->at > pat[pn ? pn - 1u : 0])
+            continue;
+        for (j = 0; j < pn; j++) {
+            uint32_t d = e->at > pat[j] ? e->at - pat[j] : pat[j] - e->at;
+            best = d < best ? d : best;
+        }
+        maxdev = best > maxdev ? best : maxdev;
+        ons++;
+    }
+    printf("pulhra: CLKDRIFT: 5 min at 123.47 BPM, %u steps checked, the largest distance to their pulse %u samples\n", ons, maxdev);
+    bad += check("CLKDRIFT: after five minutes the steps still start on their pulses (within 2 blocks + 8 ms)",
+                 ons >= 20u && maxdev <= 2u * CTL + FS * 8u / 1000u);
+    midi_enqueue(0xFu | 0xFCu << 8, 2u);
+    mix_blocks(1);
+    fm1_ms = base_ms + total + SM_EXT_TIMEOUT_MS + 10u;
+    midi_reset();
+    return bad;
+}
+
 /* the same clock twice on the jack (Tim: KO II's MIDI THRU sent its own pulse and the one through): 125.0, not 250.0 */
 static int test_midi_clock_dup(void)
 {
@@ -13426,6 +13483,7 @@ int main(void)
     bad += test_kit_lane_env();
     bad += test_fenv_adsr();
     bad += test_midi_clock_dup();
+    bad += test_midi_clock_drift();
     bad += test_kit_lanes();
     bad += test_paste_into_pick();
     bad += test_kit_lane_fenv();

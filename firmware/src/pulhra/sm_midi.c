@@ -127,9 +127,8 @@ static void sm_kbd_note(uint32_t t, uint32_t note, uint32_t vel)
 
 /* the external clock (24 pulses a beat, 6 a 1/16): the tempo from the time of a whole beat of pulses (the stamps are the
  * USB poll's / the UART's milliseconds: a beat averages their jitter, then a quarter of each new estimate), published for
- * sm_bpm_eff; and the phase: on the pulse that starts a step of the pattern's grid (6 x 8 / m pulses: *, /2 .. /8 and *2;
- * *4 and *8 fall between pulses: tempo only), the step due within a quarter step is started now, one started up to a quarter
- * step early has its next start moved to a whole step from now. A gap of SM_EXT_TIMEOUT_MS starts the measuring over */
+ * sm_bpm_eff; and the phase: every 6th pulse is a 1x step's boundary, and the grid is pulled onto it both ways (the phase
+ * lock below: ahead, its pending tick waits; behind, it starts now). A gap of SM_EXT_TIMEOUT_MS starts the measuring over */
 static uint32_t sm_ext_ts[25], sm_ext_n, sm_ext_cnt;
 #define SM_EXT_DUP_MS 3u                                  /* (a pulse is 8.3 ms apart at 300 BPM: closer on the jack is a copy) */
 static void sm_ext_pulse(uint32_t ms, uint32_t src)
@@ -162,17 +161,21 @@ static void sm_ext_pulse(uint32_t ms, uint32_t src)
     if (q % per)
         return;
     step_q8 = sm_tick_q8();                               /* (the tick: the grid's 1x step is eight of them) */
-    q = step_q8 / 4u;
-    if (sm_tick & 7u) {                                   /* (not on a 1x step's boundary: the pulse is early or late by a tick) */
-        if ((sm_tick & 7u) == 1u && sm_next_q8 >= step_q8 - q && sm_next_q8 < step_q8)
-            sm_next_q8 = step_q8;                         /* (the boundary's tick a little early: the next a whole tick on) */
-        return;
+    /* the phase lock (Tim, 1.11: an MPC's clock drifted away after a while). This pulse is a 1x step's boundary; the grid's
+     * own position: the tick pending is sm_tick & 7 (0 the boundary itself), due sm_next_q8 from now. Pending 1..4: the grid
+     * ran ahead (the estimate a little fast), so that tick waits until it is due counted from this pulse (p ticks on); pending
+     * 0 or 5..7: the grid is behind, its pending tick starts now (a tick or more caught up each step). Both ways, every step:
+     * the drift never adds up (before, only a lag under a tick was caught, a lead never: the tempo's 0.1 BPM and the pulses'
+     * millisecond stamps ran the grid ahead for good) */
+    {
+        uint32_t p = sm_tick & 7u;
+        if (p >= 1u && p <= 4u) {
+            if (sm_next_q8 < p * step_q8)
+                sm_next_q8 = p * step_q8;
+        } else {
+            sm_next_q8 = 0;
+        }
     }
-
-    if (sm_next_q8 <= q)
-        sm_next_q8 = 0;                                   /* (late: the step starts now) */
-    else if (sm_next_q8 >= step_q8 - q && sm_next_q8 < step_q8)
-        sm_next_q8 = step_q8;                             /* (early: its next a whole step from this pulse) */
 }
 
 static void sm_midi_drain(void)
