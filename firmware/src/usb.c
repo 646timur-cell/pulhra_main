@@ -567,7 +567,7 @@ no_cdc:;
     sie_wr(S_TXMAXP, 0xFF);
     uac_ep4_reset();
 #if FELUCCA_UAC_OUT
-    FM1_USB_EP4_RADR = (uint32_t)(uintptr_t)ep4rx;   /* (never ep0buf, the attach's default: a 196-byte packet) */
+    fm1_usb_ep4_rxbuf(ep4rx);   /* (never ep0buf, the attach's default: a 196-byte packet) */
     sie_wr(S_RXMAXP, 0xFF);
     sie_wr(S_RXCSR1, 0x90);                             /* ClrDataTog + FlushFIFO */
     sie_wr(S_RXCSR2, 0x40);                             /* ISO */
