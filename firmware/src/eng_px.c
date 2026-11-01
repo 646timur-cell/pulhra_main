@@ -619,7 +619,7 @@ static void ems_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
     if (vib) {                                           /* the delayed vibrato: 5.5 Hz, up to +-50 cents */
         int32_t fade = clamp((age - 420) * 32767 / 420, 0, 32767);   /* (~0.3 s still, then ~0.3 s in: 0.73 ms a block) */
         v->ph[2] += 535690u * CTL;                       /* (5.5 Hz) */
-        ct = mulq15(mulq15(osc_sine(v->ph[2]), fade), vib * 50 * 258 / 127);
+        ct = (int32_t)(((int64_t)mulq15(osc_sine(v->ph[2]), fade) * vib * 50) / (127 * 32768));   /* (cents: +-50 at VIB 127) */
     }
     v->s[3] = age < 100000 ? age + 1 : age;
     inc1 = ct ? cents_inc(m->pitch16, ct, m->fine) : m->inc;
@@ -883,7 +883,8 @@ static void ether_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     }
     inc2 = key ? (uint32_t)(((uint64_t)inc * ET_MULT[src2]) / ET_MULT[src]) : ET_FREE[src2];
     /* the second rate: GSM's frames 217 Hz, LED's ripple 100 Hz, MOTOR's commutation 6 x the rotation */
-    rinc = src == ET_GSM || src2 == ET_GSM ? ET_HZ(217) : src == ET_LED ? ET_HZ(100) : (uint32_t)(((uint64_t)inc * 6u) & 0x3FFFFFFFu);
+    rinc = src == ET_GSM || src2 == ET_GSM ? ET_HZ(217) : src == ET_LED ? ET_HZ(100)
+         : (uint64_t)inc * 6u > 0x3FFFFFFFu ? 0x3FFFFFFFu : inc * 6u;   /* (MOTOR's: capped, not wrapped) */
     binc = ET_HZ(0.3f) + (uint32_t)clamp(p[P_E3], 0, 127) * (ET_HZ(20) / 127u);   /* RATE: the bursts */
     /* the bursts' gate: SMPS's burst mode, DIGI's packets, GSM's groups, STATIC's pops; FLUX drops the rest out now and then */
     if (b + binc * n < b) {                              /* (a new burst: on or off, by chance) */
@@ -898,8 +899,8 @@ static void ether_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     for (i = 0; i < n; i++) {
         uint32_t z = noise32(&nz);
         int32_t x = et_field(src, c, inc, r, near, z, &bit);
-        if (src == ET_GSM || src == ET_SMPS || src == ET_DIGI)
-            x = (int32_t)(((int64_t)x * gate) >> 15);   /* (the bursts) */
+        if (src != ET_STATIC)
+            x = (int32_t)(((int64_t)x * gate) >> 15);   /* (the bursts; MAINS LED MOTOR: FLUX's dropouts) */
         if (src == ET_STATIC && (z & 0x3FFFu) < (uint32_t)(4 + flux))   /* (a pop) */
             x += (z >> 31) ? 30000 : -30000;
         if (bl)

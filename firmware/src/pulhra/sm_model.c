@@ -286,7 +286,7 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_CZ, 7, 7},   /* CZ 7: -21.8 dBFS (RESO SWEEP) */
     {ENGI_CZ, 8, -12},   /* CZ 8: -12.3 dBFS (ORGAN) */
     {ENGI_CZ, 9, 12},   /* CZ 9: -30.3 dBFS (PERCUSSION) */
-    {ENGI_EMS, 1, -3},   /* EMS 1: -17.0 dBFS */
+    {ENGI_EMS, 1, -7},   /* EMS 1: -15.0 dBFS (the vibrato fixed) */
     {ENGI_EMS, 3, 5},   /* EMS 3: -21.1 dBFS */
     {ENGI_EMS, 4, -4},   /* EMS 4: -16.3 dBFS */
     {ENGI_EMS, 5, 16},   /* EMS 5: -28.3 dBFS */

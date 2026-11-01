@@ -10326,6 +10326,31 @@ static int test_ems_prep(void)
     b1 = px_sound(48, 60, 0);
     printf("pulhra: EMS CUT 10 %u, CUT 120 %u\n", b0, b1);
     bad += check("EMS: CUT up: brighter", b1 > b0 * 2u);
+    {                                                     /* VIB 127: +-50 cents (+-3 %), past its delay (a review, 1.11: it was +-129 semitones) */
+        static int32_t V[44100 * 3];
+        uint32_t nl = 0, i, last = 0, mn = 1u << 30, mx = 0;
+        trk[0].p[P_E8] = 127;
+        trk[0].p[P_E3] = 0;
+        trk[0].p[P_E4] = 127;
+        trk[0].p[P_E5] = 0;
+        trk[0].p[P_E0] = 0;
+        trk_note_on(&trk[0], 60, 100);
+        while (nl < 44100u * 3u - 2u * CTL)
+            block_peak(V, &nl);
+        trk_all_off(&trk[0]);
+        play_blocks(600);
+        for (i = 44100u * 2u; i < nl; i++)
+            if (V[i - 1] < 0 && V[i] >= 0) {
+                if (last) {
+                    uint32_t d = i - last;
+                    mn = d < mn ? d : mn;
+                    mx = d > mx ? d : mx;
+                }
+                last = i;
+            }
+        printf("pulhra: EMS VIB 127 at C4: periods %u .. %u samples\n", mn, mx);
+        bad += check("EMS: VIB 127: the pitch +-50 cents (periods within +-4 %), and it moves", mn * 100u > 162u * 96u && mx * 100u < 169u * 104u && mx > mn + 3u);
+    }
     sm_sound_load(mp, 6);                                 /* PP PIANO: the bare string */
     sm_input_poll();
     play_blocks(4);
