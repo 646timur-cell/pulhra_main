@@ -813,6 +813,7 @@ static int test_panic(void)
 static void in_reset(void)
 {
     uint32_t k;
+    sm_auto = SM_AUTO_TRIG;                               /* (AUTO: the project's; each test from the default) */
     for (k = 0; k < 8u; k++)
         run_block();                                      /* (the ring empty) */
     panel = PANEL_DEFAULT;
@@ -3164,11 +3165,11 @@ static int test_rec_records_on_trigs(void)
     for (s = 0; s < 16u; s++) {
         int32_t v = lk_val(0, s, P_FCUT);
         if (s % 4u)
-            ok &= v == LK_NONE || (cpat()->step[0][s].n && (cpat()->step[0][s].flags & SMF_REST));
+            ok &= v == LK_NONE && !cpat()->step[0][s].n;
         else
-            any += v != LK_NONE && !(cpat()->step[0][s].flags & SMF_REST);
+            any += v != LK_NONE;
     }
-    bad += check("REC: playing, CUT turned: the trigs locked, a step with no trig a lock trig (REST)", ok && any == 4);
+    bad += check("REC: playing, CUT turned, AUTO TRIG (the default): locks only on the steps with trigs", ok && any == 4 && sm_auto == SM_AUTO_TRIG);
     bad += check("REC: ... the base turned with the knob (no step held: the base, always; 02:43)", ksnd(0)->p[P_FCUT] == base - 64);
     for (s = 0, ok = 1; s < 16u; s += 4u)                 /* (each trig: the value the knob had as it played) */
         ok &= lk_val(0, s, P_FCUT) >= base - 64 && lk_val(0, s, P_FCUT) < base;
@@ -3442,17 +3443,99 @@ static int test_rec_live_gestures(void)
                 bad += check(what, nl == 0u && !nempty);
                 continue;
             }
-            snprintf(what, sizeof what, "LIVE %s, %s: a lock on every trig (8), an empty step a lock trig (8)", GN[lrg_gest], PN[lrg_pagei]);
-            for (s = 1; s < 16u; s += 2u)
-                nempty -= nempty && !(cpat()->step[0][s].n && (cpat()->step[0][s].flags & SMF_REST));
-            if (check(what, nl == 8u && nempty == 8u))
+            snprintf(what, sizeof what, "LIVE %s, %s: AUTO TRIG: a lock on every trig (8), none on an empty step", GN[lrg_gest], PN[lrg_pagei]);
+            if (check(what, nl == 8u && !nempty))
                 bad++, printf("  locks on trigs %u, on empty steps %u\n", nl, nempty);
             for (s = 0; s < 16u; s++)                     /* the next pass: each trig, each lock trig its own lock */
                 if (lk_val(0, s, id) != LK_NONE)
                     back &= run_to_step(0, s) && trk[0].p[id] == lk_val(0, s, id);
-            snprintf(what, sizeof what, "LIVE %s, %s: the next pass plays the locks (the lock trigs too)", GN[lrg_gest], PN[lrg_pagei]);
+            snprintf(what, sizeof what, "LIVE %s, %s: the next pass plays the locks", GN[lrg_gest], PN[lrg_pagei]);
             bad += check(what, back && nl);
         }
+    in_reset();
+    return bad;
+}
+
+/* AUTO (Tim, 1.11): what a knob writes in live record. ALL: a step with no trig gets a lock trig (REST) and its lock, played on
+ * the next pass; OFF: nothing written, the base moves; SHIFT + REC steps TRIG -> ALL -> OFF (REC itself untouched); CLOCK's K3
+ * too; the project keeps it */
+static void nor_wipe(void);
+static void bank_reboot(void);
+static int test_rec_auto(void)
+{
+    int bad = 0;
+    uint32_t s, b, nr = 0, nt = 0, back = 1;
+    in_reset();
+    host_ticks = 1000u;
+    draw_setup();
+    for (s = 0; s < 16u; s += 2u)
+        sm_step_toggle(0, s);
+    sm_ui.page = (uint8_t)page_by_name("FILTER");
+    btn_down(B_OCTDN);                                    /* SHIFT + REC: AUTO ALL */
+    sm_input_poll();
+    ms(SM_OCT_PAIR_US / 1000u + 50u);
+    sm_input_poll();
+    press(B_REC);
+    sm_input_poll();
+    btn_up(B_OCTDN);
+    sm_input_poll();
+    bad += check("AUTO: SHIFT + REC: AUTO ALL, REC not turned on", sm_auto == SM_AUTO_ALL && !sm_rec && sm_msg == SM_MSG_AUTOA);
+    btn_down(B_REC);                                      /* live record */
+    sm_input_poll();
+    btn_down(B_PLAY);
+    sm_input_poll();
+    btn_up(B_PLAY);
+    btn_up(B_REC);
+    sm_input_poll();
+    run_to_step(0, 15);
+    for (b = 0; b < 16u; b++) {
+        uint32_t st = sm_pos[0];
+        run_to_step(0, (st + 1u) % 16u);
+        turn(EN_SELECT, 1);
+        sm_input_poll();
+        run_block();
+    }
+    for (s = 0; s < 16u; s++) {
+        if (lk_val(0, s, P_FCUT) == LK_NONE)
+            continue;
+        if (s & 1u)
+            nr += cpat()->step[0][s].n && (cpat()->step[0][s].flags & SMF_REST);
+        else
+            nt++;
+    }
+    bad += check("AUTO: ALL: every trig locked (8), every empty step a lock trig with its lock (8)", nt == 8u && nr == 8u);
+    for (s = 1; s < 16u; s += 2u)
+        back &= run_to_step(0, s) && trk[0].p[P_FCUT] == lk_val(0, s, P_FCUT);
+    bad += check("AUTO: ALL: the next pass plays the lock trigs' values", back);
+    sm_auto = SM_AUTO_OFF;
+    {
+        uint32_t n0 = cpat()->nlock;
+        int32_t c0 = ksnd(0)->p[P_FCUT];
+        for (b = 0; b < 4u; b++) {
+            run_to_step(0, (sm_pos[0] + 1u) % 16u);
+            turn(EN_SELECT, -1);
+            sm_input_poll();
+            run_block();
+        }
+        bad += check("AUTO: OFF: the knob writes nothing (the base moves)", cpat()->nlock == n0 && ksnd(0)->p[P_FCUT] == c0 - 4);
+    }
+    sm_ui.page = (uint8_t)page_by_name("CLOCK");
+    turn(EN_K3, -5);
+    sm_input_poll();
+    bad += check("AUTO: CLOCK K3 down: TRIG", sm_auto == SM_AUTO_TRIG);
+    turn(EN_K3, 1);
+    sm_input_poll();
+    draw_full();
+    bad += check("AUTO: ... K3 up: ALL, drawn", sm_auto == SM_AUTO_ALL && lint_has("AUTO", 0, 0) && lint_has("ALL", 0, 0));
+    sm_phash ^= 1u;
+    bad += check("AUTO: saved ...", sm_store_all() == 0);
+    sm_auto = SM_AUTO_TRIG;
+    bank_reboot();
+    bad += check("AUTO: ... power off, on: ALL back", sm_auto == SM_AUTO_ALL);
+    sm_auto = SM_AUTO_TRIG;
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    nor_wipe();
     in_reset();
     return bad;
 }
@@ -13493,6 +13576,7 @@ int main(void)
     bad += test_shift_trn();
     bad += test_fill_glo_g5();
     bad += test_fill_fx_g5();
+    bad += test_rec_auto();
     bad += test_undo_other_pattern();
     bad += test_len_visible();
     bad += test_filter_auto_lp();

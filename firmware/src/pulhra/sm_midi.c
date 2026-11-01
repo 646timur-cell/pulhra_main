@@ -35,6 +35,10 @@ static uint8_t sm_midi_src = 1;
  * 3's byte after the source: CLK in bits 0..1, TRNS OFF bit 2; 0 = AUTO, ON) */
 enum { SM_CLK_AUTO, SM_CLK_INT, SM_CLK_USB, SM_CLK_JACK, SM_CLK_COUNT };
 static uint8_t sm_midi_clk = SM_CLK_AUTO, sm_midi_trnoff;
+/* AUTO (Tim, 1.11): what a knob turned in live record writes: TRIG the trigs playing only, ALL a lock trig (REST) on a step with
+ * no trig too (the locks' pool: 192 a pattern), OFF nothing (the base moves alone). CLOCK's K3 and SHIFT + REC; the project's */
+enum { SM_AUTO_TRIG, SM_AUTO_ALL, SM_AUTO_OFF, SM_AUTO_COUNT };
+static uint8_t sm_auto;
 static uint8_t sm_midi_div, sm_ext_odd;                    /* SETUP's SELECT: the clock's every 2nd pulse only (Tim: KO II's THRU doubled it); the parity */
 /* the CLK choices SETUP offers (Tim: no external clock of a port not in use): AUTO, INT, and the port MIDI SRC is (USB, the
  * jack); SRC INT: AUTO and INT only */

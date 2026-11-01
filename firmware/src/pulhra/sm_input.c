@@ -238,7 +238,7 @@ static void sm_turn(uint32_t id, int32_t s)
             }
         }
     }
-    if (sm_rec && sm_live && sm_playing) {               /* REC (live), playing: the knob records onto the trig playing (ARM: never; a held trig locks) */
+    if (sm_rec && sm_live && sm_playing && sm_auto != SM_AUTO_OFF) {   /* REC (live), playing: the knob records onto the trig playing (ARM: never; a held trig locks; AUTO OFF: never) */
         uint32_t st = *(volatile uint8_t *)&sm_pos[t];
         sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};
         c.val = (int16_t)sm_pget(&smp.pat[smp.cur % SM_NPAT], t, id);
@@ -247,7 +247,8 @@ static void sm_turn(uint32_t id, int32_t s)
         uint32_t make = !x->n;                            /* (Tim, 1.11: "not always": a step with no trig recorded nothing.
                                                            * Now it gets a lock trig, REST: no note, the lock alone, as SHIFT +
                                                            * a key or a turn on a held empty step makes) */
-        if (sm_lock_set(t, st % SM_NSTEP, id, c.val) && make) {   /* (the pool full: LOCKS FULL, the base moved all the same) */
+        if ((!make || sm_auto == SM_AUTO_ALL) && sm_lock_set(t, st % SM_NSTEP, id, c.val) && make) {   /* (AUTO TRIG: the trigs only;
+                                                           * the pool full: LOCKS FULL, the base moved all the same) */
             sm_step_fresh(t, st % SM_NSTEP, SMF_REST);
             if (sm_trk_kit(t, pt))
                 x->note[0] = 0;                           /* (KIT: no lane hits, the locks only) */
@@ -1086,6 +1087,10 @@ static void sm_home_page(const int32_t *k, int32_t sel, uint32_t now)
                 sm_dirty = 1;
             }
         }
+        if (k[2]) {                                       /* K3: AUTO, what the knobs write in live record (the project's) */
+            sm_auto = (uint8_t)clamp((int32_t)sm_auto + k[2], 0, SM_AUTO_COUNT - 1);
+            sm_dirty = 1;
+        }
         if (sel) sm_turn_base(sm_ui.trk % SM_NTRK, P_LEVEL, sel);  /* SELECT: selected track's volume */
     }
 }
@@ -1248,6 +1253,12 @@ static void sm_input_poll(void)
         pressed &= ~((1u << panel.btn[B_REC]) | (1u << panel.btn[B_PLAY]));
         sm_oct_pend = 0;                                  /* (no page turn at OCT+'s release) */
         sm_oct_used = 1;
+    }
+    if (!sm_layer && sm_shift_held() && ((pressed >> panel.btn[B_REC]) & 1u) && !sm_key_arm) {   /* SHIFT + REC: AUTO round */
+        sm_auto = (uint8_t)((sm_auto + 1u) % SM_AUTO_COUNT);                                          /* (TRIG ALL OFF) */
+        sm_msg_show(sm_auto == SM_AUTO_ALL ? SM_MSG_AUTOA : sm_auto == SM_AUTO_OFF ? SM_MSG_AUTOO : SM_MSG_AUTOT);
+        pressed &= ~(1u << panel.btn[B_REC]);
+        sm_dirty = 1;
     }
     sm_rec_poll(pressed);
     sm_lrec_poll();                                       /* (live record: the notes the audio stream placed) */

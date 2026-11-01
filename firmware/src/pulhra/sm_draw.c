@@ -616,6 +616,17 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         o->val[i + 1u] = 0;
         o->v = (int32_t)sw;
         o->pos = sw * 256u / 25u;
+    } else if (k == 2u) {                                 /* K3 AUTO: what the knobs write in live record */
+        static const char *const AN[SM_AUTO_COUNT] = {"TRIG", "ALL", "OFF"};
+        const char *w = "AUTO";
+        for (i = 0; w[i]; i++)
+            o->lab[i] = w[i];
+        o->lab[i] = 0;
+        for (i = 0; AN[sm_auto % SM_AUTO_COUNT][i]; i++)
+            o->val[i] = AN[sm_auto % SM_AUTO_COUNT][i];
+        o->val[i] = 0;
+        o->v = (int32_t)sm_auto;
+        o->pos = (uint32_t)(sm_auto % SM_AUTO_COUNT) * 128u;
     } else {
         o->on = 0;
     }
