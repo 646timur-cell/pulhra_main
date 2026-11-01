@@ -10373,7 +10373,7 @@ static int test_ether(void)
     host_ticks = 1000u;
     seq_reset();
     draw_setup();
-    bad += check("ETHER: on the SOMA page, after PREP", sm_epage_of(m) == 1u && sm_epage_mach(1, 13) == m && sm_epage_n(1) == 14u);
+    bad += check("ETHER: on the SOMA page, after PREP", sm_epage_of(m) == 1u && sm_epage_mach(1, 13) == m && sm_epage_n(1) >= 14u);
     sm_ui.trk = 0;
     for (pr = 0; pr < NELEM(ETHER_PRESETS); pr++) {
         sm_sound_load(m, pr);
@@ -10468,6 +10468,49 @@ static int test_impulse(void)
         printf("pulhra: IMPLS ping rings %u blocks (PING 30), %u (PING 110)\n", len[0], len[1]);
     bad += check("IMPLS: PING up: the ping rings longer", len[1] > len[0] * 3u);
     }
+    return bad;
+}
+
+/* DRONE (Tim, 1.11) on the SOMA page after ETHER: every preset sounds, none clips; the resonators ring: RMIX up with RES high,
+ * the sound narrower (darker by the 2nd difference) than the strings alone; CHRD moves where they ring */
+static int test_drone(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_DRONE), pr, ok = 1, pk, b0, b1, b2;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    bad += check("DRONE: on the SOMA page, after ETHER", sm_epage_of(m) == 1u && sm_epage_mach(1, 14) == m && sm_epage_n(1) == 15u);
+    sm_ui.trk = 0;
+    for (pr = 0; pr < NELEM(DRONE_PRESETS); pr++) {
+        sm_sound_load(m, pr);
+        sm_input_poll();
+        play_blocks(4);
+        kit_dry();
+        trk[0].p[P_ATK] = 0;                              /* (their slow swell: the level at once) */
+        px_sound(48, 400, &pk);
+        printf("pulhra: DRONE %-14s peak %5u\n", DRONE_PRESETS[pr].name, pk);
+        ok &= pk > 1500u && pk < 32767u;
+    }
+    bad += check("DRONE: every preset sounds, none clips", ok);
+    sm_sound_load(m, 0);
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    trk[0].p[P_ATK] = 0;
+    trk[0].p[P_E8] = 0;
+    trk[0].p[P_E7] = 0;
+    trk[0].p[P_E5] = 120;
+    trk[0].p[P_E6] = 0;
+    b0 = px_sound(48, 300, 0);
+    trk[0].p[P_E6] = 127;
+    b1 = px_sound(48, 300, 0);
+    trk[0].p[P_E4] = 8;                                   /* HARM: 12 19 24, higher */
+    b2 = px_sound(48, 300, 0);
+    printf("pulhra: DRONE strings %u, resonators (5TH) %u, (HARM) %u\n", b0, b1, b2);
+    bad += check("DRONE: the resonators (RMIX 127, RES 120): narrower than the strings", b1 * 10u < b0 * 7u);
+    bad += check("DRONE: ... CHRD HARM: higher than 5TH", b2 > b1);
     return bad;
 }
 
@@ -13881,6 +13924,7 @@ int main(void)
     bad += test_ems_prep();
     bad += test_ether();
     bad += test_impulse();
+    bad += test_drone();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

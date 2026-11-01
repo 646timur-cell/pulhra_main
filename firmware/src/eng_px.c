@@ -953,3 +953,124 @@ static const engine_t ENG_ETHER = {
     .xyd = {{XY_E(1), XY_E(4), 0}, {XY_E(2), XY_E(6), 0}},
     .xya = {{50, 40, 0}, {50, 40, 0}},
 };
+
+/* ==================================================================== DRONE === */
+/* a drone generator (Tim, 1.11) on GURDY's wheel (eng_gurdy.c, GHOULBOX's hurdy-gurdy): the wheel bows the bourdon at the
+ * note, a string a fifth up (5TH) and one an octave up (OCT; BUZZ: its dog chattering, the trompette), the rosin's noise
+ * louder with WHL (the wheel's pressure: its brightness too); the strings then ring three resonators (band-passes, Simper's
+ * SVF) tuned to CHRD above the note: 5TH 0 7 12, OCT 0 12 24, MAJ 0 4 7, MIN 0 3 7, SUS 0 5 10, M7 0 4 11, CLST 0 1 2,
+ * TRIT 0 6 11, HARM 12 19 24. RES their ring (a wide band .. a whistle), RMIX the strings .. the resonators; WOBL the
+ * wheel's wander; the ninth, MOVE: the resonators drift apart and back, slowly (each its own pace). Poly 2 (legato: the
+ * wheel turns on). The resonators' states, the wander and the drift in the part's memory (dn_slot_t); ph[0] the bourdon,
+ * ph[1] the fifth, ph[2] the octave; s[0] the noise, s[1] the pressure's low-pass */
+static const char *const N_DN_CHRD[] = {"5TH", "OCT", "MAJ", "MIN", "SUS", "M7", "CLST", "TRIT", "HARM"};
+static const int8_t DN_CHRD[9][3] = {{0, 7, 12}, {0, 12, 24}, {0, 4, 7}, {0, 3, 7}, {0, 5, 10}, {0, 4, 11}, {0, 1, 2}, {0, 6, 11}, {12, 19, 24}};
+typedef struct {
+    int32_t r[6];                                        /* the three resonators' states */
+    int32_t wob;                                         /* the wheel's wander */
+    uint32_t mv[3];                                      /* MOVE: each resonator's drift phase */
+} dn_slot_t;
+#define DN_POLY 2
+ENG_MEM_FITS("DRONE", sizeof(dn_slot_t) * DN_POLY);
+static dn_slot_t *dn_slot(track_t *t, voice_t *v)
+{
+    uint32_t i = (uint32_t)(v - t->v);
+    if (t < &trk[0] || t >= &trk[NLIVE] || i >= DN_POLY)
+        return 0;
+    return (dn_slot_t *)ENG_MEM(t - trk) + i;
+}
+static void drone_note_on(track_t *t, voice_t *v)
+{
+    dn_slot_t *S = dn_slot(t, v);
+    if (!v->s[0])
+        v->s[0] = 0x2F6B5A11 + (int32_t)v->age;
+    if (S && mf_fresh(v)) {
+        uint32_t k;
+        for (k = 0; k < 6u; k++)
+            S->r[k] = 0;
+        S->mv[0] = 0;
+        S->mv[1] = 0x55555555u;
+        S->mv[2] = 0xAAAAAAAAu;
+    }
+}
+static void drone_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    const int16_t *p = t->p;
+    dn_slot_t *S = dn_slot(t, v);
+    int32_t fl = clamp(p[P_E0], 0, 127) * 160, ol = clamp(p[P_E1], 0, 127) * 140, whl = clamp(p[P_E2], 0, 127);
+    int32_t buzz = clamp(p[P_E3], 0, 127) * 258, res = clamp(p[P_E5], 0, 127), rmix = clamp(p[P_E6], 0, 127);
+    int32_t wobl = clamp(p[P_E7], 0, 127), mov = clamp(MF_E8(p), 0, 127), nst = v->s[0], lp = v->s[1];
+    int32_t kp = 5000 + whl * 200, fric = whl * 20, w, k, mk, j;
+    uint32_t chrd = (uint32_t)clamp(p[P_E4], 0, 8), i, inc, finc, oinc, ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
+    tsvf_t c[3];
+    if (!S)
+        return;
+    S->wob += (int32_t)(noise32(&nst) >> 22) - 512;       /* (GURDY's wander: a leaky random walk, once a block) */
+    S->wob -= S->wob >> 6;
+    w = (S->wob * wobl) >> 10;
+    inc = m->inc + (uint32_t)((int32_t)(m->inc >> 12) * (w >> 10));
+    finc = cents_inc(clamp(m->pitch16 + 7 * 16, 0, 2047), 2 + (w >> 12), m->fine);   /* (the fifth a hair wide) */
+    oinc = cents_inc(clamp(m->pitch16 + 12 * 16, 0, 2047), -(w >> 12), m->fine);
+    k = (8192 >> (res / 16)) - (((8192 >> (res / 16)) >> 1) * (res % 16)) / 16;   /* RES: damping 2.0 .. ~0.03, halved each 16 */
+    k = k < 24 ? 24 : k;
+    mk = 1200 + (int32_t)((int64_t)16000 * 64 / (k + 64));   /* (a narrow band rings louder from the strings: about level) */
+    mk = (int32_t)(((int64_t)mk * (k + 400)) / 8592);
+    for (j = 0; j < 3; j++) {                            /* the resonators, MOVE drifting each (up to ~+-40 cents, ~0.05 .. 0.1 Hz) */
+        int32_t dr = mov ? (osc_sine(S->mv[j]) * mov) >> 16 : 0;   /* (+-~63 in 1/16 semitone at MOVE 127: +-~40 ct) */
+        S->mv[j] += (uint32_t)(5000u + 1700u * (uint32_t)j) * CTL;
+        tsvf_coef_k(&c[j], dv_cut(clamp(m->pitch16 + DN_CHRD[chrd][j] * 16 + dr, 0, 2047)), k);
+    }
+    for (i = 0; i < n; i++) {
+        int32_t nz = (int32_t)(noise32(&nst) >> 17) - 16384, s, x, r = 0, tr;
+        s = osc_saw(ph0, inc);
+        lp += mulq15(s - lp, kp);                        /* the bourdon through the wheel's pressure */
+        x = lp + mulq15(nz, fric) + mulq15(osc_saw(ph1, finc), fl);
+        tr = osc_saw(ph2, oinc);
+        if (buzz)                                         /* the trompette's dog: clipped, a chatter at each period's start */
+            tr += mulq15(clamp(tr * 3, -24000, 24000) + (ph2 < 0x30000000u ? nz * 2 : 0), buzz);
+        x += mulq15(tr, ol);
+        x >>= 1;
+        for (j = 0; j < 3; j++) {
+            int32_t v3 = x - S->r[2 * j + 1];
+            int32_t v1 = (c[j].a1 * S->r[2 * j] + c[j].a2 * v3) >> 13;
+            int32_t v2 = S->r[2 * j + 1] + ((c[j].a2 * S->r[2 * j] + c[j].a3 * v3) >> 13);
+            S->r[2 * j] = clamp(2 * v1 - S->r[2 * j], -150000, 150000);
+            S->r[2 * j + 1] = clamp(2 * v2 - S->r[2 * j + 1], -150000, 150000);
+            r += v1;
+        }
+        r = (int32_t)clamp(((int64_t)r * mk) >> 13, -200000, 200000);
+        x += ((r - x) * rmix) >> 7;
+        ph0 += inc;
+        ph1 += finc;
+        ph2 += oinc;
+        out[i] += voice_amp(soft_knee(clamp(x, -120000, 120000), 22000), m, i) << 1;
+    }
+    v->ph[0] = ph0;
+    v->ph[1] = ph1;
+    v->ph[2] = ph2;
+    v->s[0] = nst;
+    v->s[1] = lp;
+}
+/* 5TH OCT WHL BUZZ CHRD RES RMIX WOBL (MOVE: DRONE_MOVE) */
+static const preset_t DRONE_PRESETS[] = {
+    {"DN CATHEDRAL", {80, 60, 50, 0, 1, 100, 90, 40}, {90, 64, 127, 120}, 0, 1, FX(0, 20, 10, 110)},
+    {"DN WHEEL", {90, 50, 80, 60, 0, 70, 50, 50}, {30, 64, 127, 90}, 0, 1, FX(5, 10, 0, 90)},
+    {"DN MINOR HALL", {60, 40, 40, 0, 3, 110, 100, 60}, {100, 64, 127, 127}, 0, 1, FX(0, 30, 20, 110)},
+    {"DN CLUSTER", {30, 30, 70, 20, 6, 90, 80, 80}, {80, 64, 127, 120}, 0, 1, FX(10, 20, 20, 100)},
+    {"DN BUZZ ORGAN", {100, 90, 110, 110, 0, 50, 40, 30}, {10, 64, 127, 60}, 0, 1, FX(15, 0, 0, 70)},
+    {"DN HARMONICS", {50, 70, 60, 0, 8, 120, 110, 50}, {110, 64, 127, 127}, 0, 1, FX(0, 20, 30, 110)},
+    {"DN TRITONE", {40, 40, 50, 40, 7, 100, 90, 70}, {100, 64, 127, 127}, 0, 1, FX(10, 0, 20, 110)},
+    {"DN SUS FIELD", {70, 60, 50, 0, 4, 100, 65, 40}, {120, 64, 127, 127}, 0, 1, FX(0, 40, 20, 110)},
+};
+static const uint8_t DRONE_MOVE[NELEM(DRONE_PRESETS)] = {40, 20, 60, 90, 0, 50, 80, 70};
+static const engine_t ENG_DRONE = {
+    .name = "DRONE", .page_title = {"WHEEL", "RESON"}, .presets = DRONE_PRESETS, .npresets = NELEM(DRONE_PRESETS),
+    .note_on = drone_note_on, .render = drone_render, .knob = {P_E2, P_E4, P_E5, P_E6}, .poly = DN_POLY,
+    .mem = sizeof(dn_slot_t) * DN_POLY,
+    .edit = {{"5TH", F_PCT, 0, 127, 70, 0, 0}, {"OCT", F_PCT, 0, 127, 50, 0, 0}, {"WHL", F_PCT, 0, 127, 60, 0, 0},
+             {"BUZZ", F_PCT, 0, 127, 0, 0, 0}, {"CHRD", F_ENUM, 0, 8, 0, N_DN_CHRD, 0}, {"RES", F_PCT, 0, 127, 90, 0, 0},
+             {"RMIX", F_PCT, 0, 127, 80, 0, 0}, {"WOBL", F_PCT, 0, 127, 40, 0, 0}},
+    .e8 = {"MOVE", F_PCT, 0, 127, 40, 0, 0},
+    .xyd = {{XY_E(2), XY_E(5), 0}, {XY_E(6), XY_E(8), 0}},
+    .xya = {{40, 40, 0}, {50, 50, 0}},
+};

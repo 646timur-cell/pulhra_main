@@ -306,6 +306,13 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_ETHER, 3, 16},   /* ETHER 3: -28.6 dBFS */
     {ENGI_ETHER, 4, 16},   /* ETHER 4: -27.9 dBFS */
     {ENGI_ETHER, 6, 12},   /* ETHER 6: -24.6 dBFS */
+    {ENGI_DRONE, 0, 5},   /* DRONE 0: -20.9 dBFS */
+    {ENGI_DRONE, 1, 5},   /* DRONE 1: -20.8 dBFS */
+    {ENGI_DRONE, 2, 7},   /* DRONE 2: -21.8 dBFS */
+    {ENGI_DRONE, 3, 4},   /* DRONE 3: -20.5 dBFS */
+    {ENGI_DRONE, 5, 10},   /* DRONE 5: -23.4 dBFS */
+    {ENGI_DRONE, 6, 9},   /* DRONE 6: -23.0 dBFS */
+    {ENGI_DRONE, 7, 16},   /* DRONE 7: -28.8 dBFS */
     {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
     {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
     {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */
@@ -462,6 +469,8 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
         s->p[P_FSUS] = (int8_t)CZ_DCW[preset][2];
         s->p[P_FREL] = (int8_t)CZ_DCW[preset][3];
     }
+    if (sm_engine_of(machine) == ENGI_DRONE && preset < NELEM(DRONE_MOVE))   /* DRONE: MOVE (the ninth) per preset */
+        s->p[P_E8] = (int8_t)DRONE_MOVE[preset];
     if (sm_engine_of(machine) == ENGI_ETHER && preset < NELEM(ETHER_KEY))   /* ETHER: KEY (the ninth) per preset */
         s->p[P_E8] = (int8_t)ETHER_KEY[preset];
     if (sm_engine_of(machine) == ENGI_EMS && preset < NELEM(EMS_X)) {   /* EMS: F.ENV its filter's, VIB, INSERT's phaser */
