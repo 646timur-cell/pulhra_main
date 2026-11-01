@@ -469,3 +469,111 @@ static const engine_t ENG_ORGAN = {
     .xyd = {{XY_E(2), XY_E(3), 0}, {XY_E(6), XY_E(8), 0}},
     .xya = {{40, 40, 0}, {50, 50, 0}},
 };
+
+/* ======================================================================= CZ === */
+/* Casio CZ-style phase distortion (Tim, 1.11): the PD core of PHASE (eng_phase.c: CrispyZebra's, the CZ's eight waves,
+ * WAVE and WAVE2 alternating each cycle), as a CZ-1000 plays it: DCW the bend, ENV its envelope's depth (the envelope is
+ * F.ENV's ADSR: the DCW envelope; FILTER's ENV>FLT and LFO>FLT move DCW too), LINE 1 (one line), 1+1' (a second line DTN
+ * cents up, mixed: the CZ's detuned doubling), RING (the two lines multiplied) or NOIS (the line through noise: the CZ's
+ * noise modulation), SUB a sine an octave down, KF the DCW key follow (higher notes less bent, a CZ's darker top).
+ * ph[0] line 1, ph[1] line 2 (NOIS: the noise's state), ph[2] the sub; s[0] s[1] the WAVE / WAVE2 toggles; s[2] the
+ * noise held (NOIS: a sample and hold at 4 x the pitch) */
+static const char *const N_CZ_LINE[] = {"1", "1+1'", "RING", "NOIS"};
+static void cz_note_on(track_t *t, voice_t *v)
+{
+    (void)t;
+    if (mf_fresh(v)) {
+        v->ph[0] = 0;
+        v->ph[2] = 0;
+        v->s[0] = v->s[1] = v->s[2] = 0;
+    }
+    v->ph[1] = v->ph[0];                                 /* (line 2 starts with line 1: the doubling beats from there) */
+    if (!v->ph[1])
+        v->ph[1] = 1u;
+}
+static void cz_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    const int16_t *p = t->p;
+    uint32_t w1 = (uint32_t)p[P_E0] & 7u, w2 = (uint32_t)p[P_E1], line = (uint32_t)clamp(p[P_E4], 0, 3), i, dcw, inc = m->inc, inc2 = 0;
+    int32_t depth = (p[P_E2] << 8) + m->cutoff + mulq15(m->envq15, p[P_E3] * 256), sub = p[P_E6] * 200, kf;
+    uint32_t ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
+    int32_t tg0 = v->s[0], tg1 = v->s[1], nz = v->s[2];
+    pd_t b1, b2;
+    kf = (m->pitch16 - 48 * 16) * p[P_E7];               /* (above C3: 3 octaves at KF 127 take the bend about away) */
+    depth -= kf > 0 ? (kf * 3) >> 3 : 0;
+    depth = clamp(depth, 0, 127 << 8);
+    dcw = (uint32_t)depth * 65535u / (127u << 8);
+    dcw = (dcw * 56000u) >> 16;                          /* (PHASE's classic range of the bend) */
+    if (line == 1u || line == 2u)
+        inc2 = cents_inc(m->pitch16, p[P_E5], m->fine);  /* (DTN: 0 .. 127 cents up) */
+    pd_setup(&b1, w1, dcw);
+    pd_setup(&b2, w2 ? w2 - 1u : w1, dcw);
+    for (i = 0; i < n; i++) {
+        uint32_t old = ph0;
+        int32_t s = pd_wave(tg0 ? &b2 : &b1, ph0 >> 16);
+        ph0 += inc;
+        if (ph0 < old)
+            tg0 ^= 1;
+        if (line == 1u || line == 2u) {
+            uint32_t old2 = ph1;
+            int32_t s2 = pd_wave(tg1 ? &b2 : &b1, ph1 >> 16);
+            ph1 += inc2;
+            if (ph1 < old2)
+                tg1 ^= 1;
+            s = line == 2u ? mulq15(s, s2) : (s + s2) >> 1;
+        } else if (line == 3u) {
+            if ((ph0 & 0x3FFFFFFFu) < (old & 0x3FFFFFFFu) || ph0 < old) {   /* (a new noise value 4 x a cycle) */
+                ph1 = ph1 * 1664525u + 1013904223u;
+                nz = (int32_t)(ph1 >> 17) - 16384;       /* (+-0.5) */
+            }
+            s = mulq15(s, 24576 + nz);                   /* (the wave roughened, not drowned) */
+        }
+        if (sub) {
+            ph2 += inc >> 1;
+            s += mulq15(osc_sine(ph2), sub);
+        }
+        out[i] += voice_amp(s, m, i) << 1;
+    }
+    v->ph[0] = ph0;
+    v->ph[1] = ph1;
+    v->ph[2] = ph2;
+    v->s[0] = tg0;
+    v->s[1] = tg1;
+    v->s[2] = nz;
+}
+/* the presets: WAVE WAV2 DCW ENV LINE DTN SUB KF; their DCW envelope (F.ENV: ATK DEC SUS REL) in CZ_DCW below. In the
+ * spirit of the CZ-1000's factory sounds (made by ear: no factory data), the two basses first (Tim) */
+static const preset_t CZ_PRESETS[] = {
+    {"CZ SYN BASS", {0, 2, 10, 110, 1, 6, 40, 30}, {0, 70, 70, 20}, 0, 1, FX(0, 0, 0, 5)},
+    {"CZ FAT BASS", {0, 0, 20, 90, 1, 14, 70, 20}, {0, 64, 100, 20}, 0, 1, FX(10, 10, 0, 5)},
+    {"CZ BRASS", {0, 0, 15, 95, 1, 8, 0, 40}, {12, 80, 100, 35}, 0, 0, FX(0, 20, 10, 35)},
+    {"CZ STRINGS", {0, 4, 30, 50, 1, 12, 0, 50}, {50, 90, 110, 70}, 0, 0, FX(0, 50, 20, 60)},
+    {"CZ E.PIANO", {3, 0, 10, 80, 0, 0, 0, 60}, {0, 85, 40, 50}, 0, 0, FX(0, 30, 15, 40)},
+    {"CZ CLAV", {2, 0, 20, 100, 0, 0, 0, 40}, {0, 55, 20, 15}, 0, 0, FX(10, 0, 15, 20)},
+    {"CZ BELL", {6, 0, 40, 70, 2, 9, 0, 30}, {0, 100, 0, 90}, 0, 0, FX(0, 0, 30, 60)},
+    {"CZ RESO SWEEP", {5, 0, 0, 120, 0, 0, 0, 20}, {0, 64, 110, 40}, 0, 0, FX(0, 0, 30, 40)},
+    {"CZ ORGAN", {3, 1, 50, 0, 1, 4, 0, 0}, {2, 64, 127, 20}, 0, 0, FX(0, 40, 0, 30)},
+    {"CZ PERCUSSION", {4, 7, 20, 110, 3, 0, 0, 30}, {0, 60, 0, 40}, 0, 0, FX(0, 0, 25, 40)},
+};
+static const uint8_t CZ_DCW[NELEM(CZ_PRESETS)][4] = {   /* F.ENV for each: the DCW envelope (ATK DEC SUS REL) */
+    {0, 45, 15, 20},   /* SYN BASS: a quick fall, the CZ bass's snap */
+    {0, 60, 30, 25},   /* FAT BASS: slower, rounder */
+    {25, 70, 70, 40},  /* BRASS: the bend swells in */
+    {60, 90, 80, 70},  /* STRINGS */
+    {0, 70, 20, 50},   /* E.PIANO: the bright strike, darker after */
+    {0, 40, 10, 15},   /* CLAV */
+    {0, 95, 0, 90},    /* BELL */
+    {40, 110, 0, 50},  /* RESO SWEEP: up, then the long fall */
+    {0, 64, 127, 20},  /* ORGAN (ENV 0: no sweep) */
+    {0, 30, 0, 30},    /* PERCUSSION */
+};
+static const engine_t ENG_CZ = {
+    .name = "CZ", .page_title = {"PD", "LINE"}, .presets = CZ_PRESETS, .npresets = NELEM(CZ_PRESETS),
+    .note_on = cz_note_on, .render = cz_render, .knob = {P_E2, P_E3, P_E5, P_E7}, .poly = MF_POLY,
+    .edit = {{"WAVE", F_ENUM, 0, 7, 0, N_PD_WAVE, 0}, {"WAV2", F_ENUM, 0, 8, 0, N_PD_WAVE2, 0},
+             {"DCW", F_PCT, 0, 127, 30, 0, 0}, {"ENV", F_PCT, 0, 127, 80, 0, 0},
+             {"LINE", F_ENUM, 0, 3, 0, N_CZ_LINE, 0}, {"DTN", F_INT, 0, 127, 8, 0, "ct"},
+             {"SUB", F_PCT, 0, 127, 0, 0, 0}, {"KF", F_PCT, 0, 127, 30, 0, 0}},
+    .xyd = {{XY_E(2), XY_E(3), 0}, {XY_E(5), XY_E(7), 0}},
+    .xya = {{50, 40, 0}, {40, 40, 0}},
+};

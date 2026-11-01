@@ -2761,7 +2761,7 @@ static int test_leds_layer(void)
     sm_layer = SML_EDIT;
     sm_lay_epage = 0;
     sm_leds();
-    keys &= wl(0) == 1 && wd(1) == 1 && wl(1) == 0 && wd(sm_epage_n(0) - 1u) == 1 && wd(sm_epage_n(0)) == 0 && wd(15) == 0 && wm(0) == 0;   /* SAW lit, the page's machines, no INIT */
+    keys &= wl(0) == 1 && wd(1) == 1 && wl(1) == 0 && wd(sm_epage_n(0) - 1u) == 1 && (sm_epage_n(0) >= 16u || (wd(sm_epage_n(0)) == 0 && wd(15) == 0)) && wm(0) == 0;   /* SAW lit, the page's machines, no INIT */
     smp.pat[smp.cur].step[0][5].n = 1;                    /* (the steps are not shown in a layer) */
     sm_leds();
     keys &= wany(5) == 1 && wl(5) == 0;
@@ -10113,6 +10113,77 @@ static int test_organ(void)
     return bad;
 }
 
+/* CZ (Tim, 1.11): Casio CZ-style phase distortion on the MONO page's last key (G5); every preset sounds, none clips; the DCW
+ * envelope (F.ENV, the preset's own) bends the wave: ENV up, the strike brighter than with ENV 0; KF darkens high notes */
+static uint32_t cz_bright(uint32_t note, int32_t env, int32_t kf, uint32_t *pk)   /* T1 CZ: the mean |2nd difference| / the peak, x 1e5 */
+{
+    static int32_t L[CTL * 40];
+    uint32_t nl = 0, b, i, p = 0;
+    uint64_t sl = 0;
+    trk[0].p[P_E3] = (int16_t)env;
+    trk[0].p[P_E7] = (int16_t)kf;
+    trk_note_on(&trk[0], note, 100);
+    for (b = 0; b < 40u; b++) {
+        uint32_t a = block_peak(L, &nl);
+        p = a > p ? a : p;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(400);
+    for (i = 2; i < nl; i++) {                           /* (the second difference: a high-pass, the bend's edges) */
+        int32_t d = L[i] - 2 * L[i - 1] + L[i - 2];
+        sl += (uint64_t)(d < 0 ? -d : d);
+    }
+    if (pk)
+        *pk = p;
+    return p ? (uint32_t)(sl * 100000u / nl / p) : 0u;
+}
+static int test_cz(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_CZ), pr, ok = 1, pk, b0, b1;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    bad += check("CZ: on the MONO page, its last key (G5)", sm_epage_of(m) == 0u && sm_epage_mach(0, 15) == m && sm_epage_n(0) == 16u);
+    sm_ui.trk = 0;
+    for (pr = 0; pr < NELEM(CZ_PRESETS); pr++) {
+        uint32_t b, p = 0;
+        sm_sound_load(m, pr);
+        sm_input_poll();
+        kit_dry();
+        play_blocks(4);
+        trk_note_on(&trk[0], pr < 2u ? 36u : 60u, 100);
+        for (b = 0; b < 200u; b++) {
+            uint32_t a = block_peak(0, 0);
+            p = a > p ? a : p;
+        }
+        trk_all_off(&trk[0]);
+        play_blocks(600);
+        printf("pulhra: CZ %-14s peak %5u (%.1f dBFS)\n", CZ_PRESETS[pr].name, p, p ? 20.0 * log10(p / 32767.0) : -99.0);
+        ok &= p > 1500u && p < 32767u;
+    }
+    bad += check("CZ: every preset sounds, none clips", ok);
+    bad += check("CZ: a preset's DCW envelope on F.ENV (SYN BASS: ATK 0 DEC 45)", (sm_sound_load(m, 0), sm_input_poll(),
+                 ksnd(0)->p[P_FATK] == 0 && ksnd(0)->p[P_FDEC] == 45));
+    play_blocks(4);                                       /* (the LOAD taken first: it would undo what follows) */
+    kit_dry();
+    trk[0].p[P_E4] = 0;                                   /* (one line, SAW, DCW 10) */
+    trk[0].p[P_E0] = 0;
+    trk[0].p[P_E1] = 0;
+    trk[0].p[P_E6] = 0;
+    b0 = cz_bright(48, 0, 0, &pk);
+    b1 = cz_bright(48, 127, 0, 0);
+    printf("pulhra: CZ brightness: ENV 0 %u, ENV 127 %u\n", b0, b1);
+    bad += check("CZ: ENV up: the strike brighter (the DCW envelope bends the wave)", b1 > b0 + b0 / 4u && pk > 1000u);
+    trk[0].p[P_E2] = 90;
+    b0 = cz_bright(84, 0, 0, 0);
+    b1 = cz_bright(84, 0, 127, 0);
+    printf("pulhra: CZ key follow at C6: KF 0 %u, KF 127 %u\n", b0, b1);
+    bad += check("CZ: KF up: a high note darker", b1 * 5u < b0 * 4u);
+    return bad;
+}
+
 /* the web editor's link (sm_ed.c): INFO lists the regions; a sector erased, 256 bytes written and read back through the frames;
  * a write refused while playing; RELOAD 2 indexes the user sounds anew (a record written raw shows up); bad arguments */
 static uint32_t ed_frame(const uint8_t *body, uint32_t n)  /* body: cmd and args -> the reply's length (sm_ed_out) */
@@ -13518,6 +13589,7 @@ int main(void)
     bad += test_editor_slot();
     bad += test_editor_link();
     bad += test_organ();
+    bad += test_cz();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

@@ -276,6 +276,16 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_WEST, 5, 4},   /* WEST 5: -20.7 dBFS */
     {ENGI_WEST, 6, 5},   /* WEST 6: -21.1 dBFS */
     {ENGI_ORGAN, 4, 8},   /* ORGAN 4: -25.3 dBFS (a stab) */
+    {ENGI_CZ, 0, -6},   /* CZ 0: -15.5 dBFS (SYN BASS) */
+    {ENGI_CZ, 1, -10},   /* CZ 1: -13.5 dBFS (FAT BASS) */
+    {ENGI_CZ, 2, -10},   /* CZ 2: -13.6 dBFS (BRASS) */
+    {ENGI_CZ, 3, -10},   /* CZ 3: -13.6 dBFS (STRINGS) */
+    {ENGI_CZ, 4, -5},   /* CZ 4: -15.8 dBFS (E.PIANO) */
+    {ENGI_CZ, 5, 9},   /* CZ 5: -23.2 dBFS (CLAV) */
+    {ENGI_CZ, 6, 12},   /* CZ 6: -33.2 dBFS (BELL) */
+    {ENGI_CZ, 7, 7},   /* CZ 7: -21.8 dBFS (RESO SWEEP) */
+    {ENGI_CZ, 8, -12},   /* CZ 8: -12.3 dBFS (ORGAN) */
+    {ENGI_CZ, 9, 12},   /* CZ 9: -30.3 dBFS (PERCUSSION) */
     {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
     {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
     {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */
@@ -425,6 +435,12 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
     if (pr->fenv) {                                           /* F.ENV: the sweep is the ADSR's attack and decay */
         s->p[P_FATK] = (int8_t)pr->env[0];
         s->p[P_FDEC] = (int8_t)pr->env[1];
+    }
+    if (sm_engine_of(machine) == ENGI_CZ && preset < NELEM(CZ_DCW)) {   /* CZ: F.ENV is its DCW envelope (eng_px.c CZ_DCW) */
+        s->p[P_FATK] = (int8_t)CZ_DCW[preset][0];
+        s->p[P_FDEC] = (int8_t)CZ_DCW[preset][1];
+        s->p[P_FSUS] = (int8_t)CZ_DCW[preset][2];
+        s->p[P_FREL] = (int8_t)CZ_DCW[preset][3];
     }
     s->p[P_VOICE] = (int8_t)(pr->mono ? V_LEGATO : V_POLY);
     for (i = 0; i < 4u; i++)
