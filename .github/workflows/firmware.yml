@@ -51,6 +51,14 @@ jobs:
           set -o pipefail
           FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 ./build.sh --release 1.5.1 2>&1 | tee build-pulhra.log
 
+      - name: Build (the USB audio test, 10 channels of triangles; the main package kept)
+        run: |
+          set -o pipefail
+          cp build/pulhra-1.5.1.fwsc /tmp/pulhra-main.fwsc
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=10 FELUCCA_UAC_TONE=1 ./build.sh --release 1.5.1 2>&1 | tail -n 5
+          cp build/pulhra-1.5.1.fwsc /tmp/pulhra-uac10-test.fwsc
+          cp /tmp/pulhra-main.fwsc build/pulhra-1.5.1.fwsc
+
       - name: "Build logs to the ci-logs branch (on a failure, for a clone without the Actions UI)"
         if: failure()
         run: |
@@ -77,6 +85,7 @@ jobs:
           python3 web/make_module_installer.py build/pulhra-1.5.1.fwsc 1.5.1 /tmp/out/fm1-pulhra-installer.html
           cp web/pulhra_editor.html /tmp/out/pulhra-editor.html
           cp web/pulhra_keys.html /tmp/out/keys.html   # (the key map)
+          python3 web/make_module_installer.py /tmp/pulhra-uac10-test.fwsc 1.5.1 /tmp/out/uac10-test.html   # (the USB audio test)
           cp /tmp/out/fm1-pulhra-installer.html /tmp/out/index.html   # (the folder as a site: its root is the installer)
           (cd /tmp/out && sha256sum pulhra-1.5.1.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"

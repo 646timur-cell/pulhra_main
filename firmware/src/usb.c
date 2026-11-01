@@ -35,6 +35,20 @@
 #ifndef FELUCCA_UAC_AS_FIRST
 #define FELUCCA_UAC_AS_FIRST 1
 #endif
+#ifndef FELUCCA_UAC_NCH
+#define FELUCCA_UAC_NCH 2        /* the USB input's channels (2, or 4 .. 10 even: the bench's multichannel test) */
+#endif
+#if FELUCCA_UAC_NCH < 2 || FELUCCA_UAC_NCH > 10 || (FELUCCA_UAC_NCH & 1)
+#error "FELUCCA_UAC_NCH is 2, 4, 6, 8 or 10"
+#endif
+/* FELUCCA_UAC_NCH > 2 (Tim, 1.11: the tracks as stems, the bench test first): the stream carries NCH channels at
+ * 44.1 kHz only (no 48 kHz resampling: its FIR for every pair costs too much); for now each pair is the stereo
+ * frame copied (with FELUCCA_UAC_TONE: the triangles in every pair), to learn whether the USB controller and the
+ * hosts take packets of up to 46 x NCH x 2 bytes (920 at 10) where the stereo stream sends 196 */
+#if FELUCCA_UAC_NCH > 2
+#undef FELUCCA_UAC_48K
+#define FELUCCA_UAC_48K 0
+#endif
 #if !FELUCCA_UAC
 #undef FELUCCA_UAC_48K
 #define FELUCCA_UAC_48K 0
@@ -94,11 +108,11 @@ _Static_assert(UA_HI48 + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, a
 #else
 #define UA_MAXF 46u              /* frames in the largest packet */
 #endif
-#define UAC_MAXP (UA_MAXF * 4u)
+#define UAC_MAXP (UA_MAXF * 2u * FELUCCA_UAC_NCH)
 _Static_assert(UA_HI + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, a render and a packet");
 static uint32_t ua_ring[UA_N];
 static volatile uint32_t ua_w, ua_r;
-static uint32_t ep4tx[UA_MAXF] __attribute__((aligned(4)));
+static uint32_t ep4tx[UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
 static struct {
     volatile uint8_t alt;        /* streaming interface setting: 1 = the host records */
     volatile uint8_t r48;        /* the host's rate (SET_CUR): 1 = 48 kHz, 0 = 44.1 (bus reset) */
@@ -236,7 +250,7 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #define D_FMT 14, 0x24, 2, 1, 2, 2, 16, 2, 0x44, 0xAC, 0x00, 0x80, 0xBB, 0x00,   /* 44100, 48000 */
 #define FMT_LEN 14
 #elif FELUCCA_UAC
-#define D_FMT 11, 0x24, 2, 1, 2, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,
+#define D_FMT 11, 0x24, 2, 1, FELUCCA_UAC_NCH, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,
 #define FMT_LEN 11
 #else
 #define FMT_LEN 0
@@ -255,10 +269,11 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #else
 #define AC_COLL(a) (a) + 1, (a) + 2
 #endif
+#define UAC_CHCFG (FELUCCA_UAC_NCH == 2 ? 0x03 : 0x00)   /* L R; more: no spatial places (the host numbers them) */
 #define D_AC(a)                                                                                      \
     9, 4, (a), 0, 0, 1, 1, 0, 0,                                                                     \
     10, 0x24, 1, 0x00, 0x01, 31, 0, 2, AC_COLL(a),         /* AC header 1.00: audio + MIDI streaming */ \
-    12, 0x24, 2, 1, 0x03, 0x06, 0, 2, 0x03, 0x00, 0, 0,    /* input terminal 1: line, 2 ch (L R) */      \
+    12, 0x24, 2, 1, 0x03, 0x06, 0, FELUCCA_UAC_NCH, UAC_CHCFG, 0x00, 0, 0,   /* input terminal 1: line, L R (or NCH) */ \
     9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */
 #define D_AS(s)                                                                                      \
     9, 4, (s), 0, 0, 1, 2, 0, 0,                           /* audio streaming, alt 0: no bandwidth */    \
@@ -298,7 +313,8 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     7, 5, 0x83, 2, 64, 0, 0,                               /* EP3 IN bulk */
 #define CDC_LEN 66                                         /* with its IAD */
 #define BCD_LO(cdc)                                                                                  \
-    (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x08 * FELUCCA_UAC_AS_FIRST + ((cdc) ? 0x01 + 2 * FELUCCA_USB_LAYOUT : 0))
+    (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x08 * FELUCCA_UAC_AS_FIRST + ((cdc) ? 0x01 + 2 * FELUCCA_USB_LAYOUT : 0) + \
+     0x40 * (FELUCCA_UAC_NCH > 2))   /* (the multichannel test: a host must not reuse the stereo's) */
 #define D_DEV(bcdusb, cls, sub, proto, cdc)                                                          \
     18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, 0x09, 0x12, FELUCCA_USB_PID & 0xFF, \
     FELUCCA_USB_PID >> 8, BCD_LO(cdc), 0x03, 1, 2, 0, 1
@@ -1222,7 +1238,15 @@ static void uac_service(void)
     uac.queued = 1;
     uac.wait = 0;
     n = uac_packet(ep4tx);
-    fm1_usb_ep4_send(ep4tx, n * 4u);
+#if FELUCCA_UAC_NCH > 2
+    {   /* each stereo frame into NCH / 2 pairs, from the end (a frame's place only grows) */
+        uint32_t i = n, k;
+        while (i--)
+            for (k = FELUCCA_UAC_NCH / 2u; k--;)
+                ep4tx[i * (FELUCCA_UAC_NCH / 2u) + k] = ep4tx[i];
+    }
+#endif
+    fm1_usb_ep4_send(ep4tx, n * 2u * FELUCCA_UAC_NCH);
     sie_wr(S_TXCSR1, 0x01);                             /* TxPktRdy (and UnderRun cleared) */
 }
 #endif
