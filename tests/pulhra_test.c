@@ -10926,11 +10926,11 @@ static int test_kit_lane_mix(void)
     play_blocks(4);
     sm_kit_lane = 1;
     sm_ui.page = (uint8_t)page_by_name("AMP");
-    bad += check("LMIX: KIT, AMP: K1..K4 the lane's ATK DEC SUS REL, SELECT the track's volume",
-                 sm_page_param(0) == SM_LE(1, 0) && sm_page_param(3) == SM_LE(1, 3) && sm_page_param(4) == P_LEVEL);
+    bad += check("LMIX: KIT, AMP: K1..K4 the lane's ATK DEC SUS REL, SELECT the lane's LVL",
+                 sm_page_param(0) == SM_LE(1, 0) && sm_page_param(3) == SM_LE(1, 3) && sm_page_param(4) == SM_LM(1, 0));
     sm_ui.page = (uint8_t)page_by_name("MIX");
-    bad += check("LMIX: KIT, MIX: K1 the lane's LVL, SELECT the track's volume", sm_page_param(0) == SM_LM(1, 0) &&
-                 sm_page_param(4) == P_LEVEL);
+    bad += check("LMIX: KIT, MIX: K1 the lane's LVL, SELECT too (the track's volume: MIXER)", sm_page_param(0) == SM_LM(1, 0) &&
+                 sm_page_param(4) == SM_LM(1, 0));
     {
         int8_t l0 = cpat()->lmix[0][0], l2 = cpat()->lmix[2][0], t0 = ksnd(3)->p[P_LEVEL];
         turn(EN_K1, -10);
@@ -10941,6 +10941,18 @@ static int test_kit_lane_mix(void)
         bad += check("LMIX: ... MIX K1 -15: L2's LVL alone down 15 (L1, L3, the track's LEVEL kept), on the core",
                      cpat()->lmix[1][0] == 112 - 15 && dr_lm[3][1][0] == 112 - 15 && cpat()->lmix[0][0] == l0 && cpat()->lmix[2][0] == l2 &&
                      ksnd(3)->p[P_LEVEL] == t0 && dr_lm[3][0][0] == l0);
+    }
+    {
+        int8_t t0 = ksnd(3)->p[P_LEVEL], l0 = cpat()->lmix[0][0];
+        sm_ui.page = (uint8_t)page_by_name("AMP");
+        turn(EN_SELECT, 5);
+        sm_input_poll();
+        play_blocks(2);
+        bad += check("LMIX: ... AMP SELECT +5: L2's LVL up 5 (the track's volume, L1 kept)",
+                     cpat()->lmix[1][0] == 112 - 10 && dr_lm[3][1][0] == 112 - 10 && ksnd(3)->p[P_LEVEL] == t0 && cpat()->lmix[0][0] == l0);
+        turn(EN_SELECT, -5);
+        sm_input_poll();
+        play_blocks(2);
     }
     sm_ui.page = (uint8_t)page_by_name("FX");
     bad += check("LMIX: ... FX: DIST CHO DLY REV the lane's", sm_page_param(1) == SM_LM(1, 1) && sm_page_param(3) == SM_LM(1, 3) &&

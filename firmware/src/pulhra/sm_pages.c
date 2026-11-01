@@ -149,10 +149,12 @@ static uint32_t sm_page_param(uint32_t k)
     }
     if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {
         /* the KIT (Tim): each lane its own envelope, LVL and sends, the lane in edit's: AMP's K1..K4 its ATK DEC SUS REL, MIX's
-         * K1 its LVL (as a machine's VOL), the sends of FX / MIX its own; SELECT the track's volume (all the lanes) */
+         * K1 its LVL (as a machine's VOL), the sends of FX / MIX its own; SELECT its LVL too (the track's volume: MIXER) */
         uint32_t L = sm_kit_lane % 4u;
-        if (pg->id[0] == P_ATK)                           /* (Tim: K1..K4 the lane's ATK DEC SUS REL; SELECT the track's volume) */
-            return k < 4u ? SM_LE(L, k) : P_LEVEL;
+        if (k == 4u && id == P_LEVEL)                     /* (Tim, 1.11: SELECT the lane in edit's LVL, not the track's volume: */
+            return SM_LM(L, 0u);                          /*  that stays on HOME's MIXER) */
+        if (pg->id[0] == P_ATK)                           /* (Tim: K1..K4 the lane's ATK DEC SUS REL) */
+            return SM_LE(L, k);
         if (id == P_AVOL)                                 /* (MIX's K1: the lane's LVL, its VOL; the sends: FX) */
             return SM_LM(L, 0u);
         if (id == P_DIST)                                 /* (FX's K1, MIX's K3, DIST's K2: the lane's drive, Tim 31.10) */
