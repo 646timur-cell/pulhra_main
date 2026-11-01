@@ -88,9 +88,9 @@ static uint32_t sm_layer_button(uint32_t l)
 /* the pages of machines: each its places of before (engines.c MF_PAGE) and those added since at the end of ENGINE_ORDER
  * (SM_XP(i): the i-th added; ACID on MONO); the DRUM page (Tim): one machine, DRUM (the KIT): its lanes pick KICK .. */
 #define SM_XP(i) (MF_PAGE_4 + SWAMP_NDRUM + (i))
-static const uint8_t SM_EPG_X[SM_NEPAGE][4] = {{SM_XP(0), SM_XP(4), SM_XP(7)}, {SM_XP(2), SM_XP(3), SM_XP(8), SM_XP(9)}, {0}, {0}};   /* the places added, on each page (ACID;
+static const uint8_t SM_EPG_X[SM_NEPAGE][6] = {{SM_XP(0), SM_XP(4), SM_XP(7)}, {SM_XP(2), SM_XP(3), SM_XP(8), SM_XP(9), SM_XP(10)}, {0}, {0}};   /* the places added, on each page (ACID;
                                                                                     CLOUD; ZAP SM_XP(1) a KIT lane's) */
-static const uint8_t SM_EPG_NX[SM_NEPAGE] = {3, 4, 0, 0};   /* (MONO: ACID ORGAN CZ; SOMA: CLOUD WEST EMS PREP) */
+static const uint8_t SM_EPG_NX[SM_NEPAGE] = {3, 5, 0, 0};   /* (MONO: ACID ORGAN CZ; SOMA: CLOUD WEST EMS PREP ETHER) */
 _Static_assert(MF_PAGE_2 + 2u <= 15u && MF_PAGE_3 - MF_PAGE_2 + 2u <= 15u && MF_PAGE_4 - MF_PAGE_3 <= 15u,
                "PULHRA: each page of machines at most 15 (the white keys), those added since with it");
 static uint32_t sm_epage_n(uint32_t pg)
@@ -105,7 +105,7 @@ static uint32_t sm_epage_mach(uint32_t pg, uint32_t w)  /* the machine on white 
     if (pg == 3u)
         return SM_KIT_MACH;
     n0 = (uint32_t)MF_PAGE[pg + 1u] - MF_PAGE[pg];
-    return w < n0 ? MF_PAGE[pg] + w : SM_EPG_X[pg][(w - n0) % 4u];
+    return w < n0 ? MF_PAGE[pg] + w : SM_EPG_X[pg][(w - n0) % 6u];
 }
 static uint32_t sm_epage_of(uint32_t machine)           /* the page a machine is on */
 {

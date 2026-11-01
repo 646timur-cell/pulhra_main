@@ -300,6 +300,12 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_PREP, 5, 12},   /* PREP 5: -34.1 dBFS */
     {ENGI_PREP, 6, 11},   /* PREP 6: -24.0 dBFS */
     {ENGI_PREP, 7, 12},   /* PREP 7: -24.7 dBFS */
+    {ENGI_ETHER, 0, 6},   /* ETHER 0: -21.3 dBFS */
+    {ENGI_ETHER, 1, 9},   /* ETHER 1: -23.2 dBFS */
+    {ENGI_ETHER, 2, 5},   /* ETHER 2: -21.0 dBFS */
+    {ENGI_ETHER, 3, 16},   /* ETHER 3: -28.6 dBFS */
+    {ENGI_ETHER, 4, 16},   /* ETHER 4: -27.9 dBFS */
+    {ENGI_ETHER, 6, 12},   /* ETHER 6: -24.6 dBFS */
     {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
     {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
     {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */
@@ -456,6 +462,8 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
         s->p[P_FSUS] = (int8_t)CZ_DCW[preset][2];
         s->p[P_FREL] = (int8_t)CZ_DCW[preset][3];
     }
+    if (sm_engine_of(machine) == ENGI_ETHER && preset < NELEM(ETHER_KEY))   /* ETHER: KEY (the ninth) per preset */
+        s->p[P_E8] = (int8_t)ETHER_KEY[preset];
     if (sm_engine_of(machine) == ENGI_EMS && preset < NELEM(EMS_X)) {   /* EMS: F.ENV its filter's, VIB, INSERT's phaser */
         s->p[P_FATK] = (int8_t)EMS_X[preset][0];
         s->p[P_FDEC] = (int8_t)EMS_X[preset][1];

@@ -10298,7 +10298,7 @@ static int test_ems_prep(void)
     seq_reset();
     draw_setup();
     bad += check("EMS / PREP: on the SOMA page, after CLOUD and WEST", sm_epage_of(me) == 1u && sm_epage_of(mp) == 1u &&
-                 sm_epage_mach(1, 11) == me && sm_epage_mach(1, 12) == mp && sm_epage_n(1) == 13u);
+                 sm_epage_mach(1, 11) == me && sm_epage_mach(1, 12) == mp && sm_epage_n(1) >= 13u);
     sm_ui.trk = 0;
     for (pr = 0; pr < NELEM(EMS_PRESETS) + NELEM(PREP_PRESETS); pr++) {
         uint32_t e = pr < NELEM(EMS_PRESETS), q = e ? pr : pr - NELEM(EMS_PRESETS);
@@ -10347,6 +10347,70 @@ static int test_ems_prep(void)
         ok &= b1 * 10u > b0 * 13u || b1 * 13u < b0 * 10u;
     }
     bad += check("PREP: BOLT RUBBR SCREW PAPER each unlike the bare string (30 % in brightness)", ok);
+    return bad;
+}
+
+/* ETHER (Tim, 1.11) on the SOMA page after PREP: every preset sounds, none clips; KEY ON follows the notes (an octave up: the
+ * field's period halves), each source unlike the others */
+static uint32_t et_cross(uint32_t note, uint32_t blocks)  /* T1: zero crossings over the blocks */
+{
+    static int32_t L[CTL * 200];
+    uint32_t nl = 0, b, i, zc = 0;
+    trk_note_on(&trk[0], note, 100);
+    for (b = 0; b < blocks && b < 200u; b++)
+        block_peak(L, &nl);
+    trk_all_off(&trk[0]);
+    play_blocks(600);
+    for (i = 1; i < nl; i++)
+        zc += (L[i] < 0) != (L[i - 1] < 0);
+    return zc;
+}
+static int test_ether(void)
+{
+    int bad = 0;
+    uint32_t m = eng_rank(ENGI_ETHER), pr, ok = 1, pk, z0, z1, s, b[ET_N];
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    bad += check("ETHER: on the SOMA page, after PREP", sm_epage_of(m) == 1u && sm_epage_mach(1, 13) == m && sm_epage_n(1) == 14u);
+    sm_ui.trk = 0;
+    for (pr = 0; pr < NELEM(ETHER_PRESETS); pr++) {
+        sm_sound_load(m, pr);
+        sm_input_poll();
+        play_blocks(4);
+        kit_dry();
+        px_sound(48, 300, &pk);
+        printf("pulhra: ETHER %-16s peak %5u\n", ETHER_PRESETS[pr].name, pk);
+        ok &= pk > 1500u && pk < 32767u;
+    }
+    bad += check("ETHER: every preset sounds, none clips", ok);
+    sm_sound_load(m, 7);                                  /* HUM BASS: KEY ON */
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    trk[0].p[P_E2] = 0;                                   /* (no FLUX: a steady field) */
+    trk[0].p[P_E1] = 0;
+    z0 = et_cross(36, 150);
+    z1 = et_cross(48, 150);
+    printf("pulhra: ETHER KEY ON, crossings C2 %u, C3 %u\n", z0, z1);
+    bad += check("ETHER: KEY ON, a note an octave up: the field twice as fast", z1 > z0 + z0 / 2u && z1 < z0 * 3u);
+    trk[0].p[P_E8] = 0;
+    z0 = et_cross(36, 150);
+    z1 = et_cross(48, 150);
+    bad += check("ETHER: KEY OFF: the field at its own frequency, whatever the note", z1 * 10u < z0 * 12u && z0 * 10u < z1 * 12u);
+    for (s = 0; s < ET_N; s++) {
+        trk[0].p[P_E0] = (int16_t)s;
+        trk[0].p[P_E6] = 0;
+        b[s] = px_sound(48, 150, 0);
+    }
+    for (s = 0, ok = 1; s < ET_N; s++) {
+        uint32_t q;
+        printf("pulhra: ETHER %s brightness %u\n", N_ET_SRC[s], b[s]);
+        for (q = 0; q < s; q++)
+            ok &= b[s] != b[q];
+    }
+    bad += check("ETHER: the seven fields each its own sound", ok);
     return bad;
 }
 
@@ -13758,6 +13822,7 @@ int main(void)
     bad += test_organ();
     bad += test_cz();
     bad += test_ems_prep();
+    bad += test_ether();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

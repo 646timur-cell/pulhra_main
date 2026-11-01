@@ -805,3 +805,151 @@ static const engine_t ENG_PREP = {
     .xyd = {{XY_E(1), XY_E(7), 0}, {XY_E(2), XY_E(3), 0}},
     .xya = {{50, 40, 0}, {40, 40, 0}},
 };
+
+/* ==================================================================== ETHER === */
+/* an anti-radio (Tim, 1.11; after Soma Laboratory's ETHER, which turns the electromagnetic fields around it into sound): the
+ * fields of the things around us, made: SRC MAINS (the 50 Hz hum, full-wave, its harmonics: a fat buzz), SMPS (a switching
+ * supply's whine, its jitter, its burst mode's ticks), LED (a dimmer's PWM, the mains' 100 Hz ripple on it), DIGI (data: random
+ * bits, packets on and off), MOTOR (a brushed motor: its commutation's noise, the rotation), GSM (a phone's TDMA bursts: 217 Hz
+ * frames, the "dit-dit-dit" in a speaker), STATIC (the band's noise, its pops, a heterodyne's whistle). NEAR how close the
+ * antenna is (louder, dirtier, more harmonics); FLUX the field's unrest (the frequency wanders, the level drops out); RATE the
+ * bursts' rate (~0.3 .. 20 Hz); TONE the antenna's low-pass; GRIT a sample-and-hold and a crush; BLEND / SRC2 a second field
+ * mixed in. The ninth, KEY: ON the notes set the field's frequency (playable), OFF each field at its own (a note opens it).
+ * ph[0] the carrier, ph[1] the bursts, ph[2] the second rate (GSM's frames, LED's ripple, MOTOR's commutation); s[0] the noise,
+ * s[1] s[2] the antenna, s[3] FLUX's walk (cents), s[4] the burst's gate (Q15), s[5] DIGI's bit / STATIC's pop, s[6] s[7] GRIT */
+enum { ET_MAINS, ET_SMPS, ET_LED, ET_DIGI, ET_MOTOR, ET_GSM, ET_STATIC, ET_N };
+static const char *const N_ET_SRC[] = {"MAINS", "SMPS", "LED", "DIGI", "MOTOR", "GSM", "STATC"};
+static const char *const N_ET_KEY[] = {"OFF", "ON"};
+#define ET_HZ(h) ((uint32_t)((h) * 97391.5f))                /* Hz -> a phase increment at 44.1 kHz */
+static const uint32_t ET_FREE[ET_N] = {ET_HZ(50), ET_HZ(1820), ET_HZ(240), ET_HZ(4100), ET_HZ(95), ET_HZ(1733), ET_HZ(900)};
+static const uint8_t ET_MULT[ET_N] = {1, 16, 4, 32, 1, 8, 8};   /* KEY ON: the field's frequency, the note's x this */
+static void ether_note_on(track_t *t, voice_t *v)
+{
+    (void)t;
+    if (mf_fresh(v)) {
+        v->ph[0] = v->ph[1] = v->ph[2] = 0;
+        v->s[0] = 0x6C8E9CF5;
+        v->s[1] = v->s[2] = v->s[3] = v->s[5] = v->s[6] = v->s[7] = 0;
+        v->s[4] = 32767;
+    }
+}
+/* one field's sample (Q15-ish, +-32767) at the carrier's phase c, the second rate's r; nz a fresh random number */
+static int32_t et_field(uint32_t src, uint32_t c, uint32_t inc, uint32_t r, int32_t near, uint32_t nz, int32_t *bit)
+{
+    int32_t s, a;
+    switch (src) {
+    case ET_MAINS:                                       /* the hum: its fundamental, the full wave's 2nd and up, clipped near */
+        s = osc_sine(c);
+        a = s < 0 ? -s : s;
+        s = (s >> 1) + ((a - 20860) * (32 + near)) / 96;
+        return softclip(s + ((s * near) >> 6));
+    case ET_SMPS:                                        /* narrow pulses (10 %), the switch's ring after each */
+        return ((c >> 16) < 6554u ? 26000 : -2900) + ((int32_t)(nz >> 20) - 2048) * near / 16;
+    case ET_LED:                                         /* PWM, its duty breathing on the 100 Hz ripple */
+        s = (c >> 16) < (uint32_t)(24000 + (osc_sine(r) >> 3)) ? 18000 : -18000;
+        return s - osc_saw(c, inc) / 4;
+    case ET_DIGI:                                        /* a random bit a period, NRZ */
+        if (c < inc)
+            *bit = (nz >> 31) ? 22000 : -22000;
+        return *bit + (c < inc * 2u ? (int32_t)(nz >> 18) - 8192 : 0);   /* (each edge a little ring) */
+    case ET_MOTOR:                                       /* the rotation's tone, the brushes' noise at each commutation */
+        a = (r >> 16) < 9000u ? 32767 - (int32_t)(r >> 17) * 2 : 0;
+        return (osc_sine(c) >> 1) + (int32_t)(((int64_t)((int32_t)(nz >> 16) - 32768) * a) >> 15) * (40 + near) / 128;
+    case ET_GSM:                                         /* TDMA: a burst 1/8 of each 4.6 ms frame, a square buzz in it */
+        return (r >> 29) == 0u ? ((c >> 31) ? 24000 : -24000) : 0;
+    default:                                             /* STATIC: the band's noise, a whistle drifting through it */
+        return ((int32_t)(nz >> 17) - 16384) + (osc_sine(c) * near >> 8);
+    }
+}
+static void ether_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    const int16_t *p = t->p;
+    uint32_t src = (uint32_t)clamp(p[P_E0], 0, ET_N - 1), src2 = (uint32_t)clamp(p[P_E7], 0, ET_N - 1), i, inc, inc2, rinc, binc;
+    int32_t near = clamp(p[P_E1], 0, 127), flux = clamp(p[P_E2], 0, 127), grit = clamp(p[P_E5], 0, 127), bl = clamp(p[P_E6], 0, 127);
+    int32_t nz = v->s[0], ic1 = v->s[1], ic2 = v->s[2], walk = v->s[3], gate = v->s[4], bit = v->s[5], hold = v->s[6], hc = v->s[7];
+    int32_t bit2 = bit, gt, cut, lvl;
+    uint32_t c = v->ph[0], b = v->ph[1], r = v->ph[2], key = MF_E8(p) != 0, rnd;
+    tsvf_t f;
+    /* FLUX: a random walk of the frequency (up to ~+-3 semitones), steered back to the middle */
+    rnd = noise32(&nz);
+    walk += ((int32_t)(rnd >> 21) - 1024) * flux / 64 - walk / 16;
+    walk = clamp(walk, -300 * 16, 300 * 16);
+    inc = key ? cents_inc(m->pitch16, walk / 16, m->fine) : ET_FREE[src];
+    if (key) {
+        uint64_t x = (uint64_t)inc * ET_MULT[src];
+        inc = x > 0x3FFFFFFFu ? 0x3FFFFFFFu : (uint32_t)x;
+    } else if (walk) {
+        inc = (uint32_t)((int64_t)inc + (((int64_t)inc * walk) >> 15));
+    }
+    inc2 = key ? (uint32_t)(((uint64_t)inc * ET_MULT[src2]) / ET_MULT[src]) : ET_FREE[src2];
+    /* the second rate: GSM's frames 217 Hz, LED's ripple 100 Hz, MOTOR's commutation 6 x the rotation */
+    rinc = src == ET_GSM || src2 == ET_GSM ? ET_HZ(217) : src == ET_LED ? ET_HZ(100) : (uint32_t)(((uint64_t)inc * 6u) & 0x3FFFFFFFu);
+    binc = ET_HZ(0.3f) + (uint32_t)clamp(p[P_E3], 0, 127) * (ET_HZ(20) / 127u);   /* RATE: the bursts */
+    /* the bursts' gate: SMPS's burst mode, DIGI's packets, GSM's groups, STATIC's pops; FLUX drops the rest out now and then */
+    if (b + binc * n < b) {                              /* (a new burst: on or off, by chance) */
+        rnd = noise32(&nz);
+        gt = src == ET_MAINS || src == ET_LED || src == ET_MOTOR ? (rnd >> 25) >= (uint32_t)flux / 2u : (rnd >> 31) || src == ET_GSM;
+    } else
+        gt = gate > 0;
+    gate += ((gt ? 32767 : 0) - gate) >> 2;
+    cut = (30 << 8) + clamp(p[P_E4], 0, 127) * 190 + m->cutoff;   /* TONE: the antenna's low-pass, ~120 Hz .. 16 kHz */
+    tsvf_coef(&f, cut, 20);
+    lvl = 9000 + near * 120;                             /* (NEAR: the level too) */
+    for (i = 0; i < n; i++) {
+        uint32_t z = noise32(&nz);
+        int32_t x = et_field(src, c, inc, r, near, z, &bit);
+        if (src == ET_GSM || src == ET_SMPS || src == ET_DIGI)
+            x = (int32_t)(((int64_t)x * gate) >> 15);   /* (the bursts) */
+        if (src == ET_STATIC && (z & 0x3FFFu) < (uint32_t)(4 + flux))   /* (a pop) */
+            x += (z >> 31) ? 30000 : -30000;
+        if (bl)
+            x += ((et_field(src2, c, inc2, r, near, z ^ 0x5A5A5A5Au, &bit2) - x) * bl) >> 7;
+        if (grit) {                                      /* GRIT: held 1 .. 16 samples, 12 .. 4 bits */
+            if (++hc > grit / 8) {
+                hc = 0;
+                hold = x & ~((1 << (3 + grit / 12)) - 1);
+            }
+            x = hold;
+        }
+        x = tsvf_lp(&f, x, &ic1, &ic2);
+        x = soft_knee((x * lvl) >> 14, 26000);
+        out[i] += voice_amp(x, m, i);
+        c += src == ET_STATIC ? inc + (uint32_t)((int32_t)(z >> 22) * flux) : inc;   /* (STATIC: the whistle wavers) */
+        r += rinc;
+    }
+    b += binc * n;
+    v->ph[0] = c;
+    v->ph[1] = b;
+    v->ph[2] = r;
+    v->s[0] = nz;
+    v->s[1] = ic1;
+    v->s[2] = ic2;
+    v->s[3] = walk;
+    v->s[4] = gate;
+    v->s[5] = bit;
+    v->s[6] = hold;
+    v->s[7] = hc;
+}
+/* SRC NEAR FLUX RATE TONE GRIT BLEND SRC2 (KEY: E8, the presets below set it in ETHER_KEY) */
+static const preset_t ETHER_PRESETS[] = {
+    {"ET KITCHEN", {ET_MAINS, 70, 20, 30, 70, 0, 40, ET_SMPS}, {5, 64, 127, 40}, 0, 0, FX(0, 0, 0, 20)},
+    {"ET SERVER ROOM", {ET_DIGI, 60, 40, 70, 90, 20, 50, ET_SMPS}, {5, 64, 127, 40}, 0, 0, FX(0, 0, 20, 30)},
+    {"ET TRAM", {ET_MOTOR, 90, 60, 20, 60, 10, 30, ET_MAINS}, {20, 64, 127, 60}, 0, 0, FX(10, 0, 0, 40)},
+    {"ET PHONE ON DESK", {ET_GSM, 80, 30, 50, 80, 0, 0, ET_GSM}, {0, 64, 127, 30}, 0, 0, FX(0, 0, 0, 10)},
+    {"ET OLD TV", {ET_SMPS, 60, 30, 10, 110, 30, 50, ET_STATIC}, {10, 64, 127, 50}, 0, 0, FX(0, 0, 0, 30)},
+    {"ET LED STRIP", {ET_LED, 70, 20, 30, 80, 10, 30, ET_MAINS}, {5, 64, 127, 40}, 0, 0, FX(0, 20, 0, 30)},
+    {"ET STORM", {ET_STATIC, 80, 90, 40, 70, 20, 30, ET_MAINS}, {30, 64, 127, 80}, 0, 0, FX(0, 0, 30, 60)},
+    {"ET HUM BASS", {ET_MAINS, 100, 10, 0, 40, 0, 0, ET_MAINS}, {0, 70, 100, 20}, 0, 1, FX(10, 0, 0, 5)},
+};
+static const uint8_t ETHER_KEY[NELEM(ETHER_PRESETS)] = {0, 0, 0, 0, 0, 1, 0, 1};   /* KEY per preset (LED STRIP, HUM BASS: played) */
+static const engine_t ENG_ETHER = {
+    .name = "ETHER", .page_title = {"FIELD", "ANTENNA"}, .presets = ETHER_PRESETS, .npresets = NELEM(ETHER_PRESETS),
+    .note_on = ether_note_on, .render = ether_render, .knob = {P_E1, P_E2, P_E3, P_E4}, .poly = MF_POLY,
+    .edit = {{"SRC", F_ENUM, 0, ET_N - 1, ET_MAINS, N_ET_SRC, 0}, {"NEAR", F_PCT, 0, 127, 70, 0, 0},
+             {"FLUX", F_PCT, 0, 127, 30, 0, 0}, {"RATE", F_PCT, 0, 127, 40, 0, 0},
+             {"TONE", F_PCT, 0, 127, 80, 0, 0}, {"GRIT", F_PCT, 0, 127, 0, 0, 0},
+             {"BLND", F_PCT, 0, 127, 0, 0, 0}, {"SRC2", F_ENUM, 0, ET_N - 1, ET_SMPS, N_ET_SRC, 0}},
+    .e8 = {"KEY", F_ENUM, 0, 1, 0, N_ET_KEY, 0},
+    .xyd = {{XY_E(1), XY_E(4), 0}, {XY_E(2), XY_E(6), 0}},
+    .xya = {{50, 40, 0}, {50, 40, 0}},
+};

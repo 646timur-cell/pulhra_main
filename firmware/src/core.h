@@ -108,8 +108,9 @@
 #define ENGI_CZ 61u              /* CZ: Casio CZ-style phase distortion (eng_px.c, PHASE's core) */
 #define ENGI_EMS 62u             /* EMS: Formanta EMS-01 style, two oscillators into a Polivoks-like filter (eng_px.c) */
 #define ENGI_PREP 63u            /* PREP: a prepared piano, STRING's waveguide struck, bolts / rubber / screws / paper (eng_px.c) */
-#define SWAMP_NXENG 10            /* (the engines added: ENGINES) */
-#define SWAMP_NXPL 10              /* (the places added: ENGINE_ORDER; an engine of before may take one) */
+#define ENGI_ETHER 64u           /* ETHER: an anti-radio, the electromagnetic fields around us as sound (eng_px.c) */
+#define SWAMP_NXENG 11            /* (the engines added: ENGINES) */
+#define SWAMP_NXPL 11              /* (the places added: ENGINE_ORDER; an engine of before may take one) */
 #define NLIVE (FELUCCA_STRANGE ? 2 : NPART)   /* the parts that render and hear MIDI (STRANGE: T1, T2) */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (FELUCCA_MONOFM ? 27 + (SWAMP_NDRUM + SWAMP_NXPL) * FELUCCA_SWAMP : FELUCCA_STRANGE ? 24 : NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
