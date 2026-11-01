@@ -1440,16 +1440,93 @@ static const engine_t ENG_DSMP = {
     .xya = {{40, 40, 0}, {50, 40, 0}},
 };
 
+/* ================================================================== IMPULSE === */
+/* an impulse (Tim, 1.11; after the Analog Rytm's IMPULSE: a click made to strike a filter): a lane machine. ATK its rise
+ * (0 .. ~6 ms), DCAY its fall, POL POS / NEG / BI (the impulse's derivative: a two-sided pop), NOIS noise in it, TONE its
+ * brightness (a low-pass on it); and its own ping: a resonator at TUNE (30 Hz .. ~5 kHz, the note's pitch on it) ringing for
+ * PING (0: none), MIX the click .. the ping. Put the lane's FILTER on it for the Rytm's way: the impulse through a resonant
+ * filter. The ninth, DRIV. cnt the samples since the hit, e[0] the impulse's fall (Q15), e[1] its slow self (BI), f[0..1]
+ * the ping, f[2] TONE's low-pass */
+static const char *const N_DR_IPOL[3] = {"POS", "NEG", "BI"};
+static void dimp_start(track_t *t, voice_t *v, const int16_t *e) { (void)e; dr_start(t, v); }
+static void dimp_run(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m, const int16_t *e)
+{
+    dr_slot_t *S = dr_slot(t, v);
+    int32_t note = clamp(m->pitch16 - 48 * 16, -24 * 16, 24 * 16), atk = clamp(e[0], 0, 127) * 2, pol = clamp(e[2], 0, 2);
+    int32_t ping = clamp(e[4], 0, 127), mix = ping ? clamp(e[5], 0, 127) : 0, nois = clamp(e[6], 0, 127), drv = clamp(e[8], 0, 127);
+    int32_t lpk = 2000 + clamp(e[7], 0, 127) * 240, dk = (int32_t)dv_k(dr_tau(e[1], 0, 70)), k, mk, a, d, lp = S->f[2], prev = S->e[1];
+    uint32_t i, tau = dr_tau(ping > e[1] ? ping : e[1], 10, 90);
+    tsvf_t c;
+    k = (8192 >> (ping / 11)) - (((8192 >> (ping / 11)) >> 1) * (ping % 11)) / 11;   /* (the ping's damping, halved each 11 of
+                                                          * PING: 2.0 .. ~0.0007, PING 127 rings for seconds) */
+    k = k < 3 ? 3 : k;
+    tsvf_coef_k(&c, dr_cut((23 + clamp(e[3], 0, 127) * 80 / 127) * 16 + note), k);
+    mk = (int32_t)(((int64_t)2048 * 6000) / (k + 1200)) + (int32_t)(((int64_t)400 * 6000) / (k + 40));   /* (a narrow band rings
+                                                          * softer from a click: made up, about level across PING) */
+    if (v->s[6])
+        tau = DR_CHOKE_US;
+    dv_slow(&S->q[0], dv_kb(tau * 2u), &a, &d);
+    for (i = 0; i < n; i++) {
+        int32_t imp, x, bp, v1, v2, v3, z = DR_NOISE(S);
+        if (S->cnt < atk)
+            imp = 32767 * (S->cnt + 1) / (atk + 1);
+        else {
+            if (S->cnt == atk)
+                S->e[0] = 32767;
+            imp = S->e[0];
+            S->e[0] = (S->e[0] * dk) >> 15;
+        }
+        S->cnt += S->cnt < 0x7FFFFFFF;
+        imp += (((imp * z) >> 15) - imp) * nois / 127;   /* NOIS: the impulse made of noise */
+        lp += ((imp - lp) * lpk) >> 15;                   /* TONE */
+        prev += ((lp - prev) * (lpk >> 3)) >> 15;          /* (BI: the click less its slow self, a two-sided pop) */
+        x = pol == 1 ? -lp : pol == 2 ? clamp((lp - prev) * 9, -32767, 32767) : lp;
+        v3 = x - S->f[1];                                 /* the ping (Simper's SVF), its band-pass */
+        v1 = (c.a1 * S->f[0] + c.a2 * v3) >> 13;
+        v2 = S->f[1] + ((c.a2 * S->f[0] + c.a3 * v3) >> 13);
+        S->f[0] = clamp(2 * v1 - S->f[0], -150000, 150000);
+        S->f[1] = clamp(2 * v2 - S->f[1], -150000, 150000);
+        bp = (int32_t)clamp(((int64_t)v1 * mk) >> 10, -65535, 65535);
+        x += ((bp - x) * mix) >> 7;
+        x = (clamp(x, -65535, 65535) * (a >> 6)) >> 14;  /* (the hit's envelope; its peaks to dr_out's knee) */
+        a += d;
+        out[i] += voice_amp(dr_out(x, drv), m, i);
+    }
+    S->f[2] = lp;
+    S->e[1] = prev;
+    v->s[0] = S->q[0];
+}
+DR_WRAP(dimp)
+static const preset_t DIMP_PRESETS[] = {
+    /* ATK DCAY POL TUNE PING MIX NOIS TONE */
+    {"IM CLICK", {0, 10, 0, 60, 0, 0, 0, 127}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 0)},
+    {"IM PING", {0, 5, 0, 70, 90, 110, 0, 127}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 10, 10)},
+    {"IM WOOD", {2, 8, 0, 75, 55, 90, 10, 100}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"IM BI POP", {0, 20, 2, 40, 0, 0, 0, 90}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 0)},
+    {"IM NOISE TICK", {0, 25, 0, 90, 30, 50, 120, 127}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+    {"IM DEEP PING", {4, 10, 0, 25, 110, 120, 0, 80}, {0, 64, 127, 30}, 0, 1, FX(0, 0, 0, 10)},
+};
+static const engine_t ENG_DIMP = {
+    .name = "IMPLS", .page_title = {"IMPULSE", "PING"}, .presets = DIMP_PRESETS, .npresets = NELEM(DIMP_PRESETS),
+    .note_on = dimp_note_on, .render = dimp_render, DR_MEM, .knob = {P_E1, P_E3, P_E4, P_E5},
+    .edit = {{"ATK", F_PCT, 0, 127, 0, 0, 0}, {"DCAY", F_PCT, 0, 127, 10, 0, 0}, {"POL", F_ENUM, 0, 2, 0, N_DR_IPOL, 0},
+             {"TUNE", F_PCT, 0, 127, 60, 0, 0}, {"PING", F_PCT, 0, 127, 0, 0, 0}, {"MIX", F_PCT, 0, 127, 0, 0, 0},
+             {"NOIS", F_PCT, 0, 127, 0, 0, 0}, {"TONE", F_PCT, 0, 127, 127, 0, 0}},
+    .e8 = {"DRIV", F_PCT, 0, 127, 0, 0, 0},
+    .xyd = {{XY_E(1), XY_E(3), 0}, {XY_E(4), XY_E(5), 0}},
+    .xya = {{40, 40, 0}, {50, 40, 0}},
+};
+
 /* ====================================================================== KIT === */
 /* four lanes on one track (T4 only: pulhra/sm_layer.c), each a whole drum machine of the above (Tim): L1 .. L4 its machine
  * (KICK SNARE CLAP HAT CYM), its own nine values (the pattern's sm_pattern_t.lane; in the core dr_lp, set by the sequencer's
  * loads and its parameter commands, pulhra/sm_kit.c), lockable each. A lane is a note: 36 + lane (C2 .. D#2; any other note its
  * lane by note % 4): the sequencer's lanes (sm_seq.c), the keyboard's F3 G3 A3 B3 (keys). A hit chokes only its own lane's last
  * one. Velocity scales it */
-enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_SHKR, DR_KM_BELS, DR_KM_TAMB, DR_KM_ZAP, DR_KM_TOM, DR_KM_SMP, DR_KM_N };
-static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB", "ZAP", "TOM", "SAMP"};
+enum { DR_KM_KICK, DR_KM_SNARE, DR_KM_CLAP, DR_KM_HAT, DR_KM_CYM, DR_KM_PERC, DR_KM_BELL, DR_KM_RIM, DR_KM_SHKR, DR_KM_BELS, DR_KM_TAMB, DR_KM_ZAP, DR_KM_TOM, DR_KM_SMP, DR_KM_IMP, DR_KM_N };
+static const char *const N_DR_KMACH[DR_KM_N] = {"KICK", "SNARE", "CLAP", "HAT", "CYM", "CONGA", "BELL", "RIM", "SHKR", "BELLS", "TAMB", "ZAP", "TOM", "SAMP", "IMPLS"};
 static const engine_t *const DR_KENG[DR_KM_N] = {&ENG_DKICK, &ENG_DSNARE, &ENG_DCLAP, &ENG_DHAT, &ENG_DCYM, &ENG_DPERC,
-                                                  &ENG_DBELL, &ENG_DRIM, &ENG_DSHK, &ENG_DBELS, &ENG_DTAMB, &ENG_DZAP, &ENG_DTOM, &ENG_DSMP};
+                                                  &ENG_DBELL, &ENG_DRIM, &ENG_DSHK, &ENG_DBELS, &ENG_DTAMB, &ENG_DZAP, &ENG_DTOM, &ENG_DSMP, &ENG_DIMP};
 static int16_t dr_lp[NPART][4][9] __attribute__((section(".pool")));   /* the core's lanes: each part's (only T4 plays a KIT); the audio stream's (the pool: RAM keeps its 4 KiB headroom) */
 static int16_t dr_lm[NPART][4][4];                        /* ... each lane's mix: LVL CHO DLY REV (pulhra sm_pattern_t.lmix) */
 static int16_t dr_lf[NPART][4][3];                        /* ... each lane's filter: FILT CUT RES (voice.c mf_filter_voice) */
@@ -1513,6 +1590,8 @@ static void dkit_note_on(track_t *t, voice_t *v)
         dtom_start(t, v, e);
     } else if (m == DR_KM_SMP) {
         dsmp_start(t, v, e);
+    } else if (m == DR_KM_IMP) {
+        dimp_start(t, v, e);
     } else {
         dcym_start(t, v, e);
     }
@@ -1608,6 +1687,8 @@ static void dkit_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dtom_run(t, v, b, n, &km, e);
     else if (mc == DR_KM_SMP)
         dsmp_run(t, v, b, n, &km, e);
+    else if (mc == DR_KM_IMP)
+        dimp_run(t, v, b, n, &km, e);
     else
         dcym_run(t, v, b, n, &km, e);
     if (dr_ld[(uint32_t)(t - trk) % NPART][L])            /* the lane's DIST (Tim, 31.10: its own drive; TYPE TONE OUT LOW CUT the */

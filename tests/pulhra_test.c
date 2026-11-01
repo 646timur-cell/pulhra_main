@@ -10414,6 +10414,63 @@ static int test_ether(void)
     return bad;
 }
 
+/* IMPLS (Tim, 1.11): a KIT lane's machine; every preset sounds and ends; PING rings it: longer with PING up; POL NEG the
+ * click's sign turned */
+static int test_impulse(void)
+{
+    int bad = 0;
+    uint32_t pr, ok = 1, b;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    kit_dry();
+    for (pr = 0; pr < NELEM(DIMP_PRESETS); pr++) {
+        uint32_t pk = 0, alive = 0;
+        ksnd(3)->p[P_E0] = DR_KM_IMP;
+        sm_lane_sound(0, pr);
+        sm_input_poll();
+        play_blocks(4);
+        trk_note_on(&trk[3], DR_KIT_NOTE, 120);
+        for (b = 0; b < 3000u; b++) {
+            uint32_t a = block_peak(0, 0);
+            pk = a > pk ? a : pk;
+            if (b > 2800u)
+                alive |= trk[3].v[0].active || trk[3].v[1].active;
+        }
+        trk_all_off(&trk[3]);
+        play_blocks(200);
+        printf("pulhra: IMPLS %-14s peak %5u%s\n", DIMP_PRESETS[pr].name, pk, alive ? " (still on)" : "");
+        ok &= pk > 2000u && pk < 32767u && !alive;
+    }
+    bad += check("IMPLS: every preset a lane: it sounds, no clip, it ends (2 s)", ok);
+    {
+        uint32_t len[2], q;
+        for (q = 0; q < 2u; q++) {
+            ksnd(3)->p[P_E0] = DR_KM_IMP;
+            sm_lane_sound(0, 0);
+            sm_input_poll();
+            play_blocks(4);
+            cpat()->lane[0][4] = (int8_t)(q ? 110 : 30);   /* PING */
+            cpat()->lane[0][5] = 127;                     /* MIX: the ping alone */
+            dr_lp[3][0][4] = (int16_t)(q ? 110 : 30);
+            dr_lp[3][0][5] = 127;
+            trk_note_on(&trk[3], DR_KIT_NOTE, 120);
+            for (b = 0, len[q] = 0; b < 3000u; b++)
+                if (block_peak(0, 0) > 300u)
+                    len[q] = b;
+            trk_all_off(&trk[3]);
+            play_blocks(200);
+        }
+        printf("pulhra: IMPLS ping rings %u blocks (PING 30), %u (PING 110)\n", len[0], len[1]);
+    bad += check("IMPLS: PING up: the ping rings longer", len[1] > len[0] * 3u);
+    }
+    return bad;
+}
+
 /* the web editor's link (sm_ed.c): INFO lists the regions; a sector erased, 256 bytes written and read back through the frames;
  * a write refused while playing; RELOAD 2 indexes the user sounds anew (a record written raw shows up); bad arguments */
 static uint32_t ed_frame(const uint8_t *body, uint32_t n)  /* body: cmd and args -> the reply's length (sm_ed_out) */
@@ -11758,11 +11815,11 @@ static int test_kit_lane_pages(void)
     ksnd(3)->p[P_E0] = DR_KM_KICK;
     sm_lane_machine(0);
     sm_ui.page = (uint8_t)page_by_name("EDIT 1");
-    turn(EN_SELECT, 20);                                  /* (SELECT past the end: the last, ZAP) */
+    turn(EN_SELECT, 30);                                  /* (SELECT past the end: the last, IMPLS) */
     sm_input_poll();
     draw_full();
-    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to the last, SAMP (its values the SAMP's)", ksnd(3)->p[P_E0] == DR_KM_SMP &&
-                 cpat()->lane[0][1] == DSMP_PRESETS[0].e[1] && cpat()->lane[0][3] == DSMP_PRESETS[0].e[3] && lint_has("SAMP", 0, 0));
+    bad += check("KITPAGES: SELECT on EDIT 1 picks L1's machine up to the last, IMPLS (its values the IMPULSE's)", ksnd(3)->p[P_E0] == DR_KM_IMP &&
+                 cpat()->lane[0][1] == DIMP_PRESETS[0].e[1] && cpat()->lane[0][3] == DIMP_PRESETS[0].e[3] && lint_has("IMPLS", 0, 0));
     layer_hold(B_EDIT);
     while (sm_lay_epage != 3u) {
         press(B_OCTUP);
@@ -13823,6 +13880,7 @@ int main(void)
     bad += test_cz();
     bad += test_ems_prep();
     bad += test_ether();
+    bad += test_impulse();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();
