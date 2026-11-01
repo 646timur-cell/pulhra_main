@@ -10396,6 +10396,63 @@ static int test_kick_punch(void)
     return bad;
 }
 
+/* the SOMA machines checked (Tim, 1.11): a released voice gone silent ends, whatever its REL (DRONE CELLOS: REL 127, the string
+ * itself rings out in seconds); the two overflows the fuzzing found (STRING's body past 16 bits, RESO SCRAPE's phase) played
+ * again (the sanitizer build: no runtime error) */
+static int test_soma_checked(void)
+{
+    int bad = 0;
+    uint32_t b, i, act = 1, end = 0;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    sm_ui.trk = 0;
+    sm_sound_load(eng_rank(ENGI_STRING), 9);              /* DRONE CELLOS: REL 127 */
+    sm_input_poll();
+    play_blocks(40);
+    kit_dry();
+    bad += check("SOMA: DRONE CELLOS's REL at its top (127)", trk[0].p[P_REL] == 127);
+    trk_note_on(&trk[0], 48, 100);
+    play_blocks(2000);
+    trk_note_off(&trk[0], 48);
+    for (b = 0; b < 20000u && act; b++) {
+        run_block();
+        for (i = 0, act = 0; i < NVOICE; i++)
+            act += trk[0].v[i].active;
+        end = b;
+    }
+    printf("  SOMA: DRONE CELLOS released: its voice ends after %.1f s\n", end * (double)CTL / FS);
+    bad += check("SOMA: ... let go: the voice ends once silent (under 12 s; REL 127's own fall would take ~100 s)", !act && end * CTL < 12u * FS);
+    {                                                     /* the overflows' settings (sanitizer build: no runtime error) */
+        static const int8_t ST[9] = {0, 44, 63, 94, 25, 87, 0, 58, 7}, RS[9] = {1, 2, 41, 44, 27, 28, 105, 87, 92};
+        uint32_t k;
+        sm_sound_load(eng_rank(ENGI_STRING), 0);
+        sm_input_poll();
+        play_blocks(4);
+        for (k = 0; k < 8u; k++)
+            trk[0].p[P_E0 + k] = ST[k];
+        trk[0].p[P_E8] = ST[8];
+        trk[0].p[P_FCUT] = 52;
+        trk[0].p[P_FRES] = 127;
+        trk_note_on(&trk[0], 65, 127);
+        play_blocks(300);
+        trk_all_off(&trk[0]);
+        play_blocks(300);
+        sm_sound_load(eng_rank(ENGI_RESO), 0);
+        sm_input_poll();
+        play_blocks(4);
+        for (k = 0; k < 8u; k++)
+            trk[0].p[P_E0 + k] = RS[k];
+        trk[0].p[P_E8] = RS[8];
+        trk_note_on(&trk[0], 97, 127);
+        play_blocks(3000);
+        trk_all_off(&trk[0]);
+        play_blocks(300);
+    }
+    in_reset();
+    return bad;
+}
+
 /* the three user slots in USR1's 80 KiB (Tim, 31.10): packed as the editor does (USR1's header the map: rsv2[0] / rsv2[1] where
  * USR2 / USR3 start); each slot its own zones; CLOUD and SAMP pick USR1..3; a slot left empty (USR1: its header only, the map)
  * the others still play; a header of before (no map): USR1 alone, all 80 KiB */
@@ -13375,6 +13432,7 @@ int main(void)
     bad += test_three_slots();
     bad += test_dist_clean();
     bad += test_kick_punch();
+    bad += test_soma_checked();
     printf("pulhra: %d failed\n", bad);
     return bad != 0;
 }

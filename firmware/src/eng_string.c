@@ -176,9 +176,9 @@ static void string_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         S->dcy = o;
         o = mode == SR_BOW ? o >> 3 : (o >> 4) + (o >> 5);   /* Q20 -> Q15 (a bowed string swings less: more gain) */
         if (body) {                                      /* the body: its resonances against the string */
-            int32_t r = mulq15(gurdy_bp(&bf[0], o, &S->b[0], &S->b[1]), gb[0]) +
-                        mulq15(gurdy_bp(&bf[1], o, &S->b[2], &S->b[3]), gb[1]) +
-                        mulq15(gurdy_bp(&bf[2], o, &S->b[4], &S->b[5]), gb[2]);
+            int32_t r = mulq15(clamp(gurdy_bp(&bf[0], o, &S->b[0], &S->b[1]), -65535, 65535), gb[0]) +   /* (clamped: a ringing */
+                        mulq15(clamp(gurdy_bp(&bf[1], o, &S->b[2], &S->b[3]), -65535, 65535), gb[1]) +   /* body past 16 bits */
+                        mulq15(clamp(gurdy_bp(&bf[2], o, &S->b[4], &S->b[5]), -65535, 65535), gb[2]);   /* overflowed its product) */
             o += mulq15(clamp(r - o, -65535, 65535), bmix);   /* (clamped: a loud body overflowed the product, a click) */
         }
         o = clamp(soft_knee(o, 24000), -32767, 32767);

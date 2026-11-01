@@ -154,7 +154,7 @@ static inline int32_t reso_excite(rs_slot_t *S, uint32_t ex, int32_t rate, int32
         }
         break;
     default:                                             /* SCRAPE: noise over ridges */
-        S->ph += rate;
+        S->ph = (int32_t)((uint32_t)S->ph + (uint32_t)rate);   /* (wraps round: unsigned, no overflow) */
         nz = sx_noise(&S->rng);
         x = px_m(nz, (S->ph & (1 << 19)) ? amp : amp >> 3, 15);
         break;

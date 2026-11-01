@@ -846,6 +846,38 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         m.shape = (64 << 8) + ((lfo * p[P_LD_SHP]) >> 7) + ((m.envq15 * p[P_ED_SHP]) >> 7);
         if (mod.on)                                     /* the modulation matrix (mod.c) */
             mod_voice(t, v, &m, fine);
+#if FELUCCA_SWAMP
+        if (v->stage == 3u && !v->gate && !e->ownenv && !e->oneshot) {   /* PULHRA (Tim, 1.11: the SOMA engines checked): a released
+                                                          * voice that has gone silent (below ~-72 dB for 64 blocks, ~46 ms) ends,
+                                                          * however long its REL: a KS string, a struck gong ring out long before a
+                                                          * REL 127 does (~100 s), holding a voice and the time to render it */
+            static int32_t vq[CTL];
+            int32_t *dst = spread_on > v->side ? spread_buf : out, pk = 0;
+            uint32_t j;
+            for (j = 0; j < n; j++)
+                vq[j] = 0;
+            if (t->engine == ENGI_DKIT ? mf_lane_filter_on(t, v) : mf_filters_on(p))
+                mf_filter_voice(t, v, e, n, &m, vq);
+            else
+                e->render(t, v, vq, n, &m);
+            for (j = 0; j < n; j++) {
+                int32_t a = vq[j] < 0 ? -vq[j] : vq[j];
+                pk = a > pk ? a : pk;
+                dst[j] += vq[j];
+            }
+            nr++;
+            if (pk >= 8)
+                v->quiet = 0;
+            else if (++v->quiet >= 64u) {
+                v->active = v->gate = 0;
+                v->stage = 0;
+                v->env = v->env_out = 0;
+                v->quiet = 0;
+            }
+            continue;
+        }
+        v->quiet = 0;
+#endif
 #if FELUCCA_MONOFM
         if (FELUCCA_SWAMP && t->engine == ENGI_DKIT ? mf_lane_filter_on(t, v) : mf_filters_on(p)) {   /* the track's filters (ENV > HYBRID, FILTER): the voice alone, then into */
             mf_filter_voice(t, v, e, n, &m, spread_on > v->side ? spread_buf : out);   /* the sum */
