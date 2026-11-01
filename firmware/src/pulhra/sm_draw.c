@@ -915,6 +915,10 @@ static void smd_map_get(uint32_t r, smd_mrow_t *o)
                 uint32_t w = r * 4u + c, e = perf_map[w], key, held = 0;
                 for (key = 0; key < SM_NKEYS; key++)
                     held |= ((sm_fx_keys >> key) & 1u) && sm_white_of(key) == (int32_t)w;
+                if (w == 15u && e >= PF_N) {              /* (G5, no effect: FILL while held, Tim 1.11) */
+                    smd_cell(o, c, "FILL", sm_fill);
+                    continue;
+                }
                 smd_cell(o, c, e < PF_N ? PFN[e] : "-", held);
                 o->dim |= (uint8_t)((e >= PF_N || !((ok >> e) & 1u)) ? 1u << c : 0u);
             }

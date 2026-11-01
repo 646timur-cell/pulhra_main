@@ -23,7 +23,7 @@
  *              OCT- throws away what was built (and the pick); letting go of SEQ with two links or more: that chain plays
  *              (smp.chain, sm_chain_set), one link: that pattern is asked for; G#3 turns the chain off (the pattern
  *              playing plays on). Asking for one pattern turns a chain off too (MONOFM's)
- *   GLO + G5   FILL while held (sm_fill: COND FILL / !FILL)
+ *   GLO + G5   FILL while held (sm_fill: COND FILL / !FILL); FX + G5 the same (its 16th key has no effect)
  *   FX         tap: the family's next page (FX, DIST, INSERT). Held: the punch-in effects, Felucca's FX hold layer (perform.c) on
  *              the master or one track: the 16 white keys hold their effect while down (perf_map, Felucca's default: REPEAT 1/8 1/16
  *              1/32, REVERSE, LPF, HPF, TAPE STOP, FREEZE, OCT UP, OCT DN, FLANGER, PHASER, REV THROW, ECHO THROW, SLCR, -), even
@@ -433,6 +433,10 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
             sm_fill = (uint8_t)((held >> SM_LAY_FILL_KEY) & 1u);   /* (a byte: the audio stream reads it at a COND) */
             sm_dirty = 1;
         }
+    }
+    if (sm_layer == SML_FX && ((fm1_in.notes >> SM_LAY_FILL_KEY) & 1u) != sm_fill) {   /* FX + G5 (Tim, 1.11: its free key): */
+        sm_fill = (uint8_t)((fm1_in.notes >> SM_LAY_FILL_KEY) & 1u);                    /* FILL while held, as GLO + G5 */
+        sm_dirty = 1;
     }
     if (sm_layer == SML_SEQ && sm_lay_clr == 1u) {       /* F5 held 0.8 s: the pattern cleared, every track (a tap: nothing; the UNDO
                                                              snapshot its own, unless an F3 of this hold took one: UNDO is before both) */

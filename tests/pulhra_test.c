@@ -6353,6 +6353,37 @@ static int test_fill_glo_g5(void)
     return bad;
 }
 
+/* FX + G5 (Tim, 1.11): FILL while held, as GLO + G5 (G5 has no punch-in effect); FX let go: FILL off */
+static int test_fill_fx_g5(void)
+{
+    int bad = 0;
+    in_reset();
+    host_ticks = 1000u;
+    sm_step_toggle(0, 0);
+    stp(0, 0)->cond = SM_COND_FILL;
+    ksnd(0)->len = 1;
+    press(B_PLAY);
+    sm_input_poll();
+    layer_hold(B_FX);
+    key_dn(26);                                           /* G5 */
+    sm_input_poll();
+    seq_log_clear();
+    play_blocks(4u * (uint32_t)S120 / CTL);
+    bad += check("FX/FILL: FX + G5 held: FILL plays (no effect held)", sm_fill && on_n[0] >= 3u && !sm_fx_keys);
+    key_up(26);
+    sm_input_poll();
+    bad += check("FX/FILL: G5 let go: FILL off", !sm_fill);
+    key_dn(26);
+    sm_input_poll();
+    layer_let_go(B_FX);
+    bad += check("FX/FILL: FX let go with G5 down: FILL off", !sm_fill);
+    key_up(26);
+    sm_input_poll();
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    return bad;
+}
+
 /* UNDO is of the pattern it was taken on: after a switch to another pattern it does nothing */
 static int test_undo_other_pattern(void)
 {
@@ -13388,6 +13419,7 @@ int main(void)
     bad += test_copy_paste_pattern();
     bad += test_shift_trn();
     bad += test_fill_glo_g5();
+    bad += test_fill_fx_g5();
     bad += test_undo_other_pattern();
     bad += test_len_visible();
     bad += test_filter_auto_lp();
