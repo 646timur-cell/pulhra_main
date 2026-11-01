@@ -15,7 +15,7 @@
  * step (from the lock's value, else the base; the base stays) and the key's release then does not toggle; a release with
  * no turn toggles the trig (taking it off removes its locks). Held on an EMPTY step a turn makes a REST trig with that
  * lock (a trigless lock; no toggle). No key down a turn is the base, always; REC on and playing it is also recorded: the
- * selected track's playing step, only if it has a trig, locks the new base value.
+ * selected track's playing step locks the new base value (a step with no trig: a lock trig, REST, made for it).
  * LIVE RECORD (REC on, playing, the keyboard mode): a key plays its note and is written as a trig of the selected track at the
  * nearest step (the audio stream picks it: sm_seq.c sm_rec_on) with its note, the keyboard's velocity and, at its release,
  * the LEN of the PULHRA list nearest to how long it was held; notes within one step make a chord (up to 4). MIDI notes on the
@@ -207,7 +207,7 @@ static void sm_turn_glob(uint32_t g, int32_t s)
 
 /* a knob: the model's value turned by s detents, then the command.
  * A white key down: a lock of the held step instead. No key down the knob is always the track's base (the step selected
- * on STEP is STEP's alone); REC while playing it also records: the playing step's trig (a trig there only) locks the
+ * on STEP is STEP's alone); REC while playing it also records: the playing step's trig (none: a lock trig made) locks the
  * value the base now has, and the value goes onto the core at once (a parameter a lock holds there would not take the
  * base's SMC_PARAM until the next unlocked trig). Hardware 02:43: the knobs "do not turn at all without a step" was REC
  * on while playing, where a turn used to move a lock only, never the base: no trig under the playhead, nothing at all */
@@ -242,8 +242,18 @@ static void sm_turn(uint32_t id, int32_t s)
         uint32_t st = *(volatile uint8_t *)&sm_pos[t];
         sm_cmd_t c = {SMC_PREVIEW, (uint8_t)t, smp.cur, (uint8_t)id, 0};
         c.val = (int16_t)sm_pget(&smp.pat[smp.cur % SM_NPAT], t, id);
-        if (smp.pat[smp.cur % SM_NPAT].step[t][st % SM_NSTEP].n)
-            (void)sm_lock_set(t, st % SM_NSTEP, id, c.val);   /* (the pool full: LOCKS FULL, the base moved all the same) */
+        sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+        sm_step_t *x = &pt->step[t][st % SM_NSTEP];
+        uint32_t make = !x->n;                            /* (Tim, 1.11: "not always": a step with no trig recorded nothing.
+                                                           * Now it gets a lock trig, REST: no note, the lock alone, as SHIFT +
+                                                           * a key or a turn on a held empty step makes) */
+        if (sm_lock_set(t, st % SM_NSTEP, id, c.val) && make) {   /* (the pool full: LOCKS FULL, the base moved all the same) */
+            sm_step_fresh(t, st % SM_NSTEP, SMF_REST);
+            if (sm_trk_kit(t, pt))
+                x->note[0] = 0;                           /* (KIT: no lane hits, the locks only) */
+            SM_BARRIER();
+            x->n = 1;
+        }
         (void)sm_cmd_push(c);                             /* (refused: the base's SMC_PARAM, or the next trig, brings it) */
     }
 }

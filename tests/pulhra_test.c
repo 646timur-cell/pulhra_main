@@ -3164,11 +3164,11 @@ static int test_rec_records_on_trigs(void)
     for (s = 0; s < 16u; s++) {
         int32_t v = lk_val(0, s, P_FCUT);
         if (s % 4u)
-            ok &= v == LK_NONE;
+            ok &= v == LK_NONE || (cpat()->step[0][s].n && (cpat()->step[0][s].flags & SMF_REST));
         else
-            any += v != LK_NONE;
+            any += v != LK_NONE && !(cpat()->step[0][s].flags & SMF_REST);
     }
-    bad += check("REC: playing, CUT turned: locks only on the steps with trigs", ok && any == 4);
+    bad += check("REC: playing, CUT turned: the trigs locked, a step with no trig a lock trig (REST)", ok && any == 4);
     bad += check("REC: ... the base turned with the knob (no step held: the base, always; 02:43)", ksnd(0)->p[P_FCUT] == base - 64);
     for (s = 0, ok = 1; s < 16u; s += 4u)                 /* (each trig: the value the knob had as it played) */
         ok &= lk_val(0, s, P_FCUT) >= base - 64 && lk_val(0, s, P_FCUT) < base;
@@ -3442,13 +3442,15 @@ static int test_rec_live_gestures(void)
                 bad += check(what, nl == 0u && !nempty);
                 continue;
             }
-            snprintf(what, sizeof what, "LIVE %s, %s: a lock on every trig (8), none on an empty step", GN[lrg_gest], PN[lrg_pagei]);
-            if (check(what, nl == 8u && !nempty))
+            snprintf(what, sizeof what, "LIVE %s, %s: a lock on every trig (8), an empty step a lock trig (8)", GN[lrg_gest], PN[lrg_pagei]);
+            for (s = 1; s < 16u; s += 2u)
+                nempty -= nempty && !(cpat()->step[0][s].n && (cpat()->step[0][s].flags & SMF_REST));
+            if (check(what, nl == 8u && nempty == 8u))
                 bad++, printf("  locks on trigs %u, on empty steps %u\n", nl, nempty);
-            for (s = 0; s < 16u; s += 2u)                 /* the next pass: each trig its own lock */
+            for (s = 0; s < 16u; s++)                     /* the next pass: each trig, each lock trig its own lock */
                 if (lk_val(0, s, id) != LK_NONE)
                     back &= run_to_step(0, s) && trk[0].p[id] == lk_val(0, s, id);
-            snprintf(what, sizeof what, "LIVE %s, %s: the next pass plays the locks", GN[lrg_gest], PN[lrg_pagei]);
+            snprintf(what, sizeof what, "LIVE %s, %s: the next pass plays the locks (the lock trigs too)", GN[lrg_gest], PN[lrg_pagei]);
             bad += check(what, back && nl);
         }
     in_reset();
