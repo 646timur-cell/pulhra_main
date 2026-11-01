@@ -10267,6 +10267,89 @@ static int test_cz(void)
     return bad;
 }
 
+/* EMS and PREP (Tim, 1.11) on the SOMA page; every preset sounds, none clips; EMS's CUT opens the sound, its BP thins it;
+ * PREP: STRING's knobs put back after each render, each preparation sounds unlike the bare string */
+static uint32_t px_sound(uint32_t note, uint32_t blocks, uint32_t *pk)   /* T1: the 2nd-difference brightness (x 1e5), the peak */
+{
+    static int32_t L[CTL * 400];
+    uint32_t nl = 0, b, i, p = 0;
+    uint64_t sl = 0;
+    trk_note_on(&trk[0], note, 100);
+    for (b = 0; b < blocks && b < 400u; b++) {
+        uint32_t a = block_peak(L, &nl);
+        p = a > p ? a : p;
+    }
+    trk_all_off(&trk[0]);
+    play_blocks(600);
+    for (i = 2; i < nl; i++) {
+        int32_t d = L[i] - 2 * L[i - 1] + L[i - 2];
+        sl += (uint64_t)(d < 0 ? -d : d);
+    }
+    if (pk)
+        *pk = p;
+    return p ? (uint32_t)(sl * 100000u / nl / p) : 0u;
+}
+static int test_ems_prep(void)
+{
+    int bad = 0;
+    uint32_t me = eng_rank(ENGI_EMS), mp = eng_rank(ENGI_PREP), pr, ok = 1, pk, b0, b1, j;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    bad += check("EMS / PREP: on the SOMA page, after CLOUD and WEST", sm_epage_of(me) == 1u && sm_epage_of(mp) == 1u &&
+                 sm_epage_mach(1, 11) == me && sm_epage_mach(1, 12) == mp && sm_epage_n(1) == 13u);
+    sm_ui.trk = 0;
+    for (pr = 0; pr < NELEM(EMS_PRESETS) + NELEM(PREP_PRESETS); pr++) {
+        uint32_t e = pr < NELEM(EMS_PRESETS), q = e ? pr : pr - NELEM(EMS_PRESETS);
+        sm_sound_load(e ? me : mp, q);
+        sm_input_poll();
+        play_blocks(4);
+        kit_dry();
+        px_sound(48, 300, &pk);
+        printf("pulhra: %s %-16s peak %5u\n", e ? "EMS" : "PREP", e ? EMS_PRESETS[q].name : PREP_PRESETS[q].name, pk);
+        ok &= pk > 1500u && pk < 32767u;
+    }
+    bad += check("EMS / PREP: every preset sounds, none clips", ok);
+    sm_sound_load(me, 1);                                 /* EMS LEAD: its F.ENV, VIB, the phaser */
+    sm_input_poll();
+    play_blocks(4);
+    bad += check("EMS: a preset's F.ENV, VIB and phaser set", ksnd(0)->p[P_FATK] == 10 && ksnd(0)->p[P_E8] == 60 && ksnd(0)->p[P_ITYPE] == 6 &&
+                 ksnd(0)->p[P_IMIX] == 40);
+    kit_dry();
+    trk[0].p[P_ITYPE] = 0;
+    trk[0].p[P_E7] = 0;                                   /* (no envelope on the filter) */
+    trk[0].p[P_E5] = 20;
+    trk[0].p[P_E4] = 10;
+    b0 = px_sound(48, 60, 0);
+    trk[0].p[P_E4] = 120;
+    b1 = px_sound(48, 60, 0);
+    printf("pulhra: EMS CUT 10 %u, CUT 120 %u\n", b0, b1);
+    bad += check("EMS: CUT up: brighter", b1 > b0 * 2u);
+    sm_sound_load(mp, 6);                                 /* PP PIANO: the bare string */
+    sm_input_poll();
+    play_blocks(4);
+    kit_dry();
+    {
+        int16_t before[9];
+        for (j = 0; j < 9u; j++)
+            before[j] = trk[0].p[j < 8u ? P_E0 + j : P_E8];
+        b0 = px_sound(48, 200, 0);
+        for (j = 0, ok = 1; j < 9u; j++)
+            ok &= trk[0].p[j < 8u ? P_E0 + j : P_E8] == before[j];
+        bad += check("PREP: its knobs as they were after the renders (STRING's set for each and put back)", ok);
+    }
+    for (pr = PP_BOLT, ok = 1; pr <= PP_PAPER; pr++) {
+        trk[0].p[P_E0] = (int16_t)pr;
+        trk[0].p[P_E1] = 110;
+        b1 = px_sound(48, 200, 0);
+        printf("pulhra: PREP %s brightness %u (bare %u)\n", N_PP[pr], b1, b0);
+        ok &= b1 * 10u > b0 * 13u || b1 * 13u < b0 * 10u;
+    }
+    bad += check("PREP: BOLT RUBBR SCREW PAPER each unlike the bare string (30 % in brightness)", ok);
+    return bad;
+}
+
 /* the web editor's link (sm_ed.c): INFO lists the regions; a sector erased, 256 bytes written and read back through the frames;
  * a write refused while playing; RELOAD 2 indexes the user sounds anew (a record written raw shows up); bad arguments */
 static uint32_t ed_frame(const uint8_t *body, uint32_t n)  /* body: cmd and args -> the reply's length (sm_ed_out) */
@@ -13674,6 +13757,7 @@ int main(void)
     bad += test_editor_link();
     bad += test_organ();
     bad += test_cz();
+    bad += test_ems_prep();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

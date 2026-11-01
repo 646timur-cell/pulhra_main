@@ -286,6 +286,20 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_CZ, 7, 7},   /* CZ 7: -21.8 dBFS (RESO SWEEP) */
     {ENGI_CZ, 8, -12},   /* CZ 8: -12.3 dBFS (ORGAN) */
     {ENGI_CZ, 9, 12},   /* CZ 9: -30.3 dBFS (PERCUSSION) */
+    {ENGI_EMS, 1, -3},   /* EMS 1: -17.0 dBFS */
+    {ENGI_EMS, 3, 5},   /* EMS 3: -21.1 dBFS */
+    {ENGI_EMS, 4, -4},   /* EMS 4: -16.3 dBFS */
+    {ENGI_EMS, 5, 16},   /* EMS 5: -28.3 dBFS */
+    {ENGI_EMS, 6, 12},   /* EMS 6: -24.4 dBFS */
+    {ENGI_EMS, 7, -7},   /* EMS 7: -15.2 dBFS */
+    {ENGI_PREP, 0, 10},   /* PREP 0: -23.4 dBFS */
+    {ENGI_PREP, 1, 12},   /* PREP 1: -34.2 dBFS */
+    {ENGI_PREP, 2, 15},   /* PREP 2: -29.9 dBFS */
+    {ENGI_PREP, 3, 15},   /* PREP 3: -29.4 dBFS */
+    {ENGI_PREP, 4, 6},   /* PREP 4: -21.5 dBFS */
+    {ENGI_PREP, 5, 12},   /* PREP 5: -34.1 dBFS */
+    {ENGI_PREP, 6, 11},   /* PREP 6: -24.0 dBFS */
+    {ENGI_PREP, 7, 12},   /* PREP 7: -24.7 dBFS */
     {ENGI_MNOISE, 1, 12},   /* NOISE 1: -39.7 dBFS */
     {ENGI_MNOISE, 2, 7},   /* NOISE 2: -22.2 dBFS */
     {ENGI_STRING, 0, -7},   /* STRING 0: -15.0 dBFS */
@@ -441,6 +455,19 @@ static void sm_sound_from_preset(sm_sound_t *s, uint32_t machine, uint32_t prese
         s->p[P_FDEC] = (int8_t)CZ_DCW[preset][1];
         s->p[P_FSUS] = (int8_t)CZ_DCW[preset][2];
         s->p[P_FREL] = (int8_t)CZ_DCW[preset][3];
+    }
+    if (sm_engine_of(machine) == ENGI_EMS && preset < NELEM(EMS_X)) {   /* EMS: F.ENV its filter's, VIB, INSERT's phaser */
+        s->p[P_FATK] = (int8_t)EMS_X[preset][0];
+        s->p[P_FDEC] = (int8_t)EMS_X[preset][1];
+        s->p[P_FSUS] = (int8_t)EMS_X[preset][2];
+        s->p[P_FREL] = (int8_t)EMS_X[preset][3];
+        s->p[P_E8] = (int8_t)EMS_X[preset][4];
+        if (EMS_X[preset][5]) {
+            s->p[P_ITYPE] = 6;                               /* (PHASR: params.c N_ITYPE) */
+            for (i = 0; i < 3u; i++)
+                s->p[P_IA + i] = (int8_t)ins_desc(6, i)->def;
+            s->p[P_IMIX] = (int8_t)EMS_X[preset][5];
+        }
     }
     s->p[P_VOICE] = (int8_t)(pr->mono ? V_LEGATO : V_POLY);
     for (i = 0; i < 4u; i++)

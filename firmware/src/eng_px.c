@@ -577,3 +577,231 @@ static const engine_t ENG_CZ = {
     .xyd = {{XY_E(2), XY_E(3), 0}, {XY_E(5), XY_E(7), 0}},
     .xya = {{50, 40, 0}, {40, 40, 0}},
 };
+
+/* ====================================================================== EMS === */
+/* Formanta EMS-01 style (Tim, 1.11; by the descriptions of it: a Soviet synth and organ of 1980-82, two oscillators, ring,
+ * noise, a filter after the Polivoks' (low-pass / band-pass, "aggressive", its cutoff 100 .. 1500 Hz), a delayed vibrato and
+ * a stereo phaser over it all). WAV1 SAW / RSAW (falling) / SQR / PLS (20 %), WAV2 the same or RING (oscillator 1 times a
+ * saw at oscillator 2's pitch) or NOIS; DTN oscillator 2 -12 .. +12 semitones (at 0 it runs 6 cents up: the two beat, as
+ * two analogue oscillators do); MIX 1 .. 2. Its own 12 dB state-variable filter, its integrators saturated (an op-amp
+ * filter driven: the Polivoks' scream): CUT over ~80 .. 1800 Hz, RES up to the edge of ringing, MODE LP / BP, ENV the
+ * depth of F.ENV on it (FILTER's ENV>FLT and LFO>FLT move it too). The ninth, VIB: the vibrato's depth (5.5 Hz, ~0.3 s
+ * before it fades in over ~0.3 s, as the EMS's delayed vibrato). The presets put INSERT's PHASR on.
+ * ph[0] ph[1] the oscillators, ph[2] the vibrato's phase; s[0] s[1] the filter, s[2] the noise, s[3] the blocks since the note */
+static const char *const N_EMS_W1[] = {"SAW", "RSAW", "SQR", "PLS"};
+static const char *const N_EMS_W2[] = {"SAW", "RSAW", "SQR", "PLS", "RING", "NOIS"};
+static const char *const N_EMS_MODE[] = {"LP", "BP"};
+static void ems_note_on(track_t *t, voice_t *v)
+{
+    (void)t;
+    if (mf_fresh(v)) {
+        v->ph[0] = 0;
+        v->ph[1] = 0x40000000u;
+        v->s[0] = v->s[1] = 0;
+        v->s[2] = 0x1234567;
+    }
+    if (mf_fresh(v) || v->gate)                          /* (a struck note: the vibrato's delay from here; legato keeps it) */
+        v->s[3] = 0;
+}
+static inline int32_t ems_osc(uint32_t w, uint32_t ph, uint32_t inc)
+{
+    return w == 0u ? osc_saw(ph, inc) : w == 1u ? -osc_saw(ph, inc) : w == 2u ? osc_pulse(ph, inc, 0x80000000u)
+                                                                    : osc_pulse(ph, inc, 0x33333333u);
+}
+static void ems_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    const int16_t *p = t->p;
+    uint32_t w1 = (uint32_t)clamp(p[P_E0], 0, 3), w2 = (uint32_t)clamp(p[P_E1], 0, 5), i, inc1, inc2;
+    uint32_t ph0 = v->ph[0], ph1 = v->ph[1], bp = (uint32_t)clamp(p[P_E6], 0, 1);
+    int32_t dtn = clamp(p[P_E2], -12, 12), mix = clamp(p[P_E3], 0, 127), res = clamp(p[P_E5], 0, 127);
+    int32_t vib = clamp(MF_E8(p), 0, 127), ic1 = v->s[0], ic2 = v->s[1], nz = v->s[2], age = v->s[3], ct = 0, cut, k, mk;
+    tsvf_t c;
+    if (vib) {                                           /* the delayed vibrato: 5.5 Hz, up to +-50 cents */
+        int32_t fade = clamp((age - 420) * 32767 / 420, 0, 32767);   /* (~0.3 s still, then ~0.3 s in: 0.73 ms a block) */
+        v->ph[2] += 535690u * CTL;                       /* (5.5 Hz) */
+        ct = mulq15(mulq15(osc_sine(v->ph[2]), fade), vib * 50 * 258 / 127);
+    }
+    v->s[3] = age < 100000 ? age + 1 : age;
+    inc1 = ct ? cents_inc(m->pitch16, ct, m->fine) : m->inc;
+    inc2 = cents_inc(clamp(m->pitch16 + dtn * 16, 0, 2047), ct + (dtn ? 0 : 6), m->fine);
+    /* the cutoff: CUT over CUTOFF_HZ's 19 .. 83 (~80 .. 1800 Hz), ENV x F.ENV up to 50 steps more (~3.5 octaves), FILTER's mods */
+    cut = (19 << 8) + clamp(p[P_E4], 0, 127) * 129 + ((m->envq15 * clamp(p[P_E7], 0, 127) * 101) >> 15) + m->cutoff;
+    k = 8192 - res * 8000 / 127;                         /* (damping 2.0 .. 0.05: the edge of ringing) */
+    tsvf_coef_k(&c, cut, k);
+    mk = bp ? 4096 + res * 24 : 4096 + res * 12;         /* (the level the resonance takes made up a little) */
+    for (i = 0; i < n; i++) {
+        int32_t a = ems_osc(w1, ph0, inc1), b, x, v1, v2, v3;
+        if (w2 < 4u)
+            b = ems_osc(w2, ph1, inc2);
+        else if (w2 == 4u)
+            b = (int32_t)(((int64_t)a * osc_saw(ph1, inc2)) >> 15);   /* RING (the blep may pass 2^15) */
+        else
+            b = (int32_t)(noise32(&nz) >> 17) - 16384;   /* NOIS (+-0.5) */
+        x = ((a * (127 - mix) + b * mix) >> 7);
+        /* the filter (Simper's SVF), its two integrators through a soft clip: driven, it screams and squashes */
+        v3 = x - ic2;
+        v1 = (c.a1 * ic1 + c.a2 * v3) >> 13;
+        v2 = ic2 + ((c.a2 * ic1 + c.a3 * v3) >> 13);
+        ic1 = softclip((2 * v1 - ic1) >> 1) << 1;
+        ic2 = clamp(2 * v2 - ic2, -150000, 150000);
+        x = ((bp ? v1 : v2) * mk) >> 12;
+        ph0 += inc1;
+        ph1 += inc2;
+        out[i] += voice_amp(soft_knee(x, 26000), m, i) << 1;   /* (+6 dB: as loud as the other machines) */
+    }
+    v->ph[0] = ph0;
+    v->ph[1] = ph1;
+    v->s[0] = ic1;
+    v->s[1] = ic2;
+    v->s[2] = nz;
+}
+/* WAV1 WAV2 DTN MIX CUT RES MODE ENV; the F.ENV, VIB and the phaser of each in EMS_X below */
+static const preset_t EMS_PRESETS[] = {
+    {"EMS BASS", {0, 2, -12, 50, 30, 70, 0, 70}, {0, 70, 90, 20}, 0, 1, FX(10, 0, 0, 5)},
+    {"EMS LEAD", {0, 0, 0, 60, 60, 50, 0, 50}, {5, 70, 110, 35}, 0, 1, FX(0, 0, 30, 30)},
+    {"EMS SPACE", {2, 3, 7, 64, 50, 80, 0, 60}, {40, 90, 100, 80}, 0, 0, FX(0, 20, 40, 70)},
+    {"EMS QUACK", {3, 0, 0, 40, 20, 105, 1, 100}, {0, 50, 60, 20}, 0, 1, FX(0, 0, 20, 10)},
+    {"EMS STRINGS", {0, 1, 0, 64, 70, 20, 0, 20}, {60, 90, 110, 80}, 0, 0, FX(0, 50, 20, 60)},
+    {"EMS NOISE SWEEP", {0, 5, 0, 110, 10, 110, 1, 120}, {30, 100, 50, 80}, 0, 0, FX(0, 0, 40, 60)},
+    {"EMS RING BELL", {2, 4, 7, 100, 80, 40, 0, 40}, {0, 95, 0, 80}, 0, 0, FX(0, 0, 30, 60)},
+    {"EMS SCREAM", {0, 2, 12, 64, 40, 120, 0, 90}, {0, 64, 100, 30}, 0, 1, FX(25, 0, 20, 20)},
+};
+static const uint8_t EMS_X[NELEM(EMS_PRESETS)][6] = {   /* F.ENV ATK DEC SUS REL, VIB, the phaser's MIX (0: off) */
+    {0, 50, 20, 20, 0, 0},
+    {10, 70, 60, 40, 60, 40},
+    {50, 100, 70, 80, 30, 90},
+    {0, 45, 10, 20, 0, 0},
+    {60, 90, 90, 70, 40, 80},
+    {70, 110, 30, 80, 0, 70},
+    {0, 80, 0, 60, 0, 50},
+    {0, 60, 40, 30, 70, 30},
+};
+static const engine_t ENG_EMS = {
+    .name = "EMS", .page_title = {"VCO", "VCF"}, .presets = EMS_PRESETS, .npresets = NELEM(EMS_PRESETS),
+    .note_on = ems_note_on, .render = ems_render, .knob = {P_E3, P_E4, P_E5, P_E7}, .poly = MF_POLY,
+    .edit = {{"WAV1", F_ENUM, 0, 3, 0, N_EMS_W1, 0}, {"WAV2", F_ENUM, 0, 5, 0, N_EMS_W2, 0},
+             {"DTN", F_SEMI, -12, 12, 0, 0, 0}, {"MIX", F_PCT, 0, 127, 64, 0, 0},
+             {"CUT", F_PCT, 0, 127, 60, 0, 0}, {"RES", F_PCT, 0, 127, 40, 0, 0},
+             {"MODE", F_ENUM, 0, 1, 0, N_EMS_MODE, 0}, {"ENV", F_PCT, 0, 127, 60, 0, 0}},
+    .e8 = {"VIB", F_PCT, 0, 127, 0, 0, 0},
+    .xyd = {{XY_E(4), XY_E(7), 0}, {XY_E(5), XY_E(3), 0}},
+    .xya = {{60, 40, 0}, {50, 40, 0}},
+};
+
+/* ===================================================================== PREP === */
+/* a prepared piano (Tim, 1.11): STRING's waveguide struck by a hammer (eng_string.c, STRIKE; its DTUN the piano's second
+ * string), the preparation on it. PREP: NONE, BOLT (a bolt between the strings: the partials pushed apart, a metallic
+ * ring of FM partials over the strike and the string's sound ring-modulated off its harmonics), RUBBR (rubber: the string
+ * damped, darker, a short dull thud), SCREW (a screw that rattles: the string's reflection clipped on one side, as SITAR's
+ * jawari, a buzz), PAPER (paper on the strings: a rasp, noise shaped by the string's own swing). AMT how much of it; HAMR
+ * the hammer (felt .. steel); DAMP how long it rings; BRIT its brightness; STIF the stiffness (a piano's sharp partials);
+ * POS where it is struck; FM the metallic FM partials' level (any PREP: the tine of an electric piano too, BOLT more).
+ * The ninth: UNIS, the second string's detune. Poly 2 (STRING's slots: two strings of 2048 + 1024 samples a part).
+ * STRING's knobs are set from these for the render and put back (the audio stream's alone: no command between). ph[0]
+ * ph[1] the FM pair, ph[2] the bolt's ring, s[0] the FM's envelope (Q15), s[1] s[2] the rasp's band-pass, s[3] the noise, s[4] the swing followed */
+enum { PP_NONE, PP_BOLT, PP_RUBBER, PP_SCREW, PP_PAPER, PP_N };
+static const char *const N_PP[] = {"NONE", "BOLT", "RUBBR", "SCREW", "PAPER"};
+static void prep_note_on(track_t *t, voice_t *v)
+{
+    int16_t keep = t->p[P_E0];
+    t->p[P_E0] = SR_STRIKE;
+    string_note_on(t, v);
+    t->p[P_E0] = keep;
+    v->ph[0] = v->ph[1] = v->ph[2] = 0;
+    v->s[0] = 32767;
+    if (mf_fresh(v))
+        v->s[1] = v->s[2] = v->s[4] = 0, v->s[3] = 0x2545F49;
+}
+static void prep_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    int16_t *p = t->p, sv[9];
+    uint32_t pp = (uint32_t)clamp(p[P_E0], 0, PP_N - 1), i, j, fm1, fm2, fm3;
+    int32_t amt = clamp(p[P_E1], 0, 127), buf[CTL], env = v->s[0], b1 = v->s[1], b2 = v->s[2], nz = v->s[3], fol = v->s[4];
+    int32_t fml = clamp(p[P_E7], 0, 127) + (pp == PP_BOLT ? amt : 0), ring = pp == PP_BOLT ? amt * 180 : 0, rasp = pp == PP_PAPER ? amt * 400 : 0;
+    tsvf_t c;
+    if (n > CTL)
+        n = CTL;
+    for (j = 0; j < 8u; j++)
+        sv[j] = p[P_E0 + j];
+    sv[8] = p[P_E8];                                     /* (the ninth is not P_E0 + 8) */
+    /* STRING's knobs: MODE STRIKE, PRES the hammer, POS, DAMP, BRIT, STIF, BODY (SITAR's jawari for the screw), BMIX, DTUN */
+    p[P_E0] = SR_STRIKE;
+    p[P_E1] = sv[2];
+    p[P_E2] = sv[6];
+    p[P_E3] = (int16_t)clamp(sv[3] - (pp == PP_RUBBER ? amt * 3 / 4 : 0), 0, 127);
+    p[P_E4] = (int16_t)clamp(sv[4] - (pp == PP_RUBBER ? amt / 2 : 0), 0, 127);
+    p[P_E5] = (int16_t)clamp(sv[5] + (pp == PP_BOLT ? amt / 2 : 0), 0, 127);
+    p[P_E6] = pp == PP_SCREW && amt ? SB_SITAR : SB_OFF;
+    p[P_E7] = (int16_t)(pp == PP_SCREW ? amt : 0);
+    p[P_E8] = sv[8];
+    for (i = 0; i < n; i++)
+        buf[i] = 0;
+    string_render(t, v, buf, n, m);
+    for (j = 0; j < 8u; j++)
+        p[P_E0 + j] = sv[j];
+    p[P_E8] = sv[8];
+    /* the FM partials: a carrier at 2.76 x the note, its modulator at 3.91 x (a bar's, a bolt's inharmonic ring), falling away
+     * fast (~0.3 s; slower with DAMP) */
+    fm1 = (uint32_t)(((uint64_t)m->inc * 181u) >> 6);   /* (2.83) */
+    fm2 = (uint32_t)(((uint64_t)m->inc * 250u) >> 6);   /* (3.91) */
+    fm3 = (uint32_t)(((uint64_t)m->inc * 154u) >> 6);   /* (2.41: the ring) */
+    tsvf_coef(&c, 100 << 8, 30);                         /* (the rasp's band: ~5 kHz, wide) */
+    for (i = 0; i < n; i++) {
+        int32_t y = buf[i], a;
+        if (pp == PP_RUBBER)                             /* (the damped string made up: up to x 2.4) */
+            y += (y * amt) / 90;
+        a = y < 0 ? -y : y;
+        fol += (a - fol) >> 6;                           /* (the string's swing, followed: ~1.5 ms) */
+        if (ring) {                                      /* BOLT: the string ring-modulated at 2.41 x (off its harmonics) */
+            y += (int32_t)((((int64_t)y * osc_sine(v->ph[2])) >> 15) * ring >> 15);   /* (y may pass 2^16) */
+            v->ph[2] += fm3;
+        }
+        if (fml && env > 8) {
+            int32_t mo = osc_sine(v->ph[1]);
+            int32_t s = osc_sine(v->ph[0] + (uint32_t)(mo * (env >> 4)) * 64u);
+            y += voice_amp(mulq15(s, mulq15(env, fml * 120)), m, i);
+            v->ph[0] += fm1;
+            v->ph[1] += fm2;
+        }
+        if (rasp) {                                      /* PAPER: noise shaped by the swing, band-passed */
+            int32_t nn = (int32_t)(noise32(&nz) >> 17) - 16384, v1, v2, v3;
+            nn = (int32_t)(((int64_t)nn * fol) >> 13);
+            v3 = nn - b2;
+            v1 = (c.a1 * b1 + c.a2 * v3) >> 13;
+            v2 = b2 + ((c.a2 * b1 + c.a3 * v3) >> 13);
+            b1 = clamp(2 * v1 - b1, -150000, 150000);
+            b2 = clamp(2 * v2 - b2, -150000, 150000);
+            y += (int32_t)(((int64_t)v1 * rasp) >> 15);
+        }
+        out[i] += y;
+    }
+    env = (int32_t)(((int64_t)env * (32768 - 80 + clamp(p[P_E3], 0, 127) * 60 / 127)) >> 15);   /* (a block's fall: ~0.3 s .. ~1.2 s) */
+    v->s[0] = env;
+    v->s[1] = b1;
+    v->s[2] = b2;
+    v->s[3] = nz;
+    v->s[4] = fol;
+}
+/* PREP AMT HAMR DAMP BRIT STIF POS FM (UNIS) */
+static const preset_t PREP_PRESETS[] = {
+    {"PP BOLTS", {PP_BOLT, 70, 80, 80, 70, 40, 40, 30}, {0, 100, 127, 40}, 0, 0, FX(0, 0, 10, 40)},
+    {"PP RUBBER", {PP_RUBBER, 90, 60, 60, 60, 20, 40, 0}, {0, 80, 127, 30}, 0, 0, FX(0, 0, 0, 25)},
+    {"PP SCREWS", {PP_SCREW, 80, 85, 75, 75, 30, 35, 10}, {0, 100, 127, 40}, 0, 0, FX(0, 0, 10, 35)},
+    {"PP PAPER", {PP_PAPER, 70, 70, 70, 65, 25, 40, 0}, {0, 100, 127, 35}, 0, 0, FX(0, 0, 0, 35)},
+    {"PP CAGE", {PP_BOLT, 110, 100, 85, 80, 60, 30, 60}, {0, 100, 127, 50}, 0, 0, FX(0, 0, 20, 50)},
+    {"PP MUTED KEYS", {PP_RUBBER, 127, 70, 40, 50, 10, 50, 10}, {0, 70, 127, 20}, 0, 0, FX(0, 0, 25, 30)},
+    {"PP PIANO", {PP_NONE, 0, 75, 90, 80, 45, 35, 0}, {0, 100, 127, 45}, 0, 0, FX(0, 10, 0, 45)},
+    {"PP TINE", {PP_NONE, 0, 90, 80, 70, 30, 40, 70}, {0, 100, 127, 40}, 0, 0, FX(0, 20, 10, 35)},
+};
+static const engine_t ENG_PREP = {
+    .name = "PREP", .page_title = {"PREP", "STRING"}, .presets = PREP_PRESETS, .npresets = NELEM(PREP_PRESETS),
+    .note_on = prep_note_on, .render = prep_render, .knob = {P_E1, P_E2, P_E3, P_E7}, .poly = SR_POLY,
+    .mem = sizeof(sr_slot_t) * SR_POLY, .sampled = 0,
+    .edit = {{"PREP", F_ENUM, 0, PP_N - 1, PP_BOLT, N_PP, 0}, {"AMT", F_PCT, 0, 127, 70, 0, 0},
+             {"HAMR", F_PCT, 0, 127, 80, 0, 0}, {"DAMP", F_PCT, 0, 127, 80, 0, 0},
+             {"BRIT", F_PCT, 0, 127, 70, 0, 0}, {"STIF", F_PCT, 0, 127, 40, 0, 0},
+             {"POS", F_PCT, 0, 127, 40, 0, 0}, {"FM", F_PCT, 0, 127, 20, 0, 0}},
+    .e8 = {"UNIS", F_PCT, 0, 127, 30, 0, 0},
+    .xyd = {{XY_E(1), XY_E(7), 0}, {XY_E(2), XY_E(3), 0}},
+    .xya = {{50, 40, 0}, {40, 40, 0}},
+};
