@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PULHRA Key Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* layout: one black LCD sheet, ASCII-ruled blocks in a 2-col grid that stacks on phones; keys drawn as [ KEYCAPS ] */
+:root {
+  --bg: #000; --fg: #cfcfcf; --hi: #fff; --dim: #6e6e6e; --line: #2e2e2e; --hot: #ff3b2f;
+  --pix: "Silkscreen", "IBM Plex Mono", ui-monospace, monospace;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 var(--mono);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 24px 40px; }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 22px; }
+header { display: grid; gap: 6px; }
+h1 { font: 28px/1 var(--pix); color: var(--hi); margin: 0; letter-spacing: .04em; }
+h1 span { color: var(--hot); }
+.sub { color: var(--dim); }
+pre.rule { margin: 0; color: var(--line); overflow: hidden; white-space: pre; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--dim); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+@media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+section { border: 1px solid var(--line); padding: 14px 14px 10px; min-width: 0; }
+section.wide { grid-column: 1 / -1; }
+h2 { font: 13px/1 var(--pix); color: var(--hi); margin: -22px 0 10px -6px; padding: 0 6px; background: var(--bg); width: max-content; max-width: 100%; letter-spacing: .06em; }
+h2 small { font: 11px var(--mono); color: var(--dim); letter-spacing: 0; text-transform: none; }
+dl { margin: 0; display: grid; grid-template-columns: minmax(0, 15em) minmax(0, 1fr); gap: 5px 14px; }
+@media (max-width: 460px) { dl { grid-template-columns: minmax(0, 1fr); gap: 0; } dd { margin-bottom: 7px !important; } }
+dt { color: var(--hi); white-space: normal; }
+dd { margin: 0; min-width: 0; }
+dd i { font-style: normal; color: var(--dim); }
+.k { display: inline-block; border: 1px solid var(--dim); padding: 0 4px; line-height: 1.35; color: var(--hi); white-space: nowrap; }
+.k.b { background: var(--hi); color: var(--bg); border-color: var(--hi); }   /* a black key of the keyboard */
+.p { color: var(--dim); padding: 0 2px; }
+.h { color: var(--hot); }
+.cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 12px; }
+@media (max-width: 560px) { .cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cols div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cols b { color: var(--hi); font-weight: 400; display: inline-block; min-width: 2.6em; }
+.note { color: var(--dim); margin: 10px 0 0; }
+footer { color: var(--dim); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header>
+  <h1>PULHRA <span>//</span> KEY MAP</h1>
+  <div class="sub">M-VAVE FM-1 · PULHRA firmware · every button, hold and combo on one sheet</div>
+  <div class="legend">
+    <span><span class="k">BTN</span> panel button / knob</span>
+    <span><span class="k">F3</span> white key</span>
+    <span><span class="k b">F#3</span> black key</span>
+    <span><span class="h">HOLD</span> keep the button down</span>
+    <span><span class="k">SHIFT</span> = hold <span class="k">OCT−</span></span>
+  </div>
+  <pre class="rule">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</pre>
+</header>
+
+<div class="grid">
+
+<section>
+  <h2>KNOBS</h2>
+  <dl>
+    <dt><span class="k">K1</span>…<span class="k">K4</span></dt><dd>The four parameters of the page on screen</dd>
+    <dt><span class="k">SELECT</span></dt><dd>The page's fifth parameter</dd>
+    <dt><span class="k">ALGORITHM</span></dt><dd>Track T1–T4 <i>(with SEQ held: picks a pattern)</i></dd>
+    <dt><span class="k">PRESETS</span></dt><dd>Factory sound of the track's machine <i>(trig held: the step FLAG)</i></dd>
+    <dt><span class="k">MASTER</span></dt><dd>Output volume</dd>
+    <dt><span class="k">SHIFT</span> + knob</dt><dd>Coarse turn: ×4 / ×8 on wide ranges, 1 BPM a click on tempo</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>TRANSPORT &amp; REC</h2>
+  <dl>
+    <dt><span class="k">PLAY</span></dt><dd>Start / stop</dd>
+    <dt><span class="k">REC</span></dt><dd>ARM (step record): white keys become steps; knobs move the base only</dd>
+    <dt><span class="h">HOLD</span> <span class="k">REC</span> + <span class="k">PLAY</span></dt><dd>Live record: played notes land on the nearest step; knob moves are recorded per AUTO <i>(SHIFT + REC)</i></dd>
+    <dt><span class="k">SAVE</span></dt><dd>PRESET page: load / save sounds, <span class="k">OCT+</span> confirms</dd>
+    <dt><span class="k">SHIFT</span> + <span class="k">SAVE</span></dt><dd>Save the project to flash <i>(playing: at stop)</i></dd>
+    <dt><span class="h">HOLD</span> <span class="k">SAVE</span></dt><dd>UNDO the last edit (one level)</dd>
+  </dl>
+</section>
+
+<section class="wide">
+  <h2>PAGE BUTTONS <small>· tap again for the next page</small></h2>
+  <div class="cols">
+    <div><b class="k">EDIT</b> EDIT 1 → EDIT 2</div>
+    <div><b class="k">GLO</b> AMP → MIX</div>
+    <div><b class="k">ENV</b> FILTER → F.ENV</div>
+    <div><b class="k">LFO</b> LFO → LFO DEST</div>
+    <div><b class="k">SCL</b> SCL → MICRO</div>
+    <div><b class="k">SEQ</b> STEP</div>
+    <div><b class="k">HOME</b> MIXER → CLOCK</div>
+    <div><b class="k">ARP</b> ARP → ARP 2</div>
+    <div><b class="k">FX</b> FX → DIST → INSERT</div>
+    <div><b class="k">SAVE</b> PRESET</div>
+  </div>
+  <p class="note">SHIFT pages: <span class="k">SHIFT</span>+<span class="k">EDIT</span> VOICE · <span class="k">SHIFT</span>+<span class="k">FX</span> DLY → REV → CHORUS → COMP <i>(global)</i> · <span class="k">SHIFT</span>+<span class="k">SEQ</span> EUCLID <i>(<span class="k">OCT+</span> writes the trigs)</i> · <span class="k">SHIFT</span>+<span class="k">HOME</span> MIDI / SETUP</p>
+</section>
+
+<section>
+  <h2>STEPS &amp; TRIGS <small>· REC armed</small></h2>
+  <dl>
+    <dt>Tap <span class="k">F3</span>…<span class="k">G5</span></dt><dd>Trig on / off <i>(16 steps of the page in view)</i></dd>
+    <dt><span class="h">HOLD</span> key + knob</dt><dd>Parameter lock on that step <i>(empty step: a trigless lock)</i></dd>
+    <dt><span class="k">OCT−</span> / <span class="k">OCT+</span> tap</dt><dd>Previous / next 16 steps <i>(up to 64)</i></dd>
+    <dt><span class="h">HOLD</span> trig + <span class="k">REC</span></dt><dd>Copy that trig</dd>
+    <dt><span class="h">HOLD</span> trig + <span class="k">PLAY</span> / <span class="k">OCT+</span></dt><dd>Paste the copied trig there</dd>
+    <dt><span class="h">HOLD</span> <span class="k">OCT+</span> + <span class="k">REC</span> / <span class="k">PLAY</span></dt><dd>Copy / paste the 16-step page</dd>
+    <dt><span class="k">SHIFT</span> + white key</dt><dd>Lock trig (no note) on / off <i>— REC on or off</i></dd>
+    <dt><span class="h">HOLD</span> trig + <span class="k">PRESETS</span></dt><dd>Step FLAG: ACC, SLD, ratchets X2–X4, REST…</dd>
+  </dl>
+  <p class="note">STEP page (tap <span class="k">SEQ</span>): K1 NOTE · K2 VEL · K3 LEN · K4 COND · SELECT track level · trig held + <span class="k">OCT−</span>/<span class="k">OCT+</span> NUDGE. No step held: the track's trig defaults.</p>
+</section>
+
+<section>
+  <h2>SHIFT <small>· hold OCT−, outside keyboard mode</small></h2>
+  <dl>
+    <dt><span class="k">SHIFT</span> + <span class="k b">A#3</span> / <span class="k b">C#4</span></dt><dd>Shift the track's trigs one step back / forward <i>(KIT: the lane in edit)</i></dd>
+    <dt><span class="k">SHIFT</span> + <span class="k b">D#4</span> / <span class="k b">F#4</span></dt><dd>Transpose the track −1 / +1 semitone</dd>
+    <dt><span class="k">SHIFT</span> + <span class="h">HOLD</span> <span class="k b">D#5</span></dt><dd>Copy track <i>(0.8 s)</i></dd>
+    <dt><span class="k">SHIFT</span> + <span class="h">HOLD</span> <span class="k b">F#5</span></dt><dd>Paste track <i>(0.8 s)</i></dd>
+    <dt><span class="k">SHIFT</span> + <span class="k">G5</span></dt><dd>FILL while held <i>(REC off)</i></dd>
+    <dt><span class="k">SHIFT</span> + <span class="k">REC</span></dt><dd>AUTO: what knobs record in live record — TRIG (trigs only) → ALL (empty steps get lock trigs) → OFF <i>(also HOME → CLOCK K3)</i></dd>
+  </dl>
+</section>
+
+<section>
+  <h2>HOLD SEQ <small>· tools &amp; patterns</small></h2>
+  <dl>
+    <dt><span class="k">ALGORITHM</span></dt><dd>Pick a pattern A01…E08 — release SEQ to switch</dd>
+    <dt><span class="k">OCT+</span> / <span class="k">OCT−</span></dt><dd>Add picked pattern to the chain / clear what was built</dd>
+    <dt><span class="k b">G#3</span></dt><dd>Chain off</dd>
+    <dt><span class="k b">F#3</span></dt><dd>Pattern change mode: SEQUENTIAL / DIR START / DIR JUMP</dd>
+    <dt><span class="h">HOLD</span> <span class="k b">D#5</span> / <span class="k b">F#5</span></dt><dd>Copy / paste pattern <i>(0.8 s; paste goes to the picked one)</i></dd>
+    <dt><span class="k">F3</span></dt><dd>Clear the track <i>(KIT: the lane in edit)</i></dd>
+    <dt><span class="h">HOLD</span> <span class="k">F5</span></dt><dd>Clear the whole pattern <i>(0.8 s)</i></dd>
+    <dt><span class="k">SELECT</span> · <span class="k">K1</span></dt><dd>Track length 1–64 · track speed /8…×8</dd>
+    <dt><span class="k">K2</span> · <span class="k">K3</span> · <span class="k">K4</span></dt><dd>Change mode · shift all tracks · transpose all tracks</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>HOLD GLO <small>· mixer &amp; banks</small></h2>
+  <dl>
+    <dt><span class="k b">F#3</span> <span class="k b">G#3</span> <span class="k b">A#3</span> <span class="k b">C#4</span></dt><dd>Mute T1–T4</dd>
+    <dt><span class="k">F3</span> <span class="k">G3</span> <span class="k">A3</span> <span class="k">B3</span></dt><dd>Solo T1–T4 while held</dd>
+    <dt><span class="k">G5</span></dt><dd>FILL while held</dd>
+    <dt><span class="k b">G#4</span> <span class="k b">A#4</span> <span class="k b">C#5</span> <span class="k b">D#5</span> <span class="k b">F#5</span></dt><dd>Bank A–E in view</dd>
+    <dt><span class="k">C4</span>…<span class="k">C5</span></dt><dd>Patterns 1–8: tap used = go, tap empty = save here, <span class="h">hold</span> 0.8 s = overwrite</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>HOLD FX <small>· performance, nothing recorded</small></h2>
+  <div class="cols" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+    <div><b>F3</b> RPT 1/8</div><div><b>G3</b> RPT 1/16</div><div><b>A3</b> RPT 1/32</div><div><b>B3</b> REVERSE</div>
+    <div><b>C4</b> LPF</div><div><b>D4</b> HPF</div><div><b>E4</b> TAPE STOP</div><div><b>F4</b> FREEZE</div>
+    <div><b>G4</b> OCT UP</div><div><b>A4</b> OCT DN</div><div><b>B4</b> FLANGER</div><div><b>C5</b> PHASER</div>
+    <div><b>D5</b> REV THROW</div><div><b>E5</b> ECHO THROW</div><div><b>F5</b> SLICER</div><div><b>G5</b> FILL</div>
+  </div>
+  <dl style="margin-top:10px">
+    <dt><span class="k b">F#3</span>…<span class="k b">C#4</span></dt><dd>Mute T1–T4 while held</dd>
+    <dt><span class="k b">D#4</span></dt><dd>Target: MASTER → T1 → T2 → T3 → T4</dd>
+    <dt><span class="k">K1</span> <span class="k">K2</span> <span class="k">K3</span></dt><dd>FILTER · CRUSH · THROW <i>(reset on release)</i></dd>
+    <dt><span class="k">K4</span></dt><dd>Drum-lane filter: left LPF, right HPF <i>(reset on release)</i></dd>
+    <dt><span class="k">SELECT</span></dt><dd>Effect DEPTH <i>(kept after release)</i></dd>
+  </dl>
+  <p class="note">An effect holds while its key is down, even after FX is let go.</p>
+</section>
+
+<section>
+  <h2>HOLD EDIT <small>· machines</small></h2>
+  <dl>
+    <dt>White keys</dt><dd>Load a machine of the page in view</dd>
+    <dt><span class="k">OCT+</span> / <span class="k">OCT−</span></dt><dd>Next / previous page: MONO · SOMA · SLICE · DRUM</dd>
+    <dt>DRUM page on T4</dt><dd>KICK…CYM go into the KIT lane in edit</dd>
+  </dl>
+  <h2 style="margin-top:22px">KIT ON T4</h2>
+  <dl>
+    <dt><span class="k b">F#3</span> <span class="k b">G#3</span> <span class="k b">A#3</span> <span class="k b">C#4</span></dt><dd>Lane L1–L4 to edit <i>(no layer held)</i></dd>
+    <dt><span class="k">SELECT</span> on AMP / MIX</dt><dd>Level of the lane in edit <i>(T4's volume: HOME → MIXER)</i></dd>
+  </dl>
+</section>
+
+<section>
+  <h2>KEYBOARD MODE &amp; OTHER HOLDS</h2>
+  <dl>
+    <dt><span class="k">OCT−</span> + <span class="k">OCT+</span></dt><dd>Keyboard mode on / off — all 27 keys play notes</dd>
+    <dt><span class="k">OCT−</span> / <span class="k">OCT+</span></dt><dd>Octave −3…+3 <i>(in keyboard mode)</i></dd>
+    <dt><span class="h">HOLD</span> <span class="k">ARP</span> + <span class="k">F3</span></dt><dd>LATCH the held notes <i>(keyboard mode)</i></dd>
+    <dt><span class="h">HOLD</span> <span class="k">HOME</span> + <span class="k">F3</span>…<span class="k">B3</span></dt><dd>Select T1–T4</dd>
+  </dl>
+</section>
+
+</div>
+
+<footer>PULHRA · GPL-3.0 fork of Felucca · layers open after the HOLD time (300–600 ms, SETUP) or at once when a key or knob is used</footer>
+</div>
+</body>
+</html>

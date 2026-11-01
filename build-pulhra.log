@@ -1,0 +1,467 @@
+In file included from firmware/src/pulhra.c:77:
+In file included from firmware/src/engines.c:72:
+firmware/src/eng_mono.c:808:28: warning: operator '>>' has lower precedence than '+'; '+' will be evaluated first [-Wshift-op-parentheses]
+            y = softclip(y + px_m(y, drv * 129, 12) >> 1);
+                         ~~^~~~~~~~~~~~~~~~~~~~~~~~ ~~
+firmware/src/eng_mono.c:808:28: note: place parentheses around the '+' expression to silence this warning
+            y = softclip(y + px_m(y, drv * 129, 12) >> 1);
+                           ^
+                         (                         )
+In file included from firmware/src/pulhra.c:78:
+firmware/src/params.c:262:19: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FM3_ATK] = PE("DIV", N_EUC_DIV, 0),          /* EUCLID's divider: a step x 1 .. x 64 (seq.c EUC_DIV_X) */
+                  ^~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:21: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                    ^~~~~~~
+firmware/src/params.c:252:35: note: expanded from macro 'FMOP'
+#define FMOP(k) [P_FM##k##_ATK] = PD("ATK", F_TIME, 0, 127, 0), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:263:21: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FM4_LEVEL] = PE("TUNE", N_MTUNE, 0),         /* MICRO: the tuning, how much of it, RAND's seed */
+                    ^~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:30: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                             ^~~~~~~
+firmware/src/params.c:256:37: note: expanded from macro 'FMOP'
+                [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
+                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:264:19: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FM3_DEC] = PD("AMT", F_PCT, 0, 100, 100),
+                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:21: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                    ^~~~~~~
+firmware/src/params.c:253:35: note: expanded from macro 'FMOP'
+                [P_FM##k##_DEC] = PD("DEC", F_TIME, 0, 127, 0), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:265:19: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FM3_SUS] = PD("SEED", F_INT, 0, 99, 0),
+                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:21: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                    ^~~~~~~
+firmware/src/params.c:254:35: note: expanded from macro 'FMOP'
+                [P_FM##k##_SUS] = PD("SUS", F_PCT, 0, 127, 127), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:266:19: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FM3_REL] = PE("KIT", N_GLKIT, 0),            /* GLITCH: the kit, a user slot's cuts */
+                  ^~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:21: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                    ^~~~~~~
+firmware/src/params.c:255:35: note: expanded from macro 'FMOP'
+                [P_FM##k##_REL] = PD("REL", F_TIME, 0, 127, 0), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:267:21: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FM1_LEVEL] = PD("CUTS", F_INT, 2, 16, 16),
+                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:5: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+    ^~~~~~
+firmware/src/params.c:260:36: note: expanded from macro 'XYR'
+               [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:269:5: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
+    ^~~~~~~~~~~~~~
+firmware/src/params.c:268:34: note: expanded from macro 'MDEG'
+#define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:30: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                             ^~~~~~~
+firmware/src/params.c:252:35: note: expanded from macro 'FMOP'
+#define FMOP(k) [P_FM##k##_ATK] = PD("ATK", F_TIME, 0, 127, 0), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:269:21: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
+                    ^~~~~~~~~~~~~
+firmware/src/params.c:268:34: note: expanded from macro 'MDEG'
+#define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:30: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                             ^~~~~~~
+firmware/src/params.c:253:35: note: expanded from macro 'FMOP'
+                [P_FM##k##_DEC] = PD("DEC", F_TIME, 0, 127, 0), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:269:36: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
+                                   ^~~~~~~~~~~~~~~
+firmware/src/params.c:268:34: note: expanded from macro 'MDEG'
+#define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:30: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                             ^~~~~~~
+firmware/src/params.c:254:35: note: expanded from macro 'FMOP'
+                [P_FM##k##_SUS] = PD("SUS", F_PCT, 0, 127, 127), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:269:53: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
+                                                    ^~~~~~~~~~~~~~
+firmware/src/params.c:268:34: note: expanded from macro 'MDEG'
+#define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:30: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                             ^~~~~~~
+firmware/src/params.c:255:35: note: expanded from macro 'FMOP'
+                [P_FM##k##_REL] = PD("REL", F_TIME, 0, 127, 0), \
+                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:288:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FATK] = PD("ATK", F_TIME, 0, 127, 0),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:279:5: note: previous initialization is here
+    LANE(0, "KICK"), LANE(1, "SNARE"), LANE(2, "CLAP"), LANE(3, "HATCL"),
+    ^~~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:289:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FDEC] = PD("DEC", F_TIME, 0, 127, 64),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:279:22: note: previous initialization is here
+    LANE(0, "KICK"), LANE(1, "SNARE"), LANE(2, "CLAP"), LANE(3, "HATCL"),
+                     ^~~~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:290:17: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_DTYPE] = PE("TYPE", N_DTYPE, 0),
+                ^~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:279:40: note: previous initialization is here
+    LANE(0, "KICK"), LANE(1, "SNARE"), LANE(2, "CLAP"), LANE(3, "HATCL"),
+                                       ^~~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:291:17: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_DTONE] = PD("TONE", F_BIPCT, -64, 63, 0),
+                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:279:57: note: previous initialization is here
+    LANE(0, "KICK"), LANE(1, "SNARE"), LANE(2, "CLAP"), LANE(3, "HATCL"),
+                                                        ^~~~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:292:17: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_DLCUT] = PD("LCUT", F_PCT, 0, 127, 0),
+                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:280:5: note: previous initialization is here
+    LANE(4, "HATOP"), LANE(5, "TOM"), LANE(6, "RIM"), LANE(7, "BELL"),
+    ^~~~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:293:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_DOUT] = PD("OUT", F_BIPCT, -64, 63, 0),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:280:23: note: previous initialization is here
+    LANE(4, "HATOP"), LANE(5, "TOM"), LANE(6, "RIM"), LANE(7, "BELL"),
+                      ^~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:294:15: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_LN6] = PD("-", F_INT, 0, 0, 0),
+              ^~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:280:39: note: previous initialization is here
+    LANE(4, "HATOP"), LANE(5, "TOM"), LANE(6, "RIM"), LANE(7, "BELL"),
+                                      ^~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:295:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FSUS] = PD("SUS", F_PCT, 0, 127, 0),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:280:55: note: previous initialization is here
+    LANE(4, "HATOP"), LANE(5, "TOM"), LANE(6, "RIM"), LANE(7, "BELL"),
+                                                      ^~~~~~~~~~~~~~~
+firmware/src/params.c:278:36: note: expanded from macro 'LANE'
+#define LANE(k, l) [P_LN0 + (k)] = PD(l, F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:296:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FREL] = {"REL", F_TIME, 0, 127, 0, N_FREL, 0},   /* 0: "DEC", the decay's rate (as before) */
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:269:5: note: previous initialization is here
+    MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
+    ^~~~~~~~~~~~~~
+firmware/src/params.c:268:34: note: expanded from macro 'MDEG'
+#define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:298:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_AVOL] = PD("VOL", F_DBOFS, -64, 15, 0),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:269:21: note: previous initialization is here
+    MDEG(8u, "b6"), MDEG(9u, "6"), MDEG(10u, "b7"), MDEG(11u, "7"),
+                    ^~~~~~~~~~~~~
+firmware/src/params.c:268:34: note: expanded from macro 'MDEG'
+#define MDEG(d, l) [MDEG_P(d)] = {l, F_INT, -100, 100, 0, 0, "ct"}
+                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:316:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_SLEN] = PD("LEN", F_STEPS, 1, 32, 16),           /* (MONOFM's patterns: 32 steps, mf_pat.c) */
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:224:16: note: previous initialization is here
+    [P_SLEN] = PD("LEN", F_STEPS, 1, NSTEP, 16),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:317:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_SDIV] = PE("SCALE", N_MSCALE, 2),                /* (Elektron's track scale, core.h seq_div) */
+               ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:225:16: note: previous initialization is here
+    [P_SDIV] = PE("DIV", N_DIV, 2),
+               ^~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:318:15: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_EUC] = PE("EUCL", N_ONOFF, 0),
+              ^~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:197:17: note: previous initialization is here
+    [P_ED_FX] = PD("FX", F_BIPCT, -64, 63, 0),
+                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:319:17: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_EHITS] = PD("HITS", F_INT, 0, 64, 4),
+                ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:13: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+            ^~~~~~
+firmware/src/params.c:260:36: note: expanded from macro 'XYR'
+               [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
+                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:320:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_EROT] = PD("ROT", F_INT, 0, 63, 0),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:261:21: note: previous initialization is here
+    XYR(1), XYR(2), FMOP(3), FMOP(4),
+                    ^~~~~~~
+firmware/src/params.c:256:37: note: expanded from macro 'FMOP'
+                [P_FM##k##_LEVEL] = PD("LVL", F_PCT, 0, 127, 127)
+                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:321:14: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_XV] = PD("X", F_PCT, 0, 127, 0),
+             ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:313:17: note: previous initialization is here
+    [P_FTYPE] = PE("TYPE", N_FTYPE, 0),           /* 1.5 (#104): ANALOG's filter, LP = as before (eng_analog.c) */
+                ^~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:322:14: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_YV] = PD("Y", F_PCT, 0, 127, 0),
+             ^~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:262:19: note: previous initialization is here
+    [P_FM3_ATK] = PE("DIV", N_EUC_DIV, 0),          /* EUCLID's divider: a step x 1 .. x 64 (seq.c EUC_DIV_X) */
+                  ^~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:323:15: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FLT] = PE("FILT", N_MFILT, 0),
+              ^~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:183:22: note: expanded from macro 'PE'
+#define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:264:19: note: previous initialization is here
+    [P_FM3_DEC] = PD("AMT", F_PCT, 0, 100, 100),
+                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:324:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FCUT] = PD("CUT", F_CUTOFF, 0, 127, 127),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:265:19: note: previous initialization is here
+    [P_FM3_SUS] = PD("SEED", F_INT, 0, 99, 0),
+                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:325:16: warning: subobject initialization overrides initialization of other fields within its enclosing subobject [-Winitializer-overrides]
+    [P_FRES] = PD("RES", F_PCT, 0, 127, 0),
+               ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:267:21: note: previous initialization is here
+    [P_FM1_LEVEL] = PD("CUTS", F_INT, 2, 16, 16),
+                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+firmware/src/params.c:182:30: note: expanded from macro 'PD'
+#define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
+                             ^~~~~~~~~~~~~~~~~~~~~~~~
+In file included from firmware/src/pulhra.c:100:
+In file included from firmware/src/pulhra/sm_app.c:21:
+firmware/src/pulhra/sm_bank.c:813:64: warning: excess elements in array initializer
+    static const uint8_t BANK_KEY[SM_NBANK] = {15, 17, 20, 22, 25};
+                                                               ^~
+In file included from firmware/src/pulhra.c:100:
+In file included from firmware/src/pulhra/sm_app.c:32:
+firmware/src/pulhra/sm_draw.c:883:27: warning: unused variable 's' [-Wunused-variable]
+        const sm_sound_t *s = smd_snd();
+                          ^
+33 warnings generated.
+size: 113 main-loop functions built for size (918 not in this build; 36 reached from an interrupt kept -Os)
+loader: image 8216 B at 0x1c0a800, bss end 0x1c0f510
+loader: ota.bin 6930 B
+face S: InterTight[wght].ttf@400 12px h15 base12  105 glyphs x 4  data 10410 B + table 3360 B + kern 2757 B (919 pairs) = 16537 B   digit adv 7.00px
+face M: InterTight[wght].ttf@500 15px h19 base15  105 glyphs x 4  data 13083 B + table 3360 B + kern 2976 B (992 pairs) = 19429 B   digit adv 9.00px
+face L: InterTight[wght].ttf@600 28px h35 base28  51 glyphs x 2  data 7278 B + table 816 B + kern 663 B (221 pairs) = 8807 B   digit adv 18.00px
+fonts total 44773 B  -> /home/runner/work/pulhra_main/pulhra_main/build/gen/ui_fonts.h
+2 extra bytes in post.stringData array
+2 extra bytes in post.stringData array
+icons: x_oct_up: symbol_pitch_up not in the font yet, using control_arrow_up
+icons: x_oct_dn: symbol_pitch_down not in the font yet, using control_arrow_down
+icons 12px: 105 cells, 4237 B
+icons 16px: 39 cells, 2590 B
+icons 24px: 6 cells, 667 B
+icons code: 57 B
+icons total 7551 B -> /home/runner/work/pulhra_main/pulhra_main/build/gen/ui_icons.h   (87 legacy names + 36 new)
+keycaps: 29 pills, data 4948 B + table 232 B; knob arcs 584 B = 5764 B -> /home/runner/work/pulhra_main/pulhra_main/build/gen/ui_keycaps.h
+fm6 patches: 8 -> /home/runner/work/pulhra_main/pulhra_main/build/gen/felucca_fm6.h
+generated waves into /home/runner/work/pulhra_main/pulhra_main/build/genwav
+samples: 5 sets, 11 zones, 126244 B ADPCM, SLICE BREAK 44100 samples, SLICE PIANO (shared) 16537 samples (cached)
+strange samples: 188188 B (83 zones: 3 sources, 16 x 5 kit slices); MONOFM's BBOX 23820 B
+mono tables: 32 DIGIPRO waves
+  ok    .ram_text: 916 insns, no calls
+  ok    image 521040 B; RAM .data+.bss 89472 B of 94208; pool 338596 B of 348160
+  ok    register access: hal/ only (src/, loader/ clean)
+app      /home/runner/work/pulhra_main/pulhra_main/build/felucca.bin  521040 B
+loader   /home/runner/work/pulhra_main/pulhra_main/build/loader/ota.bin  6930 B
+package  /home/runner/work/pulhra_main/pulhra_main/build/pulhra-1.5.1.fwsc  610086 B, identity FM-1_915
+release  /home/runner/work/pulhra_main/pulhra_main/build/release-1.5.1/
