@@ -45,6 +45,17 @@
  * 44.1 kHz only (no 48 kHz resampling: its FIR for every pair costs too much); for now each pair is the stereo
  * frame copied (with FELUCCA_UAC_TONE: the triangles in every pair), to learn whether the USB controller and the
  * hosts take packets of up to 46 x NCH x 2 bytes (920 at 10) where the stereo stream sends 196 */
+#ifndef FELUCCA_UAC_OUT
+#define FELUCCA_UAC_OUT 0
+#endif
+/* FELUCCA_UAC_OUT=1 (Tim, 1.11: USB Audio Recorder PRO on Android: "error selecting output"; its own driver wants a
+ * playback side as KO II has): a stereo USB output too, a speaker the host may play into (EP4 OUT, isochronous
+ * adaptive, the input's rates). What comes is taken and dropped: the FM-1 plays nothing of it. SET_CUR on it is
+ * answered, its rate kept apart (the input's own rate never follows it) */
+#if !FELUCCA_UAC
+#undef FELUCCA_UAC_OUT
+#define FELUCCA_UAC_OUT 0
+#endif
 #if FELUCCA_UAC_NCH > 2
 #undef FELUCCA_UAC_48K
 #define FELUCCA_UAC_48K 0
@@ -113,6 +124,9 @@ _Static_assert(UA_HI + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, a
 static uint32_t ua_ring[UA_N];
 static volatile uint32_t ua_w, ua_r;
 static uint32_t ep4tx[UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
+#if FELUCCA_UAC_OUT
+static uint32_t ep4rx[UA_MAXF + 2u] __attribute__((aligned(4)));   /* the output's packets land here (and are dropped) */
+#endif
 static struct {
     volatile uint8_t alt;        /* streaming interface setting: 1 = the host records */
     volatile uint8_t r48;        /* the host's rate (SET_CUR): 1 = 48 kHz, 0 = 44.1 (bus reset) */
@@ -122,7 +136,9 @@ static struct {
     uint8_t queued;              /* a packet was queued since the stream (re)started */
     uint8_t feed;                /* this render feeds the ring (sampled when it starts) */
     uint8_t wait;                /* polls the queued packet has waited */
-    uint8_t e0_rx;               /* SET_CUR sampling frequency: data stage pending */
+    uint8_t e0_rx;               /* SET_CUR sampling frequency: data stage pending (2: the output's, kept apart) */
+    uint8_t o48, oalt;           /* the output (FELUCCA_UAC_OUT): its rate (1 = 48 kHz), its alt setting */
+    uint32_t orx;                /* the output: packets taken (and dropped) */
     volatile uint32_t fill_min;  /* ring fill when the last render started */
     uint32_t acc;                /* 44.1 frames per ms: 0.1 frame steps */
     uint32_t last;               /* the last frame sent, repeated on an underrun */
@@ -249,9 +265,11 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #if FELUCCA_UAC_48K
 #define D_FMT 14, 0x24, 2, 1, 2, 2, 16, 2, 0x44, 0xAC, 0x00, 0x80, 0xBB, 0x00,   /* 44100, 48000 */
 #define FMT_LEN 14
+#define D_FMTO 14, 0x24, 2, 1, 2, 2, 16, 2, 0x44, 0xAC, 0x00, 0x80, 0xBB, 0x00,
 #elif FELUCCA_UAC
 #define D_FMT 11, 0x24, 2, 1, FELUCCA_UAC_NCH, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,
 #define FMT_LEN 11
+#define D_FMTO 11, 0x24, 2, 1, 2, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,
 #else
 #define FMT_LEN 0
 #endif
@@ -264,17 +282,38 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
  * streaming interface and no audio device appears (MIDI still works). Listed last, MIDI is dropped at the
  * end of the walk and the audio streaming interface is parsed. The class spec gives the order no meaning
  * (Linux takes each listed interface on its own); FELUCCA_UAC_AS_FIRST=0: 1.0 .. 1.5's order (MIDI first). */
-#if FELUCCA_UAC_AS_FIRST
+#if FELUCCA_UAC_OUT
+#define AC_COLL(a) (a) + 2, (a) + 3, (a) + 1                /* (the output's streaming after the input's; MIDI last) */
+#elif FELUCCA_UAC_AS_FIRST
 #define AC_COLL(a) (a) + 2, (a) + 1
 #else
 #define AC_COLL(a) (a) + 1, (a) + 2
 #endif
+#if FELUCCA_UAC_OUT
+/* the output: input terminal 3 (USB streaming, 2 ch L R) to output terminal 4 (a speaker) */
+#define D_AC_OUT 12, 0x24, 2, 3, 0x01, 0x01, 0, 2, 0x03, 0x00, 0, 0, 9, 0x24, 3, 4, 0x01, 0x03, 0, 3, 0,
+#define D_ASO(s)                                                                                     \
+    9, 4, (s), 0, 0, 1, 2, 0, 0,                                                                     \
+    9, 4, (s), 1, 1, 1, 2, 0, 0,                                                                     \
+    7, 0x24, 1, 3, 1, 0x01, 0x00,                          /* AS general: terminal 3, PCM */            \
+    D_FMTO                                                 /* type I: 2 ch, 16 bit, the input's rates */ \
+    9, 5, 0x04, 0x09, (UA_MAXF * 4u) & 0xFF, (UA_MAXF * 4u) >> 8, 1, 0, 0,   /* EP4 OUT isochronous adaptive */ \
+    7, 0x25, 1, 0x01, 0, 0, 0,
+#define ACH_LEN (11 + 21)
+#define ASO_LEN (41 + FMT_LEN)
+#else
+#define D_AC_OUT
+#define D_ASO(s)
+#define ACH_LEN 0
+#define ASO_LEN 0
+#endif
 #define UAC_CHCFG (FELUCCA_UAC_NCH == 2 ? 0x03 : 0x00)   /* L R; more: no spatial places (the host numbers them) */
 #define D_AC(a)                                                                                      \
     9, 4, (a), 0, 0, 1, 1, 0, 0,                                                                     \
-    10, 0x24, 1, 0x00, 0x01, 31, 0, 2, AC_COLL(a),         /* AC header 1.00: audio + MIDI streaming */ \
+    10 + FELUCCA_UAC_OUT, 0x24, 1, 0x00, 0x01, 31 + ACH_LEN - 10 * (FELUCCA_UAC_OUT), 0, 2 + FELUCCA_UAC_OUT, AC_COLL(a),   /* AC header 1.00 */ \
     12, 0x24, 2, 1, 0x03, 0x06, 0, FELUCCA_UAC_NCH, UAC_CHCFG, 0x00, 0, 0,   /* input terminal 1: line, L R (or NCH) */ \
-    9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */
+    9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */ \
+    D_AC_OUT
 #define D_AS(s)                                                                                      \
     9, 4, (s), 0, 0, 1, 2, 0, 0,                           /* audio streaming, alt 0: no bandwidth */    \
     9, 4, (s), 1, 1, 1, 2, 0, 0,                           /* alt 1: the stream */                      \
@@ -297,9 +336,9 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     5, 0x25, 1, 1, 1,                                                                                \
     9, 5, 0x81, 2, 64, 0, 0, 0, 0,                                                                   \
     5, 0x25, 1, 1, 3,
-#define D_AUDIO(a) D_AC(a) D_MIDI((a) + 1) D_AS((a) + 2)   /* audio + MIDI from interface a */
-#define AUD_NIF (2 + FELUCCA_UAC)
-#define AUD_LEN (92 + (63 + FMT_LEN) * FELUCCA_UAC)
+#define D_AUDIO(a) D_AC(a) D_MIDI((a) + 1) D_AS((a) + 2) D_ASO((a) + 3)   /* audio + MIDI from interface a */
+#define AUD_NIF (2 + FELUCCA_UAC + FELUCCA_UAC_OUT)
+#define AUD_LEN (92 + (63 + FMT_LEN) * FELUCCA_UAC + (ACH_LEN ? ACH_LEN - 10 : 0) + ASO_LEN)
 #define D_CDC(c)                                                                                     \
     D_IAD((c), 2, 2, 2, 1),                                /* IAD: CDC ACM */                           \
     9, 4, (c), 0, 1, 2, 2, 1, 0,                           /* communication */                          \
@@ -314,7 +353,7 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #define CDC_LEN 66                                         /* with its IAD */
 #define BCD_LO(cdc)                                                                                  \
     (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x08 * FELUCCA_UAC_AS_FIRST + ((cdc) ? 0x01 + 2 * FELUCCA_USB_LAYOUT : 0) + \
-     0x40 * (FELUCCA_UAC_NCH > 2))   /* (the multichannel test: a host must not reuse the stereo's) */
+     0x40 * (FELUCCA_UAC_NCH > 2) + 0x20 * FELUCCA_UAC_OUT)   /* (the multichannel test: a host must not reuse the stereo's) */
 #define D_DEV(bcdusb, cls, sub, proto, cdc)                                                          \
     18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, 0x09, 0x12, FELUCCA_USB_PID & 0xFF, \
     FELUCCA_USB_PID >> 8, BCD_LO(cdc), 0x03, 1, 2, 0, 1
@@ -363,6 +402,7 @@ static uint8_t usb_cdc_on = FELUCCA_CDC_DEFAULT != 0;      /* the console is pre
 #define AUD_IF 0u
 #endif
 #define UAC_AS_IF (AUD_IF + 2u)
+#define UAC_ASO_IF (AUD_IF + 3u)                           /* (FELUCCA_UAC_OUT: the output's streaming) */
 static const uint8_t STR0[4] = {4, 3, 0x09, 0x04};
 static const uint8_t STR1[] = {42, 3, 'H', 0, 0xFC, 0, 'g', 0, 'e', 0, 'l', 0, 't', 0, 'o', 0, 'n', 0, ' ', 0, 'I', 0,
                                'n', 0, 's', 0, 't', 0, 'r', 0, 'u', 0, 'm', 0, 'e', 0, 'n', 0, 't', 0, 's', 0};
@@ -520,6 +560,13 @@ no_cdc:;
     sie_wr(S_INDEX, 4);
     sie_wr(S_TXMAXP, 0xFF);
     uac_ep4_reset();
+#if FELUCCA_UAC_OUT
+    FM1_USB_EP4_RADR = (uint32_t)(uintptr_t)ep4rx;   /* (never ep0buf, the attach's default: a 196-byte packet) */
+    sie_wr(S_RXMAXP, 0xFF);
+    sie_wr(S_RXCSR1, 0x90);                             /* ClrDataTog + FlushFIFO */
+    sie_wr(S_RXCSR2, 0x40);                             /* ISO */
+    uac.oalt = 0;
+#endif
     fm1_usb_ep_enable(1u << 4);
     uac_stream(0);
 #endif
@@ -607,6 +654,12 @@ static void ep0_service(void)
     }
 #endif
 #if FELUCCA_UAC
+    if (uac.e0_rx == 2u) {                              /* the output's SET_CUR: its rate kept, the input's stays */
+        if (sie_rd(S_COUNT0) >= 3u)
+            uac.o48 = (ep0buf[0] | (uint32_t)ep0buf[1] << 8 | (uint32_t)ep0buf[2] << 16) == 48000u;
+        uac.e0_rx = 0;
+        goto ack;
+    }
     if (uac.e0_rx) {                                    /* SET_CUR sampling frequency: 3 bytes, Hz */
         uac.rate_sets++;
         if (sie_rd(S_COUNT0) >= 3u)
@@ -665,6 +718,12 @@ static void ep0_service(void)
             uac_stream(wvalue);
             goto ack;
         }
+#if FELUCCA_UAC_OUT
+        if (s[4] == UAC_ASO_IF && wvalue <= 1u && usb.config) {
+            uac.oalt = (uint8_t)wvalue;
+            goto ack;
+        }
+#endif
 #endif
         if (wvalue == 0)
             goto ack;
@@ -677,13 +736,21 @@ static void ep0_service(void)
             e0_send(&alt, 1, wlength);
             return;
         }
+#if FELUCCA_UAC_OUT
+        if (s[4] == UAC_ASO_IF) {
+            static uint8_t oalt;
+            oalt = uac.oalt;
+            e0_send(&oalt, 1, wlength);
+            return;
+        }
+#endif
 #endif
         e0_send(zero2, 1, wlength);
         return;
     case 0x0201: {                                      /* CLEAR_FEATURE(ENDPOINT_HALT): data toggle reset */
         uint32_t ep = s[4] & 0x0Fu, last = USB_CDC_ON ? 3u : 1u;
 #if FELUCCA_UAC
-        if (wvalue == 0 && s[4] == 0x84u)
+        if (wvalue == 0 && (s[4] == 0x84u || (FELUCCA_UAC_OUT && s[4] == 0x04u)))
             goto ack;                                   /* isochronous: no halt, no toggle */
 #endif
         if (wvalue != 0 || ep > last)
@@ -725,10 +792,10 @@ static void ep0_service(void)
 #endif
 #if FELUCCA_UAC
     case 0x2201:                                        /* SET_CUR, endpoint: sampling frequency */
-        if (s[4] != 0x84u || s[3] != 1u)
+        if ((s[4] != 0x84u && !(FELUCCA_UAC_OUT && s[4] == 0x04u)) || s[3] != 1u)
             goto stall;
         if (wlength) {
-            uac.e0_rx = 1;
+            uac.e0_rx = s[4] == 0x84u ? 1u : 2u;
             sie_wr(S_INDEX, 0);
             sie_wr(S_CSR0, 0x40);                       /* the 3 bytes follow */
             return;
@@ -741,10 +808,10 @@ static void ep0_service(void)
 #if FELUCCA_UAC_48K
         static const uint8_t RATE48[3] = {48000u & 0xFF, (48000u >> 8) & 0xFF, 48000u >> 16};
 #endif
-        if (s[4] != 0x84u || s[3] != 1u)
+        if ((s[4] != 0x84u && !(FELUCCA_UAC_OUT && s[4] == 0x04u)) || s[3] != 1u)
             goto stall;
 #if FELUCCA_UAC_48K
-        if (s[1] == 0x83u || (s[1] == 0x81u && uac.r48)) {
+        if (s[1] == 0x83u || (s[1] == 0x81u && (s[4] == 0x84u ? uac.r48 : uac.o48))) {
             e0_send(RATE48, 3, wlength);
             return;
         }
@@ -1219,6 +1286,15 @@ static uint32_t uac_packet(uint32_t *d)
 static void uac_service(void)
 {
     uint32_t csr, n;
+#if FELUCCA_UAC_OUT
+    if (usb.up && usb.config) {                         /* the output: a packet taken is dropped, the next may land */
+        sie_wr(S_INDEX, 4);
+        if (sie_rd(S_RXCSR1) & 0x01u) {
+            uac.orx++;
+            sie_wr(S_RXCSR1, 0);                        /* RxPktRdy cleared */
+        }
+    }
+#endif
     if (!usb.up || !usb.config || !uac.alt)
         return;
     sie_wr(S_INDEX, 4);
