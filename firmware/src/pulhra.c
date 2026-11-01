@@ -32,6 +32,9 @@
 #ifndef FELUCCA_UAC
 #define FELUCCA_UAC 1            /* USB audio input: the master output, 16-bit stereo 44.1 kHz (usb.c) */
 #endif
+#ifndef FELUCCA_UAC_OUT
+#define FELUCCA_UAC_OUT 1        /* a dummy USB output too (Tim, 1.11: Android's USB Audio Recorder PRO wants one; tested OK) */
+#endif
 #ifndef FELUCCA_UAC_TONE
 #define FELUCCA_UAC_TONE 0       /* bench: the USB input sends test triangles instead of the music */
 #endif
