@@ -644,7 +644,7 @@ static void ems_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
         v2 = ic2 + ((c.a2 * ic1 + c.a3 * v3) >> 13);
         ic1 = softclip((2 * v1 - ic1) >> 1) << 1;
         ic2 = clamp(2 * v2 - ic2, -150000, 150000);
-        x = ((bp ? v1 : v2) * mk) >> 12;
+        x = ((bp ? v1 : v2) * mk) >> 11;                 /* (x 2 into the knee: Tim, 1.11, "very quiet"; it pushes the knee as it should) */
         ph0 += inc1;
         ph1 += inc2;
         out[i] += voice_amp(soft_knee(x, 26000), m, i) << 1;   /* (+6 dB: as loud as the other machines) */

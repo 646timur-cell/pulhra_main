@@ -286,12 +286,12 @@ static const struct { uint8_t eng, pre; int8_t steps; } SM_LVL_TRIM[] = {
     {ENGI_CZ, 7, 7},   /* CZ 7: -21.8 dBFS (RESO SWEEP) */
     {ENGI_CZ, 8, -12},   /* CZ 8: -12.3 dBFS (ORGAN) */
     {ENGI_CZ, 9, 12},   /* CZ 9: -30.3 dBFS (PERCUSSION) */
-    {ENGI_EMS, 1, -7},   /* EMS 1: -15.0 dBFS (the vibrato fixed) */
-    {ENGI_EMS, 3, 5},   /* EMS 3: -21.1 dBFS */
-    {ENGI_EMS, 4, -4},   /* EMS 4: -16.3 dBFS */
-    {ENGI_EMS, 5, 16},   /* EMS 5: -28.3 dBFS */
-    {ENGI_EMS, 6, 12},   /* EMS 6: -24.4 dBFS */
-    {ENGI_EMS, 7, -7},   /* EMS 7: -15.2 dBFS */
+    {ENGI_EMS, 1, -7},   /* EMS 1: -10.9 dBFS (against -14.5: Tim, 1.11, the EMS heard quiet at -18.5) */
+    {ENGI_EMS, 3, 3},   /* EMS 3: -16.1 dBFS (against -14.5: Tim, 1.11, the EMS heard quiet at -18.5) */
+    {ENGI_EMS, 4, -8},   /* EMS 4: -10.6 dBFS (against -14.5: Tim, 1.11, the EMS heard quiet at -18.5) */
+    {ENGI_EMS, 5, 15},   /* EMS 5: -22.3 dBFS (against -14.5: Tim, 1.11, the EMS heard quiet at -18.5) */
+    {ENGI_EMS, 6, 8},   /* EMS 6: -18.4 dBFS (against -14.5: Tim, 1.11, the EMS heard quiet at -18.5) */
+    {ENGI_EMS, 7, -5},   /* EMS 7: -11.8 dBFS (against -14.5: Tim, 1.11, the EMS heard quiet at -18.5) */
     {ENGI_PREP, 0, 10},   /* PREP 0: -23.4 dBFS */
     {ENGI_PREP, 1, 12},   /* PREP 1: -34.2 dBFS */
     {ENGI_PREP, 2, 15},   /* PREP 2: -29.9 dBFS */
