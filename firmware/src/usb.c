@@ -336,6 +336,12 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     5, 0x25, 1, 1, 1,                                                                                \
     9, 5, 0x81, 2, 64, 0, 0, 0, 0,                                                                   \
     5, 0x25, 1, 1, 3,
+#ifndef D_ASO                                             /* (no USB audio built: no output either) */
+#define D_AC_OUT
+#define D_ASO(s)
+#define ACH_LEN 0
+#define ASO_LEN 0
+#endif
 #define D_AUDIO(a) D_AC(a) D_MIDI((a) + 1) D_AS((a) + 2) D_ASO((a) + 3)   /* audio + MIDI from interface a */
 #define AUD_NIF (2 + FELUCCA_UAC + FELUCCA_UAC_OUT)
 #define AUD_LEN (92 + (63 + FMT_LEN) * FELUCCA_UAC + (ACH_LEN ? ACH_LEN - 10 : 0) + ASO_LEN)
