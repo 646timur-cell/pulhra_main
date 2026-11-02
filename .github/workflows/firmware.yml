@@ -113,6 +113,26 @@ jobs:
         with:
           name: pulhra-${{ needs.build.outputs.channel }}-${{ github.sha }}
           path: output
+      - uses: actions/checkout@v4
+        if: needs.build.outputs.channel != 'rc'
+        with:
+          ref: firmware-builds
+          path: published
+      - name: Stage only the selected Pages channel
+        id: stage
+        if: needs.build.outputs.channel != 'rc'
+        env:
+          CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          if [ "$CHANNEL" = preview ]; then
+            head=$(git ls-remote origin refs/heads/develop | cut -f1)
+            if [ "$head" != "$GITHUB_SHA" ]; then
+              echo "A newer develop commit exists; skipping this preview."
+              exit 0
+            fi
+          fi
+          python3 tools/publish_site.py output/site published
+          echo "staged=yes" >> "$GITHUB_OUTPUT"
       - name: Publish tagged release (immutable assets)
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -131,24 +151,11 @@ jobs:
             --generate-notes "output/pulhra-$VERSION-release.tar.gz" \
             output/site/*.fwsc output/site/fm1-pulhra-installer.html output/site/pulhra-editor.html \
             output/site/SHA256SUMS output/site/SOURCE_COMMIT output/site/CHANNEL.json
-      - uses: actions/checkout@v4
-        if: needs.build.outputs.channel != 'rc'
-        with:
-          ref: firmware-builds
-          path: published
-      - name: Update only the selected Pages channel
-        if: needs.build.outputs.channel != 'rc'
+      - name: Push staged Pages channel
+        if: steps.stage.outputs.staged == 'yes'
         env:
           CHANNEL: ${{ needs.build.outputs.channel }}
         run: |
-          if [ "$CHANNEL" = preview ]; then
-            head=$(git ls-remote origin refs/heads/develop | cut -f1)
-            if [ "$head" != "$GITHUB_SHA" ]; then
-              echo "A newer develop commit exists; skipping this preview."
-              exit 0
-            fi
-          fi
-          python3 tools/publish_site.py output/site published
           cd published
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
