@@ -157,6 +157,15 @@ static int midi_enqueue(uint32_t pkt, uint32_t source)
     mi_w++;
     return 1;
 }
+/* USB MIDI out (usb.c's queue): the tests log the packets and the block they went in */
+static uint32_t mo_log[4096], mo_at[4096], mo_n, mo_blk;
+static void midi_out_event(uint32_t pkt)
+{
+    if (mo_n < 4096u) {
+        mo_at[mo_n] = mo_blk;
+        mo_log[mo_n++] = pkt;
+    }
+}
 /* every note-on of the app code included below (the sequencer's) goes through the counter; the tests' own calls after
  * the #undef go to voice.c's directly */
 #define trk_note_on seq_note_on
@@ -814,6 +823,7 @@ static void in_reset(void)
 {
     uint32_t k;
     sm_auto = SM_AUTO_TRIG;                               /* (AUTO: the project's; each test from the default) */
+    sm_clko_on = 0;                                       /* (CLK OUT, the USB page: off) */
     for (k = 0; k < 8u; k++)
         run_block();                                      /* (the ring empty) */
     panel = PANEL_DEFAULT;
@@ -10698,6 +10708,50 @@ static double stem_e(uint32_t k)                         /* the energy of a USB 
     }
     return e;
 }
+static int test_clock_out(void)                         /* CLK OUT (the USB page, K2): 24 a quarter, START at PLAY, STOP at STOP */
+{
+    int bad = 0;
+    uint32_t b, i, f8 = 0, fa = 0, fc = 0, first = 0, bars;
+    in_reset();
+    host_ticks = 1000u;
+    sm_clko_on = 0;
+    mo_n = 0;
+    play_blocks(100);
+    bad += check("CLKO: off: nothing out", mo_n == 0);
+    sm_clko_on = 1;
+    play_blocks(100);
+    for (i = 0; i < mo_n; i++)
+        f8 += mo_log[i] == (0x0Fu | 0xF8u << 8);
+    bad += check("CLKO: on, stopped: the pulses run (a follower holds the tempo)", f8 > 0 && f8 == mo_n);
+    mo_n = 0;
+    press(B_PLAY);
+    sm_input_poll();
+    bars = (uint32_t)(4.0 * 60.0 / 120.0 * 44100.0 / CTL * 4.0);   /* four bars at 120 */
+    for (b = 0, mo_blk = 0; b < bars; b++, mo_blk++)
+        run_block();
+    f8 = 0;
+    for (i = 0; i < mo_n; i++) {
+        if (mo_log[i] == (0x0Fu | 0xFAu << 8)) {
+            fa++;
+            first = i;
+        }
+        if (mo_log[i] == (0x0Fu | 0xF8u << 8) && fa)
+            f8++;
+    }
+    printf("pulhra: CLKO: START at %u, %u pulses in %u blocks (4 bars at 120: 384)\n", first, f8, bars);
+    bad += check("CLKO: PLAY: START first, then 24 a quarter (4 bars: 384 +-1), a pulse right after START", fa == 1u && first == 0u &&
+                 f8 >= 383u && f8 <= 385u && mo_log[1] == (0x0Fu | 0xF8u << 8));
+    mo_n = 0;
+    press(B_PLAY);
+    sm_input_poll();
+    play_blocks(10);
+    for (i = 0; i < mo_n; i++)
+        fc += mo_log[i] == (0x0Fu | 0xFCu << 8);
+    bad += check("CLKO: STOP: one STOP", fc == 1u);
+    sm_clko_on = 0;
+    play_blocks(2);
+    return bad;
+}
 static int test_usb_stems(void)                         /* the stems' modes (fx.c uac_mode): TRACKS, DRUMS, STEREO */
 {
     int bad = 0;
@@ -14256,6 +14310,7 @@ int main(void)
     bad += test_kit_lane_vel();
     bad += test_len_by_trig();
     bad += test_usb_stems();
+    bad += test_clock_out();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

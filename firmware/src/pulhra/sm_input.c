@@ -1369,6 +1369,10 @@ static void sm_input_poll(void)
             uac_mode = (uint8_t)((((int32_t)uac_mode + k[0]) % (int32_t)UAC_M_COUNT + (int32_t)UAC_M_COUNT) % (int32_t)UAC_M_COUNT);
             sm_dirty = 1;
         }
+        if (k[1]) {                                       /* K2: CLK OUT, right on, left off */
+            sm_clko_on = (uint8_t)(k[1] > 0);
+            sm_dirty = 1;
+        }
     } else if (sm_page_home() == SMH_PRESET) {            /* K1 machine, K2 category, K3 LOAD, K4 SAVE (OCT+ does it) */
         sm_pr_page(k);
     } else if (sm_page_home()) {

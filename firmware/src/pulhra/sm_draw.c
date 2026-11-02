@@ -587,6 +587,16 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
     }
     if (sm_page_home() == SMH_USB) {                      /* K1 MODE: what the USB audio carries (the stems' version); K2..K4 none */
         static const char *const UM_N[UAC_M_COUNT] = {"DRUMS", "TRACK", "SUM"};
+        if ((k & 3u) == 1u) {                             /* K2: MIDI clock and START / STOP out (USB MIDI) */
+            o->on = 1;
+            o->lab[0] = 'C'; o->lab[1] = 'L'; o->lab[2] = 'K'; o->lab[3] = 'O'; o->lab[4] = 0;
+            smd_upper(o->val, sm_clko_on ? "ON" : "OFF", 5u);
+            o->v = sm_clko_on;
+            o->pos = sm_clko_on ? 256u : 0u;
+            o->dim = 0;
+            o->inv = 0;
+            return;
+        }
         if ((k & 3u) != 0u) {
             o->on = 0;
             return;
@@ -819,7 +829,7 @@ static uint32_t smd_sel_sig(void)
     if (sm_page_home() == SMH_SETUP)
         return smd_mix(h, sm_midi_div);
     if (sm_page_home() == SMH_USB)
-        return smd_mix(h, 0x500u + uac_mode);
+        return smd_mix(h, 0x500u + uac_mode + 16u * sm_clko_on);
     if (sm_page_home() == SMH_PRESET)                     /* (what the row names: the sound, the place, what OCT+ does) */
         return smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, sm_pr.mach), sm_pr.cat), sm_pr.item), sm_pr.place),
                        smd_mix(sm_pr.arm + 4u * sm_up.seq + 64u * sm_up.pend, sm_ui.trk * 256u + s->preset));   /* (SAVE's name: the

@@ -185,7 +185,7 @@ static void sm_prec_get(sm_prec_t *r)
         r->g4[i] = song.g[SM_GFX4[i]];
     for (i = 0; i < SM_NTRK; i++)
         r->mch[i] = sm_midi_ch[i];
-    r->msrc = sm_midi_src;
+    r->msrc = (uint8_t)(sm_midi_src | (sm_clko_on ? 0x80u : 0u));   /* (bit 7: CLK OUT, the USB page) */
     r->mtrn = (uint8_t)((sm_midi_clk & 3u) | (sm_midi_trnoff ? 4u : 0u) | (sm_midi_div ? 8u : 0u) | (uint8_t)((sm_auto % SM_AUTO_COUNT) << 4) |
                      (uint8_t)((uac_mode % UAC_M_COUNT) << 6));   /* (bit 3: DIV 1:2; bits 4-5: AUTO; bits 6-7: the USB stems' mode) */
 }
@@ -539,7 +539,8 @@ static void sm_store_boot(void)
         }
         for (i = 0; i < SM_NTRK; i++)
             sm_midi_ch[i] = (uint8_t)(r.mch[i] <= 16u ? r.mch[i] : i + 1u);
-        sm_midi_src = (uint8_t)(r.msrc < 3u ? r.msrc : 1u);
+        sm_midi_src = (uint8_t)((r.msrc & 0x7Fu) < 3u ? (r.msrc & 0x7Fu) : 1u);
+        sm_clko_on = (uint8_t)(r.msrc >> 7);
         sm_midi_clk = (uint8_t)(r.mtrn & 3u);
         sm_midi_trnoff = (uint8_t)((r.mtrn >> 2) & 1u);
         sm_midi_div = (uint8_t)((r.mtrn >> 3) & 1u);

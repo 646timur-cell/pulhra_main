@@ -882,6 +882,38 @@ static void sm_rec_stop(void)
     }
 }
 
+/* MIDI clock out (Tim 3.11; USB MIDI: to a computer, or through a USB host, the Pico box, to another FM-1): with CLK OUT on, 24 pulses a
+ * quarter from this tempo (internal or followed), always, so a follower holds the tempo stopped too; START at PLAY (the pulses from
+ * there in phase: one at once, then every 4/3 of a tick), STOP at STOP */
+static uint8_t sm_clko_on, sm_clko_run;
+static uint32_t sm_clko_q8, sm_clko_rem;
+static void sm_clko_block(uint32_t n)
+{
+    uint32_t nq8 = n << 8, tq = sm_tick_q8();
+    if (!sm_clko_on) {
+        if (sm_clko_run)
+            midi_out_event(0x0Fu | 0xFCu << 8);           /* (turned off while playing: the follower stops) */
+        sm_clko_run = 0;
+        return;
+    }
+    if (sm_playing && !sm_clko_run) {
+        midi_out_event(0x0Fu | 0xFAu << 8);               /* START, then a pulse at once (the sequence's first tick) */
+        sm_clko_run = 1;
+        sm_clko_q8 = 0;
+        sm_clko_rem = 0;
+    } else if (!sm_playing && sm_clko_run) {
+        midi_out_event(0x0Fu | 0xFCu << 8);               /* STOP */
+        sm_clko_run = 0;
+    }
+    while (sm_clko_q8 < nq8) {
+        uint32_t st = tq * 4u + sm_clko_rem;              /* (a pulse: 32 ticks a quarter, 24 pulses: 4/3 of a tick, exact over three) */
+        midi_out_event(0x0Fu | 0xF8u << 8);
+        sm_clko_q8 += st / 3u;
+        sm_clko_rem = st % 3u;
+    }
+    sm_clko_q8 -= nq8;
+}
+
 /* the audio block's events: the commands first (before engine_block: a machine change applied after it would render the
  * old engine with the new engine's values in this block, voice.c track_render), then panic_req, the engines' switches,
  * and the sequencer's events of the block in time order: the steps' starts, the nudged fires, the ratchet parts. MIDI IN's
@@ -908,6 +940,7 @@ static void events_block(uint32_t n)
         engine_block(&trk[t]);                            /* engine switch: fade, then switch (voice.c) */
     }
     sm_arp_block(n);                                      /* (the arpeggiators run stopped too) */
+    sm_clko_block(n);
     if (!sm_playing)
         return;
     {
