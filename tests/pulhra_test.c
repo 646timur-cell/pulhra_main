@@ -10811,13 +10811,13 @@ static int test_usb_stems(void)                         /* the stems' modes (fx.
             }
         }
         printf("pulhra: USB DRUMS: kick %g, drums %g, rest %g, master pair %g\n", e[0], e[1], e[2], e[3]);
-        bad += check("USB DRUMS: the KIT's kick on 1-2 (mono), the hat on 3-4, nothing else playing: 5-6 near silent, 7-8 (the master) "
+        bad += check("USB DRUMS: the KIT's kick on 1 (mono), the hat on 3-4, nothing else playing: 5-6 near silent, 7-8 (the master) "
                      "left to usb.c", e[0] > 1e5 && e[1] > 1e4 && e[2] < (e[0] + e[1]) * 0.01 && e[3] == 0);
         {
             uint32_t i, mono = 1;
             for (i = 0; i < CTL; i++)
-                mono &= (uac_stem[0][i] & 0xFFFFu) == (uac_stem[0][i] >> 16);
-            bad += check("USB DRUMS: the kick mono (L = R)", mono != 0);
+                mono &= (uac_stem[0][i] >> 16) == 0u;
+            bad += check("USB DRUMS: the kick on channel 1 alone (2 silent)", mono != 0);
         }
     }
     {

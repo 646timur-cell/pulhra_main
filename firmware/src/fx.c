@@ -1343,7 +1343,7 @@ static __attribute__((noinline)) void mf_punch_track(int32_t *out, uint32_t n, u
         scope_take_mix(n);
 }
 #endif
-/* the stems' mode (Tim 2.11; SHIFT + HOME, the USB page; the project keeps it): DRUMS 1-2 the KIT's kick (mono), 3-4 the other drums,
+/* the stems' mode (Tim 2.11; SHIFT + HOME, the USB page; the project keeps it): DRUMS 1 the KIT's kick (mono; 2 silent), 3-4 the other drums,
  * 5-6 the rest with the effects, 7-8 the master; TRACKS T1 .. T4 (no effects' return); STEREO 1-2 the master */
 enum { UAC_M_DRUMS, UAC_M_TRACKS, UAC_M_STEREO, UAC_M_COUNT };
 static volatile uint8_t uac_mode;
@@ -1445,7 +1445,7 @@ static void mix_block(int32_t *out, uint32_t n)
         int32_t gl = 4096 - (pan > 0 ? pan * 64 : 0), gr = 4096 + (pan < 0 ? pan * 64 : 0);
         for (i = 0; i < n; i++) {
             int32_t x = kit ? clamp(((dr_kick[i] >> 2) * lvl) >> 10, -524287, 524287) : 0, kl = (x * gl) >> 12, kr = (x * gr) >> 12;
-            uac_stem[0][i] = uac_pack((kl + kr) >> 1, (kl + kr) >> 1);
+            uac_stem[0][i] = uac_pack((kl + kr) >> 1, 0);   /* (channel 1 alone, 2 silent: Tim 3.11) */
             uac_stem[1][i] = uac_pack(uac_t4[0][i] - kl, uac_t4[1][i] - kr);
             uac_stem[2][i] = uac_pack(uac_rest[0][i] + mix_l[i] + wet[i] - uac_pre[0][i], uac_rest[1][i] + mix_r[i] + wet[i] - uac_pre[1][i]);
             uac_stem[3][i] = 0;                         /* (usb.c: the master) */
