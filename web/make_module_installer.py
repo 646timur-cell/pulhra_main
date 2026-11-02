@@ -78,6 +78,17 @@ def pulhra(raw, version, out):
     if b"FELUCCA-LOADER-1" not in raw:
         raise SystemExit("no Felucca loader in the package")
     html = (HERE / "pulhra_installer.html").read_text(encoding="utf-8")
+    channel = os.environ.get("PULHRA_CHANNEL", "local")
+    if channel not in ("stable", "preview", "rc", "ci", "local"):
+        raise SystemExit(f"unknown PULHRA channel: {channel}")
+    label = {"stable": "STABLE", "preview": "EXPERIMENTAL PREVIEW", "rc": "RELEASE CANDIDATE", "ci": "TEST BUILD", "local": "LOCAL BUILD"}[channel]
+    notice = "" if channel == "stable" else " — back up banks before installing."
+    html = html.replace("<!--CHANNEL-->", f'<div class="ver">// {label}{notice}</div>')
+    # Relative links also work on a project site and when downloaded for offline installation.
+    nav = '<a href="preview/">[ EXPERIMENTAL ]</a>' if channel == "stable" else '<a href="../">[ STABLE ]</a>'
+    html = html.replace("<!--CHANNEL_NAV-->", nav if channel in ("stable", "preview") else "")
+    if channel == "stable":
+        html = html.replace('href="stems.html"', 'href="preview/stems.html"')
     lib = "\n".join(strip_module((HERE / f).read_text(encoding="utf-8")) for f in ("fm1pkg.js", "fm1ota.js"))
     data = "data:application/octet-stream;base64," + base64.b64encode(raw).decode()
     meta = json.dumps({"version": version, "product": product, "pkg": data, "commit": os.environ.get("GITHUB_SHA", "")[:7]})

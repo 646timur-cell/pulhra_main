@@ -8,6 +8,7 @@ parameter locks, trig states, chains, an arpeggiator per track and per-pattern k
 - **What it is and how to play it:** [PULHRA.md](PULHRA.md)
 - **Install:** open `fm1-pulhra-installer.html` from the [`firmware-builds`](../../tree/firmware-builds) branch in Chrome
   with the FM-1 on USB. `SOURCE_COMMIT` in that branch names the commit it was built from.
+- **Branches and releases:** [RELEASING.md](RELEASING.md). `main` is stable source; `develop` publishes [experimental previews](https://646timur-cell.github.io/pulhra_main/preview/). Stable site updates require a release tag.
 - **Build:** [BUILDING.md](BUILDING.md). Host tests:
   `cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/pulhra_test tests/pulhra_test.c -lm`
 - **Design and plans:** `docs/superpowers/specs/`, `docs/superpowers/plans/`
