@@ -51,7 +51,7 @@ jobs:
           set -o pipefail
           FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 ./build.sh --release 1.5.1 2>&1 | tee build-pulhra.log
 
-      - name: Build (the stems, a separate version: 8 channels at 44.1 kHz, the modes on SHIFT + HOME's USB page; its bench; the main package kept)
+      - name: "Build (the stems, a separate version, 8 channels at 44.1 kHz, the modes on SHIFT + HOME's USB page; its bench; the main package kept)"
         run: |
           set -o pipefail
           cp build/pulhra-1.5.1.fwsc /tmp/pulhra-main.fwsc
