@@ -1356,12 +1356,13 @@ static uint32_t uac_stem[5][CTL] __attribute__((section(".pool")));   /* (the po
 static int32_t uac_pre[2][CTL] __attribute__((section(".pool"))), uac_t4[2][CTL] __attribute__((section(".pool"))),
     uac_rest[2][CTL] __attribute__((section(".pool")));
 #define UAC_MASTER_PAIR (uac_mode == UAC_M_DRUMS ? 3u : uac_mode == UAC_M_STEREO ? 0u : 0xFFu)   /* (usb.c uac_tap: the master there) */
-#define UAC_STEM_SHIFT 2         /* the stems' headroom: -12 dB (Tim, 2.11: the KIT's pair clipped, red, at the master's full level; the
-                                    master has its compressor and limiter, the stems none, and 16 bits) */
+/* the stems' level (Tim 3.11: the kick clipped at -12 dB of the master's full level): as the master pair, the MASTER knob's (or full
+ * with USB LEVEL FIXED), then -12 dB: the master has its compressor and limiter, the stems none, and 16 bits */
+static int32_t uac_g = MASTER_FULL;
 static inline uint32_t uac_pack(int32_t l, int32_t r)
 {
-    l >>= UAC_STEM_SHIFT;
-    r >>= UAC_STEM_SHIFT;
+    l = (int32_t)(((int64_t)l * uac_g) >> 14);
+    r = (int32_t)(((int64_t)r * uac_g) >> 14);
     l = l > 32767 ? 32767 : l < -32768 ? -32768 : l;
     r = r > 32767 ? 32767 : r < -32768 ? -32768 : r;
     return (uint32_t)(uint16_t)l | (uint32_t)(uint16_t)r << 16;
@@ -1374,6 +1375,9 @@ static void mix_block(int32_t *out, uint32_t n)
     int32_t mg = fx_usb_fixed ? MASTER_FULL : (int32_t)song.master_q12;   /* (USB LEVEL FIXED: MASTER after) */
     for (i = 0; i < n; i++)
         send_c[i] = send_d[i] = send_r[i] = mix_l[i] = mix_r[i] = 0;
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+    uac_g = mg;                                         /* (the stems at the master pair's level, uac_pack) */
+#endif
 #if FELUCCA_DARK
     mf_prep();
 #endif
