@@ -1352,8 +1352,9 @@ static volatile uint8_t uac_mode;
  * DIST, INSERT, level and pan: what it adds to mix_l / mix_r), and the effects' return: what the buses' wet and the rest
  * (HALL's side, PERFORM on the dry mix) add after the tracks; all before MASTER, the compressor and the limiter, at the
  * master's full level. A frame of a stem: 16-bit L | R << 16 (as the ring has it) */
-static uint32_t uac_stem[5][CTL];
-static int32_t uac_pre[2][CTL], uac_t4[2][CTL], uac_rest[2][CTL];
+static uint32_t uac_stem[5][CTL] __attribute__((section(".pool")));   /* (the pool: RAM keeps its 4 KiB headroom) */
+static int32_t uac_pre[2][CTL] __attribute__((section(".pool"))), uac_t4[2][CTL] __attribute__((section(".pool"))),
+    uac_rest[2][CTL] __attribute__((section(".pool")));
 #define UAC_MASTER_PAIR (uac_mode == UAC_M_DRUMS ? 3u : uac_mode == UAC_M_STEREO ? 0u : 0xFFu)   /* (usb.c uac_tap: the master there) */
 #define UAC_STEM_SHIFT 2         /* the stems' headroom: -12 dB (Tim, 2.11: the KIT's pair clipped, red, at the master's full level; the
                                     master has its compressor and limiter, the stems none, and 16 bits) */
