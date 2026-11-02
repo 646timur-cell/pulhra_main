@@ -22,17 +22,17 @@ static struct { volatile uint32_t notes, buttons, frames; uint32_t enc_dfr[8]; }
 #include "../firmware/src/core.h"
 static const uint8_t *host_xip(uint32_t off);          /* (pulhra_test.c: the simulated flash, the user slot read as XIP) */
 #define SMP_USER_XIP(k) host_xip(SMP_USER_BASE + SMP_SLOT_OFF(k))
+#ifndef FELUCCA_UAC
+#define FELUCCA_UAC 1                /* (voice.c, fx.c: the USB stems, as PULHRA's stems version builds them) */
+#endif
+#ifndef FELUCCA_UAC_NCH
+#define FELUCCA_UAC_NCH 8
+#endif
 #include "../firmware/src/engines.c"
 #include "../firmware/src/params.c"
 #include "../firmware/src/mod.c"
 #include "../firmware/src/voice.c"
 #include "../firmware/src/slicer.c"
-#ifndef FELUCCA_UAC
-#define FELUCCA_UAC 1                /* (fx.c: the USB stems, as PULHRA builds them) */
-#endif
-#ifndef FELUCCA_UAC_NCH
-#define FELUCCA_UAC_NCH 10
-#endif
 #include "../firmware/src/fx.c"
 
 /* ------------------------------------------------------------ HAL stubs --- */

@@ -186,7 +186,8 @@ static void sm_prec_get(sm_prec_t *r)
     for (i = 0; i < SM_NTRK; i++)
         r->mch[i] = sm_midi_ch[i];
     r->msrc = sm_midi_src;
-    r->mtrn = (uint8_t)((sm_midi_clk & 3u) | (sm_midi_trnoff ? 4u : 0u) | (sm_midi_div ? 8u : 0u) | (uint8_t)((sm_auto % SM_AUTO_COUNT) << 4));   /* (bit 3: DIV 1:2; bits 4-5: AUTO) */
+    r->mtrn = (uint8_t)((sm_midi_clk & 3u) | (sm_midi_trnoff ? 4u : 0u) | (sm_midi_div ? 8u : 0u) | (uint8_t)((sm_auto % SM_AUTO_COUNT) << 4) |
+                     (uint8_t)((uac_mode % UAC_M_COUNT) << 6));   /* (bit 3: DIV 1:2; bits 4-5: AUTO; bits 6-7: the USB stems' mode) */
 }
 static uint32_t sm_proj_hash(void)
 {
@@ -543,6 +544,7 @@ static void sm_store_boot(void)
         sm_midi_trnoff = (uint8_t)((r.mtrn >> 2) & 1u);
         sm_midi_div = (uint8_t)((r.mtrn >> 3) & 1u);
         sm_auto = (uint8_t)(((r.mtrn >> 4) & 3u) % SM_AUTO_COUNT);
+        uac_mode = (uint8_t)(((r.mtrn >> 6) & 3u) % UAC_M_COUNT);
         smp.bpm10 = (uint16_t)clamp(r.bpm10, 300, 3000);
         smp.swing = (uint8_t)clamp(r.swing, 50, 75);
         smp.mute = (uint8_t)(r.mute & ((1u << SM_NTRK) - 1u));

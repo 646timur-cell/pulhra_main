@@ -585,6 +585,21 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         }
         return;
     }
+    if (sm_page_home() == SMH_USB) {                      /* K1 MODE: what the USB audio carries (the stems' version); K2..K4 none */
+        static const char *const UM_N[UAC_M_COUNT] = {"DRUMS", "TRACK", "SUM"};
+        if ((k & 3u) != 0u) {
+            o->on = 0;
+            return;
+        }
+        o->on = 1;
+        o->lab[0] = 'M'; o->lab[1] = 'O'; o->lab[2] = 'D'; o->lab[3] = 'E'; o->lab[4] = 0;
+        smd_upper(o->val, UM_N[uac_mode % UAC_M_COUNT], 5u);
+        o->v = uac_mode;
+        o->pos = (uint32_t)(uac_mode % UAC_M_COUNT) * 256u / (UAC_M_COUNT - 1u);
+        o->dim = FELUCCA_UAC_NCH <= 2;                    /* (the stereo firmware: the master only, whatever the mode) */
+        o->inv = 0;
+        return;
+    }
     if (sm_page_home() == SMH_SETUP) {                    /* K1 CLK, K2 MODE, K3 TRNS, K4 SRC (the notes' MIDI source) */
         static const char *const CLK_N[SM_CLK_COUNT] = {"AUTO", "INT", "USB", "JACK"};
         static const char *const PM_N[SM_PM_COUNT] = {"SEQ", "STR", "JMP"};
@@ -797,11 +812,14 @@ static uint32_t smd_sel_sig(void)
         h = smd_mix(h, (uint32_t)(uint8_t)s->p[P_E0 + sm_kit_lane % 4u] * 4u + sm_kit_lane);
     if (sm_page_is_step())
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
-    if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP && sm_page_home() != SMH_PRESET)   /* (the
+    if (sm_page_home() && sm_page_home() != SMH_MIDI && sm_page_home() != SMH_SETUP && sm_page_home() != SMH_PRESET &&
+        sm_page_home() != SMH_USB)   /* (the
                                                              selected track's volume) */
         return smd_mix(h, (uint32_t)clamp(s->p[P_LEVEL], TP[P_LEVEL].min, TP[P_LEVEL].max));
     if (sm_page_home() == SMH_SETUP)
         return smd_mix(h, sm_midi_div);
+    if (sm_page_home() == SMH_USB)
+        return smd_mix(h, 0x500u + uac_mode);
     if (sm_page_home() == SMH_PRESET)                     /* (what the row names: the sound, the place, what OCT+ does) */
         return smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, sm_pr.mach), sm_pr.cat), sm_pr.item), sm_pr.place),
                        smd_mix(sm_pr.arm + 4u * sm_up.seq + 64u * sm_up.pend, sm_ui.trk * 256u + s->preset));   /* (SAVE's name: the
@@ -846,7 +864,8 @@ static void smd_select(void)
         if (sm_pr.arm)                                    /* (OCT+ at the right: what does it) */
             sm_px_text(240 - 4 - 12 * 4, 2, 2u, "OCT+", T_TEXT, 0);
     } else if (sm_page_is_step() || (sm_page_home() && sm_page_home() != SMH_EUCLID && sm_page_home() != SMH_MIDI &&
-                              sm_page_home() != SMH_SETUP)) {   /* STEP and HOME (MIXER, CLOCK): the selected track's volume */
+                              sm_page_home() != SMH_SETUP && sm_page_home() != SMH_USB)) {   /* STEP and HOME (MIXER, CLOCK): the
+                                                             selected track's volume */
         char val[12];
         const char *unit;
         int32_t x;
@@ -854,6 +873,9 @@ static void smd_select(void)
         x = sm_px_text(4, 2, 2u, "LEVEL", T_TEXT, 0) + 4 + 12;
         val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
+    } else if (sm_page_home() == SMH_USB) {                /* USB: the channels the mode gives (the stereo firmware: 1-2 only) */
+        static const char *const MAP[UAC_M_COUNT] = {"1KICK 3DRM 5MIX 7ALL", "1T1 3T2 5T3 7T4", "1-2 ALL"};
+        sm_px_text(4, 2, 2u, FELUCCA_UAC_NCH > 2 ? MAP[uac_mode % UAC_M_COUNT] : "STEREO FIRMWARE", T_TEXT, 0);
     } else if (sm_page_home() == SMH_SETUP) {              /* SETUP's SELECT: the clock's DIV (1:2 takes every second pulse) */
         int32_t x = sm_px_text(4, 2, 2u, "CLK DIV", T_TEXT, 0) + 4 + 12;
         sm_px_text(x, 2, 2u, sm_midi_div ? "1:2" : "1:1", T_TEXT, 1);
@@ -1202,7 +1224,7 @@ static uint32_t smd_strip1_sig(void)                     /* the selected track's
     return smd_mix(h, t * 2u + (b != 0));
 }
 /* the pages with no sequencer under them (Tim): MIDI and SETUP (OCT- + HOME): the strip's zone black */
-static int smd_nostrip(void) { return !sm_map_open() && (sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP); }
+static int smd_nostrip(void) { return !sm_map_open() && (sm_page_home() == SMH_MIDI || sm_page_home() == SMH_SETUP || sm_page_home() == SMH_USB); }
 static uint32_t smd_strip_sig(void) { return smd_nostrip() ? 0x5E7u : smd_panel() ? smd_strip4_sig() : smd_strip1_sig(); }
 /* the selected track's strip in ASCII (Tim's): a character per step in its 13 px cell, the ink on the strip's ground:
  *   . an empty step (dim)   bullet a trig   ^ an accent   degree a REST (a lock trig)   x a ratchet   * a slide (or PSLIDE)

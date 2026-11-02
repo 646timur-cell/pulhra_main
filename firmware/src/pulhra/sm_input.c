@@ -1364,6 +1364,11 @@ static void sm_input_poll(void)
                 sm_midi_clk = SM_CLK_AUTO;
             sm_dirty = 1;
         }
+    } else if (sm_page_home() == SMH_USB) {               /* K1: the USB audio's mode (the stems' version), round */
+        if (k[0]) {
+            uac_mode = (uint8_t)((((int32_t)uac_mode + k[0]) % (int32_t)UAC_M_COUNT + (int32_t)UAC_M_COUNT) % (int32_t)UAC_M_COUNT);
+            sm_dirty = 1;
+        }
     } else if (sm_page_home() == SMH_PRESET) {            /* K1 machine, K2 category, K3 LOAD, K4 SAVE (OCT+ does it) */
         sm_pr_page(k);
     } else if (sm_page_home()) {

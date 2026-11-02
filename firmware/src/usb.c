@@ -1221,7 +1221,8 @@ static __attribute__((noinline)) void uac_tap48(const int32_t *out, uint32_t n)
 #endif
 
 #if UA_W > 1
-#define STEM_AT(k, i) uac_stem[k][i]
+#define STEM_AT(k, i) ((k) == UAC_MASTER_PAIR ? (uint32_t)(uint16_t)uac_s16(out[2u * (i)]) | (uint32_t)(uint16_t)uac_s16(out[2u * (i) + 1u]) << 16 \
+                                              : uac_stem[k][i])   /* (fx.c: the mode's pairs; the master from the output) */
 #else
 #define STEM_AT(k, i) 0u
 #endif
@@ -1267,11 +1268,10 @@ static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   
     }
 #else
 #if UA_W > 1
-    for (i = 0; i < n; i++) {                           /* the stems (fx.c uac_stem: each pair this block, packed), not the master */
+    for (i = 0; i < n; i++) {                           /* the stems (fx.c uac_stem: each pair this block, packed; the mode's master pair the output) */
         uint32_t k, f = ((w + i) & (UA_N - 1u)) * UA_W;
-        (void)out;
         for (k = 0; k < UA_W; k++)
-            ua_ring[f + k] = uac_stem[k][i];
+            ua_ring[f + k] = STEM_AT(k, i);
     }
 #else
     for (i = 0; i < n; i++)

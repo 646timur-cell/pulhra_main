@@ -737,6 +737,17 @@ static __attribute__((noinline)) void mf_filter_voice(track_t *t, voice_t *v, co
 }
 #endif
 
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+static int32_t dr_kick[CTL];
+#endif
+#if FELUCCA_SWAMP && FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+/* the USB stems' KICK (Tim 2.11, mode DRUMS): the KIT's lanes whose machine is KICK render apart here, then into the KIT's sum; fx.c
+ * takes the kick's share from it */
+#define VDST(t, v) ((t)->engine == ENGI_DKIT && dr_kmach((t)->p[P_E0 + dr_lane((v)->note)]) == DR_KM_KICK ? dr_kick : \
+                    spread_on > (v)->side ? spread_buf : out)
+#else
+#define VDST(t, v) (spread_on > (v)->side ? spread_buf : out)
+#endif
 static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
 {
     const engine_t *e = ENGINES[t->engine];
@@ -762,6 +773,11 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
     int16_t pe_new[8];
     for (i = 0; i < n; i++)
         out[i] = 0;
+#if FELUCCA_SWAMP && FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+    if (t->engine == ENGI_DKIT)
+        for (i = 0; i < n; i++)
+            dr_kick[i] = 0;
+#endif
     if (mod.on && mod.ldep < 32767)                     /* the matrix's DEPTH (mod.c) */
         lfo = mulq15(lfo, mod.ldep);
     if (spread_on)
@@ -852,7 +868,7 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
                                                           * however long its REL: a KS string, a struck gong ring out long before a
                                                           * REL 127 does (~100 s), holding a voice and the time to render it */
             static int32_t vq[CTL];
-            int32_t *dst = spread_on > v->side ? spread_buf : out, pk = 0;
+            int32_t *dst = VDST(t, v), pk = 0;
             uint32_t j;
             for (j = 0; j < n; j++)
                 vq[j] = 0;
@@ -880,14 +896,19 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
 #endif
 #if FELUCCA_MONOFM
         if (FELUCCA_SWAMP && t->engine == ENGI_DKIT ? mf_lane_filter_on(t, v) : mf_filters_on(p)) {   /* the track's filters (ENV > HYBRID, FILTER): the voice alone, then into */
-            mf_filter_voice(t, v, e, n, &m, spread_on > v->side ? spread_buf : out);   /* the sum */
+            mf_filter_voice(t, v, e, n, &m, VDST(t, v));   /* the sum */
             nr++;
             continue;
         }
 #endif
-        e->render(t, v, spread_on > v->side ? spread_buf : out, n, &m);   /* (SPREAD: the left ones) */
+        e->render(t, v, VDST(t, v), n, &m);   /* (SPREAD: the left ones) */
         nr++;
     }
+#if FELUCCA_SWAMP && FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+    if (t->engine == ENGI_DKIT)
+        for (i = 0; i < n; i++)
+            out[i] += dr_kick[i];                       /* (the kick back in the KIT's sum) */
+#endif
     if (spread_on)
         spread_sum(out);                                /* out: every voice; spread_buf: the left ones */
     if (e->post)                                        /* the engine's own effect on the part (STRANGE: LYRA's delay) */
