@@ -105,6 +105,11 @@ static struct {
  * 48..119 with no glitch; one render was once seen 29 frames under the floor: a packet (46) must
  * still be in hand then. */
 #define UA_W (FELUCCA_UAC_NCH / 2u)   /* words a frame: a stereo pair each (16-bit L | R << 16) */
+/* the stems (Tim 2.11, a recording's counters): a 920-byte packet is on the wire ~0.65 ms; looked for at 2 kHz, the next one was
+ * often queued after the host's next IN token (missed ~8 %, the ring overfilled, blocks dropped). The stems look every TIMER5 tick
+ * (10 kHz, main.c) */
+#define UAC_POLL_ALL (UA_W > 1u)
+#define UAC_WAIT_STALL (UAC_POLL_ALL ? 200u : 40u)   /* ticks of uac_service: 20 ms either way */
 /* (the stems, UA_W 5: the same ring and band, 10 KiB: fx.c gives its delay 1.0 s for it; Tim 2.11: the narrower band of
  * 256 frames crackled) */
 #define UA_N 512u                /* ring, frames (16-bit L | R << 16); a power of two */
@@ -1349,7 +1354,7 @@ static void uac_service(void)
     sie_wr(S_INDEX, 4);
     csr = sie_rd(S_TXCSR1);
     if (csr & 0x01u) {                                  /* still queued */
-        if (uac.wait < 255u && ++uac.wait == 40u && uac.flowing) {
+        if (uac.wait < 255u && ++uac.wait == UAC_WAIT_STALL && uac.flowing) {
             uac.flowing = 0;
             uac.stalls++;
         }

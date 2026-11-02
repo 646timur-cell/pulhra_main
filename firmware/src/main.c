@@ -42,7 +42,7 @@ void fm1_timer5_irq(void)
     if (felucca_dbg.in_audio) {
         felucca_dbg.nested++;
 #if FELUCCA_UAC
-        if (usb_due)
+        if (usb_due || UAC_POLL_ALL)
             uac_service();
 #endif
         t5_nested_ticks += fm1_ticks() - t0;
@@ -50,6 +50,10 @@ void fm1_timer5_irq(void)
     }
     if (owed & 1u)
         usb_poll();
+#if FELUCCA_UAC
+    else if (UAC_POLL_ALL)
+        uac_service();                          /* (the stems: every tick, usb_poll has its own call) */
+#endif
 #if FELUCCA_UART
     if (owed & 2u)
         uart_midi_poll();
