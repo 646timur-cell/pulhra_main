@@ -1346,8 +1346,12 @@ static __attribute__((noinline)) void mf_punch_track(int32_t *out, uint32_t n, u
  * master's full level. A frame of a stem: 16-bit L | R << 16 (as the ring has it) */
 static uint32_t uac_stem[5][CTL];
 static int32_t uac_pre[2][CTL];
+#define UAC_STEM_SHIFT 2         /* the stems' headroom: -12 dB (Tim, 2.11: the KIT's pair clipped, red, at the master's full level; the
+                                    master has its compressor and limiter, the stems none, and 16 bits) */
 static inline uint32_t uac_pack(int32_t l, int32_t r)
 {
+    l >>= UAC_STEM_SHIFT;
+    r >>= UAC_STEM_SHIFT;
     l = l > 32767 ? 32767 : l < -32768 ? -32768 : l;
     r = r > 32767 ? 32767 : r < -32768 ? -32768 : r;
     return (uint32_t)(uint16_t)l | (uint32_t)(uint16_t)r << 16;
