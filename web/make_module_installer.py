@@ -87,6 +87,8 @@ def pulhra(raw, version, out):
     # Relative links also work on a project site and when downloaded for offline installation.
     nav = '<a href="preview/">[ EXPERIMENTAL ]</a>' if channel == "stable" else '<a href="../">[ STABLE ]</a>'
     html = html.replace("<!--CHANNEL_NAV-->", nav if channel in ("stable", "preview") else "")
+    diagnostics = '<a href="stereo-tone.html">[ STEREO TEST TONE ]</a> :: <a href="stems-tone.html">[ STEMS DIAGNOSTICS ]</a>'
+    html = html.replace("<!--DIAGNOSTICS-->", diagnostics if channel == "preview" else "")
     if channel == "stable":
         html = html.replace('href="stems.html"', 'href="preview/stems.html"')
     lib = "\n".join(strip_module((HERE / f).read_text(encoding="utf-8")) for f in ("fm1pkg.js", "fm1ota.js"))

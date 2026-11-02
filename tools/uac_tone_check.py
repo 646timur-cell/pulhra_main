@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-"""Check a recording of the USB audio input of a FELUCCA_UAC_TONE=1 build (src/usb.c): 16-bit stereo WAV,
-recorded at the rate the FM-1 was set to (44.1 or 48 kHz; the triangles are made at that rate, so they
-must arrive exactly). Frame n of the stream is phase ph = n % 100 of
-    L = q * 1000 - 25000,  R = q2 * 1000 - 25000,  q = ph < 50 ? ph : 100 - ph,  q2 = |50 - ph|
-so every frame must be the one after the frame before: a lost frame or a repeated one shows as a break.
-The leading silence (the stream starting) and the end of the file are skipped.
-  tools/uac_tone_check.py REC.wav [more.wav ...]     exit 1 if any file has a break"""
+"""Check unprocessed 16-bit WAV recordings of PULHRA USB diagnostic builds.
+Stereo: exact diagnostic triangles at 44.1/48 kHz. Six channels: DRUMS
+counters in channels 5/6, 44.1 kHz. Exit 1 for corruption or unrecognised audio.
+  python3 tools/uac_tone_check.py recording.wav [more.wav ...]
+"""
 import sys
 import wave
 from array import array
@@ -21,46 +18,72 @@ def tri(ph):
 TRI = [tri(p) for p in range(100)]
 
 
-def check(path):
-    with wave.open(path, "rb") as w:
-        ch, width, rate, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
-        raw = w.readframes(n)
-    if ch != 2 or width != 2:
-        print(f"{path}: {ch} ch, {8 * width} bit: need a 16-bit stereo recording")
-        return False
-    a = array("h", raw)
-    if sys.byteorder == "big":
-        a.byteswap()
-    fr = [(a[2 * i], a[2 * i + 1]) for i in range(len(a) // 2)]
-    i = 0
-    while i < len(fr) and fr[i] == (0, 0):
-        i += 1
-    start, breaks, first = i, [], None
-    ph = None
+def stereo(fr):
+    while fr and fr[-1] == (0, 0):
+        fr.pop()
+    start = 0
+    while start < len(fr) and fr[start] == (0, 0):
+        start += 1
+    i, checked, unknown, breaks, ph = start, 0, 0, [], None
     while i < len(fr):
-        if ph is None:                                   # (re)sync: the phase that fits this frame and the next
+        if ph is None:
             cand = [p for p in range(100) if TRI[p] == fr[i] and i + 1 < len(fr) and TRI[(p + 1) % 100] == fr[i + 1]]
             if not cand:
+                unknown += 1
                 i += 1
                 continue
             ph = cand[0]
-        elif TRI[ph] != fr[i]:
+        if TRI[ph] != fr[i]:
             breaks.append(i)
-            if first is None:
-                first = i
             ph = None
             continue
+        checked += 1
         ph = (ph + 1) % 100
         i += 1
-    good = len(fr) - start
-    print(f"{path}: {rate} Hz, {len(fr)} frames ({len(fr) / rate:.1f} s), from frame {start}: "
-          f"{len(breaks)} break(s)" + (f", first at frame {first} ({first / rate:.3f} s)" if breaks else "")
-          + (f"; {good} frames checked" if good else ""))
-    return not breaks and good > 0
+    return checked >= 32 and not breaks and not unknown, f'{checked} matched frames, {len(breaks)} breaks, {unknown} unrecognised frames' + (f', first break at frame {breaks[0]}' if breaks else '')
 
 
-if __name__ == "__main__":
+def stems(fr):
+    while fr and not any(fr[-1]):
+        fr.pop()
+    start = next((i for i in range(len(fr) - 1) if fr[i][5] & 0xFFFF == 0x5A5A and
+                  fr[i][4] & 7 == 0 and (fr[i + 1][4] - fr[i][4]) & 0xFFFF == 1), None)
+    if start is None:
+        return False, 'no diagnostic frame counters found in channels 5/6'
+    first, last, breaks = {}, {}, []
+    previous = None
+    for i in range(start, len(fr)):
+        count, value = fr[i][4] & 0xFFFF, fr[i][5] & 0xFFFF
+        lane = count & 7
+        if (previous is not None and (count - previous) & 0xFFFF != 1) or (lane == 0 and value != 0x5A5A):
+            breaks.append(i)
+        previous = count
+        if lane:
+            first.setdefault(lane, value)
+            last[lane] = value
+    delta = {name: (last.get(lane, 0) - first.get(lane, 0)) & 0xFFFF for lane, name in
+             ((1, 'underruns'), (2, 'overruns'), (3, 'missed packets'))}
+    checked = len(fr) - start
+    return checked >= 32 and not breaks and not any(delta.values()), f'{checked} counter frames, {len(breaks)} discontinuities, counter increases: {delta}'
+
+
+def check(path):
+    with wave.open(path, 'rb') as w:
+        ch, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
+        raw = w.readframes(w.getnframes())
+    if width != 2 or ch not in (2, 6) or rate not in (44100, 48000) or (ch == 6 and rate != 44100):
+        print(f'{path}: need 16-bit stereo at 44.1/48 kHz or 6 channels at 44.1 kHz')
+        return False
+    a = array('h', raw)
+    if sys.byteorder == 'big':
+        a.byteswap()
+    fr = [tuple(a[i:i + ch]) for i in range(0, len(a), ch)]
+    ok, message = stereo(fr) if ch == 2 else stems(fr)
+    print(f'{path}: {rate} Hz, {ch} channels: {message}: {"PASS" if ok else "FAIL"}')
+    return ok
+
+
+if __name__ == '__main__':
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    ok = all([check(p) for p in sys.argv[1:]])
-    sys.exit(0 if ok else 1)
+    sys.exit(0 if all([check(p) for p in sys.argv[1:]]) else 1)
