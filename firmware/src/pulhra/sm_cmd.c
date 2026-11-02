@@ -392,7 +392,8 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     s->n = 1;
 }
 
-/* the main loop: track t's length len (1 .. SM_NSTEP; SEQ + SELECT, OCT+ held + a trig key). The KIT (Tim, 2.11): the lane in
+static void sm_redraw_all(void);
+/* the main loop: track t's length len (1 .. SM_NSTEP; SEQ + SELECT); every zone of the screen drawn again. The KIT (Tim, 2.11): the lane in
  * edit's, each lane its own; the track's, the longest of them (lanes that followed the track take its length as their own) */
 static void sm_len_set(uint32_t t, int32_t len)
 {
@@ -410,6 +411,7 @@ static void sm_len_set(uint32_t t, int32_t len)
     } else {
         pt->kit.snd[t].len = (uint8_t)len;
     }
+    sm_redraw_all();                                      /* (the length shows in the title, the strip, the KIT's rows: all again) */
 }
 
 /* the main loop, SHIFT + a trig key (Tim): step st of track t a lock trig (REST: no note, its locks only) or back. An empty
