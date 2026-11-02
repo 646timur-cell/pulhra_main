@@ -10542,6 +10542,72 @@ static int test_drone(void)
 /* each KIT lane its own length (Tim, 2.11): SEQ held + SELECT on the KIT is the lane in edit's length, the track's the longest;
  * L1 16 steps and L2 12, a hit on step 1 of each: over 49 steps L1 hits at 1 17 33 49, L2 at 1 13 25 37 49; a lane's own lock
  * plays from its own step; the lengths saved and back; every lane at the track's length: as before */
+static void oct_key(uint32_t w)                          /* OCT+ held, white key w tapped, OCT+ let go (past the pair window) */
+{
+    btn_down(B_OCTUP);
+    sm_input_poll();
+    host_ticks += (SM_OCT_PAIR_US + 50000u) * FM1_TICKS_PER_US;
+    sm_input_poll();
+    key_dn(WHITE[w]);
+    sm_input_poll();
+    key_up(WHITE[w]);
+    sm_input_poll();
+    btn_up(B_OCTUP);
+    sm_input_poll();
+    host_ticks += 100000u * FM1_TICKS_PER_US;
+    sm_input_poll();
+}
+static int test_len_by_trig(void)                       /* OCT+ held + a trig key: the length ends there (Elektron's PAGE + trig) */
+{
+    int bad = 0;
+    sm_pattern_t *pt;
+    uint32_t i;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 0;
+    ksnd(0)->len = 32u;
+    sm_ui.bank = 1;
+    oct_key(3);
+    bad += check("LENKEY: T1 32 steps, page 2, OCT+ held + the 4th white: 20 steps, still page 2, no step toggled",
+                 ksnd(0)->len == 20u && sm_ui.bank == 1u && !cpat()->step[0][19].n && !cpat()->step[0][3].n);
+    oct_key(11);
+    bad += check("LENKEY: ... + the 12th: 28", ksnd(0)->len == 28u && sm_ui.bank == 1u);
+    sm_ui.bank = 0;
+    oct_key(7);
+    bad += check("LENKEY: page 1, the 8th: 8 steps, one page", ksnd(0)->len == 8u && sm_ui.bank == 0u);
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    pt = cpat();
+    ksnd(3)->len = 16u;
+    for (i = 0; i < 4u; i++)
+        pt->llen[i] = 0;
+    sm_kit_lane = 2;
+    lint_n = lint_band = 0;
+    sm_draw();
+    oct_key(5);
+    bad += check("LENKEY: the KIT, L3 in edit, the 6th white: L3 6 steps, the others 16, the track 16",
+                 pt->llen[2] == 6u && sm_llen(pt, 0) == 16u && sm_llen(pt, 1) == 16u && sm_llen(pt, 3) == 16u && ksnd(3)->len == 16u);
+    layer_hold(B_SEQ);
+    lint_n = lint_band = 0;
+    sm_draw();
+    bad += check("LENKEY: SEQ held: LEN 6 L3 in the title", lint_has("LEN 6", 0, 0) && lint_has("SEQ T4 L3", 0, 0));
+    turn(EN_SELECT, 3);
+    sm_input_poll();
+    lint_n = lint_band = 0;
+    sm_draw();
+    bad += check("LENKEY: ... SELECT +3: L3 9, the title redrawn LEN 9 (not a full redraw)", pt->llen[2] == 9u && lint_has("LEN 9", 0, 0));
+    layer_let_go(B_SEQ);
+    sm_kit_lane = 0;
+    for (i = 0; i < 4u; i++)
+        pt->llen[i] = 0;
+    sm_ui.trk = 0;
+    ksnd(0)->len = 16u;
+    return bad;
+}
 static int test_kit_lane_len(void)
 {
     int bad = 0;
@@ -14136,6 +14202,7 @@ int main(void)
     bad += test_drone();
     bad += test_kit_lane_len();
     bad += test_kit_lane_vel();
+    bad += test_len_by_trig();
     bad += test_usb_stems();
     bad += test_west();
     bad += test_cloud();

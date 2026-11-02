@@ -371,32 +371,13 @@ static void sm_layer_keys(uint32_t pressed, uint32_t notes, const int32_t *k, in
         sm_lay_epage = (uint8_t)((sm_lay_epage + SM_NEPAGE - 1u) % SM_NEPAGE);
         sm_dirty = 1;
     }
-    if (sm_layer == SML_SEQ && sel && sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {   /* the KIT (Tim, 2.11): the lane in edit's
-                                                          * length, each lane its own; the track's, the longest of them */
+    if (sm_layer == SML_SEQ && sel) {                     /* SELECT: the track's length (the KIT: the lane in edit's, sm_len_set) */
         sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
-        uint32_t L, mx = 1;
-        int32_t len;
-        for (L = 0; L < 4u; L++)                          /* (lanes that followed the track: its length, now their own) */
-            pt->llen[L] = (uint8_t)sm_llen(pt, L);
-        len = clamp((int32_t)pt->llen[sm_kit_lane % 4u] + sel, 1, (int32_t)SM_NSTEP);
-        pt->llen[sm_kit_lane % 4u] = (uint8_t)len;
-        for (L = 0; L < 4u; L++)
-            mx = pt->llen[L] > mx ? pt->llen[L] : mx;
-        pt->kit.snd[t].len = (uint8_t)mx;
+        int32_t cur = sm_trk_kit(t, pt) ? (int32_t)sm_llen(pt, sm_kit_lane % 4u) : (int32_t)pt->kit.snd[t % SM_NTRK].len;
+        sm_len_set(t, cur + sel);
+        sm_dirty = 1;
         if (sm_ui.bank >= sm_npages())
             sm_ui.bank = 0;
-        sm_dirty = 1;
-        sel = 0;
-    }
-    if (sm_layer == SML_SEQ && sel) {                     /* SELECT: the track's length */
-        sm_sound_t *sd = sm_ui_sound();
-        int32_t len = clamp((int32_t)sd->len + sel, 1, (int32_t)SM_NSTEP);
-        if ((uint8_t)len != sd->len) {
-            sd->len = (uint8_t)len;
-            if (sm_ui.bank >= sm_npages())
-                sm_ui.bank = 0;
-            sm_dirty = 1;
-        }
     }
     if (sm_layer == SML_SEQ && (k[2] || k[3])) {          /* K3 every track's shift, K4 their transpose (as A#3 / C#4, D#4 / F#4) */
         int32_t j;

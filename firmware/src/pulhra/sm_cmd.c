@@ -392,6 +392,26 @@ static void sm_step_toggle(uint32_t t, uint32_t st)
     s->n = 1;
 }
 
+/* the main loop: track t's length len (1 .. SM_NSTEP; SEQ + SELECT, OCT+ held + a trig key). The KIT (Tim, 2.11): the lane in
+ * edit's, each lane its own; the track's, the longest of them (lanes that followed the track take its length as their own) */
+static void sm_len_set(uint32_t t, int32_t len)
+{
+    sm_pattern_t *pt = &smp.pat[smp.cur % SM_NPAT];
+    len = clamp(len, 1, (int32_t)SM_NSTEP);
+    t %= SM_NTRK;
+    if (sm_trk_kit(t, pt)) {
+        uint32_t L, mx = 1;
+        for (L = 0; L < 4u; L++)
+            pt->llen[L] = (uint8_t)sm_llen(pt, L);
+        pt->llen[sm_kit_lane % 4u] = (uint8_t)len;
+        for (L = 0; L < 4u; L++)
+            mx = pt->llen[L] > mx ? pt->llen[L] : mx;
+        pt->kit.snd[t].len = (uint8_t)mx;
+    } else {
+        pt->kit.snd[t].len = (uint8_t)len;
+    }
+}
+
 /* the main loop, SHIFT + a trig key (Tim): step st of track t a lock trig (REST: no note, its locks only) or back. An empty
  * step: a fresh lock trig (its fields, a barrier, n); a trig: its REST flag flipped (one byte: the audio stream sees the old
  * flags or the new) */

@@ -289,7 +289,8 @@ static uint32_t smd_page_sig(void)
     if (smd_flag_held())                                  /* (a trig held on a sound page: its FLAG is the line) */
         h = smd_mix(smd_mix(h, 0x200u + sm_ui.held_step), smd_held_flags());
     if (sm_map_open())                                    /* (the title of the layer: its page of machines, the track's length) */
-        h = smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank), perf_trk);
+        h = smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(smd_mix(h, 0x100u + sm_layer), sm_lay_epage), s->len), sm_ui.trk * 8u + sm_glo_bank), perf_trk),
+                    sm_view_len(&smp.pat[smp.cur % SM_NPAT], sm_ui.trk) + 256u * sm_kit_lane);   /* (the KIT: the lane's length, Tim 2.11) */
     if (sm_layer == SML_FX)                               /* (FX's title: SELECT's DEPTH, the shimmer's) */
         h = smd_mix(smd_mix(h, 0x400u + (uint32_t)(uint8_t)perf_k[3]), (uint32_t)perf_harm_on());
     return h;

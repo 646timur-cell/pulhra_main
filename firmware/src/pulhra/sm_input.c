@@ -381,6 +381,17 @@ static void sm_keys_press(uint32_t notes, uint32_t now)
             continue;
         if ((sm_key_arm >> k) & 1u)                       /* (down again before its release was seen: that release first) */
             continue;
+        if (!sm_layer && !sm_ui.kbd && ((fm1_in.buttons >> panel.btn[B_OCTUP]) & 1u)) {   /* OCT+ held + a trig key (Tim, 2.11, as
+                                                             * Elektron's PAGE + trig): the length ends on that step (the page in view; the KIT:
+                                                             * the lane in edit's); no page turn at OCT+'s release */
+            sm_len_set(sm_ui.trk, (int32_t)sm_ui.bank * 16 + w + 1);
+            sm_dirty = 1;
+            if (sm_ui.bank >= sm_npages())
+                sm_ui.bank = 0;
+            sm_oct_pend = 0;
+            sm_oct_used = 1;
+            continue;
+        }
         if (sm_shift && k == SM_SHK_FILL && !sm_rec)      /* (SHIFT + G5, REC off: FILL, sm_fill_poll; REC on: the copy as ever) */
             continue;
         if (sm_shift) {                                   /* SHIFT + a trig key (Tim): a lock trig there (no note, the locks only), or
