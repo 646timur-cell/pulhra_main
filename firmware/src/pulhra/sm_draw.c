@@ -884,7 +884,7 @@ static void smd_select(void)
         val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
     } else if (sm_page_home() == SMH_USB) {                /* USB: the channels the mode gives (the stereo firmware: 1-2 only) */
-        static const char *const MAP[UAC_M_COUNT] = {"1KICK 2DRM 4MIX", "1-2 SUM"};
+        static const char *const MAP[UAC_M_COUNT] = {"1KICK 3DRM 5REST", "1-2 SUM"};
         sm_px_text(4, 2, 2u, FELUCCA_UAC_NCH > 2 ? MAP[uac_mode % UAC_M_COUNT] : "STEREO FIRMWARE", T_TEXT, 0);
     } else if (sm_page_home() == SMH_SETUP) {              /* SETUP's SELECT: the clock's DIV (1:2 takes every second pulse) */
         int32_t x = sm_px_text(4, 2, 2u, "CLK DIV", T_TEXT, 0) + 4 + 12;

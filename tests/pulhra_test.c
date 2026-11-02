@@ -10724,8 +10724,8 @@ static int test_usb_stems(void)                         /* the stems' modes (fx.
         for (k = 0; k < 6u; k++)
             e[k] += ch_e(k);
     }
-    bad += check("USB DRUMS: T1, T2 playing: 4-5 (the rest) sound, 1 (kick) 2-3 (drums) 6 silent",
-                 e[3] > 1e5 && e[4] > 1e5 && e[0] == 0 && e[1] == 0 && e[2] == 0 && e[5] == 0);
+    bad += check("USB DRUMS: T1, T2 playing: 5-6 (the rest) sound, 1 (kick) 2 3-4 (drums) silent",
+                 e[4] > 1e5 && e[5] > 1e5 && e[0] == 0 && e[1] == 0 && e[2] == 0 && e[3] == 0);
     press(B_PLAY);                                      /* (stopped) */
     sm_input_poll();
     for (s4 = 0; s4 < 16u; s4++) {                      /* (T1, T2's trigs off) */
@@ -10754,8 +10754,8 @@ static int test_usb_stems(void)                         /* the stems' modes (fx.
             e[k] += ch_e(k);
     }
     printf("pulhra: USB DRUMS: kick %g, drums %g %g, rest %g %g, 6: %g\n", e[0], e[1], e[2], e[3], e[4], e[5]);
-    bad += check("USB DRUMS: the KIT's kick on 1, the hat on 2-3, nothing else playing: 4-5 near silent, 6 silent",
-                 e[0] > 1e5 && e[1] > 1e4 && e[2] > 1e4 && e[3] + e[4] < (e[0] + e[1] + e[2]) * 0.01 && e[5] == 0);
+    bad += check("USB DRUMS: the KIT's kick on 1 (2 silent), the hat on 3-4, nothing else playing: 5-6 near silent",
+                 e[0] > 1e5 && e[1] == 0 && e[2] > 1e4 && e[3] > 1e4 && e[4] + e[5] < (e[0] + e[2] + e[3]) * 0.01);
     {
         uint32_t pg = page_by_name("USB");
         sm_ui.page = pg;
