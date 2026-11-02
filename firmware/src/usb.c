@@ -1246,6 +1246,17 @@ static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   
                 ua_ring[((w + i) & (UA_N - 1u)) * UA_W + k] = UA_W > 1u && k + 1u < UA_W ? STEM_AT(k, i) :
                                                             (uint32_t)(uint16_t)(int16_t)((int32_t)q * 1000 - 25000) |
                                                             (uint32_t)(uint16_t)(int16_t)((int32_t)q2 * 1000 - 25000) << 16;
+#if UA_W > 1
+            {   /* the stems' bench (Tim 2.11): the last pair L the frame's count (16 bits: every frame known), R the ring's counters,
+                 * one a frame round 8: a mark, underruns, overruns, missed, adj up, adj down, starts, the fill */
+                static uint32_t cnt;
+                uint32_t sel = cnt & 7u, dv = sel == 0u ? 0x5A5Au : sel == 1u ? uac.underruns : sel == 2u ? uac.overruns :
+                                              sel == 3u ? uac.missed : sel == 4u ? uac.adj_up : sel == 5u ? uac.adj_down :
+                                              sel == 6u ? uac.starts : uac.fill_min;
+                ua_ring[((w + i) & (UA_N - 1u)) * UA_W + UA_W - 1u] = (cnt & 0xFFFFu) | (dv & 0xFFFFu) << 16;
+                cnt++;
+            }
+#endif
         }
         (void)out;
     }
