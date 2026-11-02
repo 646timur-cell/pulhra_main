@@ -1207,6 +1207,11 @@ static __attribute__((noinline)) void uac_tap48(const int32_t *out, uint32_t n)
 }
 #endif
 
+#if UA_W > 1
+#define STEM_AT(k, i) uac_stem[k][i]
+#else
+#define STEM_AT(k, i) 0u
+#endif
 static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   /* audio ISR: one block (Q15) */
 {
     uint32_t w = ua_w, i;
@@ -1228,8 +1233,10 @@ static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   
         static uint32_t ph;
         for (i = 0; i < n; i++, ph = ph == 99u ? 0u : ph + 1u) {
             uint32_t q = ph < 50u ? ph : 100u - ph, q2 = ph < 50u ? 50u - ph : ph - 50u, k;
-            for (k = 0; k < UA_W; k++)                  /* (every pair the same triangles) */
-                ua_ring[((w + i) & (UA_N - 1u)) * UA_W + k] = (uint32_t)(uint16_t)(int16_t)((int32_t)q * 1000 - 25000) |
+            for (k = 0; k < UA_W; k++)                  /* (every pair the same triangles; the stems: the last pair only, the
+                                                           * others the stems, Tim 2.11: is a crackle the transport's or theirs) */
+                ua_ring[((w + i) & (UA_N - 1u)) * UA_W + k] = UA_W > 1u && k + 1u < UA_W ? STEM_AT(k, i) :
+                                                            (uint32_t)(uint16_t)(int16_t)((int32_t)q * 1000 - 25000) |
                                                             (uint32_t)(uint16_t)(int16_t)((int32_t)q2 * 1000 - 25000) << 16;
         }
         (void)out;
