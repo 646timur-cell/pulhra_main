@@ -105,6 +105,16 @@ static struct {
  * 48..119 with no glitch; one render was once seen 29 frames under the floor: a packet (46) must
  * still be in hand then. */
 #define UA_W (FELUCCA_UAC_NCH / 2u)   /* words a frame: a stereo pair each (16-bit L | R << 16) */
+#if UA_W > 1
+/* the stems' version (Tim 3.11): two faces, the mode's (fx.c uac_mode; the main loop re-presents the device, uac_set_nw): DRUMS the
+ * build's NCH channels, SUM a stereo pair. Words a frame sent: */
+static uint8_t uac_nw = UA_W;
+#if FELUCCA_CDC
+#error "the stems' version has no console (one descriptor pair a face)"
+#endif
+#else
+#define uac_nw 1u
+#endif
 /* the stems (Tim 2.11, a recording's counters): a 920-byte packet is on the wire ~0.65 ms; looked for at 2 kHz, the next one was
  * often queued after the host's next IN token (missed ~8 %, the ring overfilled, blocks dropped). The stems look every TIMER5 tick
  * (10 kHz, main.c) */
@@ -128,7 +138,8 @@ _Static_assert(UA_HI48 + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, a
 #else
 #define UA_MAXF 46u              /* frames in the largest packet */
 #endif
-#define UAC_MAXP (UA_MAXF * 2u * FELUCCA_UAC_NCH)
+#define UAC_NCH_D FELUCCA_UAC_NCH      /* (the descriptors' channels: the stems' SUM face redefines it, below) */
+#define UAC_MAXP (UA_MAXF * 2u * UAC_NCH_D)
 _Static_assert(UA_HI + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, a render and a packet");
 #if UA_W > 1
 static uint32_t ua_ring[UA_N * UA_W] __attribute__((section(".pool")));   /* (frame f: words f * UA_W ..; 5 KiB: the pool's) */
@@ -288,7 +299,7 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #define FMT_LEN 14
 #define D_FMTO 14, 0x24, 2, 1, 2, 2, 16, 2, 0x44, 0xAC, 0x00, 0x80, 0xBB, 0x00,
 #elif FELUCCA_UAC
-#define D_FMT 11, 0x24, 2, 1, FELUCCA_UAC_NCH, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,
+#define D_FMT 11, 0x24, 2, 1, UAC_NCH_D, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,
 #define FMT_LEN 11
 #define D_FMTO 11, 0x24, 2, 1, 2, 2, 16, 1, UAC_RATE & 0xFF, (UAC_RATE >> 8) & 0xFF, UAC_RATE >> 16,
 #else
@@ -328,11 +339,11 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #define ACH_LEN 0
 #define ASO_LEN 0
 #endif
-#define UAC_CHCFG (FELUCCA_UAC_NCH == 2 ? 0x03 : 0x00)   /* L R; more: no spatial places (the host numbers them) */
+#define UAC_CHCFG (UAC_NCH_D == 2 ? 0x03 : 0x00)   /* L R; more: no spatial places (the host numbers them) */
 #define D_AC(a)                                                                                      \
     9, 4, (a), 0, 0, 1, 1, 0, 0,                                                                     \
     10 + FELUCCA_UAC_OUT, 0x24, 1, 0x00, 0x01, 31 + ACH_LEN - 10 * (FELUCCA_UAC_OUT), 0, 2 + FELUCCA_UAC_OUT, AC_COLL(a),   /* AC header 1.00 */ \
-    12, 0x24, 2, 1, 0x03, 0x06, 0, FELUCCA_UAC_NCH, UAC_CHCFG, 0x00, 0, 0,   /* input terminal 1: line, L R (or NCH) */ \
+    12, 0x24, 2, 1, 0x03, 0x06, 0, UAC_NCH_D, UAC_CHCFG, 0x00, 0, 0,   /* input terminal 1: line, L R (or NCH) */ \
     9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */ \
     D_AC_OUT
 #define D_AS(s)                                                                                      \
@@ -378,9 +389,14 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     7, 5, 0x03, 2, 64, 0, 0,                               /* EP3 OUT bulk */                           \
     7, 5, 0x83, 2, 64, 0, 0,                               /* EP3 IN bulk */
 #define CDC_LEN 66                                         /* with its IAD */
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+#define UAC_BCD_X (UAC_NCH_D > 2 ? 0xC0 : 0x80)            /* (the stems' faces: a host must not reuse the stereo's, nor each other's) */
+#else
+#define UAC_BCD_X 0
+#endif
 #define BCD_LO(cdc)                                                                                  \
     (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x08 * FELUCCA_UAC_AS_FIRST + ((cdc) ? 0x01 + 2 * FELUCCA_USB_LAYOUT : 0) + \
-     0x40 * (FELUCCA_UAC_NCH > 2) + 0x20 * FELUCCA_UAC_OUT)   /* (the multichannel test: a host must not reuse the stereo's) */
+     UAC_BCD_X + 0x20 * FELUCCA_UAC_OUT)   /* (the multichannel test: a host must not reuse the stereo's) */
 #define D_DEV(bcdusb, cls, sub, proto, cdc)                                                          \
     18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, 0x09, 0x12, FELUCCA_USB_PID & 0xFF, \
     FELUCCA_USB_PID >> 8, BCD_LO(cdc), 0x03, 1, 2, 0, 1
@@ -390,6 +406,15 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 static const uint8_t DEV_DESC_PLAIN[18] = {D_DEV(0x0110, 0, 0, 0, 0)};
 static const uint8_t CFG_DESC_PLAIN[] = {D_CFG(CFG_LEN_PLAIN, AUD_NIF), D_AUDIO(0)};
 typedef char cfg_plain_len_ok[sizeof CFG_DESC_PLAIN == CFG_LEN_PLAIN ? 1 : -1];
+#if UA_W > 1
+#undef UAC_NCH_D
+#define UAC_NCH_D 2                                        /* the stems' SUM face: a stereo pair (44.1 kHz) */
+static const uint8_t DEV_DESC_SUM[18] = {D_DEV(0x0110, 0, 0, 0, 0)};
+static const uint8_t CFG_DESC_SUM[] = {D_CFG(CFG_LEN_PLAIN, AUD_NIF), D_AUDIO(0)};
+typedef char cfg_sum_len_ok[sizeof CFG_DESC_SUM == CFG_LEN_PLAIN ? 1 : -1];
+#undef UAC_NCH_D
+#define UAC_NCH_D FELUCCA_UAC_NCH
+#endif
 #if FELUCCA_CDC
 #define CFG_LEN (9 + 8 + AUD_LEN + CDC_LEN)
 #define USB_NIF (AUD_NIF + 2)
@@ -445,11 +470,19 @@ static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)
     switch (wvalue >> 8) {
     case 1:
         *d = USB_CDC_ON ? DEV_DESC : DEV_DESC_PLAIN;
+#if UA_W > 1
+        if (uac_nw == 1u)
+            *d = DEV_DESC_SUM;
+#endif
         *l = 18;
         return 1;
     case 2:
         *d = USB_CDC_ON ? CFG_DESC : CFG_DESC_PLAIN;
         *l = (uint16_t)(USB_CDC_ON ? sizeof CFG_DESC : sizeof CFG_DESC_PLAIN);
+#if UA_W > 1
+        if (uac_nw == 1u)
+            *d = CFG_DESC_SUM;
+#endif
         return 1;
     case 3:
         switch (wvalue & 0xFFu) {
@@ -1259,7 +1292,7 @@ static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   
                 uint32_t sel = cnt & 7u, dv = sel == 0u ? 0x5A5Au : sel == 1u ? uac.underruns : sel == 2u ? uac.overruns :
                                               sel == 3u ? uac.missed : sel == 4u ? uac.adj_up : sel == 5u ? uac.adj_down :
                                               sel == 6u ? uac.starts : uac.fill_min;
-                ua_ring[((w + i) & (UA_N - 1u)) * UA_W + UA_W - 1u] = (cnt & 0xFFFFu) | (dv & 0xFFFFu) << 16;
+                ua_ring[((w + i) & (UA_N - 1u)) * UA_W + uac_nw - 1u] = (cnt & 0xFFFFu) | (dv & 0xFFFFu) << 16;
                 cnt++;
             }
 #endif
@@ -1303,7 +1336,7 @@ static uint32_t uac_packet(uint32_t *d)
         }
     }
     if (!uac.go || uac.ring48 != uac.r48) {             /* not primed (at this rate) yet */
-        for (i = 0; i < n; i++)
+        for (i = 0; i < n * uac_nw; i++)
             d[i] = 0;
         return n;
     }
@@ -1318,14 +1351,20 @@ static uint32_t uac_packet(uint32_t *d)
     fill = ua_w - r;
     RING_PUBLISH();                                     /* the slots after the index */
     k = fill < n ? fill : n;
-    for (i = 0; i < k * UA_W; i++)
-        d[i] = ua_ring[((r + i / UA_W) & (UA_N - 1u)) * UA_W + i % UA_W];
-    if (k < n) {                                        /* (the last frame again: its pairs) */
-        uac.underruns++;
-        for (; i < n * UA_W; i++)
-            d[i] = k ? d[i - UA_W] : (UA_W > 1u ? 0u : uac.last);
+    {   /* the frames: the words the face sends of each (uac_nw <= UA_W: the first ones) */
+        uint32_t j, w, nw = uac_nw;
+        for (j = 0, i = 0; j < k; j++) {
+            const uint32_t *f = &ua_ring[((r + j) & (UA_N - 1u)) * UA_W];
+            for (w = 0; w < nw; w++)
+                d[i++] = f[w];
+        }
+        if (k < n) {                                    /* (the last frame again: its pairs) */
+            uac.underruns++;
+            for (; i < n * nw; i++)
+                d[i] = k ? d[i - nw] : (UA_W > 1u ? 0u : uac.last);
+        }
+        uac.last = d[n * nw - 1u];
     }
-    uac.last = d[n * UA_W - 1u];
     RING_PUBLISH();
     ua_r = r + k;
     uac.pkts++;
@@ -1371,7 +1410,7 @@ static void uac_service(void)
     ep4tx_k ^= 1u;                                      /* (the other buffer: the last one may still be read) */
 #endif
     n = uac_packet(ep4tx);
-    fm1_usb_ep4_send(ep4tx, n * 2u * FELUCCA_UAC_NCH);
+    fm1_usb_ep4_send(ep4tx, n * 4u * uac_nw);
     sie_wr(S_TXCSR1, 0x01);                             /* TxPktRdy (and UnderRun cleared) */
 }
 #endif
@@ -1498,6 +1537,23 @@ static void usb_retry(uint32_t now_ms)
     usb.retries++;
     usb_start();
 }
+
+#if FELUCCA_UAC && UA_W > 1
+/* the main loop: the face the stems' mode wants (DRUMS: NCH channels, SUM: a pair). A change drops off the bus; usb_retry attaches again
+ * within a second with the other descriptors, the host enumerates the device afresh (MIDI too, a moment) */
+static void uac_set_nw(uint32_t nw)
+{
+    if (nw == uac_nw)
+        return;
+    if (usb.up) {
+        usb.up = 0;                                     /* usb_poll (TIMER5) stops before the SIE goes */
+        RING_PUBLISH();
+        fm1_usb_off();
+    }
+    usb.config = 0;
+    uac_nw = (uint8_t)nw;
+}
+#endif
 
 static void usb_detach(void)
 {

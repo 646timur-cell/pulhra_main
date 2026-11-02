@@ -26,7 +26,7 @@ static const uint8_t *host_xip(uint32_t off);          /* (pulhra_test.c: the si
 #define FELUCCA_UAC 1                /* (voice.c, fx.c: the USB stems, as PULHRA's stems version builds them) */
 #endif
 #ifndef FELUCCA_UAC_NCH
-#define FELUCCA_UAC_NCH 8
+#define FELUCCA_UAC_NCH 6
 #endif
 #include "../firmware/src/engines.c"
 #include "../firmware/src/params.c"

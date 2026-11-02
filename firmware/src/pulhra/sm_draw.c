@@ -586,7 +586,7 @@ static void smd_home_knob(uint32_t k, smd_knob_t *o)
         return;
     }
     if (sm_page_home() == SMH_USB) {                      /* K1 MODE: what the USB audio carries (the stems' version); K2..K4 none */
-        static const char *const UM_N[UAC_M_COUNT] = {"DRUMS", "TRACK", "SUM"};
+        static const char *const UM_N[UAC_M_COUNT] = {"DRUMS", "SUM"};
         if ((k & 3u) == 1u) {                             /* K2: MIDI clock and START / STOP out (USB MIDI) */
             o->on = 1;
             o->lab[0] = 'C'; o->lab[1] = 'L'; o->lab[2] = 'K'; o->lab[3] = 'O'; o->lab[4] = 0;
@@ -884,7 +884,7 @@ static void smd_select(void)
         val[(240 - x) / 12 < 11 ? (240 - x) / 12 : 11] = 0;
         sm_px_text(x, 2, 2u, val, T_TEXT, 1);
     } else if (sm_page_home() == SMH_USB) {                /* USB: the channels the mode gives (the stereo firmware: 1-2 only) */
-        static const char *const MAP[UAC_M_COUNT] = {"1KICK 3DRM 5MIX 7ALL", "1T1 3T2 5T3 7T4", "1-2 ALL"};
+        static const char *const MAP[UAC_M_COUNT] = {"1KICK 2DRM 4MIX", "1-2 SUM"};
         sm_px_text(4, 2, 2u, FELUCCA_UAC_NCH > 2 ? MAP[uac_mode % UAC_M_COUNT] : "STEREO FIRMWARE", T_TEXT, 0);
     } else if (sm_page_home() == SMH_SETUP) {              /* SETUP's SELECT: the clock's DIV (1:2 takes every second pulse) */
         int32_t x = sm_px_text(4, 2, 2u, "CLK DIV", T_TEXT, 0) + 4 + 12;

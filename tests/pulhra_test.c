@@ -10697,16 +10697,85 @@ static int test_kit_lane_len(void)
 
 /* each KIT lane its own velocity (Tim, 2.11: a lane's VEL changed the others'): on STEP, a trig held, K2 is the lane in edit's
  * own velocity; the other lanes of the step keep theirs; an accent is the lane's own step's; recorded a lane its own */
-static double stem_e(uint32_t k)                         /* the energy of a USB stem this block (both sides) */
+static double ch_e(uint32_t c)                           /* the energy of channel c (0..5) of the stems this block */
 {
     double e = 0;
     uint32_t i;
-    for (i = 0; i < CTL; i++)
-    {
-        double l = (int16_t)(uac_stem[k][i] & 0xFFFFu), r = (int16_t)(uac_stem[k][i] >> 16);
-        e += l * l + r * r;
+    for (i = 0; i < CTL; i++) {
+        uint32_t w = uac_stem[c / 2u][i];
+        double x = (int16_t)(c & 1u ? w >> 16 : w & 0xFFFFu);
+        e += x * x;
     }
     return e;
+}
+static int test_usb_stems(void)                         /* the stems' modes (fx.c uac_mode): DRUMS (6 channels), SUM */
+{
+    int bad = 0;
+    uint32_t b, k, s4;
+    double e[6];
+    in_reset();
+    host_ticks = 1000u;
+    uac_mode = UAC_M_DRUMS;
+    trigs_play();                                       /* T1, T2 playing, no KIT: 4-5 (the rest) sound, 1-3 silent */
+    for (k = 0; k < 6u; k++)
+        e[k] = 0;
+    for (b = 0; b < 200u; b++) {
+        run_block();
+        for (k = 0; k < 6u; k++)
+            e[k] += ch_e(k);
+    }
+    bad += check("USB DRUMS: T1, T2 playing: 4-5 (the rest) sound, 1 (kick) 2-3 (drums) 6 silent",
+                 e[3] > 1e5 && e[4] > 1e5 && e[0] == 0 && e[1] == 0 && e[2] == 0 && e[5] == 0);
+    press(B_PLAY);                                      /* (stopped) */
+    sm_input_poll();
+    for (s4 = 0; s4 < 16u; s4++) {                      /* (T1, T2's trigs off) */
+        sm_step_toggle(0, s4);
+        sm_step_toggle(1, s4);
+    }
+    kit_dry();
+    play_blocks(400);
+    sm_ui.trk = 3;                                      /* the KIT, a kick on L1 (steps 1 5 9 13), a hat on L3 (3 7 11 15) */
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    play_blocks(4);
+    for (s4 = 0; s4 < 16u; s4 += 2u) {
+        sm_kit_lane = (s4 & 2u) ? 2u : 0u;
+        sm_step_toggle(3, s4);
+    }
+    sm_ui.trk = 0;
+    sm_kit_lane = 0;
+    press(B_PLAY);
+    sm_input_poll();
+    for (k = 0; k < 6u; k++)
+        e[k] = 0;
+    for (b = 0; b < 800u; b++) {
+        run_block();
+        for (k = 0; k < 6u; k++)
+            e[k] += ch_e(k);
+    }
+    printf("pulhra: USB DRUMS: kick %g, drums %g %g, rest %g %g, 6: %g\n", e[0], e[1], e[2], e[3], e[4], e[5]);
+    bad += check("USB DRUMS: the KIT's kick on 1, the hat on 2-3, nothing else playing: 4-5 near silent, 6 silent",
+                 e[0] > 1e5 && e[1] > 1e4 && e[2] > 1e4 && e[3] + e[4] < (e[0] + e[1] + e[2]) * 0.01 && e[5] == 0);
+    {
+        uint32_t pg = page_by_name("USB");
+        sm_ui.page = pg;
+        turn(EN_K1, 1);
+        sm_input_poll();
+        bad += check("USB page (SHIFT + HOME's family): K1 DRUMS -> SUM", pg < sm_page_count() && uac_mode == UAC_M_SUM);
+        sm_phash ^= 1u;
+        sm_store_all();
+        uac_mode = UAC_M_DRUMS;
+        bank_reboot();
+        bad += check("USB: the mode kept with the project (power off, on: SUM)", uac_mode == UAC_M_SUM);
+        sm_ui.page = 0;
+    }
+    bad += check("USB SUM: the master on 1-2 (usb.c uac_tap's word 0)", UAC_MASTER_PAIR == 0u);
+    uac_mode = UAC_M_DRUMS;
+    press(B_PLAY);
+    sm_input_poll();
+    play_blocks(40);
+    printf("usb stems: %s\n", bad ? "FAIL" : "ok");
+    return bad;
 }
 static int test_clock_out(void)                         /* CLK OUT (the USB page, K2): 24 a quarter, START at PLAY, STOP at STOP */
 {
@@ -10750,97 +10819,6 @@ static int test_clock_out(void)                         /* CLK OUT (the USB page
     bad += check("CLKO: STOP: one STOP", fc == 1u);
     sm_clko_on = 0;
     play_blocks(2);
-    return bad;
-}
-static int test_usb_stems(void)                         /* the stems' modes (fx.c uac_mode): TRACKS, DRUMS, STEREO */
-{
-    int bad = 0;
-    uint32_t b, k, s4;
-    double e[5] = {0, 0, 0, 0, 0};
-    in_reset();
-    host_ticks = 1000u;
-    uac_mode = UAC_M_TRACKS;
-    trigs_play();
-    for (b = 0; b < 200u; b++) {
-        run_block();
-        for (k = 0; k < 4u; k++)
-            e[k] += stem_e(k);
-    }
-    if (!(e[0] > 1e5 && e[1] > 1e5)) {
-        printf("FAIL: TRACKS: stems T1 %g T2 %g silent\n", e[0], e[1]);
-        bad++;
-    }
-    if (e[2] != 0 || e[3] != 0) {
-        printf("FAIL: TRACKS: stems T3 %g T4 %g not silent\n", e[2], e[3]);
-        bad++;
-    }
-    press(B_PLAY);                                      /* (stopped) */
-    sm_input_poll();
-    play_blocks(400);
-    for (s4 = 0; s4 < 16u; s4++) {                      /* (T1, T2's trigs off) */
-        sm_step_toggle(0, s4);
-        sm_step_toggle(1, s4);
-    }
-    kit_dry();
-    sm_ui.trk = 3;                                      /* DRUMS: the KIT, a kick on L1 (steps 1 5 9 13), a hat on L3 (3 7 11 15) */
-    sm_sound_load(SM_KIT_MACH, 0);
-    sm_input_poll();
-    play_blocks(4);
-    for (s4 = 0; s4 < 16u; s4 += 2u) {
-        sm_kit_lane = (s4 & 2u) ? 2u : 0u;
-        sm_step_toggle(3, s4);
-    }
-    sm_ui.trk = 0;
-    sm_kit_lane = 0;
-    uac_mode = UAC_M_DRUMS;
-    press(B_PLAY);
-    sm_input_poll();
-    for (k = 0; k < 5u; k++)
-        e[k] = 0;
-    {
-        double lo = 0, hi = 0;
-        for (b = 0; b < 800u; b++) {
-            uint32_t i;
-            run_block();
-            for (k = 0; k < 4u; k++)
-                e[k] += stem_e(k);
-            for (i = 0; i < CTL; i++) {                 /* the kick: low, the hat: high (a first difference's share) */
-                int16_t x = (int16_t)(uac_stem[0][i] & 0xFFFFu), y = (int16_t)(uac_stem[1][i] & 0xFFFFu);
-                lo += (double)x * x;
-                hi += (double)y * y;
-            }
-        }
-        printf("pulhra: USB DRUMS: kick %g, drums %g, rest %g, master pair %g\n", e[0], e[1], e[2], e[3]);
-        bad += check("USB DRUMS: the KIT's kick on 1 (mono), the hat on 3-4, nothing else playing: 5-6 near silent, 7-8 (the master) "
-                     "left to usb.c", e[0] > 1e5 && e[1] > 1e4 && e[2] < (e[0] + e[1]) * 0.01 && e[3] == 0);
-        {
-            uint32_t i, mono = 1;
-            for (i = 0; i < CTL; i++)
-                mono &= (uac_stem[0][i] >> 16) == 0u;
-            bad += check("USB DRUMS: the kick on channel 1 alone (2 silent)", mono != 0);
-        }
-    }
-    {
-        uint32_t pg = page_by_name("USB");
-        sm_ui.page = pg;
-        turn(EN_K1, 1);
-        sm_input_poll();
-        bad += check("USB page (SHIFT + HOME's family): K1 DRUMS -> TRACK", pg < sm_page_count() && uac_mode == UAC_M_TRACKS);
-        sm_phash ^= 1u;
-        sm_store_all();
-        uac_mode = UAC_M_DRUMS;
-        bank_reboot();
-        bad += check("USB: the mode kept with the project (power off, on: TRACK)", uac_mode == UAC_M_TRACKS);
-        sm_ui.page = 0;
-    }
-    uac_mode = UAC_M_STEREO;
-    run_block();
-    bad += check("USB STEREO: the stems silent (usb.c: the master on 1-2)", stem_e(0) == 0 && stem_e(1) == 0 && stem_e(2) == 0);
-    uac_mode = UAC_M_DRUMS;
-    press(B_PLAY);
-    sm_input_poll();
-    play_blocks(40);
-    printf("usb stems: %s\n", bad ? "FAIL" : "ok");
     return bad;
 }
 static int test_kit_lane_vel(void)

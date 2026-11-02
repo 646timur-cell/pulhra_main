@@ -1343,9 +1343,10 @@ static __attribute__((noinline)) void mf_punch_track(int32_t *out, uint32_t n, u
         scope_take_mix(n);
 }
 #endif
-/* the stems' mode (Tim 2.11; SHIFT + HOME, the USB page; the project keeps it): DRUMS 1 the KIT's kick (mono; 2 silent), 3-4 the other drums,
- * 5-6 the rest with the effects, 7-8 the master; TRACKS T1 .. T4 (no effects' return); STEREO 1-2 the master */
-enum { UAC_M_DRUMS, UAC_M_TRACKS, UAC_M_STEREO, UAC_M_COUNT };
+/* the stems' mode (Tim 3.11; SHIFT + HOME, the USB page; the project keeps it): DRUMS 6 channels: 1 the KIT's kick (mono), 2-3 the other
+ * drums, 4-5 the rest with the effects (and the kick's ducking, if on), 6 silent; SUM a stereo pair, the master (usb.c presents the
+ * device anew with the mode's channels) */
+enum { UAC_M_DRUMS, UAC_M_SUM, UAC_M_COUNT };
 static volatile uint8_t uac_mode;
 #if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
 /* the USB stems (Tim, 2.11; usb.c uac_tap copies them to its ring): each track's share of the mix this block (after its
@@ -1355,7 +1356,7 @@ static volatile uint8_t uac_mode;
 static uint32_t uac_stem[5][CTL] __attribute__((section(".pool")));   /* (the pool: RAM keeps its 4 KiB headroom) */
 static int32_t uac_pre[2][CTL] __attribute__((section(".pool"))), uac_t4[2][CTL] __attribute__((section(".pool"))),
     uac_rest[2][CTL] __attribute__((section(".pool")));
-#define UAC_MASTER_PAIR (uac_mode == UAC_M_DRUMS ? 3u : uac_mode == UAC_M_STEREO ? 0u : 0xFFu)   /* (usb.c uac_tap: the master there) */
+#define UAC_MASTER_PAIR (uac_mode == UAC_M_SUM ? 0u : 0xFFu)   /* (usb.c uac_tap: the master there) */
 /* the stems' level (Tim 3.11: the kick clipped at -12 dB of the master's full level): as the master pair, the MASTER knob's (or full
  * with USB LEVEL FIXED), then -12 dB: the master has its compressor and limiter, the stems none, and 16 bits */
 static int32_t uac_g = MASTER_FULL;
@@ -1412,8 +1413,6 @@ static void mix_block(int32_t *out, uint32_t n)
             mix_part(&trk[t], n);
             for (j = 0; j < n; j++) {
                 int32_t dl = mix_l[j] - uac_pre[0][j], dr = mix_r[j] - uac_pre[1][j];
-                if (uac_mode == UAC_M_TRACKS)
-                    uac_stem[t][j] = uac_pack(dl, dr);
                 if (t == 3u) {
                     uac_t4[0][j] = dl;
                     uac_t4[1][j] = dr;
@@ -1449,14 +1448,13 @@ static void mix_block(int32_t *out, uint32_t n)
         int32_t gl = 4096 - (pan > 0 ? pan * 64 : 0), gr = 4096 + (pan < 0 ? pan * 64 : 0);
         for (i = 0; i < n; i++) {
             int32_t x = kit ? clamp(((dr_kick[i] >> 2) * lvl) >> 10, -524287, 524287) : 0, kl = (x * gl) >> 12, kr = (x * gr) >> 12;
-            uac_stem[0][i] = uac_pack((kl + kr) >> 1, 0);   /* (channel 1 alone, 2 silent: Tim 3.11) */
-            uac_stem[1][i] = uac_pack(uac_t4[0][i] - kl, uac_t4[1][i] - kr);
-            uac_stem[2][i] = uac_pack(uac_rest[0][i] + mix_l[i] + wet[i] - uac_pre[0][i], uac_rest[1][i] + mix_r[i] + wet[i] - uac_pre[1][i]);
-            uac_stem[3][i] = 0;                         /* (usb.c: the master) */
+            uint32_t kd = uac_pack((kl + kr) >> 1, uac_t4[0][i] - kl), dr = uac_pack(uac_t4[1][i] - kr,
+                                                                                 uac_rest[0][i] + mix_l[i] + wet[i] - uac_pre[0][i]);
+            uac_stem[0][i] = kd;                        /* channels 1 kick, 2 drums L */
+            uac_stem[1][i] = dr;                        /* 3 drums R, 4 rest L */
+            uac_stem[2][i] = uac_pack(uac_rest[1][i] + mix_r[i] + wet[i] - uac_pre[1][i], 0);   /* 5 rest R, 6 silent */
+            uac_stem[3][i] = 0;
         }
-    } else if (uac_mode == UAC_M_STEREO) {
-        for (i = 0; i < n; i++)
-            uac_stem[0][i] = uac_stem[1][i] = uac_stem[2][i] = uac_stem[3][i] = 0;
     }
 #endif
 #if FELUCCA_SWAMP

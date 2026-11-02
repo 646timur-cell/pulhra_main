@@ -51,13 +51,13 @@ jobs:
           set -o pipefail
           FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 ./build.sh --release 1.5.1 2>&1 | tee build-pulhra.log
 
-      - name: "Build (the stems, a separate version, 8 channels at 44.1 kHz, the modes on SHIFT + HOME's USB page; its bench; the main package kept)"
+      - name: "Build (the stems, a separate version, 6 channels at 44.1 kHz (SUM: 2), the modes on SHIFT + HOME's USB page; its bench; the main package kept)"
         run: |
           set -o pipefail
           cp build/pulhra-1.5.1.fwsc /tmp/pulhra-main.fwsc
-          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=8 ./build.sh --release 1.5.1 2>&1 | tail -n 6
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=6 ./build.sh --release 1.5.1 2>&1 | tail -n 6
           cp build/pulhra-1.5.1.fwsc /tmp/pulhra-stems.fwsc
-          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=8 FELUCCA_UAC_TONE=1 ./build.sh --release 1.5.1 2>&1 | tail -n 6
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=6 FELUCCA_UAC_TONE=1 ./build.sh --release 1.5.1 2>&1 | tail -n 6
           cp build/pulhra-1.5.1.fwsc /tmp/pulhra-stems-tone.fwsc
           cp /tmp/pulhra-main.fwsc build/pulhra-1.5.1.fwsc
 
@@ -87,7 +87,7 @@ jobs:
           python3 web/make_module_installer.py build/pulhra-1.5.1.fwsc 1.5.1 /tmp/out/fm1-pulhra-installer.html
           cp web/pulhra_editor.html /tmp/out/pulhra-editor.html
           cp web/pulhra_keys.html /tmp/out/keys.html   # (the key map)
-          python3 web/make_module_installer.py /tmp/pulhra-stems.fwsc 1.5.1 /tmp/out/stems.html   # (USB audio: the stems, 8 channels, modes)
+          python3 web/make_module_installer.py /tmp/pulhra-stems.fwsc 1.5.1 /tmp/out/stems.html   # (USB audio: the stems, DRUMS 6 channels / SUM 2)
           python3 web/make_module_installer.py /tmp/pulhra-stems-tone.fwsc 1.5.1 /tmp/out/stems-tone.html   # (the bench: the last pair a frame counter and the ring's counters)
           cp /tmp/out/fm1-pulhra-installer.html /tmp/out/index.html   # (the folder as a site: its root is the installer)
           (cd /tmp/out && sha256sum pulhra-1.5.1.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
