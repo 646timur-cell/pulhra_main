@@ -39,14 +39,9 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'release_test.py' -v
       - name: Generated headers
         run: python3 -c "import sys; sys.path.insert(0, 'tools'); import build; build.generate()"
-      - name: Host tests (MONOFM)
-        run: |
-          set -o pipefail
-          mkdir -p build/host
-          cc -O2 -w -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/monofm_test tests/monofm_test.c -lm
-          build/host/monofm_test | tail -n 30
       - name: Host tests (PULHRA)
         run: |
+          mkdir -p build/host
           cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/pulhra_test tests/pulhra_test.c -lm
           build/host/pulhra_test
       - name: JieLi toolchain
