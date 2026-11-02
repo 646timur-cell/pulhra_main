@@ -10620,6 +10620,57 @@ static int test_kit_lane_len(void)
 
 /* each KIT lane its own velocity (Tim, 2.11: a lane's VEL changed the others'): on STEP, a trig held, K2 is the lane in edit's
  * own velocity; the other lanes of the step keep theirs; an accent is the lane's own step's; recorded a lane its own */
+static double stem_e(uint32_t k)                         /* the energy of a USB stem this block (both sides) */
+{
+    double e = 0;
+    uint32_t i;
+    for (i = 0; i < CTL; i++)
+    {
+        double l = (int16_t)(uac_stem[k][i] & 0xFFFFu), r = (int16_t)(uac_stem[k][i] >> 16);
+        e += l * l + r * r;
+    }
+    return e;
+}
+static int test_usb_stems(void)                         /* T1, T2 playing: their stems sound, T3, T4 silent; T1 muted: its silent */
+{
+    int bad = 0;
+    uint32_t b;
+    double e[5] = {0, 0, 0, 0, 0};
+    in_reset();
+    host_ticks = 1000u;
+    trigs_play();
+    for (b = 0; b < 200u; b++) {
+        uint32_t k;
+        run_block();
+        for (k = 0; k < 5u; k++)
+            e[k] += stem_e(k);
+    }
+    if (!(e[0] > 1e6 && e[1] > 1e6)) {
+        printf("FAIL: stems T1 %g T2 %g silent\n", e[0], e[1]);
+        bad++;
+    }
+    if (e[2] != 0 || e[3] != 0) {
+        printf("FAIL: stems T3 %g T4 %g not silent\n", e[2], e[3]);
+        bad++;
+    }
+    int8_t l0 = ksnd(0)->p[P_LEVEL], l1 = trk[0].p[P_LEVEL];
+    ksnd(0)->p[P_LEVEL] = 0, trk[0].p[P_LEVEL] = 0;
+    play_blocks(40);
+    for (b = 0, e[0] = 0; b < 100u; b++) {
+        run_block();
+        e[0] += stem_e(0);
+    }
+    if (e[0] != 0) {
+        printf("FAIL: stem T1 at level 0: %g\n", e[0]);
+        bad++;
+    }
+    ksnd(0)->p[P_LEVEL] = l0, trk[0].p[P_LEVEL] = l1;
+    press(B_PLAY);                                      /* (stopped) */
+    sm_input_poll();
+    play_blocks(40);
+    printf("usb stems: %s\n", bad ? "FAIL" : "ok");
+    return bad;
+}
 static int test_kit_lane_vel(void)
 {
     int bad = 0;
@@ -14085,6 +14136,7 @@ int main(void)
     bad += test_drone();
     bad += test_kit_lane_len();
     bad += test_kit_lane_vel();
+    bad += test_usb_stems();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

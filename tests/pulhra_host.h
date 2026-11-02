@@ -27,6 +27,12 @@ static const uint8_t *host_xip(uint32_t off);          /* (pulhra_test.c: the si
 #include "../firmware/src/mod.c"
 #include "../firmware/src/voice.c"
 #include "../firmware/src/slicer.c"
+#ifndef FELUCCA_UAC
+#define FELUCCA_UAC 1                /* (fx.c: the USB stems, as PULHRA builds them) */
+#endif
+#ifndef FELUCCA_UAC_NCH
+#define FELUCCA_UAC_NCH 10
+#endif
 #include "../firmware/src/fx.c"
 
 /* ------------------------------------------------------------ HAL stubs --- */

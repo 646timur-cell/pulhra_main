@@ -289,8 +289,10 @@ def check(img, syms, dis, rt):
         errors.append("app.ld: POOL does not start where RAM ends")
     if ram_len - bss < 4096:                      # keep >= 4 KiB of .bss spare (state the audio side touches)
         errors.append(f"RAM headroom {ram_len - bss} B < 4096 B")
-    if pool_len - pool < 8192:                    # keep >= 8 KiB of the pool spare
-        errors.append(f"pool headroom {pool_len - pool} B < 8192 B")
+    # keep >= 8 KiB of the pool spare; PULHRA's USB stems (usb.c: a 5 KiB ring, FELUCCA_UAC_NCH 10) >= 4 KiB
+    pool_min = 4096 if sym("uac_stem") else 8192
+    if pool_len - pool < pool_min:
+        errors.append(f"pool headroom {pool_len - pool} B < {pool_min} B")
     return errors, notes
 
 

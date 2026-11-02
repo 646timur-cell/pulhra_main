@@ -44,7 +44,8 @@
 /* FELUCCA_UAC_NCH > 2 (Tim, 1.11: the tracks as stems, the bench test first): the stream carries NCH channels at
  * 44.1 kHz only (no 48 kHz resampling: its FIR for every pair costs too much); for now each pair is the stereo
  * frame copied (with FELUCCA_UAC_TONE: the triangles in every pair), to learn whether the USB controller and the
- * hosts take packets of up to 46 x NCH x 2 bytes (920 at 10) where the stereo stream sends 196 */
+ * hosts take packets of up to 46 x NCH x 2 bytes (920 at 10) where the stereo stream sends 196. Since 2.11 (Tim) NCH 10 is the
+ * stems: fx.c fills uac_stem (T1 .. T4, the effects' return), uac_tap takes them (FELUCCA_UAC_TONE: triangles in every pair) */
 #ifndef FELUCCA_UAC_OUT
 #define FELUCCA_UAC_OUT 0
 #endif
@@ -103,10 +104,20 @@ static struct {
  * band: ~5.8 ms). Measured under load (65 % CPU): a 64..112 band started renders at
  * 48..119 with no glitch; one render was once seen 29 frames under the floor: a packet (46) must
  * still be in hand then. */
+#define UA_W (FELUCCA_UAC_NCH / 2u)   /* words a frame: a stereo pair each (16-bit L | R << 16) */
+#if UA_W > 1
+/* the stems (FELUCCA_UAC_NCH 10, Tim 2.11: T1 .. T4 a stereo pair each, the effects' return a pair): a shorter ring (the
+ * pool's: 256 frames x 5 words), a narrower band (a render starting late still has a packet in hand: 56 - 29 > 46 - 46) */
+#define UA_N 256u
+#define UA_PRIME 64u
+#define UA_LO 56u
+#define UA_HI 72u
+#else
 #define UA_N 512u                /* ring, frames (16-bit L | R << 16); a power of two */
 #define UA_PRIME 104u            /* silence ahead of the first rendered frame */
 #define UA_LO 80u                /* a render may start late: keep a packet and more in hand */
 #define UA_HI 128u
+#endif
 #define UAC_RATE 44100u
 #if FELUCCA_UAC_48K
 /* 48 kHz: the same times in 48 kHz frames (x 160 / 147); a render of HALF_FRAMES gives 139..140 frames */
@@ -121,7 +132,11 @@ _Static_assert(UA_HI48 + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, a
 #endif
 #define UAC_MAXP (UA_MAXF * 2u * FELUCCA_UAC_NCH)
 _Static_assert(UA_HI + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, a render and a packet");
+#if UA_W > 1
+static uint32_t ua_ring[UA_N * UA_W] __attribute__((section(".pool")));   /* (frame f: words f * UA_W ..; 5 KiB: the pool's) */
+#else
 static uint32_t ua_ring[UA_N];
+#endif
 static volatile uint32_t ua_w, ua_r;
 static uint32_t ep4tx[UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
 #if FELUCCA_UAC_OUT
@@ -1118,8 +1133,8 @@ static __attribute__((noinline)) void uac_render_start(void)   /* audio ISR, bef
             rs.w = rs.ph = 0;
         }
 #endif
-        for (i = 0; i < prime; i++)
-            ua_ring[(r + i) & (UA_N - 1u)] = 0;
+        for (i = 0; i < prime * UA_W; i++)
+            ua_ring[(((r + i / UA_W) & (UA_N - 1u)) * UA_W) + i % UA_W] = 0;
         RING_PUBLISH();
         ua_w = r + prime;
         uac.fill_min = prime;
@@ -1219,16 +1234,26 @@ static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   
          * recorded frame must follow the one before, so a lost or repeated frame shows exactly */
         static uint32_t ph;
         for (i = 0; i < n; i++, ph = ph == 99u ? 0u : ph + 1u) {
-            uint32_t q = ph < 50u ? ph : 100u - ph, q2 = ph < 50u ? 50u - ph : ph - 50u;
-            ua_ring[(w + i) & (UA_N - 1u)] = (uint32_t)(uint16_t)(int16_t)((int32_t)q * 1000 - 25000) |
-                                             (uint32_t)(uint16_t)(int16_t)((int32_t)q2 * 1000 - 25000) << 16;
+            uint32_t q = ph < 50u ? ph : 100u - ph, q2 = ph < 50u ? 50u - ph : ph - 50u, k;
+            for (k = 0; k < UA_W; k++)                  /* (every pair the same triangles) */
+                ua_ring[((w + i) & (UA_N - 1u)) * UA_W + k] = (uint32_t)(uint16_t)(int16_t)((int32_t)q * 1000 - 25000) |
+                                                            (uint32_t)(uint16_t)(int16_t)((int32_t)q2 * 1000 - 25000) << 16;
         }
         (void)out;
+    }
+#else
+#if UA_W > 1
+    for (i = 0; i < n; i++) {                           /* the stems (fx.c uac_stem: each pair this block, packed), not the master */
+        uint32_t k, f = ((w + i) & (UA_N - 1u)) * UA_W;
+        (void)out;
+        for (k = 0; k < UA_W; k++)
+            ua_ring[f + k] = uac_stem[k][i];
     }
 #else
     for (i = 0; i < n; i++)
         ua_ring[(w + i) & (UA_N - 1u)] = (uint32_t)(uint16_t)uac_s16(out[2u * i]) |
                                          (uint32_t)(uint16_t)uac_s16(out[2u * i + 1u]) << 16;
+#endif
 #endif
     RING_PUBLISH();
     ua_w = w + n;
@@ -1269,15 +1294,14 @@ static uint32_t uac_packet(uint32_t *d)
     fill = ua_w - r;
     RING_PUBLISH();                                     /* the slots after the index */
     k = fill < n ? fill : n;
-    for (i = 0; i < k; i++)
-        d[i] = ua_ring[(r + i) & (UA_N - 1u)];
-    if (k < n) {
-        uint32_t last = k ? d[k - 1u] : uac.last;
+    for (i = 0; i < k * UA_W; i++)
+        d[i] = ua_ring[((r + i / UA_W) & (UA_N - 1u)) * UA_W + i % UA_W];
+    if (k < n) {                                        /* (the last frame again: its pairs) */
         uac.underruns++;
-        for (; i < n; i++)
-            d[i] = last;
+        for (; i < n * UA_W; i++)
+            d[i] = k ? d[i - UA_W] : (UA_W > 1u ? 0u : uac.last);
     }
-    uac.last = d[n - 1u];
+    uac.last = d[n * UA_W - 1u];
     RING_PUBLISH();
     ua_r = r + k;
     uac.pkts++;
@@ -1320,14 +1344,6 @@ static void uac_service(void)
     uac.queued = 1;
     uac.wait = 0;
     n = uac_packet(ep4tx);
-#if FELUCCA_UAC_NCH > 2
-    {   /* each stereo frame into NCH / 2 pairs, from the end (a frame's place only grows) */
-        uint32_t i = n, k;
-        while (i--)
-            for (k = FELUCCA_UAC_NCH / 2u; k--;)
-                ep4tx[i * (FELUCCA_UAC_NCH / 2u) + k] = ep4tx[i];
-    }
-#endif
     fm1_usb_ep4_send(ep4tx, n * 2u * FELUCCA_UAC_NCH);
     sie_wr(S_TXCSR1, 0x01);                             /* TxPktRdy (and UnderRun cleared) */
 }

@@ -1339,6 +1339,20 @@ static __attribute__((noinline)) void mf_punch_track(int32_t *out, uint32_t n, u
         scope_take_mix(n);
 }
 #endif
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+/* the USB stems (Tim, 2.11; usb.c uac_tap copies them to its ring): each track's share of the mix this block (after its
+ * DIST, INSERT, level and pan: what it adds to mix_l / mix_r), and the effects' return: what the buses' wet and the rest
+ * (HALL's side, PERFORM on the dry mix) add after the tracks; all before MASTER, the compressor and the limiter, at the
+ * master's full level. A frame of a stem: 16-bit L | R << 16 (as the ring has it) */
+static uint32_t uac_stem[5][CTL];
+static int32_t uac_pre[2][CTL];
+static inline uint32_t uac_pack(int32_t l, int32_t r)
+{
+    l = l > 32767 ? 32767 : l < -32768 ? -32768 : l;
+    r = r > 32767 ? 32767 : r < -32768 ? -32768 : r;
+    return (uint32_t)(uint16_t)l | (uint32_t)(uint16_t)r << 16;
+}
+#endif
 static void mix_block(int32_t *out, uint32_t n)
 {
     uint32_t i;
@@ -1358,18 +1372,47 @@ static void mix_block(int32_t *out, uint32_t n)
 #endif
     perf = perf_begin(n);                               /* the FX hold layer at work (perform.c) */
 #if FELUCCA_MONOFM
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+    if (perf && perf_trk && perf_trk <= NPART)          /* (the punch-in's path: no stems, silence on them) */
+        memset(uac_stem, 0, sizeof uac_stem);
+#endif
     if (perf && perf_trk && perf_trk <= NPART) {        /* the punch-in on one track (FX + D#4): the others to the master */
         mf_punch_track(out, n, perf_trk - 1u);          /* as they are, that track's dry sound through the effects */
         return;
     }
 #endif
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+    {
+        uint32_t t, j;
+        for (t = 0; t < NLIVE && t < 4u; t++) {         /* each track: the mix before it and after (its share, whatever path) */
+            for (j = 0; j < n; j++) {
+                uac_pre[0][j] = mix_l[j];
+                uac_pre[1][j] = mix_r[j];
+            }
+            mix_part(&trk[t], n);
+            for (j = 0; j < n; j++)
+                uac_stem[t][j] = uac_pack(mix_l[j] - uac_pre[0][j], mix_r[j] - uac_pre[1][j]);
+        }
+        for (; t < NLIVE; t++)
+            mix_part(&trk[t], n);
+        for (j = 0; j < n; j++) {                       /* (the tracks' sum: what the effects' return is measured from) */
+            uac_pre[0][j] = mix_l[j];
+            uac_pre[1][j] = mix_r[j];
+        }
+    }
+#else
     for (i = 0; i < NLIVE; i++)                         /* (STRANGE: T1, T2 only) */
         mix_part(&trk[i], n);
+#endif
     if (perf)
         perf_pre(mix_l, mix_r, send_d, send_r, n);
     fx_buses(send_c, send_d, send_r, wet, n);
     if (hl.side)
         rev_side_mix(mix_l, mix_r, n);                  /* HALL: stereo */
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+    for (i = 0; i < n; i++)                             /* the effects' return: the whole less the tracks' (HALL's side in it) */
+        uac_stem[4][i] = uac_pack(mix_l[i] + wet[i] - uac_pre[0][i], mix_r[i] + wet[i] - uac_pre[1][i]);
+#endif
 #if FELUCCA_SWAMP
     master_comp(n);
 #endif
