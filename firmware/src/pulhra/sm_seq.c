@@ -49,6 +49,9 @@ static volatile uint8_t sm_cpos;
 static volatile uint8_t sm_chain_gen;
 static uint8_t sm_chain_seen;
 static uint8_t sm_pos[SM_NTRK], sm_next[SM_NTRK];         /* the step playing, the step to play next */
+static uint8_t sm_lpos[4], sm_lnext[4];                   /* the KIT's lanes (Tim, 2.11: each its own length): each lane's step
+                                                             playing, its next; with every lane the track's length, the track's */
+static uint8_t sm_knote[4];                               /* the KIT's hits of the trig fired (its lanes' own steps): a ratchet's parts */
 static uint8_t sm_held[SM_NTRK][4], sm_nheld[SM_NTRK];    /* the notes the sequencer holds, per track */
 static int32_t sm_gate[SM_NTRK];                          /* samples left of their LEN (SM_GATE_INF: to the next trig) */
 #define SM_GATE_INF 0x7FFFFFFF
@@ -169,7 +172,7 @@ static void sm_seq_locks(uint32_t t, uint32_t st)
 {
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     uint8_t now[SM_LKB];
-    uint32_t i, n = pt->nlock, ts = SM_TS(t, st), b;
+    uint32_t i, n = pt->nlock, ts = SM_TS(t, st), b, kit = t == SM_KIT_TRK && sm_snd_kit(&pt->kit.snd[t]);
     memset(now, 0, sizeof now);
     if (n > SM_NLOCK)
         n = SM_NLOCK;
@@ -177,8 +180,10 @@ static void sm_seq_locks(uint32_t t, uint32_t st)
     for (i = 0; i < n; i++) {
         const sm_lock_t *l = &pt->lock[i];
         uint32_t p = l->param;
-        if (l->ts != ts || p >= SM_NPID)                  /* (0xFF >= SM_NPID: a removed entry) */
+        if (p >= SM_NPID)                                 /* (0xFF >= SM_NPID: a removed entry) */
             continue;
+        if (kit && sm_id_lane(p) < 4u ? l->ts != SM_TS(t, sm_lpos[sm_id_lane(p)]) : l->ts != ts)
+            continue;                                     /* (the KIT: a lane's values from the lane's own step) */
         now[p >> 3] |= (uint8_t)(1u << (p & 7u));
         sm_seq_pset(t, p, l->val, st, 1);
     }
@@ -234,6 +239,8 @@ static void sm_seq_init(void)
     sm_next_q8 = 0;
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
+    memset(sm_lpos, 0, sizeof sm_lpos);
+    memset(sm_lnext, 0, sizeof sm_lnext);
     memset(sm_nheld, 0, sizeof sm_nheld);
     memset(sm_lk_on, 0, sizeof sm_lk_on);
     memset(sm_lk_step, 0xFF, sizeof sm_lk_step);
@@ -276,6 +283,8 @@ static void sm_seq_play(void)
     sm_tick = 0;
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
+    memset(sm_lpos, 0, sizeof sm_lpos);
+    memset(sm_lnext, 0, sizeof sm_lnext);
     memset(sm_pre, 0, sizeof sm_pre);
     memset(sm_lpre, 0, sizeof sm_lpre);
     memset(sm_rskip, 0, sizeof sm_rskip);
@@ -313,6 +322,8 @@ static void sm_seq_stop(void)
     sm_rec_stop();
     memset(sm_pos, 0, sizeof sm_pos);
     memset(sm_next, 0, sizeof sm_next);
+    memset(sm_lpos, 0, sizeof sm_lpos);
+    memset(sm_lnext, 0, sizeof sm_lnext);
     sm_playing = 0;
 }
 
@@ -471,11 +482,40 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
     const sm_step_t *s = &pt->step[t][st];
     sm_step_t e;
-    uint32_t hits, vel, f, li;
-    if (!s->n)                                            /* (n first: the main loop writes it last, sm_step_toggle) */
+    uint32_t hits, vel, f, li, kit = sm_trk_kit(t, pt), L;
+    uint8_t lcond[4] = {0, 0, 0, 0};
+    if (!s->n && !kit)                                    /* (n first: the main loop writes it last, sm_step_toggle) */
         return;
     SM_BARRIER();
-    sm_step_eff(s, &pt->kit.snd[t], &e);                  /* (the inherited fields: the track's defaults now) */
+    if (s->n)
+        sm_step_eff(s, &pt->kit.snd[t], &e);              /* (the inherited fields: the track's defaults now) */
+    else {                                                /* (the KIT: no trig on the track's step, a lane's may hit) */
+        memset(&e, 0, sizeof e);
+        e.n = 1;
+        e.vel = pt->kit.snd[t].dvel;
+        e.len = pt->kit.snd[t].dlen;
+    }
+    if (kit) {                                            /* the KIT (Tim, 2.11: each lane its own length): each lane's hit
+                                                             from its own step (sm_lpos; every lane the track's length: this
+                                                             step), the rest of the trig (flags, LEN, NUDGE) the track step's */
+        uint32_t any = 0;
+        for (L = 0; L < 4u; L++) {
+            const sm_step_t *ls = &pt->step[t][sm_lpos[L] % SM_NSTEP];
+            sm_step_t le;
+            e.note[L] = 0;
+            if (!ls->n || (ls->flags & SMF_REST))
+                continue;
+            SM_BARRIER();
+            sm_step_eff(ls, &pt->kit.snd[t], &le);
+            e.note[L] = le.note[L];
+            lcond[L] = le.cond;
+            any |= e.note[L] != 0;
+        }
+        if (!s->n && !any)
+            return;
+        if (any)
+            e.flags &= (uint8_t)~SMF_REST;                /* (a lock trig on the track's step, a lane's hit elsewhere: it plays) */
+    }
     s = &e;
     f = s->flags;
     if (!sm_trk_kit(t, pt) && !sm_cond_ok(t, s->cond, next_pass)) {   /* (the KIT: each lane its own condition, below) */
@@ -493,17 +533,17 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
     if (sm_trk_kit(t, pt)) {                              /* the KIT: each lane's own condition, a lock of SM_LC(L) (Tim), else
                                                              the trig's (the defaults'), each lane on its own: no lane's
                                                              condition, no lane's PRE gates another's (Tim, 31.10) */
-        uint32_t L;
         for (L = 0; L < 4u; L++) {
             int32_t i;
             if (!e.note[L])
                 continue;
-            i = sm_lock_find(pt, t, st, SM_LC(L));
-            if (!sm_cond_pre(t, i >= 0 ? (uint32_t)(uint16_t)pt->lock[i].val : e.cond, next_pass, &sm_lpre[L])) {
+            i = sm_lock_find(pt, t, sm_lpos[L] % SM_NSTEP, SM_LC(L));   /* (the lane's own step's condition) */
+            if (!sm_cond_pre(t, i >= 0 ? (uint32_t)(uint16_t)pt->lock[i].val : lcond[L], next_pass, &sm_lpre[L])) {
                 e.note[L] = 0;
                 sm_lmask[t] &= (uint8_t)~(1u << L);
             }
         }
+        memcpy(sm_knote, e.note, sizeof sm_knote);
     }
     if ((f & SMF_PSLIDE) && pt->nlock)                    /* (no locks: nothing to glide) */
         sm_ps_begin(t, st, (int32_t)at, step_q8);
@@ -553,12 +593,8 @@ static void sm_seq_part(uint32_t t)
     }
     SM_BARRIER();
     sm_step_eff(s, &pt->kit.snd[t], &e);
-    if (sm_lmask[t] != 0xFu) {                            /* (the KIT: the lanes their conditions held back stay out) */
-        uint32_t L;
-        for (L = 0; L < 4u; L++)
-            if (!((sm_lmask[t] >> L) & 1u))
-                e.note[L] = 0;
-    }
+    if (sm_trk_kit(t, pt))                                /* (the KIT: the hits the trig fired, each lane's own step's, the */
+        memcpy(e.note, sm_knote, sizeof sm_knote);        /* lanes their conditions held back out) */
     sm_seq_notes(t, &e, sm_rat_vel[t], 0);
     sm_gate[t] = (int32_t)((sm_rat_d[t] >> 8) * (uint32_t)clamp(trk[t].p[P_SGATE], 1, 127) / 128u);
     sm_rat_left[t]--;
@@ -577,7 +613,7 @@ static int32_t sm_nudge_of(const sm_step_t *s)
 static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t muted)
 {
     const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
-    uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP), i = sm_next[t], j, skip;
+    uint32_t len = (uint32_t)clamp(pt->kit.snd[t].len, 1, SM_NSTEP), i = sm_next[t], j, skip, kpoly = 0, lhit = 0;
     uint32_t sw, swn;
     sm_tgcur[t] ^= 1u;
     sw = sm_tgcur[t] ? sm_swd_q8[t] : 0u;                 /* (this step's swing delay, the next step's) */
@@ -588,12 +624,29 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
         i = 0;
     sm_pos[t] = (uint8_t)i;
     sm_next[t] = (uint8_t)(i + 1u < len ? i + 1u : 0u);
+    if (t == SM_KIT_TRK) {                                /* the KIT's lanes, each round its own length (sm_llen; all the
+                                                             track's: the track's step, as before) */
+        uint32_t L;
+        for (L = 0; L < 4u; L++) {
+            uint32_t ll = sm_llen(pt, L), lp = sm_lnext[L] < ll ? sm_lnext[L] : 0u;
+            sm_lpos[L] = (uint8_t)lp;
+            sm_lnext[L] = (uint8_t)(lp + 1u < ll ? lp + 1u : 0u);
+        }
+        kpoly = sm_kit_poly(pt);
+    }
     if (!i)                                               /* a pass (0xFFFF at PLAY -> 0); past 0xFFFE it goes on at 855: */
         sm_loop[t] = (uint16_t)(sm_loop[t] == 0xFFFEu ? 840u + 0xFFFFu % 840u : sm_loop[t] + 1u);   /* (same A:B, not 1ST) */
     sm_late_q8[t] = SM_Q8_NONE;
     s = &pt->step[t][i];
     skip = (uint32_t)(sm_rskip[t] >> i) & 1u;                       /* (live record: the key played this step's note already) */
     sm_rskip[t] &= ~((uint64_t)1u << i) & (len < 64u ? ((uint64_t)1u << len) - 1u : ~(uint64_t)0);   /* (none left past a shortened length) */
+    if (kpoly) {                                          /* (a lane hits on its own step: the track's step fires for it) */
+        uint32_t L;
+        for (L = 0; L < 4u; L++) {
+            const sm_step_t *ls = &pt->step[t][sm_lpos[L]];
+            lhit |= ls->n && !(ls->flags & SMF_REST) && ls->note[L];
+        }
+    }
     if (sm_done[t] == i) {                                /* fired early already */
         sm_done[t] = 0xFFu;
     } else {
@@ -603,8 +656,8 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
             sm_seq_release(t);
             sm_slid[t] = 0;
         }
-        if (s->n && !muted && !skip) {
-            off = (int32_t)sw + sm_nudge_of(s) * (int32_t)step_q8 / 16;
+        if ((s->n || lhit) && !muted && !skip) {
+            off = (int32_t)sw + (s->n ? sm_nudge_of(s) : 0) * (int32_t)step_q8 / 16;
             if (off > 0) {
                 sm_late_q8[t] = at + (uint32_t)off;
                 sm_late_st[t] = (uint8_t)i;
@@ -616,7 +669,8 @@ static void sm_seq_step(uint32_t t, uint32_t at, uint32_t step_q8, uint32_t mute
     j = sm_next[t];
     s = &pt->step[t][j];
     sm_early_q8[t] = SM_Q8_NONE;
-    if (!muted && s->n && !((uint32_t)(sm_rskip[t] >> j) & 1u) && (off = (int32_t)swn + sm_nudge_of(s) * (int32_t)step_q8 / 16) < 0) {
+    if (!muted && !kpoly && s->n && !((uint32_t)(sm_rskip[t] >> j) & 1u) && (off = (int32_t)swn + sm_nudge_of(s) * (int32_t)step_q8 / 16) < 0) {   /* (the KIT's
+                                                             lanes apart: no early fire, each lane's next step is not this) */
         sm_early_q8[t] = at + step_q8 + (uint32_t)off;    /* (a sum below 0: before the step's start; else its own start does it) */
         sm_early_st[t] = (uint8_t)j;
     }
@@ -656,6 +710,8 @@ static void sm_pat_switch(uint32_t n, uint32_t how)
         sm_rskip[t] = 0;                                  /* (the steps of the pattern before) */
         if (how != SM_PM_JUMP) {
             sm_next[t] = 0;
+            if (t == SM_KIT_TRK)
+                memset(sm_lnext, 0, sizeof sm_lnext);   /* (the lanes from step 1 too) */
             sm_loop[t] = 0xFFFFu;                         /* (step 1's start counts the first pass: 1ST holds again) */
             sm_pre[t] = 0;
         }
@@ -718,6 +774,8 @@ static void sm_pat_block(uint32_t nq8)
         sm_tick = 0;
         for (t = 0; t < SM_NTRK; t++) {
             sm_next[t] = 0;
+            if (t == SM_KIT_TRK)
+                memset(sm_lnext, 0, sizeof sm_lnext);   /* (the lanes from step 1 too) */
             sm_rskip[t] = 0;                              /* (a mark on the step that no longer comes next) */
         }
         return;
@@ -728,6 +786,8 @@ static void sm_pat_block(uint32_t nq8)
             sm_tick = 0;
             for (t = 0; t < SM_NTRK; t++) {
                 sm_next[t] = 0;
+            if (t == SM_KIT_TRK)
+                memset(sm_lnext, 0, sizeof sm_lnext);   /* (the lanes from step 1 too) */
                 sm_rskip[t] = 0;
             }
         }
@@ -784,6 +844,16 @@ static void sm_rec_on(uint32_t t, uint32_t note, uint32_t vel)
             sm_early_q8[t] = SM_Q8_NONE;
         if (sm_done[t] != st)                             /* (fired early already: its start plays nothing anyway) */
             sm_rskip[t] |= (uint64_t)1u << st;
+    }
+    {                                                     /* the KIT, its lanes apart (Tim, 2.11): the hit onto its lane's own step,
+                                                             the nearest of the lane's (no skip mark: the track's steps are not
+                                                             the lane's) */
+        const sm_pattern_t *pt = &smp.pat[sm_play_pat % SM_NPAT];
+        if (sm_trk_kit(t, pt) && sm_kit_poly(pt)) {
+            uint32_t L = dr_lane(note);
+            st = st == sm_pos[t] ? sm_lpos[L] : sm_lnext[L];
+            sm_rskip[t] &= ~((uint64_t)1u << sm_next[t]);
+        }
     }
     sm_ropen[t][note >> 5] |= 1u << (note & 31u);
     sm_rev_put(SM_REV_ON, t, st, note, vel);

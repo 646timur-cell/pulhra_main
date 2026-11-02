@@ -269,6 +269,7 @@ static void sm_copy_trk(uint32_t t)
     memcpy(sm_clip.lenv, p->lenv, sizeof sm_clip.lenv);
     memcpy(sm_clip.lfenv, p->lfenv, sizeof sm_clip.lfenv);
     memcpy(sm_clip.ldist, p->ldist, sizeof sm_clip.ldist);
+    memcpy(sm_clip.llen, p->llen, sizeof sm_clip.llen);
     sm_clip_kind = SM_CLIP_TRK;
 }
 
@@ -289,6 +290,7 @@ static void sm_paste_trk(uint32_t t)
         memcpy(smp.pat[smp.cur % SM_NPAT].lenv, sm_clip.lenv, sizeof sm_clip.lenv);
         memcpy(smp.pat[smp.cur % SM_NPAT].lfenv, sm_clip.lfenv, sizeof sm_clip.lfenv);
         memcpy(smp.pat[smp.cur % SM_NPAT].ldist, sm_clip.ldist, sizeof sm_clip.ldist);
+        memcpy(smp.pat[smp.cur % SM_NPAT].llen, sm_clip.llen, sizeof sm_clip.llen);
     }
     sm_acc_reset(1u << t);
 }
@@ -345,7 +347,7 @@ static int sm_lock_of_lane(uint32_t q, uint32_t L)
 static void sm_shift_lane(uint32_t L, int32_t dir)
 {
     sm_pattern_t *p = &smp.pat[smp.cur % SM_NPAT];
-    uint32_t t = SM_KIT_TRK, len = (uint32_t)clamp(p->kit.snd[t].len, 1, (int32_t)SM_NSTEP), s, i, n;
+    uint32_t t = SM_KIT_TRK, len = sm_llen(p, L % 4u), s, i, n;   /* (the lane's own length, Tim 2.11) */
     uint8_t v[SM_NSTEP];
     L %= 4u;
     sm_undo_snap();

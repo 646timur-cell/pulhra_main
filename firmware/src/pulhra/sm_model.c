@@ -102,6 +102,35 @@ static int sm_is_lf(uint32_t id) { return id >= SM_LF0 && id < SM_LC0; }
 static int sm_is_le(uint32_t id) { return id >= SM_LE0 && id < SM_LE0 + 16u; }
 static int sm_is_lv(uint32_t id) { return id >= SM_LV0 && id < SM_LV0 + 20u; }
 static int sm_is_ld(uint32_t id) { return id >= SM_LD0 && id < SM_LD0 + 4u; }
+/* the KIT lane an id belongs to (its values, mix, filter, condition, envelopes, DIST), 4: none (a track's) */
+static uint32_t sm_id_lane(uint32_t q)
+{
+    return sm_is_lp(q) ? (q - SM_LP0) / 9u : sm_is_lm(q) ? (q - SM_LM0) / 4u : sm_is_lf(q) ? (q - SM_LF0) / 3u :
+           q >= SM_LC0 && q < SM_LC0 + 4u ? q - SM_LC0 : sm_is_le(q) ? (q - SM_LE0) / 4u : sm_is_lv(q) ? (q - SM_LV0) / 5u :
+           sm_is_ld(q) ? q - SM_LD0 : 4u;
+}
+/* lane L's length on pattern pt (Tim, 2.11: each its own; 0: the track's) */
+static uint32_t sm_llen(const sm_pattern_t *pt, uint32_t L)
+{
+    uint32_t n = pt->llen[L % 4u];
+    return n ? (n < SM_NSTEP ? n : SM_NSTEP) : (uint32_t)clamp(pt->kit.snd[SM_KIT_TRK].len, 1, SM_NSTEP);
+}
+/* the length the trig keys and the strip show for track t: the KIT's, the lane in edit's (Tim, 2.11) */
+static uint32_t sm_view_len(const sm_pattern_t *pt, uint32_t t)
+{
+    return sm_trk_kit(t % SM_NTRK, pt) ? sm_llen(pt, sm_kit_lane % 4u) : (uint32_t)clamp(pt->kit.snd[t % SM_NTRK].len, 1, SM_NSTEP);
+}
+/* the KIT's lanes run apart: a lane's length not the track's */
+static int sm_kit_poly(const sm_pattern_t *pt)
+{
+    uint32_t L, len = (uint32_t)clamp(pt->kit.snd[SM_KIT_TRK].len, 1, SM_NSTEP);
+    if (!sm_snd_kit(&pt->kit.snd[SM_KIT_TRK]))
+        return 0;
+    for (L = 0; L < 4u; L++)
+        if (sm_llen(pt, L) != len)
+            return 1;
+    return 0;
+}
 static const uint8_t SM_LV_ID[5] = {P_FATK, P_FDEC, P_FSUS, P_FREL, P_ED_FLT};   /* (a lane's F.ENV: the track's ids it stands for) */
 static const param_desc_t *sm_lv_desc(uint32_t j) { return &TP[SM_LV_ID[j % 5u]]; }
 static const char *const SM_LFN[5] = {"OFF", "LP", "BP", "HP", "NOTCH"};

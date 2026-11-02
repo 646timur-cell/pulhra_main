@@ -101,6 +101,8 @@ typedef struct {
     int8_t ldist[4];                                      /* ... and each lane's DIST, its drive (Tim, 31.10: the sends the lane's; the
                                                              TYPE TONE OUT LOW CUT the track's; bank version 8; an older bank loads
                                                              with the KIT sound's DIST) */
+    uint8_t llen[4];                                      /* ... and each lane's length (Tim, 2.11: each lane its own, as a track's;
+                                                             1 .. SM_NSTEP; 0: the track's, len; bank version 9, an older bank: 0) */
 } sm_pattern_t;
 
 /* the pattern change (smp.mode, the project's, as MONOFM's): SEQUENTIAL at the end of the pattern playing (its master length),

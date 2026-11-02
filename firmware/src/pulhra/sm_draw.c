@@ -55,6 +55,7 @@ static uint8_t sm_last_pos = 0xFFu, sm_last_play = 0xFFu; /* the playing step an
  * every signature and every zone of the frame uses these two, so what is drawn is what the signature said */
 static uint8_t smd_lat;                                   /* the selected track's keyboard LATCH (sm_klatch), read once per frame */
 static uint8_t smd_pos, smd_play, smd_rec, smd_live;      /* (and REC / live: the REC key sets them from the main loop) */
+static uint8_t smd_lpos4[4];                              /* ... the KIT's lanes' steps playing (sm_seq.c sm_lpos) */
 static uint8_t smd_pos4[SM_NTRK];                         /* HOME > MIXER: every track's playing step, read once per frame too */
 static uint32_t sm_last_pos4 = 0xFFFFFFFFu;
 static uint32_t sm_last_ui;                                /* the hash of the UI's state the last frame saw (sm_draw) */
@@ -335,9 +336,14 @@ static void smd_page(void)
             smd_cat(b, &n, " MUTE SOLO");
         } else {                                          /* SEQ: LEN 32 large, SEQ T1 at the right */
             char l[8] = {'L', 'E', 'N', ' ', 0, 0, 0, 0};
-            uint32_t len = smd_snd()->len % 100u;
+            uint32_t len = sm_view_len(&smp.pat[smp.cur % SM_NPAT], sm_ui.trk) % 100u;   /* (the KIT: the lane in edit's) */
             smd_cat(b, &n, "SEQ T");
             b[n++] = (char)('1' + sm_ui.trk % SM_NTRK);
+            if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {
+                b[n++] = ' ';
+                b[n++] = 'L';
+                b[n++] = (char)('1' + sm_kit_lane % 4u);
+            }
             b[n] = 0;
             smd_lenstr(l + 4, len);
             sm_px_text(0, 3, 3u, l, T_TEXT, 0);
@@ -1092,7 +1098,7 @@ static uint32_t smd_mark(void)                            /* the bar over a step
     int32_t st = sm_page_is_step() ? sm_step_edit() : -1;
     return sm_ui.held_step < SM_NSTEP ? sm_ui.held_step : st >= 0 ? (uint32_t)st : 0xFFu;
 }
-static uint32_t smd_strip_len(void) { return (uint32_t)clamp(smd_snd()->len, 1, SM_NSTEP); }
+static uint32_t smd_strip_len(void) { return sm_view_len(&smp.pat[smp.cur % SM_NPAT], sm_ui.trk); }   /* (the KIT: the lane in edit's) */
 /* HOME > MIXER: the strip is the four tracks, a row of dots each (rows 0..2, 5..7, 10..12, 15..17): a trig a 3 x 3 dot (a
  * REST hollow, the stack of a ratchet left out: no room), an empty strong beat a dim 1 x 1, nothing past the track's
  * length; the step playing a bar 5 x 1 under its place (rows 3, 8, 13, 18); a track not heard (muted, another soloed) dim;
@@ -1122,10 +1128,11 @@ static uint32_t smd_strip4_sig(void)
     int kit = smd_kitp();
     uint32_t b = sm_ui.bank * 16u, t, i, h = smd_mix(2166136261u, 0x4D4958u + b + (kit ? 0x100u : 0u));
     for (t = 0; t < SM_NTRK; t++) {
-        uint32_t tt = kit ? SM_KIT_TRK : t, len = (uint32_t)clamp(pt->kit.snd[tt].len, 1, SM_NSTEP);
+        uint32_t tt = kit ? SM_KIT_TRK : t, len = kit ? sm_llen(pt, t) : (uint32_t)clamp(pt->kit.snd[tt].len, 1, SM_NSTEP);
+        uint32_t ps = kit ? smd_lpos4[t] : smd_pos4[tt];
         for (i = 0; i < 16u; i++)
             h = smd_mix(h, b + i < len ? (uint32_t)(uint8_t)smd_prow_ch(pt, t, b + i, kit) : 9u);
-        h = smd_mix(smd_mix(h, len), smd_play && smd_pos4[tt] >= b && smd_pos4[tt] < b + 16u ? smd_pos4[tt] : 0xFFu);
+        h = smd_mix(smd_mix(h, len), smd_play && ps >= b && ps < b + 16u ? ps : 0xFFu);
         if (kit)
             h = smd_mix(h, (uint32_t)(uint8_t)pt->kit.snd[tt].p[P_E0 + t]);
     }
@@ -1146,7 +1153,8 @@ static void smd_strip4(void)
     char c[2] = {0, 0}, l[3] = {kit ? 'L' : 'T', 0, 0};
     smd_begin(0, SMD_MIX_Y, 240u, SMD_MIX_H, SM_WHITE_DIM);
     for (t = 0; t < SM_NTRK; t++) {                       /* (KIT: the rows its lanes L1 .. L4, the lane in edit's label inverted) */
-        uint32_t tt = kit ? SM_KIT_TRK : t, len = (uint32_t)clamp(pt->kit.snd[tt].len, 1, SM_NSTEP);
+        uint32_t tt = kit ? SM_KIT_TRK : t, len = kit ? sm_llen(pt, t) : (uint32_t)clamp(pt->kit.snd[tt].len, 1, SM_NSTEP);
+        uint32_t ps = kit ? smd_lpos4[t] : smd_pos4[tt];  /* (the KIT: each lane its own length, its own step playing) */
         int32_t y = 3 + (int32_t)t * 18;
         uint16_t ink = (uint16_t)(((mute >> tt) & 1u) ? SM_DIM_INK : T_BG);
         l[1] = (char)('1' + t);
@@ -1154,7 +1162,7 @@ static void smd_strip4(void)
         for (i = 0; i < 16u && b + i < len; i++) {
             int32_t x = 16 + (int32_t)i * 14;
             c[0] = smd_prow_ch(pt, t, b + i, kit);
-            if (smd_play && smd_pos4[tt] == b + i) {
+            if (smd_play && ps == b + i) {
                 cv_rect(x, y - 1, 13, 16, ink);
                 sm_px_text(x + 2, y, 2u, c, SM_WHITE_DIM, 0);
             } else {
@@ -1258,6 +1266,10 @@ static void sm_draw(void)
     sm_draw_px = 0;
     smd_play = *(volatile uint8_t *)&sm_playing != 0;     /* the snapshot of the frame (the audio stream moves both) */
     smd_pos = *(volatile uint8_t *)&sm_pos[sm_ui.trk % SM_NTRK];
+    for (z = 0; z < 4u; z++)                              /* (the KIT's lanes: each its own step playing) */
+        smd_lpos4[z] = *(volatile uint8_t *)&sm_lpos[z];
+    if (sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT]))
+        smd_pos = smd_lpos4[sm_kit_lane % 4u];            /* (the strip: the lane in edit's) */
     smd_rec = *(volatile uint8_t *)&sm_rec != 0;
     smd_live = *(volatile uint8_t *)&sm_live != 0;
     smd_lat = (uint8_t)(sm_ui.kbd && ((sm_klatch >> (sm_ui.trk % SM_NTRK)) & 1u));   /* (LAT: the keyboard mode's alone) */

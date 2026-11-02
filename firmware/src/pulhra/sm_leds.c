@@ -135,8 +135,9 @@ static void sm_leds(void)
         sm_led_pos_init();
         ready = 1;
     }
-    len = pt->kit.snd[t].len;
-    len = len < 1u ? 1u : len > SM_NSTEP ? SM_NSTEP : len;
+    len = sm_view_len(pt, t);                             /* (the KIT: the lane in edit's length, its own step playing) */
+    if (sm_trk_kit(t, pt))
+        ph = *(volatile uint8_t *)&sm_lpos[sm_kit_lane % 4u];
     for (k = 0; k < SM_NKEYS && (!sm_layer || sm_layer == SML_SEQ) && !sm_ui.kbd && sm_hold_btn() == 0xFFu; k++) {   /* (SEQ held: the trigs stay lit) */
         const sm_step_t *st;
         uint32_t s;

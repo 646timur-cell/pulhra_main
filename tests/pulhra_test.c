@@ -10539,6 +10539,85 @@ static int test_drone(void)
     return bad;
 }
 
+/* each KIT lane its own length (Tim, 2.11): SEQ held + SELECT on the KIT is the lane in edit's length, the track's the longest;
+ * L1 16 steps and L2 12, a hit on step 1 of each: over 49 steps L1 hits at 1 17 33 49, L2 at 1 13 25 37 49; a lane's own lock
+ * plays from its own step; the lengths saved and back; every lane at the track's length: as before */
+static int test_kit_lane_len(void)
+{
+    int bad = 0;
+    uint32_t i, n1 = 0, n2 = 0, ok = 1, at1[8], at2[8];
+    sm_pattern_t *pt;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    pt = cpat();
+    ksnd(3)->len = 16u;
+    for (i = 0; i < 4u; i++)
+        pt->llen[i] = 0;
+    sm_kit_lane = 0;
+    sm_step_toggle(3, 0);
+    sm_kit_lane = 1;
+    sm_step_toggle(3, 0);
+    bad += check("LLEN: every lane the track's length: not apart", !sm_kit_poly(pt) && sm_llen(pt, 1) == 16u);
+    layer_hold(B_SEQ);
+    turn(EN_SELECT, -4);
+    sm_input_poll();
+    draw_full();
+    bad += check("LLEN: SEQ + SELECT -4 on the KIT, L2 in edit: L2 12 steps, the others 16, the track 16; LEN 12 L2 drawn",
+                 pt->llen[0] == 16u && pt->llen[1] == 12u && pt->llen[2] == 16u && pt->llen[3] == 16u && ksnd(3)->len == 16u &&
+                 sm_kit_poly(pt) && lint_has("L2", 0, 0));
+    layer_let_go(B_SEQ);
+    seq_log_clear();
+    press(B_PLAY);
+    sm_input_poll();
+    for (i = 0; i < 49u * (uint32_t)S120 / CTL + 4u; i++)
+        run_block();
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    for (i = 0; i < seq_nev; i++) {
+        const seq_ev_t *e = &seq_ev[i];
+        if (!e->on || e->t != 3u)
+            continue;
+        if (e->note == DR_KIT_NOTE && n1 < 8u)
+            at1[n1++] = e->at;
+        if (e->note == DR_KIT_NOTE + 1u && n2 < 8u)
+            at2[n2++] = e->at;
+    }
+    printf("pulhra: LLEN: L1 %u hits, L2 %u hits\n", n1, n2);
+    for (i = 1; i < n1; i++)
+        ok &= (uint32_t)((at1[i] - at1[0] + S120 / 2) / S120) == 16u * i;
+    for (i = 1; i < n2; i++)
+        ok &= (uint32_t)((at2[i] - at2[0] + S120 / 2) / S120) == 12u * i;
+    bad += check("LLEN: L1 (16) hits on 1 17 33 49, L2 (12) on 1 13 25 37 49: each lane round its own length",
+                 n1 == 4u && n2 == 5u && ok && at1[0] == at2[0]);
+    {                                                     /* a lock of L2's LVL on its step 1: played at each of its hits */
+        sm_lock_set(3, 0, SM_LM(1, 0), 20);
+        press(B_PLAY);
+        sm_input_poll();
+        for (i = 0, ok = 1; i < 13u * (uint32_t)S120 / CTL; i++) {
+            run_block();
+            if (sm_lpos[1] == 0u && sm_pos[3] == 12u)     /* (track step 13: L2 back on its step 1, its lock on) */
+                ok &= dr_lm[3][1][0] == 20;
+        }
+        push(SMC_STOP, 0, 0, 0, 0);
+        run_block();
+        bad += check("LLEN: L2's lock on its own step 1 plays at track step 13 (its second pass)", ok && sm_lpos[1] == 0u);
+    }
+    sm_phash ^= 1u;
+    bad += check("LLEN: saved ...", sm_store_all() == 0);
+    pt->llen[1] = 0;
+    bank_reboot();
+    pt = cpat();
+    bad += check("LLEN: ... power off, on: L2 12 again", pt->llen[1] == 12u && pt->llen[0] == 16u);
+    nor_wipe();
+    in_reset();
+    return bad;
+}
+
 /* the web editor's link (sm_ed.c): INFO lists the regions; a sector erased, 256 bytes written and read back through the frames;
  * a write refused while playing; RELOAD 2 indexes the user sounds anew (a record written raw shows up); bad arguments */
 static uint32_t ed_frame(const uint8_t *body, uint32_t n)  /* body: cmd and args -> the reply's length (sm_ed_out) */
@@ -13950,6 +14029,7 @@ int main(void)
     bad += test_ether();
     bad += test_impulse();
     bad += test_drone();
+    bad += test_kit_lane_len();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();
