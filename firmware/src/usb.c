@@ -131,7 +131,15 @@ static uint32_t ua_ring[UA_N * UA_W] __attribute__((section(".pool")));   /* (fr
 static uint32_t ua_ring[UA_N];
 #endif
 static volatile uint32_t ua_w, ua_r;
+#if UA_W > 1
+/* the stems: two packet buffers, in turn (Tim 2.11: a 920-byte packet came out with chunks of about 512 bytes from another packet,
+ * frames 24 or 26 out: the DMA still reads the one sent while the next is built; the stereo's 184 bytes never showed it) */
+static uint32_t ep4txb[2][UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
+static uint8_t ep4tx_k;
+#define ep4tx ep4txb[ep4tx_k]
+#else
 static uint32_t ep4tx[UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
+#endif
 #if FELUCCA_UAC_OUT
 static uint32_t ep4rx[UA_MAXF + 2u] __attribute__((aligned(4)));   /* the output's packets land here (and are dropped) */
 #endif
@@ -1343,6 +1351,9 @@ static void uac_service(void)
     }
     uac.queued = 1;
     uac.wait = 0;
+#if UA_W > 1
+    ep4tx_k ^= 1u;                                      /* (the other buffer: the last one may still be read) */
+#endif
     n = uac_packet(ep4tx);
     fm1_usb_ep4_send(ep4tx, n * 2u * FELUCCA_UAC_NCH);
     sie_wr(S_TXCSR1, 0x01);                             /* TxPktRdy (and UnderRun cleared) */
