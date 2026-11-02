@@ -850,8 +850,13 @@ static void sm_step_page(const int32_t *k, int32_t sel, int32_t pre)
         uint32_t cur = li >= 0 ? (uint32_t)(uint16_t)pt->lock[li].val : e.cond;
         (void)sm_lock_set(t, (uint32_t)st, SM_LC(sm_kit_lane % 4u), (int32_t)sm_field_turn(3, cur, k[3]));
     }
+    if ((k[0] || k[1]) && sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT]) && s->note[sm_kit_lane % 4u]) {   /* the KIT (Tim, 2.11): */
+        uint32_t L = sm_kit_lane % 4u;                    /* K1 / K2 the lane in edit's own velocity (never the step's, the */
+        int32_t cur = s->note[L] == SM_INH ? (int32_t)e.vel : (int32_t)s->note[L];   /* other lanes' with it) */
+        s->note[L] = (uint8_t)clamp(cur + (k[0] + k[1]) * (sm_shift ? 4 : 1), 1, 127);
+    }
     for (i = 0; i < 4u; i++)
-        if (k[i] && !(i == 3u && sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT]))) {
+        if (k[i] && !(i == 3u && sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) && !(i < 2u && sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT]))) {
             uint32_t old = i == 0u ? e.note[0] : 0u;
             *f[i] = (uint8_t)sm_field_turn(i, i == 0u ? e.note[0] : i == 1u ? e.vel : i == 2u ? e.len : e.cond, k[i]);
             if (i == 0u && s->n > 1u && !sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {   /* a chord: NOTE moves every note (Tim) */
@@ -995,7 +1000,7 @@ static void sm_lrec_poll(void)
             if (e.pat != smp.cur % SM_NPAT || e.step >= SM_NSTEP)
                 continue;
             if (!(sm_rc_ok[t] && sm_rc_step[t] == e.step && sm_rc_pat[t] == e.pat &&
-                  (uint32_t)(e.at - sm_rc_at[t]) < (sq >> 8) && sm_step_rec_add(t, e.step, e.note))) {
+                  (uint32_t)(e.at - sm_rc_at[t]) < (sq >> 8) && sm_step_rec_add(t, e.step, e.note, e.vel))) {
                 sm_step_rec(t, e.step, e.note, e.vel);
                 sm_rc_ok[t] = 1;
                 sm_rc_step[t] = e.step;

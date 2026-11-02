@@ -10618,6 +10618,60 @@ static int test_kit_lane_len(void)
     return bad;
 }
 
+/* each KIT lane its own velocity (Tim, 2.11: a lane's VEL changed the others'): on STEP, a trig held, K2 is the lane in edit's
+ * own velocity; the other lanes of the step keep theirs; an accent is the lane's own step's; recorded a lane its own */
+static int test_kit_lane_vel(void)
+{
+    int bad = 0;
+    uint32_t i, v1 = 0, v2 = 0;
+    sm_pattern_t *pt;
+    in_reset();
+    host_ticks = 1000u;
+    seq_reset();
+    draw_setup();
+    sm_ui.trk = 3;
+    sm_sound_load(SM_KIT_MACH, 0);
+    sm_input_poll();
+    pt = cpat();
+    ksnd(3)->len = 16u;
+    for (i = 0; i < 4u; i++)
+        pt->llen[i] = 0;
+    sm_kit_lane = 0;
+    sm_step_toggle(3, 0);
+    sm_kit_lane = 1;
+    sm_step_toggle(3, 0);
+    sm_ui.page = (uint8_t)page_by_name("STEP");
+    sm_ui.sel_step = 0;
+    sm_ui.held_step = 0;
+    {
+    uint8_t vel0 = pt->step[3][0].vel, n0 = pt->step[3][0].note[0];
+    turn(EN_K2, -60);                                     /* L2 in edit: its velocity down */
+    sm_input_poll();
+    draw_full();
+    bad += check("LVEL: STEP K2 on the KIT: L2's own velocity 40, L1's and the step's as they were",
+                 pt->step[3][0].note[1] == 40u && pt->step[3][0].note[0] == n0 && pt->step[3][0].vel == vel0);
+    }
+    sm_ui.held_step = sm_ui.sel_step = 0xFFu;
+    seq_log_clear();
+    press(B_PLAY);
+    sm_input_poll();
+    for (i = 0; i < 4u * (uint32_t)S120 / CTL; i++)
+        run_block();
+    push(SMC_STOP, 0, 0, 0, 0);
+    run_block();
+    for (i = 0; i < seq_nev; i++)
+        if (seq_ev[i].on && seq_ev[i].t == 3u) {
+            if (seq_ev[i].note == DR_KIT_NOTE && !v1)
+                v1 = seq_ev[i].vel;
+            if (seq_ev[i].note == DR_KIT_NOTE + 1u && !v2)
+                v2 = seq_ev[i].vel;
+        }
+    printf("pulhra: LVEL: L1 velocity %u, L2 %u\n", v1, v2);
+    bad += check("LVEL: played: L1 at the step's velocity, L2 at its own 40", v1 == ksnd(3)->dvel && v2 == 40u);
+    in_reset();
+    return bad;
+}
+
 /* the web editor's link (sm_ed.c): INFO lists the regions; a sector erased, 256 bytes written and read back through the frames;
  * a write refused while playing; RELOAD 2 indexes the user sounds anew (a record written raw shows up); bad arguments */
 static uint32_t ed_frame(const uint8_t *body, uint32_t n)  /* body: cmd and args -> the reply's length (sm_ed_out) */
@@ -14030,6 +14084,7 @@ int main(void)
     bad += test_impulse();
     bad += test_drone();
     bad += test_kit_lane_len();
+    bad += test_kit_lane_vel();
     bad += test_west();
     bad += test_cloud();
     bad += test_zap();

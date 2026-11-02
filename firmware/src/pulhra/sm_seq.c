@@ -443,7 +443,8 @@ static void sm_seq_notes(uint32_t t, const sm_step_t *s, uint32_t vel, uint32_t 
         sm_seq_release(t);
         for (k = 0; k < SM_NLANE; k++)
             if (s->note[k]) {
-                trk_note_on(&trk[t], DR_KIT_NOTE + k, s->note[k] == SM_INH || vel == 127u ? vel : s->note[k]);
+                trk_note_on(&trk[t], DR_KIT_NOTE + k, s->note[k] == SM_INH ? vel : s->note[k]);   /* (the lane's own, resolved
+                                                                                                   at the fire: sm_seq_fire) */
                 sm_held[t][n++] = (uint8_t)(DR_KIT_NOTE + k);
             }
         sm_nheld[t] = (uint8_t)n;
@@ -507,7 +508,8 @@ static void sm_seq_fire(uint32_t t, uint32_t st, uint32_t at, uint32_t step_q8, 
                 continue;
             SM_BARRIER();
             sm_step_eff(ls, &pt->kit.snd[t], &le);
-            e.note[L] = le.note[L];
+            e.note[L] = !le.note[L] ? 0u : (le.flags & SMF_ACCENT) ? 127u :   /* (Tim, 2.11: each lane its own velocity, the */
+                        le.note[L] == SM_INH ? (uint8_t)clamp(le.vel, 1, 127) : le.note[L];   /* lane's step's: never another's) */
             lcond[L] = le.cond;
             any |= e.note[L] != 0;
         }

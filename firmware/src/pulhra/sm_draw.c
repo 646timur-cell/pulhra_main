@@ -476,6 +476,20 @@ static void smd_step_knob(uint32_t k, smd_knob_t *o)
         e.len = d->dlen;
         e.cond = d->dcond;
     }
+    if (p && k < 2u && sm_trk_kit(sm_ui.trk % SM_NTRK, &smp.pat[smp.cur % SM_NPAT])) {   /* the KIT: K1 nothing, K2 the lane in */
+        uint32_t L = sm_kit_lane % 4u, v;                 /* edit's own velocity (Tim, 2.11) */
+        if (!k) {
+            o->on = 0;
+            return;
+        }
+        if (!p->note[L])
+            return;
+        v = p->note[L] == SM_INH ? e.vel : p->note[L];
+        o->filled = p->note[L] != SM_INH;
+        smd_int(o->val, (int32_t)v, 0);
+        o->pos = (v > 1u ? v - 1u : 0u) * 256u / 126u;
+        return;
+    }
     switch (k) {
     case 0:
         smd_note(o->val, e.note[0] & 127u);

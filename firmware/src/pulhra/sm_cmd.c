@@ -315,7 +315,7 @@ static void sm_step_rec(uint32_t t, uint32_t st, uint32_t note, uint32_t vel)
     s->n = 1;
 }
 /* ... a note more on the trig of step st (a chord recorded within the step, up to 4): its byte first, then n. 0: full / there */
-static int sm_step_rec_add(uint32_t t, uint32_t st, uint32_t note)
+static int sm_step_rec_add(uint32_t t, uint32_t st, uint32_t note, uint32_t vel)
 {
     sm_step_t *s;
     uint32_t k;
@@ -325,7 +325,7 @@ static int sm_step_rec_add(uint32_t t, uint32_t st, uint32_t note)
     if (sm_trk_kit(t, &smp.pat[smp.cur % SM_NPAT])) {     /* KIT: another lane on the step */
         if (!s->n || s->note[dr_lane(note)])
             return 0;
-        s->note[dr_lane(note)] = SM_INH;
+        s->note[dr_lane(note)] = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);   /* (its own velocity, Tim 2.11) */
         return 1;
     }
     if (!s->n || s->n >= 4u || (s->flags & SMF_REST))
