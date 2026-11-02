@@ -25,7 +25,7 @@ installer(build / f'pulhra-{version}.fwsc', 'fm1-pulhra-installer.html')
 shutil.copy2(site / 'fm1-pulhra-installer.html', site / 'index.html')
 for source, name in [('pulhra_editor.html', 'pulhra-editor.html'), ('pulhra_keys.html', 'keys.html')]:
     shutil.copy2(root / 'web' / source, site / name)
-for name in ('stems', 'stems-tone'):
+for name in ('stereo-tone', 'stems', 'stems-tone'):
     package = build / f'pulhra-{version}-{name}.fwsc'
     if package.exists():
         installer(package, f'{name}.html')

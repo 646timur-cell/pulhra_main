@@ -118,7 +118,10 @@ static uint8_t uac_nw = UA_W;
 /* the stems (Tim 2.11, a recording's counters): a 920-byte packet is on the wire ~0.65 ms; looked for at 2 kHz, the next one was
  * often queued after the host's next IN token (missed ~8 %, the ring overfilled, blocks dropped). The stems look every TIMER5 tick
  * (10 kHz, main.c) */
-#define UAC_POLL_ALL (UA_W > 1u)
+#ifndef FELUCCA_UAC_FAST_POLL
+#define FELUCCA_UAC_FAST_POLL 0
+#endif
+#define UAC_POLL_ALL (FELUCCA_UAC_FAST_POLL || UA_W > 1u)
 #define UAC_WAIT_STALL (UAC_POLL_ALL ? 200u : 40u)   /* ticks of uac_service: 20 ms either way */
 /* (the stems, UA_W 5: the same ring and band, 10 KiB: fx.c gives its delay 1.0 s for it; Tim 2.11: the narrower band of
  * 256 frames crackled) */
@@ -147,15 +150,12 @@ static uint32_t ua_ring[UA_N * UA_W] __attribute__((section(".pool")));   /* (fr
 static uint32_t ua_ring[UA_N];
 #endif
 static volatile uint32_t ua_w, ua_r;
-#if UA_W > 1
-/* the stems: two packet buffers, in turn (Tim 2.11: a 920-byte packet came out with chunks of about 512 bytes from another packet,
- * frames 24 or 26 out: the DMA still reads the one sent while the next is built; the stereo's 184 bytes never showed it) */
+/* The controller may clear TxPktRdy before its final DMA reads drain. Prepare
+ * the next packet in the other buffer for stereo too; never mutate the packet
+ * just handed to USB. At most one packet is queued, so two buffers suffice. */
 static uint32_t ep4txb[2][UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
 static uint8_t ep4tx_k;
 #define ep4tx ep4txb[ep4tx_k]
-#else
-static uint32_t ep4tx[UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
-#endif
 #if FELUCCA_UAC_OUT
 static uint32_t ep4rx[UA_MAXF + 2u] __attribute__((aligned(4)));   /* the output's packets land here (and are dropped) */
 #endif
@@ -1372,7 +1372,7 @@ static uint32_t uac_packet(uint32_t *d)
     return n;
 }
 
-/* TIMER5, 2 kHz, also nested in the render: the host takes one packet per 1 ms frame; queue the
+/* TIMER5, 10 kHz in PULHRA (2 kHz otherwise), also nested in the render: the host takes one packet per 1 ms frame; queue the
  * next one as soon as the last has gone (TxPktRdy clear). Not paced on SOF-pending (see usb_poll).
  * The ring is fed only while the host reads: it often selects alt 1 long before its first IN token,
  * and a recorder may stop reading without going back to alt 0 (a packet waiting > 20 ms). */
@@ -1380,7 +1380,7 @@ static void uac_service(void)
 {
     uint32_t csr, n;
 #if FELUCCA_UAC_OUT
-    if (usb.up && usb.config) {                         /* the output: a packet taken is dropped, the next may land */
+    if (usb.up && usb.config && uac.oalt) {             /* the output: a packet taken is dropped, the next may land */
         sie_wr(S_INDEX, 4);
         if (sie_rd(S_RXCSR1) & 0x01u) {
             uac.orx++;
@@ -1406,9 +1406,7 @@ static void uac_service(void)
     }
     uac.queued = 1;
     uac.wait = 0;
-#if UA_W > 1
-    ep4tx_k ^= 1u;                                      /* (the other buffer: the last one may still be read) */
-#endif
+    ep4tx_k ^= 1u;                                      /* the previous packet may still be read by DMA */
     n = uac_packet(ep4tx);
     fm1_usb_ep4_send(ep4tx, n * 4u * uac_nw);
     sie_wr(S_TXCSR1, 0x01);                             /* TxPktRdy (and UnderRun cleared) */
