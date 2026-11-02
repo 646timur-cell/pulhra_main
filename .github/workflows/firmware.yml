@@ -61,6 +61,10 @@ jobs:
           cp build/pulhra-1.5.1.fwsc /tmp/pulhra-stems-noout.fwsc
           FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=10 FELUCCA_UAC_TONE=1 ./build.sh --release 1.5.1 2>&1 | tail -n 6
           cp build/pulhra-1.5.1.fwsc /tmp/pulhra-stems-tone.fwsc
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=10 FELUCCA_UAC_TONE=1 FELUCCA_UAC_OUT=0 ./build.sh --release 1.5.1 2>&1 | tail -n 6
+          cp build/pulhra-1.5.1.fwsc /tmp/pulhra-stems-tone-noout.fwsc
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=8 FELUCCA_UAC_TONE=1 ./build.sh --release 1.5.1 2>&1 | tail -n 6
+          cp build/pulhra-1.5.1.fwsc /tmp/pulhra-stems-tone8.fwsc
           cp /tmp/pulhra-main.fwsc build/pulhra-1.5.1.fwsc
 
       - name: "Build logs to the ci-logs branch (on a failure, for a clone without the Actions UI)"
@@ -92,6 +96,8 @@ jobs:
           python3 web/make_module_installer.py /tmp/pulhra-stems.fwsc 1.5.1 /tmp/out/stems.html   # (USB audio: the stems, 10 channels)
           python3 web/make_module_installer.py /tmp/pulhra-stems-noout.fwsc 1.5.1 /tmp/out/stems-noout.html   # (... without the dummy output)
           python3 web/make_module_installer.py /tmp/pulhra-stems-tone.fwsc 1.5.1 /tmp/out/stems-tone.html   # (diagnosis: the stems, pair 9-10 a triangle)
+          python3 web/make_module_installer.py /tmp/pulhra-stems-tone-noout.fwsc 1.5.1 /tmp/out/stems-tone-noout.html   # (... without the dummy output)
+          python3 web/make_module_installer.py /tmp/pulhra-stems-tone8.fwsc 1.5.1 /tmp/out/stems-tone8.html   # (... 8 channels, the last pair the counters)
           cp /tmp/out/fm1-pulhra-installer.html /tmp/out/index.html   # (the folder as a site: its root is the installer)
           (cd /tmp/out && sha256sum pulhra-1.5.1.fwsc > SHA256SUMS && echo "$sha" > SOURCE_COMMIT)
           git config user.name "github-actions[bot]"
