@@ -5,7 +5,11 @@
 #if FELUCCA_MONOFM
 /* MONOFM: 1.11 s (96 KiB, the rest of the pool to four parts' engine memory, engines.c): 1/4 fits from 54 BPM, 1/4D
  * from 81, 1/2 from 108. Not a power of two: the ring wraps by compare (DLY_AT, DLY_NEXT) */
+#if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
+#define DLY_LEN 44032u           /* the stems' version (Tim 2.11): 1.0 s, its 10 KiB to the USB ring of 10 channels (usb.c UA_N 512) */
+#else
 #define DLY_LEN 49152u
+#endif
 #define DLY_AT(w, d) ((w) >= (d) ? (w) - (d) : (w) + DLY_LEN - (d))
 #define DLY_NEXT(w) ((w) + 1u >= DLY_LEN ? 0u : (w) + 1u)
 #else

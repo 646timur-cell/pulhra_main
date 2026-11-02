@@ -105,19 +105,12 @@ static struct {
  * 48..119 with no glitch; one render was once seen 29 frames under the floor: a packet (46) must
  * still be in hand then. */
 #define UA_W (FELUCCA_UAC_NCH / 2u)   /* words a frame: a stereo pair each (16-bit L | R << 16) */
-#if UA_W > 1
-/* the stems (FELUCCA_UAC_NCH 10, Tim 2.11: T1 .. T4 a stereo pair each, the effects' return a pair): a shorter ring (the
- * pool's: 256 frames x 5 words), a narrower band (a render starting late still has a packet in hand: 56 - 29 > 46 - 46) */
-#define UA_N 256u
-#define UA_PRIME 64u
-#define UA_LO 56u
-#define UA_HI 72u
-#else
+/* (the stems, UA_W 5: the same ring and band, 10 KiB: fx.c gives its delay 1.0 s for it; Tim 2.11: the narrower band of
+ * 256 frames crackled) */
 #define UA_N 512u                /* ring, frames (16-bit L | R << 16); a power of two */
 #define UA_PRIME 104u            /* silence ahead of the first rendered frame */
 #define UA_LO 80u                /* a render may start late: keep a packet and more in hand */
 #define UA_HI 128u
-#endif
 #define UAC_RATE 44100u
 #if FELUCCA_UAC_48K
 /* 48 kHz: the same times in 48 kHz frames (x 160 / 147); a render of HALF_FRAMES gives 139..140 frames */
