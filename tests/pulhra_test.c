@@ -10897,6 +10897,7 @@ static uint32_t ed_pack7(const uint8_t *d, uint32_t n, uint8_t *o)
     }
     return k;
 }
+static uint32_t ed_diag_value(uint32_t id) { return 0xF1230000u + id; }
 static int test_editor_link(void)
 {
     int bad = 0;
@@ -10913,6 +10914,25 @@ static int test_editor_link(void)
     bad += check("EDLINK: INFO: ok, version 1, 4 regions (the presets' at 0xDE000, 8 KiB)", n > 20u && sm_ed_out[5] == 0 &&
                  sm_ed_out[6] == 1 && sm_ed_out[7] == 4 && sm_ed_ru21(sm_ed_out + 8 + 2 * 7 + 1) == SM_UP_SEC0 &&
                  sm_ed_ru21(sm_ed_out + 8 + 2 * 7 + 4) == 2u * SM_FL_SEC);
+    {
+        uint32_t (*old_provider)(uint32_t) = sm_diag_read;
+        uint32_t writes = nor_writes;
+        sm_diag_read = ed_diag_value;
+        flash_ok = 0; sm_playing = 1; q[0] = SM_ED_STATS;
+        n = ed_frame(q, 1);
+        uint32_t good = n == 9u + 5u * SM_D_COUNT && sm_ed_out[5] == SM_ED_OK && sm_ed_out[6] == 1 && sm_ed_out[7] == SM_D_COUNT;
+        for (i = 0; i < SM_D_COUNT && good; i++) {
+            uint32_t value = 0, j;
+            for (j = 0; j < 5u; j++) value |= (uint32_t)sm_ed_out[8u + i * 5u + j] << (7u * j);
+            good &= value == ed_diag_value(i);
+        }
+        bad += check("EDLINK: STATS while playing, without flash: full u32, no writes or transport change", good && nor_writes == writes && sm_playing);
+        q[1] = 1; ed_frame(q, 2);
+        bad += check("EDLINK: STATS rejects arguments", sm_ed_out[5] == SM_ED_BADARG);
+        sm_diag_read = 0; ed_frame(q, 1);
+        bad += check("EDLINK: unavailable stats provider is explicit", sm_ed_out[5] == SM_ED_BADARG);
+        sm_diag_read = old_provider; flash_ok = 1; sm_playing = 0;
+    }
     q[0] = SM_ED_ERASE; q[1] = 2; q[2] = (uint8_t)(off & 127u); q[3] = (uint8_t)((off >> 7) & 127u); q[4] = (uint8_t)(off >> 14);
     n = ed_frame(q, 5);
     bad += check("EDLINK: ERASE a sector of the presets: ok", n && sm_ed_out[5] == SM_ED_OK);

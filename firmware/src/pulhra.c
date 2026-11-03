@@ -93,6 +93,36 @@
 static uint32_t kb_out_tick;             /* audio.c writes it; seq.c's press-latency stat (not in PULHRA) reads it */
 #include "audio.c"
 
+#include "pulhra/sm_diag.h"
+/* Main-loop reads only: no new work in the audio interrupt and no flash access. */
+static uint32_t sm_hw_diag_read(uint32_t id)
+{
+    switch (id) {
+    case SM_D_TICKS: return fm1_ticks();
+    case SM_D_HALVES: return audio_halves;
+    case SM_D_LATE: return *(volatile uint32_t *)&felucca_dbg.late;
+    case SM_D_MAX_US: return audio_max_us;
+    case SM_D_LAST_US: return *(volatile uint32_t *)&felucca_dbg.last_us;
+    case SM_D_CPU_Q8: return *(volatile uint32_t *)&song.cpu_q8;
+    case SM_D_TIMER_IRQS: return *(volatile uint32_t *)&felucca_dbg.timer_irqs;
+    case SM_D_PACKETS: return *(volatile uint32_t *)&uac.pkts;
+    case SM_D_FRAMES: return *(volatile uint32_t *)&uac.frames;
+    case SM_D_RING_WRITE: return ua_w;
+    case SM_D_RING_READ: return ua_r;
+    case SM_D_FILL: return *(volatile uint32_t *)&uac.fill_min;
+    case SM_D_UNDERRUNS: return *(volatile uint32_t *)&uac.underruns;
+    case SM_D_OVERRUNS: return *(volatile uint32_t *)&uac.overruns;
+    case SM_D_MISSED: return *(volatile uint32_t *)&uac.missed;
+    case SM_D_STALLS: return *(volatile uint32_t *)&uac.stalls;
+    case SM_D_ADJ_UP: return *(volatile uint32_t *)&uac.adj_up;
+    case SM_D_ADJ_DOWN: return *(volatile uint32_t *)&uac.adj_down;
+    case SM_D_STARTS: return *(volatile uint32_t *)&uac.starts;
+    case SM_D_HALF_FRAMES: return HALF_FRAMES;
+    case SM_D_TICKS_PER_US: return FM1_TICKS_PER_US;
+    default: return 0;
+    }
+}
+
 /* ------------------------------------------------- panel, storage, update --- */
 #include "panel.c"
 #include "settings_persist.c"    /* the settings record: PULHRA reads the panel table and the palette / LEDS / HOLD from it */
