@@ -49,6 +49,7 @@ jobs:
       - name: PULHRA USB transport and timing tests
         run: |
           python3 -m unittest discover -s tests -p uac_recording_test.py -v
+          python3 -m unittest discover -s tests -p audio_stats_test.py -v
           cc -O2 -Wall -Wextra -o build/host/pulhra_timer_test tests/pulhra_timer_test.c
           build/host/pulhra_timer_test
           cc -O2 -w -DT_CDC=0 -DHALF_FRAMES=128 -DFELUCCA_UAC_FAST_POLL=1 -o build/host/uac_test tests/uac_test.c -lm

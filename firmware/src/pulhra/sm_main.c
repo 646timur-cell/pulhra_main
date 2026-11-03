@@ -102,6 +102,7 @@ static void fm1_main(void)
     fm1_input_init();
     fm1_adc_init();
     panel_init();
+    sm_diag_read = sm_hw_diag_read;
     sm_core_init();
     sm_store_boot();                                    /* (the banks and the project from the flash: sm_bank.c) */
     master_boot();

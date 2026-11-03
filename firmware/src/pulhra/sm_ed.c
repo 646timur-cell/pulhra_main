@@ -13,16 +13,20 @@
  *   5 RELOAD what             -> rc                   (1: the banks and the project: the device restarts; 2: the user
  *                                                      sounds' index; 4: the sample slot rescanned)
  *   6 STATE                   -> rc, playing
+ *   7 STATS (no args)         -> rc, schema 1, count, count x u32 (5 little-endian 7-bit bytes)
+ *                              read-only, works during playback and without flash
  * rc: 0 done, 1 bad arguments, 2 busy (playing: ERASE / WRITE / RELOAD only while stopped: an erase stops the audio),
  * 3 the flash failed, 4 no flash. A READ works while playing (256-byte windows, the audio keeps up).
  * The regions: 0 PROJECT (both copies), 1 BANKS (the places), 2 PRESETS (the user sounds' two sectors), 3 SAMPLE (USR1's
  * 80 KiB: the three slots, packed: eng_sample.c smp_user_map) */
 
+#include "sm_diag.h"
+
 #define SM_ED_H0 0x7Du
 #define SM_ED_H1 0x50u
 #define SM_ED_H2 0x48u
 #define SM_ED_VER 1u
-enum { SM_ED_INFO = 1, SM_ED_READ, SM_ED_ERASE, SM_ED_WRITE, SM_ED_RELOAD, SM_ED_STATE };
+enum { SM_ED_INFO = 1, SM_ED_READ, SM_ED_ERASE, SM_ED_WRITE, SM_ED_RELOAD, SM_ED_STATE, SM_ED_STATS };
 enum { SM_ED_OK, SM_ED_BADARG, SM_ED_BUSY, SM_ED_FLASH, SM_ED_NOFLASH };
 static const struct { uint32_t base, size; } SM_ED_REG[4] = {
     {SM_FL_PROJ, 2u * SM_FL_SEC},
@@ -37,6 +41,7 @@ static uint8_t sm_ed_out[SM_ED_OUT] __attribute__((section(".pool")));
 static uint8_t sm_ed_buf[256] __attribute__((section(".pool")));
 static uint8_t sm_ed_reboot;                              /* RELOAD 1 answered: the main loop restarts the device */
 static uint32_t sm_ed_n;
+static uint32_t (*sm_diag_read)(uint32_t id);  /* optional hardware provider; emulator may leave it null */
 
 static void sm_ed_b(uint32_t v)
 {
@@ -92,7 +97,7 @@ static uint32_t sm_ed_handle(const uint8_t *p, uint32_t n)
     sm_ed_b(SM_ED_H1);
     sm_ed_b(SM_ED_H2);
     sm_ed_b(cmd);
-    if (cmd != SM_ED_INFO && cmd != SM_ED_STATE && !flash_ok) {
+    if (cmd != SM_ED_INFO && cmd != SM_ED_STATE && cmd != SM_ED_STATS && !flash_ok) {
         sm_ed_b(SM_ED_NOFLASH);
     } else if (cmd == SM_ED_INFO) {
 #ifdef FELUCCA_VERSION
@@ -111,6 +116,19 @@ static uint32_t sm_ed_handle(const uint8_t *p, uint32_t n)
         for (i = 0; NAME[i]; i++)
             sm_ed_b((uint8_t)NAME[i]);
         sm_ed_b(0);
+    } else if (cmd == SM_ED_STATS) {
+        if (n || !sm_diag_read) {
+            sm_ed_b(SM_ED_BADARG);
+        } else {
+            sm_ed_b(SM_ED_OK);
+            sm_ed_b(1);                                /* snapshot schema version */
+            sm_ed_b(SM_D_COUNT);
+            for (i = 0; i < SM_D_COUNT; i++) {
+                uint32_t value = sm_diag_read(i), j;
+                for (j = 0; j < 5u; j++)
+                    sm_ed_b(value >> (7u * j));        /* u32 in five 7-bit bytes */
+            }
+        }
     } else if (cmd == SM_ED_STATE) {
         sm_ed_b(SM_ED_OK);
         sm_ed_b(*(volatile uint8_t *)&sm_playing != 0);
