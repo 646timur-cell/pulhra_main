@@ -130,3 +130,23 @@ PLAY и без флеша; не пишет флеш, не меняет тран�
 Путь вывода должен быть новым. Поля включают TIMER4, обработанные звуковые полубуферы,
 late/max/last/CPU, TIMER5, USB-пакеты/кадры и индексы очереди. Это позволит сопоставить
 реальную частоту подачи, обработанные прерывания и темп USB вместо следующей догадки.
+
+### DMA pending-event loss under load
+
+Direct capture on a second FM-1 with `b7eb1d1`, different KITs, reproduced
+underruns. In a steady 20.02-second interval with no stream restart, the renderer
+and ring writer produced 43,882.4 frames/s while USB queued 43,999.6 frames/s
+at 999.97 packets/s (device clock). Counters increased by 92 underruns and
+37 late renders, with no overruns, missed packets or stalls.
+
+The ALNK0 ISR used to acknowledge its half-buffer pending bit after rendering.
+A new half-buffer event arriving during a late render was therefore cleared
+without processing its block. Acknowledge the selected half before rendering
+so the interrupt controller can dispatch the next event after ISR return.
+This preserves pending work; it does not make an over-budget render faster or
+repair audio already played by DMA. Hardware capture is still required to
+verify USB continuity and check for remaining deadline overruns.
+
+`audio_test.c` injects the next DMA event during the real ISR's USB tap, models
+the pending-bit clear, and dispatches retained pending work. Both event-retention
+checks fail with the old acknowledgement order and pass with the new order.
