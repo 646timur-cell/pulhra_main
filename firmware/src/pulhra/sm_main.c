@@ -133,7 +133,7 @@ static void fm1_main(void)
         uint32_t m = fm1_ms;
         fm1_wdt_feed();
 #if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
-        uac_set_nw(uac_mode == UAC_M_SUM ? 1u : FELUCCA_UAC_NCH / 2u);   /* (the stems' mode: the device's face, usb.c) */
+        uac_set_nw(uac_mode == UAC_M_SUM ? 1u : UA_W);   /* (the stems' mode: the device's face, usb.c) */
 #endif
         usb_retry(fm1_ms);
         if (fm1_ms > 30000u && bootguard.pending) {     /* a crash or hang in the first 30 s counts */

@@ -44,7 +44,7 @@ def main(pkg, version, out):
         TITLE, CREDIT = PULHRA_TITLE, PULHRA_CREDIT
     raw = Path(pkg).read_bytes()
     if TITLE == PULHRA_TITLE:                           # PULHRA: its own page (web/pulhra_installer.html)
-        return pulhra(raw, version, out)
+        return pulhra(raw, version, out, pkg)
     product = product_of(raw)
     if not re.fullmatch(r"FM-1_9\d\d", product):
         raise SystemExit(f"{pkg}: identity {product!r} is not a Felucca package (FM-1_9xx)")
@@ -69,7 +69,7 @@ def main(pkg, version, out):
     print(f"installer: {out} ({len(html)} B), package {len(raw)} B, {product}, version {version}")
 
 
-def pulhra(raw, version, out):
+def pulhra(raw, version, out, package_name=""):
     """PULHRA's installer: web/pulhra_installer.html, the same update code (fm1pkg.js, fm1ota.js), the package inside"""
     import os
     product = product_of(raw)
@@ -91,6 +91,19 @@ def pulhra(raw, version, out):
     html = html.replace("<!--DIAGNOSTICS-->", diagnostics if channel == "preview" else "")
     if channel == "stable":
         html = html.replace('href="stems.html"', 'href="preview/stems.html"')
+    compact = os.environ.get("PULHRA_STEM_CHANNELS") == "5"
+    if compact:
+        html = html.replace("6 ch: 1 kick mono · 3-4 drums · 5-6 the rest with FX", "5 ch: 1-2 drums · 3-4 the rest with FX · 5 kick mono")
+    name = Path(package_name).name
+    variant = ""
+    if name.endswith("-stems-tone.fwsc"):
+        inputs = "3-4" if compact else "5-6"
+        variant = f"DIAGNOSTICS — DRUMS mode: record inputs {inputs} (frame counters, not music)."
+    elif name.endswith("-stems.fwsc") and compact:
+        variant = "5 CHANNEL STEMS — 1-2 drums · 3-4 rest + FX · 5 kick mono. SUM is stereo."
+    elif name.endswith("-stereo-tone.fwsc"):
+        variant = "STEREO TEST TONE — diagnostic signal, not music."
+    html = html.replace("<!--VARIANT-->", f'<div class="ver">// {variant}</div>' if variant else "")
     lib = "\n".join(strip_module((HERE / f).read_text(encoding="utf-8")) for f in ("fm1pkg.js", "fm1ota.js"))
     data = "data:application/octet-stream;base64," + base64.b64encode(raw).decode()
     meta = json.dumps({"version": version, "product": product, "pkg": data, "commit": os.environ.get("GITHUB_SHA", "")[:7]})
