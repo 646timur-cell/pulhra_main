@@ -1353,10 +1353,13 @@ static uint32_t uac_packet(uint32_t *d)
             d[i] = 0;
         return n;
     }
-    if (uac.fill_min > hi) {
+    /* Compact 44.1-kHz STEMS stays on adjacent 44/45-frame packets. Larger
+     * fill corrections made bursty 43/46-frame packets despite an intact ring.
+     * This is a host-interoperability experiment; do not alter legacy/stereo. */
+    if (uac.fill_min > hi && (FELUCCA_UAC_NCH != 5 || n < 45u)) {
         n++;
         uac.adj_up++;
-    } else if (uac.fill_min < lo) {
+    } else if (uac.fill_min < lo && (FELUCCA_UAC_NCH != 5 || n > 44u)) {
         n--;
         uac.adj_down++;
     }

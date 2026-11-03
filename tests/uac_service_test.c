@@ -149,6 +149,34 @@ static void transport(uint32_t nw, uint32_t rate48)
     uac_render_start(); /* the producer sees the stopped reader and disarms the ring */
     if (uac.stalls != before + 1u || uac.go || uac.flowing) bad++;
 }
+static void kick_through_tap(void)
+{
+#if FELUCCA_UAC_NCH == 5
+    int32_t output[64] = {0};
+    uint32_t packet[UA_MAXF * UA_W], i, frames, bytes;
+    memset(&uac, 0, sizeof uac);
+    ua_r = ua_w = 0;
+    uac_nw = UA_W;
+    uac.go = uac.feed = 1;
+    uac.fill_min = UA_PRIME;
+    for (i = 0; i < 32u; i++) {
+        uac_stem[0][i] = 12345u;
+        uac_stem[1][i] = 0;
+        uac_stem[2][i] = 0;
+    }
+    uac_tap(output, 32);
+    uac_tap(output, 32);
+    frames = uac_packet(packet);
+    bytes = uac_wire_packet(packet, frames);
+    for (i = 0; i < frames; i++) {
+        const uint8_t *p = (const uint8_t *)packet + 10u * i + 8u;
+        if ((p[0] | (uint16_t)p[1] << 8) != 12345u) bad++;
+    }
+    if (bytes != frames * 10u) bad++;
+    printf("kick through tap -> ring -> packet -> physical channel 5: %u frames, errors %u\n", frames, bad);
+#endif
+}
+
 int main(void)
 {
     transport(UA_W, 0);
@@ -158,6 +186,7 @@ int main(void)
 #if UA_W > 1
     transport(1u, 0); /* SUM: same storage stride, just the master pair on the wire */
 #endif
+    kick_through_tap();
     printf("uac service: %s\n", bad ? "FAIL" : "ok");
     return bad != 0;
 }
