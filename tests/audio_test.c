@@ -10,19 +10,28 @@
 #define FM1_TICKS_PER_US 1u
 static uint32_t host_clock, host_us, host_half_reads, host_dma_advanced, host_acks, host_nest;
 static uint8_t host_pending;
+static uint32_t host_irq_model, host_inject_half, host_model_half;
 static volatile uint32_t t5_nested_ticks;              /* audio.c's: TIMER5 nested in the render (main.c) */
 static uint32_t fm1_ticks(void) { t5_nested_ticks = host_nest; host_clock += host_us; return host_clock; }
 static uint8_t fm1_audio_pending(void) { return host_pending; }
 static void fm1_audio_ack_aux(uint8_t p) { (void)p; }
-static uint32_t fm1_audio_free_half(void) { return host_dma_advanced && host_half_reads++ > 0u; }
-static void fm1_audio_ack_half(void) { host_acks++; }
+static uint32_t fm1_audio_free_half(void) { return host_irq_model ? host_model_half : host_dma_advanced && host_half_reads++ > 0u; }
+static void fm1_audio_ack_half(void) { host_acks++; if (host_irq_model) host_pending &= ~FM1_AUDIO_HALF; }
 static void fm1_audio_init(int32_t *b, uint32_t n, void (*isr)(void), uint32_t p)
 { (void)b; (void)n; (void)isr; (void)p; }
 void isr_alnk0(void) {}
 #define FELUCCA_UAC 1                                  /* audio.c taps USB audio: here into host_tap */
 static int32_t host_tap[2 * 64];
 static uint32_t host_tap_n;
-static void uac_tap(const int32_t *out, uint32_t n) { memcpy(host_tap, out, 8u * n); host_tap_n = n; }
+static void uac_tap(const int32_t *out, uint32_t n)
+{
+    memcpy(host_tap, out, 8u * n); host_tap_n = n;
+    if (host_irq_model && host_inject_half) {
+        host_inject_half = 0;
+        host_model_half ^= 1u;
+        host_pending |= FM1_AUDIO_HALF;   /* DMA advances while the real ISR renders. */
+    }
+}
 static void uac_render_start(void) {}
 #include "../firmware/src/audio.c"
 enum { FM1_ADC_BATT = 3, FM1_ADC_MASTER = 4 };
@@ -49,6 +58,7 @@ static void fresh(void)
     shed_req = 0; shed_count = 0; shed_over = 0;
     host_clock = host_us = host_half_reads = host_dma_advanced = host_acks = host_nest = 0;
     host_pending = FM1_AUDIO_HALF;
+    host_irq_model = host_inject_half = host_model_half = 0;
     transport_req = panic_req = 0;
 }
 static voice_t *held(track_t *t, uint32_t note)
@@ -141,6 +151,24 @@ static void dma(void)
     for (i = 0; i < 512u; i++) fm1_alnk0_irq();
     expected = host_us * 256u / (HALF_FRAMES * 1000000u / FS);
     check("steady CPU load converges without integer smoothing bias", song.cpu_q8 >= expected - 1u && song.cpu_q8 <= expected);
+}
+/* A W1C DMA pending bit is not a queue: clearing it after rendering can erase
+ * the next half's event. Run the actual ISR, inject that event in the USB tap,
+ * then dispatch the pending interrupt exactly as the interrupt controller does. */
+static void dma_pending(void)
+{
+    fresh(); host_irq_model = 1;
+    fm1_alnk0_irq();
+    check("normal DMA event is acknowledged and renders exactly one half",
+          host_acks == 1u && audio_halves == 1u && !host_pending);
+    fresh(); host_irq_model = host_inject_half = 1;
+    fm1_alnk0_irq();
+    check("next DMA event survives a render crossing the half boundary",
+          (host_pending & FM1_AUDIO_HALF) && audio_halves == 1u && felucca_dbg.late == 1u);
+    if (host_pending & FM1_AUDIO_HALF) fm1_alnk0_irq();
+    check("interrupt controller dispatches the surviving half without waiting a full DMA cycle",
+          audio_halves == 2u && host_acks == 2u && !host_pending && !felucca_dbg.in_audio);
+    fresh();
 }
 /* MENU > USB LEVEL (fx.c fx_usb_fixed, audio.c audio_block): MASTER (default) as before, USB = the DAC's signal and
  * follows the knob; FIXED: USB at the full level whatever MASTER is (MASTER 0: USB still plays, the DAC is silent),
@@ -273,7 +301,7 @@ int main(void)
     setvbuf(stdout, NULL, _IONBF, 0);
     usb_level();
     boot_keys();
-    overload(); dma();
+    overload(); dma(); dma_pending();
     printf(bad ? "audio: %d FAILED\n" : "audio: all passed\n", bad);
     return bad != 0;
 }
