@@ -1,5 +1,6 @@
 {
   "channel": "preview",
-  "version": "1.5.1-devcdea859",
-  "sha": "cdea859a3486af837eb4e12c7e3bfa82e34f89f0"
+  "version": "1.5.1-devee601e1",
+  "sha": "ee601e1893844ca46cff8770266b4aca786bd962",
+  "stem_channels": 5
 }
