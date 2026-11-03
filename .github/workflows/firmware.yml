@@ -49,8 +49,14 @@ jobs:
           python3 -m unittest discover -s tests -p uac_recording_test.py -v
           cc -O2 -Wall -Wextra -o build/host/pulhra_timer_test tests/pulhra_timer_test.c
           build/host/pulhra_timer_test
-          cc -O2 -w -DT_CDC=0 -DHALF_FRAMES=128 -o build/host/uac_test tests/uac_test.c -lm
+          cc -O2 -w -DT_CDC=0 -DHALF_FRAMES=128 -DFELUCCA_UAC_FAST_POLL=1 -o build/host/uac_test tests/uac_test.c -lm
           build/host/uac_test
+          for rate in 44100 48000; do
+            flags=()
+            if [ "$rate" = 48000 ]; then flags=(-DTEST_RATE48=1); fi
+            cc -O2 -w -DT_CDC=0 -DHALF_FRAMES=128 -DFELUCCA_UAC_FAST_POLL=1 "${flags[@]}" -o build/host/uac_jitter_test tests/uac_jitter_test.c -lm
+            build/host/uac_jitter_test
+          done
           for channels in 2 6; do
             cc -O2 -w -DFELUCCA_UAC_NCH=$channels -DFELUCCA_UAC_OUT=1 -o build/host/uac_service_test tests/uac_service_test.c -lm
             build/host/uac_service_test

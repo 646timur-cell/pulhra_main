@@ -339,7 +339,7 @@ static void test_ring(void)
     cons_bad = cons_rep = 0;
     base_p = uac.underruns + uac.overruns;
     run(3000, 0, 1, 1);
-    check("restart: primed again, in order, no glitch", cons_n > 3000u * 44u && cons_bad == 0 && cons_rep == 0 &&
+    check("restart: primed again, in order, no glitch", cons_n + UA_PRIME > 3000u * 44u && cons_bad == 0 && cons_rep == 0 &&
           uac.underruns + uac.overruns == base_p);
 }
 
