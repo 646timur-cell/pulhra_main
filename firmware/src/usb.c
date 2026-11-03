@@ -36,10 +36,10 @@
 #define FELUCCA_UAC_AS_FIRST 1
 #endif
 #ifndef FELUCCA_UAC_NCH
-#define FELUCCA_UAC_NCH 2        /* the USB input's channels (2, or 4 .. 10 even: the bench's multichannel test) */
+#define FELUCCA_UAC_NCH 2        /* the USB input's channels (2 stereo, 5 compact stems, or legacy even multichannel) */
 #endif
-#if FELUCCA_UAC_NCH < 2 || FELUCCA_UAC_NCH > 10 || (FELUCCA_UAC_NCH & 1)
-#error "FELUCCA_UAC_NCH is 2, 4, 6, 8 or 10"
+#if FELUCCA_UAC_NCH < 2 || FELUCCA_UAC_NCH > 10 || ((FELUCCA_UAC_NCH & 1) && FELUCCA_UAC_NCH != 5)
+#error "FELUCCA_UAC_NCH is 2, 4, 5, 6, 8 or 10"
 #endif
 /* FELUCCA_UAC_NCH > 2 (Tim, 1.11: the tracks as stems, the bench test first): the stream carries NCH channels at
  * 44.1 kHz only (no 48 kHz resampling: its FIR for every pair costs too much); for now each pair is the stereo
@@ -104,7 +104,7 @@ static struct {
  * band: ~5.8 ms). Measured under load (65 % CPU): a 64..112 band started renders at
  * 48..119 with no glitch; one render was once seen 29 frames under the floor: a packet (46) must
  * still be in hand then. */
-#define UA_W (FELUCCA_UAC_NCH / 2u)   /* words a frame: a stereo pair each (16-bit L | R << 16) */
+#define UA_W ((FELUCCA_UAC_NCH + 1u) / 2u)   /* words a frame: a stereo pair each (16-bit L | R << 16) */
 #if UA_W > 1
 /* the stems' version (Tim 3.11): two faces, the mode's (fx.c uac_mode; the main loop re-presents the device, uac_set_nw): DRUMS the
  * build's NCH channels, SUM a stereo pair. Words a frame sent: */
@@ -162,7 +162,7 @@ static volatile uint32_t ua_w, ua_r;
 /* The controller may clear TxPktRdy before its final DMA reads drain. Prepare
  * the next packet in the other buffer for stereo too; never mutate the packet
  * just handed to USB. At most one packet is queued, so two buffers suffice. */
-static uint32_t ep4txb[2][UA_MAXF * FELUCCA_UAC_NCH / 2u] __attribute__((aligned(4)));
+static uint32_t ep4txb[2][UA_MAXF * UA_W] __attribute__((aligned(4)));
 static uint8_t ep4tx_k;
 #define ep4tx ep4txb[ep4tx_k]
 #if FELUCCA_UAC_OUT
@@ -399,7 +399,11 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     7, 5, 0x83, 2, 64, 0, 0,                               /* EP3 IN bulk */
 #define CDC_LEN 66                                         /* with its IAD */
 #if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
-#define UAC_BCD_X (UAC_NCH_D > 2 ? 0xC0 : 0x80)            /* (the stems' faces: a host must not reuse the stereo's, nor each other's) */
+#if FELUCCA_UAC_NCH == 5
+#define UAC_BCD_X (UAC_NCH_D > 2 ? 0x40 : 0x20)   /* new compact DRUMS/SUM faces; avoid cached six-channel descriptors */
+#else
+#define UAC_BCD_X (UAC_NCH_D > 2 ? 0xC0 : 0x80)            /* legacy multichannel faces */
+#endif
 #else
 #define UAC_BCD_X 0
 #endif
@@ -1381,6 +1385,29 @@ static uint32_t uac_packet(uint32_t *d)
     return n;
 }
 
+/* Compact DRUMS on the wire: drums L/R, rest+FX L/R, kick mono.
+ * Internal DSP/ring storage keeps the three legacy stereo words, avoiding
+ * any sound or bank-format change. Only packing at the USB boundary changes. */
+static uint32_t uac_wire_packet(uint32_t *packet, uint32_t frames)
+{
+#if FELUCCA_UAC_NCH == 5
+    if (uac_nw != 1u) {
+        uint8_t *bytes = (uint8_t *)packet;
+        uint32_t i, j;
+        for (i = 0; i < frames; i++) {
+            uint8_t *src = bytes + 12u * i, *dst = bytes + 10u * i;
+            uint8_t kick_l = src[0], kick_h = src[1];
+            for (j = 0; j < 8u; j++)
+                dst[j] = src[4u + j];
+            dst[8] = kick_l;
+            dst[9] = kick_h;
+        }
+        return frames * 10u;
+    }
+#endif
+    return frames * 4u * uac_nw;
+}
+
 /* TIMER5, 10 kHz in PULHRA (2 kHz otherwise), also nested in the render: the host takes one packet per 1 ms frame; queue the
  * next one as soon as the last has gone (TxPktRdy clear). Not paced on SOF-pending (see usb_poll).
  * The ring is fed only while the host reads: it often selects alt 1 long before its first IN token,
@@ -1417,7 +1444,7 @@ static void uac_service(void)
     uac.wait = 0;
     ep4tx_k ^= 1u;                                      /* the previous packet may still be read by DMA */
     n = uac_packet(ep4tx);
-    fm1_usb_ep4_send(ep4tx, n * 4u * uac_nw);
+    fm1_usb_ep4_send(ep4tx, uac_wire_packet(ep4tx, n));
     sie_wr(S_TXCSR1, 0x01);                             /* TxPktRdy (and UnderRun cleared) */
 }
 #endif

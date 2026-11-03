@@ -47,9 +47,65 @@ static uint32_t uac_stem[5][32];
 #include "../firmware/src/usb.c"
 
 static uint32_t frame(uint32_t i, uint32_t pair) { return (i * 7919u) ^ (pair * 0x1234567u); }
+static uint32_t wire_channels(uint32_t nw)
+{
+    return FELUCCA_UAC_NCH == 5 && nw > 1u ? 5u : nw * 2u;
+}
+static uint16_t wire_sample(uint32_t index)
+{
+    const uint8_t *b = (const uint8_t *)saved + 2u * index;
+    return (uint16_t)(b[0] | (uint16_t)b[1] << 8);
+}
+static uint16_t expected_sample(uint32_t count, uint32_t channel, uint32_t nw)
+{
+    static const uint8_t compact[5] = {2, 3, 4, 5, 0};
+    uint32_t slot = FELUCCA_UAC_NCH == 5 && nw > 1u ? compact[channel] : channel;
+    return (uint16_t)(frame(count, slot / 2u) >> (16u * (slot & 1u)));
+}
+static void descriptors(uint32_t nw)
+{
+    uint32_t off, fmt = 0, terminal = 0, endpoint = 0, interface = 0xFFu;
+#if UA_W > 1
+    uac_nw = nw;
+#endif
+    const uint8_t *config;
+    uint16_t length;
+    if (!get_desc(0x0200, &config, &length)) { bad++; return; }
+    for (off = 0; off < length;) {
+        const uint8_t *d = config + off;
+        if (d[0] < 2 || off + d[0] > length) { bad++; break; }
+        if (d[1] == 4) interface = d[2];
+        if (interface == UAC_AS_IF && d[1] == 0x24 && d[0] == 11 && d[2] == 2 && d[3] == 1) {
+            fmt++;
+            if (d[4] != wire_channels(nw) || d[5] != 2 || d[6] != 16) bad++;
+        }
+        if (interface == UAC_AS_IF && d[1] == 0x24 && d[0] == 14 && d[2] == 2 && d[3] == 1) {
+            fmt++;
+            if (d[4] != wire_channels(nw) || d[5] != 2 || d[6] != 16) bad++;
+        }
+        if (d[1] == 0x24 && d[0] == 12 && d[2] == 2 && d[3] == 1) {
+            terminal++;
+            if (d[7] != wire_channels(nw)) bad++;
+        }
+        if (d[1] == 5 && d[2] == 0x84) {
+            uint32_t maxp = d[4] | (uint32_t)d[5] << 8;
+            endpoint++;
+            if (maxp != UA_MAXF * wire_channels(nw) * 2u) bad++;
+            if (FELUCCA_UAC_NCH == 5 && maxp > 512u) bad++;
+        }
+        off += d[0];
+    }
+    printf("descriptors %u ch: fmt %u terminal %u endpoint %u bad %u\n", wire_channels(nw), fmt, terminal, endpoint, bad);
+    if (fmt != 1 || terminal != 1 || endpoint != 1) bad++;
+#if FELUCCA_UAC_NCH == 5
+    if (DEV_DESC_PLAIN[12] == DEV_DESC_SUM[12]) bad++;
+#endif
+}
+
 static void transport(uint32_t nw, uint32_t rate48)
 {
-    uint32_t count = 0, turn, f, p, before;
+    uint32_t count = 0, turn, f, p, before, channels = wire_channels(nw), bytes_per_frame = channels * 2u;
+    descriptors(nw);
     memset(&usb, 0, sizeof usb); memset(&uac, 0, sizeof uac);
     memset(regs, 0, sizeof regs);
     dma = 0; dma_bytes = 0; overwritten = 0; ua_r = ua_w = 0;
@@ -69,18 +125,23 @@ static void transport(uint32_t nw, uint32_t rate48)
             for (p = 0; p < UA_W; p++) ua_ring[(ua_w & (UA_N - 1u)) * UA_W + p] = frame(ua_w, p);
             ua_w++;
         }
+        uac.fill_min = turn % 3u == 0u ? UA_HI + 1u : turn % 3u == 1u ? UA_LO - 1u : UA_PRIME;
+#if FELUCCA_UAC_48K
+        if (rate48) uac.fill_min = turn % 3u == 0u ? UA_HI48 + 1u : turn % 3u == 1u ? UA_LO48 - 1u : UA_PRIME48;
+#endif
         regs[4][17] = 0; /* ready clears; previous packet's memory can still be read */
         uac_service();
-        if (!dma_bytes || dma_bytes % (4u * nw)) { bad++; break; }
-        for (f = 0; f < dma_bytes / (4u * nw); f++, count++)
-            for (p = 0; p < nw; p++)
-                if (((const uint32_t *)saved)[f * nw + p] != frame(count, p)) bad++;
+        if (!dma_bytes || dma_bytes % bytes_per_frame) { bad++; break; }
+        for (f = 0; f < dma_bytes / bytes_per_frame; f++, count++)
+            for (p = 0; p < channels; p++)
+                if (wire_sample(f * channels + p) != expected_sample(count, p, nw)) bad++;
+        if (FELUCCA_UAC_NCH == 5 && dma_bytes > 460u) bad++;
         before = sends;
         uac_service(); /* TX still busy: must not queue or consume another packet */
         if (sends != before) bad++;
     }
     if (uac.underruns || uac.overruns || overwritten) bad++;
-    printf("%u channels, %u Hz: %u ordered frames, %u in-flight overwrites\n", nw * 2u, rate48 ? 48000u : 44100u, count, overwritten);
+    printf("%u channels, %u Hz: %u ordered frames, %u in-flight overwrites\n", channels, rate48 ? 48000u : 44100u, count, overwritten);
     before = uac.stalls;
     for (turn = 0; turn < 198u; turn++) uac_service();
     if (uac.stalls != before) bad++;

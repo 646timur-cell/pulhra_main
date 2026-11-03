@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Check unprocessed 16-bit WAV recordings of PULHRA USB diagnostic builds.
-Stereo: exact diagnostic triangles at 44.1/48 kHz. Six channels: DRUMS
-counters in channels 5/6, 44.1 kHz. Exit 1 for corruption or unrecognised audio.
+"""Check 16/24-bit WAV recordings of PULHRA USB diagnostic builds.
+Stereo: exact diagnostic triangles at 44.1/48 kHz. Compact DRUMS counters are in channels 3/4 of 5, legacy in 5/6 of 6;
+a stereo recording of just the counter pair is also recognised. Exit 1 for corruption or unrecognised audio.
   python3 tools/uac_tone_check.py recording.wav [more.wav ...]
 """
 import sys
+from collections import Counter
 import wave
 from array import array
 
@@ -44,16 +45,20 @@ def stereo(fr):
 
 
 def stems(fr):
+    if not fr:
+        return False, 'empty recording'
+    counter = {2: 0, 5: 2, 6: 4}[len(fr[0])]
+    fr = [(f[counter], f[counter + 1]) for f in fr]
     while fr and not any(fr[-1]):
         fr.pop()
-    start = next((i for i in range(len(fr) - 1) if fr[i][5] & 0xFFFF == 0x5A5A and
-                  fr[i][4] & 7 == 0 and (fr[i + 1][4] - fr[i][4]) & 0xFFFF == 1), None)
+    start = next((i for i in range(len(fr) - 1) if fr[i][1] & 0xFFFF == 0x5A5A and
+                  fr[i][0] & 7 == 0 and (fr[i + 1][0] - fr[i][0]) & 0xFFFF == 1), None)
     if start is None:
-        return False, 'no diagnostic frame counters found in channels 5/6'
+        return False, 'no diagnostic frame counters found in the diagnostic channel pair'
     first, last, breaks = {}, {}, []
     previous = None
     for i in range(start, len(fr)):
-        count, value = fr[i][4] & 0xFFFF, fr[i][5] & 0xFFFF
+        count, value = fr[i][0] & 0xFFFF, fr[i][1] & 0xFFFF
         lane = count & 7
         if (previous is not None and (count - previous) & 0xFFFF != 1) or (lane == 0 and value != 0x5A5A):
             breaks.append(i)
@@ -71,15 +76,41 @@ def check(path):
     with wave.open(path, 'rb') as w:
         ch, width, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
         raw = w.readframes(w.getnframes())
-    if width != 2 or ch not in (2, 6) or rate not in (44100, 48000) or (ch == 6 and rate != 44100):
-        print(f'{path}: need 16-bit stereo at 44.1/48 kHz or 6 channels at 44.1 kHz')
+    if width not in (2, 3) or ch not in (2, 5, 6) or rate not in (44100, 48000) or (ch > 2 and rate != 44100):
+        print(f'{path}: need 16/24-bit stereo at 44.1/48 kHz, or 5/6 channels at 44.1 kHz')
         return False
-    a = array('h', raw)
-    if sys.byteorder == 'big':
-        a.byteswap()
-    fr = [tuple(a[i:i + ch]) for i in range(0, len(a), ch)]
-    ok, message = stereo(fr) if ch == 2 else stems(fr)
-    print(f'{path}: {rate} Hz, {ch} channels: {message}: {"PASS" if ok else "FAIL"}')
+    if width == 2:
+        values = array('h', raw)
+        if sys.byteorder == 'big':
+            values.byteswap()
+    else:
+        values = [int.from_bytes(raw[i:i + 3], 'little', signed=True) / 256.0 for i in range(0, len(raw), 3)]
+    fr = [tuple(values[i:i + ch]) for i in range(0, len(values), ch)]
+    if not fr:
+        print(f'{path}: empty recording: FAIL')
+        return False
+    ci = {2: 0, 5: 2, 6: 4}[ch]
+    candidates = [f[ci + 1] for f in fr if 22500 < f[ci + 1] < 23500]
+    gain, counters = 1.0, ch > 2
+    if len(candidates) > len(fr) / 64:
+        trial = Counter(candidates).most_common(1)[0][0] / 23130.0
+        pair = [(round(f[ci] / trial), round(f[ci + 1] / trial)) for f in fr]
+        markers = sum((a & 7) == 0 and b == 23130 for a, b in pair)
+        if markers > len(fr) / 64:
+            gain, counters = trial, True
+    if ch == 2 and not counters:
+        peak = max(abs(v) for f in fr for v in f)
+        if peak:
+            gain = peak / 25000.0
+    # Recover integer PCM after a constant Consolidate gain; reject resampling or
+    # nonlinear processing rather than rounding arbitrary audio into a false pass.
+    residual = max(abs(f[k] / gain - round(f[k] / gain)) for f in fr for k in (ci, ci + 1))
+    if residual > 0.02:
+        print(f'{path}: PCM altered beyond constant gain (residual {residual:.4f}): FAIL')
+        return False
+    fr = [tuple(round(v / gain) for v in f) for f in fr]
+    ok, message = stems(fr) if counters else stereo(fr)
+    print(f'{path}: {rate} Hz, {ch} channels, gain {gain:.8f}: {message}: {"PASS" if ok else "FAIL"}')
     return ok
 
 
