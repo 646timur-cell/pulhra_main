@@ -21,8 +21,8 @@ def installer(package, name):
 
 
 os.environ['PULHRA_CHANNEL'] = info['channel']
-os.environ['PULHRA_STEM_CHANNELS'] = '5'
-info['stem_channels'] = 5
+os.environ['PULHRA_STEM_CHANNELS'] = '6'
+info['stem_channels'] = 6
 installer(build / f'pulhra-{version}.fwsc', 'fm1-pulhra-installer.html')
 shutil.copy2(site / 'fm1-pulhra-installer.html', site / 'index.html')
 for source, name in [('pulhra_editor.html', 'pulhra-editor.html'), ('pulhra_keys.html', 'keys.html')]:

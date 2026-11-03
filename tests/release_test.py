@@ -52,15 +52,15 @@ class ReleaseTest(unittest.TestCase):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
         import make_module_installer as installer
         with tempfile.TemporaryDirectory() as directory:
-            for suffix, label in [('stems', '5 CHANNEL STEMS'), ('stems-tone', 'record inputs 3-4'), ('stereo-tone', 'STEREO TEST TONE')]:
+            for suffix, label in [('stems', '6 CHANNEL STEMS'), ('stems-tone', 'record inputs 3-4'), ('stereo-tone', 'STEREO TEST TONE')]:
                 package = Path(directory) / f'pulhra-1.5.1-{suffix}.fwsc'
                 output = Path(directory) / 'installer.html'
                 package.write_bytes(b'FELUCCA-LOADER-1')
-                with patch.object(installer, 'product_of', return_value='FM-1_915'), patch.dict(os.environ, {'PULHRA_CHANNEL': 'preview', 'PULHRA_STEM_CHANNELS': '5'}):
+                with patch.object(installer, 'product_of', return_value='FM-1_915'), patch.dict(os.environ, {'PULHRA_CHANNEL': 'preview', 'PULHRA_STEM_CHANNELS': '6'}):
                     installer.main(str(package), '1.5.1-test', str(output))
                 html = output.read_text()
                 self.assertIn(label, html)
-                self.assertIn('5 ch: 1-2 drums', html)
+                self.assertIn('6 ch: 1-2 drums', html)
                 self.assertNotIn('<!--VARIANT-->', html)
 
 

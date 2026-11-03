@@ -92,13 +92,18 @@ def pulhra(raw, version, out, package_name=""):
     if channel == "stable":
         html = html.replace('href="stems.html"', 'href="preview/stems.html"')
     compact = os.environ.get("PULHRA_STEM_CHANNELS") == "5"
+    paired = os.environ.get("PULHRA_STEM_CHANNELS") == "6"
+    if paired:
+        html = html.replace("6 ch: 1 kick mono · 3-4 drums · 5-6 the rest with FX", "6 ch: 1-2 drums · 3-4 the rest with FX · 5-6 kick dual mono")
     if compact:
         html = html.replace("6 ch: 1 kick mono · 3-4 drums · 5-6 the rest with FX", "5 ch: 1-2 drums · 3-4 the rest with FX · 5 kick mono")
     name = Path(package_name).name
     variant = ""
     if name.endswith("-stems-tone.fwsc"):
-        inputs = "3-4" if compact else "5-6"
+        inputs = "3-4" if compact or paired else "5-6"
         variant = f"DIAGNOSTICS — DRUMS mode: record inputs {inputs} (frame counters, not music)."
+    elif name.endswith("-stems.fwsc") and paired:
+        variant = "6 CHANNEL STEMS — 1-2 drums · 3-4 rest + FX · 5-6 kick dual mono. SUM is stereo."
     elif name.endswith("-stems.fwsc") and compact:
         variant = "5 CHANNEL STEMS — 1-2 drums · 3-4 rest + FX · 5 kick mono. SUM is stereo."
     elif name.endswith("-stereo-tone.fwsc"):

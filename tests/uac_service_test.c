@@ -58,8 +58,8 @@ static uint16_t wire_sample(uint32_t index)
 }
 static uint16_t expected_sample(uint32_t count, uint32_t channel, uint32_t nw)
 {
-    static const uint8_t compact[5] = {2, 3, 4, 5, 0};
-    uint32_t slot = FELUCCA_UAC_NCH == 5 && nw > 1u ? compact[channel] : channel;
+    static const uint8_t compact[6] = {2, 3, 4, 5, 0, 0};
+    uint32_t slot = (FELUCCA_UAC_NCH == 5 || FELUCCA_UAC_NCH == 6) && nw > 1u ? compact[channel] : channel;
     return (uint16_t)(frame(count, slot / 2u) >> (16u * (slot & 1u)));
 }
 static void descriptors(uint32_t nw)
@@ -97,7 +97,7 @@ static void descriptors(uint32_t nw)
     }
     printf("descriptors %u ch: fmt %u terminal %u endpoint %u bad %u\n", wire_channels(nw), fmt, terminal, endpoint, bad);
     if (fmt != 1 || terminal != 1 || endpoint != 1) bad++;
-#if FELUCCA_UAC_NCH == 5
+#if FELUCCA_UAC_NCH == 5 || FELUCCA_UAC_NCH == 6
     if (DEV_DESC_PLAIN[12] == DEV_DESC_SUM[12]) bad++;
 #endif
 }
@@ -135,7 +135,8 @@ static void transport(uint32_t nw, uint32_t rate48)
         for (f = 0; f < dma_bytes / bytes_per_frame; f++, count++)
             for (p = 0; p < channels; p++)
                 if (wire_sample(f * channels + p) != expected_sample(count, p, nw)) bad++;
-        if (FELUCCA_UAC_NCH == 5 && dma_bytes > 460u) bad++;
+        if (FELUCCA_UAC_NCH == 5 && dma_bytes > 450u) bad++;
+        if (FELUCCA_UAC_NCH == 6 && dma_bytes > 540u) bad++;
         before = sends;
         uac_service(); /* TX still busy: must not queue or consume another packet */
         if (sends != before) bad++;
@@ -151,7 +152,7 @@ static void transport(uint32_t nw, uint32_t rate48)
 }
 static void kick_through_tap(void)
 {
-#if FELUCCA_UAC_NCH == 5
+#if FELUCCA_UAC_NCH == 5 || FELUCCA_UAC_NCH == 6
     int32_t output[64] = {0};
     uint32_t packet[UA_MAXF * UA_W], i, frames, bytes;
     memset(&uac, 0, sizeof uac);
@@ -169,10 +170,13 @@ static void kick_through_tap(void)
     frames = uac_packet(packet);
     bytes = uac_wire_packet(packet, frames);
     for (i = 0; i < frames; i++) {
-        const uint8_t *p = (const uint8_t *)packet + 10u * i + 8u;
+        const uint8_t *p = (const uint8_t *)packet + (2u * FELUCCA_UAC_NCH) * i + 8u;
         if ((p[0] | (uint16_t)p[1] << 8) != 12345u) bad++;
+#if FELUCCA_UAC_NCH == 6
+        if ((p[2] | (uint16_t)p[3] << 8) != 12345u) bad++;
+#endif
     }
-    if (bytes != frames * 10u) bad++;
+    if (bytes != frames * 2u * FELUCCA_UAC_NCH) bad++;
     printf("kick through tap -> ring -> packet -> physical channel 5: %u frames, errors %u\n", frames, bad);
 #endif
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Check 16/24-bit WAV recordings of PULHRA USB diagnostic builds.
-Stereo: exact diagnostic triangles at 44.1/48 kHz. Compact DRUMS counters are in channels 3/4 of 5, legacy in 5/6 of 6;
+Stereo: exact diagnostic triangles at 44.1/48 kHz. Current DRUMS counters are in channels 3/4 of 5 or 6, archived six-channel builds in 5/6;
 a stereo recording of just the counter pair is also recognised. Exit 1 for corruption or unrecognised audio.
   python3 tools/uac_tone_check.py recording.wav [more.wav ...]
 """
@@ -44,10 +44,24 @@ def stereo(fr):
     return checked >= 32 and not breaks and not unknown, f'{checked} matched frames, {len(breaks)} breaks, {unknown} unrecognised frames' + (f', first break at frame {breaks[0]}' if breaks else '')
 
 
+def counter_index(fr):
+    channels = len(fr[0])
+    if channels != 6:
+        return {2: 0, 5: 2}[channels]
+    # Support current 3/4 and archived 5/6 diagnostics, including Consolidate gain.
+    def score(ci):
+        candidates = [f[ci + 1] for f in fr if 22500 < f[ci + 1] < 23500]
+        if not candidates:
+            return 0
+        gain = Counter(candidates).most_common(1)[0][0] / 23130.0
+        return sum((round(f[ci] / gain) & 7) == 0 and round(f[ci + 1] / gain) == 23130 for f in fr)
+    return max((4, 2), key=score)
+
+
 def stems(fr):
     if not fr:
         return False, 'empty recording'
-    counter = {2: 0, 5: 2, 6: 4}[len(fr[0])]
+    counter = counter_index(fr)
     fr = [(f[counter], f[counter + 1]) for f in fr]
     while fr and not any(fr[-1]):
         fr.pop()
@@ -89,7 +103,7 @@ def check(path):
     if not fr:
         print(f'{path}: empty recording: FAIL')
         return False
-    ci = {2: 0, 5: 2, 6: 4}[ch]
+    ci = counter_index(fr)
     candidates = [f[ci + 1] for f in fr if 22500 < f[ci + 1] < 23500]
     gain, counters = 1.0, ch > 2
     if len(candidates) > len(fr) / 64:

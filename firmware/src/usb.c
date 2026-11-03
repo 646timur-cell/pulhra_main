@@ -401,6 +401,8 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #if FELUCCA_UAC && FELUCCA_UAC_NCH > 2
 #if FELUCCA_UAC_NCH == 5
 #define UAC_BCD_X (UAC_NCH_D > 2 ? 0x40 : 0x20)   /* new compact DRUMS/SUM faces; avoid cached six-channel descriptors */
+#elif FELUCCA_UAC_NCH == 6
+#define UAC_BCD_X (UAC_NCH_D > 2 ? 0xA0 : 0x60)   /* paired DRUMS/SUM; distinct from old channel order */
 #else
 #define UAC_BCD_X (UAC_NCH_D > 2 ? 0xC0 : 0x80)            /* legacy multichannel faces */
 #endif
@@ -1353,13 +1355,13 @@ static uint32_t uac_packet(uint32_t *d)
             d[i] = 0;
         return n;
     }
-    /* Compact 44.1-kHz STEMS stays on adjacent 44/45-frame packets. Larger
+    /* Five/six-channel 44.1-kHz STEMS stays on adjacent 44/45-frame packets. Larger
      * fill corrections made bursty 43/46-frame packets despite an intact ring.
-     * This is a host-interoperability experiment; do not alter legacy/stereo. */
-    if (uac.fill_min > hi && (FELUCCA_UAC_NCH != 5 || n < 45u)) {
+     * Keep the tested pacing when exposing three complete stereo pairs. */
+    if (uac.fill_min > hi && ((FELUCCA_UAC_NCH != 5 && FELUCCA_UAC_NCH != 6) || n < 45u)) {
         n++;
         uac.adj_up++;
-    } else if (uac.fill_min < lo && (FELUCCA_UAC_NCH != 5 || n > 44u)) {
+    } else if (uac.fill_min < lo && ((FELUCCA_UAC_NCH != 5 && FELUCCA_UAC_NCH != 6) || n > 44u)) {
         n--;
         uac.adj_down++;
     }
@@ -1388,24 +1390,28 @@ static uint32_t uac_packet(uint32_t *d)
     return n;
 }
 
-/* Compact DRUMS on the wire: drums L/R, rest+FX L/R, kick mono.
+/* DRUMS on the wire: drums L/R, rest+FX L/R, kick mono (duplicated for six channels).
  * Internal DSP/ring storage keeps the three legacy stereo words, avoiding
  * any sound or bank-format change. Only packing at the USB boundary changes. */
 static uint32_t uac_wire_packet(uint32_t *packet, uint32_t frames)
 {
-#if FELUCCA_UAC_NCH == 5
+#if FELUCCA_UAC_NCH == 5 || FELUCCA_UAC_NCH == 6
     if (uac_nw != 1u) {
         uint8_t *bytes = (uint8_t *)packet;
         uint32_t i, j;
         for (i = 0; i < frames; i++) {
-            uint8_t *src = bytes + 12u * i, *dst = bytes + 10u * i;
+            uint8_t *src = bytes + 12u * i, *dst = bytes + (2u * FELUCCA_UAC_NCH) * i;
             uint8_t kick_l = src[0], kick_h = src[1];
             for (j = 0; j < 8u; j++)
                 dst[j] = src[4u + j];
             dst[8] = kick_l;
             dst[9] = kick_h;
+#if FELUCCA_UAC_NCH == 6
+            dst[10] = kick_l;
+            dst[11] = kick_h;
+#endif
         }
-        return frames * 10u;
+        return frames * 2u * FELUCCA_UAC_NCH;
     }
 #endif
     return frames * 4u * uac_nw;

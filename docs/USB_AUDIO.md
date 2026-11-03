@@ -10,10 +10,11 @@ host-тесты не заменяют проверку USB-контроллер�
   при USB LEVEL FIXED. Включает мастер-компрессор, лимитер и эффекты.
 - **STEMS:** 16 bit, 44,1 кГц. SHIFT + HOME → USB → K1:
   - SUM: два канала полного стереомикса;
-  - DRUMS (новый компактный вариант): каналы 1–2 — остальные барабаны T4;
-    каналы 3–4 — остальные треки и возвраты эффектов; канал 5 — бочка KIT/T4 моно.
-    Пустой шестой канал не передаётся. В Ableton включить stereo 1/2, stereo 3/4 и mono 5.
-    Прежний шестиканальный формат остаётся в коде для тестов совместимости, но не в новых preview-пакетах.
+  - DRUMS (три стереопары): каналы 1–2 — остальные барабаны T4;
+    каналы 3–4 — остальные треки и возвраты эффектов; каналы 5–6 — бочка KIT/T4, одинаковый моносигнал в обоих каналах.
+    В Ableton включить stereo 1/2, 3/4 и 5/6 (или mono 5 для бочки).
+    Пятиканальный эксперимент заменён шестиканальным: в проверенном Live устройство
+    определялось как 5 In, но аудиодвижок открывал только 4 входных канала.
     Эти стемы снимаются до общего мастер-компрессора/лимитера, поэтому их сумма не обязана
     совпадать с обработанным стереомастером. Общая обработка KIT может попадать в остаток барабанов.
   После смены SUM/DRUMS устройство переподключается по USB; повторно выбрать его в программе записи.
@@ -150,3 +151,13 @@ verify USB continuity and check for remaining deadline overruns.
 `audio_test.c` injects the next DMA event during the real ISR's USB tap, models
 the pending-bit clear, and dispatches retained pending work. Both event-retention
 checks fail with the old acknowledgement order and pass with the new order.
+
+### Six-channel host compatibility
+
+Current STEMS exposes three complete stereo pairs: drums, rest+FX, kick dual mono.
+The internal ring and DSP buses are unchanged. USB packing reorders the three
+words and duplicates the mono kick at unchanged per-channel amplitude. SUM
+remains two channels; diagnostic frame counters remain in physical inputs 3–4.
+The tested 44/45-frame pacing and early DMA acknowledgement are retained.
+New bcdDevice values distinguish both faces from older cached descriptors.
+Six-channel packets can reach 540 bytes; hardware continuity must be rechecked.
