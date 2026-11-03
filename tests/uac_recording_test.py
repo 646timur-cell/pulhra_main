@@ -37,12 +37,19 @@ class RecordingTest(unittest.TestCase):
         self.assertTrue(stems(data.copy())[0])
         self.assertFalse(stems(data[:100] + data[101:])[0])
 
+    def test_paired_stems(self):
+        data = [(123, 456, i & 0xFFFF, 0x5A5A if i & 7 == 0 else 0, 789, 789) for i in range(65504, 65904)]
+        self.assertTrue(stems(data.copy())[0])
+        self.assertFalse(stems(data[:100] + data[101:])[0])
+        self.assertFalse(stems(data[:100] + data[99:])[0])
+
     def test_pcm24_and_consolidate_gain(self):
         counter = [(i & 0xFFFF, 0x5A5A if i & 7 == 0 else 0) for i in range(65504, 65904)]
         cases = [
             (counter, 1.0),
             (counter, 0.9999),
             ([(0, 0, a, b, 123) for a, b in counter], 0.9999),
+            ([(0, 0, a, b, 123, 123) for a, b in counter], 0.9999),
             ([TRI[i % 100] for i in range(500)], 32768 * 0.9999 / 25000),
         ]
         with tempfile.TemporaryDirectory() as folder:

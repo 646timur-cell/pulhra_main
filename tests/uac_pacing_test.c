@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Real five-channel producer/packet controller with variable render and USB phases.
+/* Real multichannel producer/packet controller with variable render and USB phases.
  * Keep 44.1 kHz packets at 44/45 frames while preserving every generated frame. */
 #define main service_main
 #include "uac_service_test.c"
@@ -44,7 +44,7 @@ static int stream(double rate)
             next_packet = ((uint32_t)(now / 1000) + 1u) * 1000.0 + rnd() % 500u;
         }
     }
-    printf("five-channel %.1f Hz: %u frames, corrupt %u, outside 44/45 %u, underruns %u, overruns %u\n", rate, consumed, faults, nonstandard, uac.underruns, uac.overruns);
+    printf("multichannel %.1f Hz: %u frames, corrupt %u, outside 44/45 %u, underruns %u, overruns %u\n", rate, consumed, faults, nonstandard, uac.underruns, uac.overruns);
     return faults || nonstandard || uac.underruns || uac.overruns;
 }
 int main(void) { return stream(44117.6) | stream(44085.0) | stream(44150.0); }

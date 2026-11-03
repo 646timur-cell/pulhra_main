@@ -36,7 +36,7 @@
 #define FELUCCA_UAC_FAST_POLL 1  /* queue audio packets every 100 us, including during DSP rendering */
 #endif
 #ifndef FELUCCA_UAC_NCH
-#define FELUCCA_UAC_NCH 2        /* stereo master, 44.1 / 48 kHz; 5: compact SUM / DRUMS at 44.1 kHz */
+#define FELUCCA_UAC_NCH 2        /* stereo master, 44.1 / 48 kHz; 6: three-pair SUM / DRUMS at 44.1 kHz */
 #endif
 #ifndef FELUCCA_UAC_OUT
 #define FELUCCA_UAC_OUT 1        /* a dummy USB output too (Tim, 1.11: Android's USB Audio Recorder PRO wants one; tested OK) */

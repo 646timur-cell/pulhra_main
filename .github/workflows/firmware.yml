@@ -44,8 +44,8 @@ jobs:
           mkdir -p build/host
           cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -Ibuild/gen -Ifirmware/src -o build/host/pulhra_test tests/pulhra_test.c -lm
           build/host/pulhra_test
-          cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -DFELUCCA_UAC_NCH=5 -Ibuild/gen -Ifirmware/src -o build/host/pulhra_test5 tests/pulhra_test.c -lm
-          build/host/pulhra_test5
+          cc -O2 -w -DFELUCCA_SWAMP=1 -DFELUCCA_MONOFM=1 -DFELUCCA_MODULE=0 -DFELUCCA_UAC_NCH=6 -Ibuild/gen -Ifirmware/src -o build/host/pulhra_test6 tests/pulhra_test.c -lm
+          build/host/pulhra_test6
       - name: PULHRA USB transport and timing tests
         run: |
           python3 -m unittest discover -s tests -p uac_recording_test.py -v
@@ -66,9 +66,9 @@ jobs:
             cc -O2 -w -DFELUCCA_UAC_NCH=$channels -DFELUCCA_UAC_OUT=1 -o build/host/uac_service_test tests/uac_service_test.c -lm
             build/host/uac_service_test
           done
-          cc -O2 -w -DFELUCCA_UAC_NCH=5 -DFELUCCA_UAC_OUT=1 -DFELUCCA_UAC_TONE=1 -o build/host/uac_service_diagnostic_test tests/uac_service_test.c -lm
+          cc -O2 -w -DFELUCCA_UAC_NCH=6 -DFELUCCA_UAC_OUT=1 -DFELUCCA_UAC_TONE=1 -o build/host/uac_service_diagnostic_test tests/uac_service_test.c -lm
           build/host/uac_service_diagnostic_test
-          cc -O2 -w -DFELUCCA_UAC_NCH=5 -DFELUCCA_UAC_OUT=1 -o build/host/uac_pacing_test tests/uac_pacing_test.c -lm
+          cc -O2 -w -DFELUCCA_UAC_NCH=6 -DFELUCCA_UAC_OUT=1 -o build/host/uac_pacing_test tests/uac_pacing_test.c -lm
           build/host/uac_pacing_test
       - name: JieLi toolchain
         run: tools/get_toolchain.sh
@@ -91,9 +91,9 @@ jobs:
           set -o pipefail
           FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_TONE=1 ./build.sh --release "$VERSION" 2>&1 | tee build-stereo-tone.log
           cp "build/pulhra-$VERSION.fwsc" "build/pulhra-$VERSION-stereo-tone.fwsc"
-          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=5 ./build.sh --release "$VERSION" 2>&1 | tee build-stems.log
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=6 ./build.sh --release "$VERSION" 2>&1 | tee build-stems.log
           cp "build/pulhra-$VERSION.fwsc" "build/pulhra-$VERSION-stems.fwsc"
-          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=5 FELUCCA_UAC_TONE=1 ./build.sh --release "$VERSION" 2>&1 | tee build-stems-tone.log
+          FELUCCA_SWAMP=1 FELUCCA_MONOFM=1 FELUCCA_MODULE=0 FELUCCA_UAC_NCH=6 FELUCCA_UAC_TONE=1 ./build.sh --release "$VERSION" 2>&1 | tee build-stems-tone.log
           cp "build/pulhra-$VERSION.fwsc" "build/pulhra-$VERSION-stems-tone.fwsc"
       - name: Assemble site from default firmware and matching release bundle
         env:
