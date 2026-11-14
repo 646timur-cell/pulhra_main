@@ -18,3 +18,5 @@ parameter locks, trig states, chains, an arpeggiator per track and per-pattern k
 PULHRA is a fork of MONOFM, which is built on [Felucca](https://github.com/hugelton/Felucca) by hugelton
 (GPL-3.0-only). Felucca's own README is kept as [FELUCCA.md](FELUCCA.md); licensing is in [LICENSING.md](LICENSING.md)
 and [LICENSES/](LICENSES). The history before this repository lives in `fm1-sound-module` (branch `pulhra`).
+
+You can also try Pulhra in the browser, no flashing needed, in the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
